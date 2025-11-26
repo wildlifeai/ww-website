@@ -131,7 +131,36 @@ def run_conversion(uploaded_file):
 
         # Find the output file and rename it
         vela_original_output = find_vela_output(work_dir, tflite_path.name)
-        vela_final_path = work_dir / f"{container_name}_vela.tflite"
+
+        # Build 8.3-style name from model_variables.h: <last4digits>V<version>.tfl
+        target_name = None
+        try:
+            with open(vars_h_path, 'r', encoding='utf-8', errors='replace') as _f:
+                _hdr = _f.read()
+            _pid_m = re.search(r"\.project_id\s*=\s*(\d+)", _hdr)
+            _ver_m = re.search(r"\.deploy_version\s*=\s*(\d+)", _hdr)
+            if _pid_m and _ver_m:
+                _pid = _pid_m.group(1)
+                _ver = str(int(_ver_m.group(1)))  # normalize to no leading zeros
+                _last4 = _pid[-4:].rjust(4, '0')
+                _base = f"{_last4}V{_ver}"
+                if len(_base) > 8:
+                    st.warning(f"Generated filename '{_base}' exceeds 8 characters; truncating to 8 for 8.3 compliance.")
+                    _base = _base[:8]
+                target_name = _base + ".tfl"
+        except Exception as _e:
+            # fall back if parsing fails
+            pass
+
+        if not target_name:
+            # Fallback to a default pattern if parsing failed
+            target_name = "MOD00001.tfl"
+
+        vela_final_path = work_dir / target_name
+        # If a file with target_name already exists, overwrite it to ensure a deterministic name
+        if vela_final_path.exists():
+            vela_final_path.unlink()
+
         safe_move(vela_original_output, vela_final_path)
         st.write(f"Vela model saved as: {vela_final_path.name}")
 
