@@ -308,10 +308,10 @@ def check_user_role(supabase: Client, user_id: str, org_id: str) -> bool:
         return False
 
 
-def get_user_organizations(supabase: Client, user_id: str) -> Dict[str, str]:
+def get_user_organizations(supabase: Client, user_id: str) -> List[Dict[str, str]]:
     """
     Fetch organizations the user belongs to.
-    Returns dict mapping org name to org ID.
+    Returns a list of dicts, each with 'name' and 'id' of an org.
     """
     try:
         # Get user roles for organisations
@@ -323,10 +323,12 @@ def get_user_organizations(supabase: Client, user_id: str) -> Dict[str, str]:
             .is_('deleted_at', 'null')\
             .execute()
         
-        orgs = {
-            role['organisations']['name']: role['organisations']['id']
+        orgs = [
+            {"name": role['organisations']['name'], "id": role['organisations']['id']}
             for role in response.data if role.get('organisations')
-        }
+        ]
+        # Sort by name for a better user experience
+        orgs.sort(key=lambda x: x['name'])
         return orgs
         
     except Exception as e:
@@ -606,13 +608,14 @@ if 'manifest_bytes' in st.session_state and st.session_state['manifest_bytes']:
                 st.warning("⚠️ You are not a member of any organization.")
                 st.info("💡 Contact your organization manager to get added to an organization.")
             else:
-                # Organization selector
-                selected_org_name = st.selectbox(
+                # Organization selector - handles duplicate names correctly
+                selected_org = st.selectbox(
                     "Select Organization",
-                    options=list(orgs.keys()),
+                    options=orgs,
+                    format_func=lambda org: org['name'],
                     help="Choose which organization to upload this model to"
                 )
-                selected_org_id = orgs[selected_org_name]
+                selected_org_id = selected_org['id']
                 
                 # Model description
                 model_name = st.session_state.get('model_name', 'unknown')
