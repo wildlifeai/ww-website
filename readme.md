@@ -5,57 +5,101 @@
 </p>
 
 <h1 align="center">
-Wildlife Watcher Model Conversion Tool
+Wildlife Watcher Model Converter & Upload Tool
 </h1>
 
 <p align="center">
-  <strong>A web tool to convert Edge Impulse models for use with Wildlife Watcher devices.</strong>
+  <strong>Convert Edge Impulse models and download complete MANIFEST packages for Wildlife Watcher devices.</strong>
   <br />
-  <a href="https://wildlife-watcher-model-conversion-4umtawwfwbj3webexi4fnn.streamlit.app/" target="_blank">
+  <a href="https://wildlife-watcher.streamlit.app" target="_blank">
     <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" />
   </a>
 </p>
 
-## 🚀 Project
+## 🚀 Features
 
-This Streamlit application provides a simple web interface for converting Edge Impulse models into the format required by Wildlife Watcher hardware.
+### 📦 Public MANIFEST Download (No Login Required)
+- **One-click download** of complete camera device package
+- Automatically combines:
+  - Latest config firmware (CONFIG.TXT, HMSTB1.BIN, etc.)
+  - Latest default AI wildlife detection model
+- Ready to extract to SD card and use immediately
 
-The tool automates the process described in the original `WildlifeWatcher_model_preparation.ipynb` notebook. It accepts a standard Edge Impulse `.zip` file and performs the following steps:
+### 🔄 Model Conversion
+- Convert Edge Impulse models using Vela compiler (`ethos-u55-64`)
+- Extract labels from `model_variables.h`
+- Package into `Manifest.zip` for Wildlife Watcher devices
 
-1. Unzips the model file.
-2. Runs the `vela` compiler (for the `ethos-u55-64` accelerator) on the `trained.tflite` file.
-3. Extracts class labels from the `model_variables.h` header file.
-4. Packages the newly compiled `_vela.tflite` model and the `labels.txt` file into a downloadable `Manifest.zip`.
+### 📤 Upload to Supabase (Login Required)
+- Upload custom models to your organization
+- Requires `organisation_manager` or `ww_admin` role
+- Automatic version management
+- Rollback on failure
 
-## 💻 Development
+## 🎯 Usage
 
-To run this application locally, ensure you have Python 3 and pip installed.
+### Download MANIFEST Package
+1. Visit [wildlife-watcher.streamlit.app](https://wildlife-watcher.streamlit.app)
+2. Click **"🚀 Download MANIFEST.zip"** (top of page)
+3. Extract to SD card root directory
+4. Insert SD card into Wildlife Watcher camera device
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/your-repo-name.git
-    cd your-repo-name
-    ```
-    *(Note: Replace the URL with your actual repository link.)*
-2.  **Install dependencies:**
-    This will install `streamlit` and `ethos-u-vela`.
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  **Run the app:**
-    ```bash
-    streamlit run app.py
-    ```
+### Upload Custom Model
+1. **Login** with your Wildlife Watcher account (sidebar)
+2. **Upload** your Edge Impulse model zip (format: `modelname-custom-version.zip`)
+3. **Convert** - app runs Vela optimization
+4. **Download** converted model (optional)
+5. **Upload to Database** - select your organization
+6. Model is now available in the Wildlife Watcher mobile app!
 
-The application will open in your default web browser.
+## 💻 Local Development
+
+### Prerequisites
+- Python 3.9+
+- pip
+
+### Setup
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/wildlifeai/wildlife-watcher-model-conversion.git
+   cd wildlife-watcher-model-conversion
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configure environment variables:**
+   Create `.env` file:
+   ```env
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_ANON_KEY=your-anon-key-here
+   ```
+
+4. **Run the app:**
+   ```bash
+   streamlit run app.py
+   ```
+
+The application will open at `http://localhost:8501`.
+
+## 🔧 Tech Stack
+- **Frontend:** Streamlit
+- **Backend:** Supabase (PostgreSQL + Storage)
+- **ML Compiler:** Ethos-U Vela
+- **Deployment:** Streamlit Community Cloud
+
+## 📁 File Structure
+- `app.py` - Main Streamlit application
+- `requirements.txt` - Python dependencies
+- `.env` - Supabase credentials (local only)
+- `readme.md` - This file
 
 ## 👥 Contributors
-
-This tool was developed by members of the Wildlife.ai team:
 - Will McEwan
 - Tobyn Packer
 - Victor Anton
 
 ## 📜 License
-
 This project is licensed under the **GPL-3.0 License** - see the `LICENSE` file for details.

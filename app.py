@@ -294,12 +294,21 @@ def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path) 
     Returns True on success, False on failure.
     """
     try:
+        st.write(f"🔍 DEBUG: Attempting download from bucket='{bucket}', path='{path}'")
         response = supabase.storage.from_(bucket).download(path)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(response)
-        return True
+        
+        if response:
+            st.write(f"✅ DEBUG: Downloaded {len(response)} bytes")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(response)
+            return True
+        else:
+            st.error(f"❌ DEBUG: Download returned empty response for {path}")
+            return False
     except Exception as e:
-        st.error(f"Download failed for {path}: {str(e)}")
+        st.error(f"❌ Download failed for bucket='{bucket}', path='{path}': {type(e).__name__}: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
         return False
 
 def create_manifest_package(supabase: Client) -> Optional[bytes]:
