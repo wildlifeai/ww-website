@@ -27,7 +27,11 @@ def init_supabase() -> Optional[Client]:
     if not url or not key:
         return None
     
-    return create_client(url, key)
+    try:
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"Failed to initialize Supabase client: {str(e)}")
+        return None
 
 # --- Helper Functions from your Notebook ---
 
