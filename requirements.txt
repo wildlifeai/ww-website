@@ -1,2 +1,4 @@
 streamlit
 ethos-u-vela
+supabase==2.3.4
+python-dotenv

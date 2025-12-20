@@ -9,6 +9,26 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from dotenv import load_dotenv
+from supabase import create_client, Client
+from typing import Optional, Dict, List
+
+from typing import Optional, Dict, List
+
+# Load environment variables
+load_dotenv()
+
+# Initialize Supabase client
+@st.cache_resource
+def init_supabase() -> Optional[Client]:
+    """Initialize Supabase client with caching"""
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_ANON_KEY")
+    
+    if not url or not key:
+        return None
+    
+    return create_client(url, key)
 
 # --- Helper Functions from your Notebook ---
 
@@ -178,6 +198,9 @@ def run_conversion(uploaded_file):
         if not labels:
             raise RuntimeError('No labels found in model_variables.h.')
 
+        # Store labels in session state for upload
+        st.session_state['labels'] = labels
+        
         labels_txt_path = work_dir / 'labels.txt'
         with open(labels_txt_path, 'w') as f:
             f.write('\n'.join(labels))
@@ -214,9 +237,283 @@ def run_conversion(uploaded_file):
         st.success("Manifest.zip created successfully!")
         return manifest_bytes
 
+# --- Supabase Integration Functions ---
+
+def render_login(supabase: Client) -> bool:
+    """
+    Render authentication sidebar.
+    Returns True if user is logged in, False otherwise.
+    """
+    st.sidebar.title("🔐 Authentication")
+    
+    if 'user' in st.session_state and st.session_state.get('user'):
+        user_email = st.session_state.user.email
+        st.sidebar.success(f"✅ Logged in as:  \n**{user_email}**")
+        
+        if st.sidebar.button("Logout", use_container_width=True):
+            supabase.auth.sign_out()
+            st.session_state.clear()
+            st.rerun()
+        return True
+    
+    with st.sidebar.form("login_form"):
+        email = st.text_input("Email", placeholder="user@example.com")
+        password = st.text_input("Password", type="password")
+        submit = st.form_submit_button("Login", use_container_width=True)
+        
+        if submit:
+            if not email or not password:
+                st.sidebar.error("Please enter both email and password")
+                return False
+            
+            try:
+                response = supabase.auth.sign_in_with_password({
+                    "email": email,
+                    "password": password
+                })
+                st.session_state.user = response.user
+                st.session_state.session = response.session
+                st.sidebar.success("Login successful!")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Login failed: {str(e)}")
+                return False
+    
+    return False
+
+
+def check_user_role(supabase: Client, user_id: str, org_id: str) -> bool:
+    """
+    Check if user has organisation_manager or ww_admin role.
+    Returns True if authorized, False otherwise.
+    """
+    try:
+        # Check for ww_admin (system scope)
+        admin_response = supabase.table('user_roles')\
+            .select('role')\
+            .eq('user_id', user_id)\
+            .eq('role', 'ww_admin')\
+            .eq('scope_type', 'system')\
+            .eq('is_active', True)\
+            .is_('deleted_at', 'null')\
+            .execute()
+        
+        if admin_response.data and len(admin_response.data) > 0:
+            return True
+        
+        # Check for organisation_manager in specific org
+        manager_response = supabase.table('user_roles')\
+            .select('role')\
+            .eq('user_id', user_id)\
+            .eq('role', 'organisation_manager')\
+            .eq('scope_type', 'organisation')\
+            .eq('scope_id', org_id)\
+            .eq('is_active', True)\
+            .is_('deleted_at', 'null')\
+            .execute()
+        
+        return manager_response.data and len(manager_response.data) > 0
+        
+    except Exception as e:
+        st.error(f"❌ Role check failed: {str(e)}")
+        return False
+
+
+def get_user_organizations(supabase: Client, user_id: str) -> Dict[str, str]:
+    """
+    Fetch organizations the user belongs to.
+    Returns dict mapping org name to org ID.
+    """
+    try:
+        # Get user roles for organisations
+        response = supabase.table('user_roles')\
+            .select('scope_id, organisations:scope_id(id, name)')\
+            .eq('user_id', user_id)\
+            .eq('scope_type', 'organisation')\
+            .eq('is_active', True)\
+            .is_('deleted_at', 'null')\
+            .execute()
+        
+        orgs = {}
+        for role in response.data:
+            if role.get('organisations'):
+                org_data = role['organisations']
+                orgs[org_data['name']] = org_data['id']
+        
+        return orgs
+        
+    except Exception as e:
+        st.error(f"❌ Failed to fetch organizations: {str(e)}")
+        return {}
+
+
+def upload_model_to_storage(
+    supabase: Client,
+    manifest_bytes: bytes,
+    model_name: str,
+    version: str,
+    org_id: str
+) -> str:
+    """
+    Upload Manifest.zip to Supabase Storage.
+    Storage path: <org_id>/<model_name>-custom-<version>/Manifest.zip
+    Returns: storage_path
+    """
+    # Generate storage path following the naming convention
+    storage_path = f"{org_id}/{model_name}-custom-{version}/Manifest.zip"
+    
+    try:
+        # Upload to ai-models bucket
+        response = supabase.storage.from_('ai-models').upload(
+            path=storage_path,
+            file=manifest_bytes,
+            file_options={
+                "content-type": "application/zip",
+                "upsert": "true"  # Allow overwriting existing versions
+            }
+        )
+        
+        return storage_path
+        
+    except Exception as e:
+        raise Exception(f"Storage upload failed: {str(e)}")
+
+
+def register_model_in_db(
+    supabase: Client,
+    name: str,
+    version: str,
+    description: str,
+    org_id: str,
+    user_id: str,
+    storage_path: str,
+    file_size_bytes: int,
+    detection_capabilities: List[str]
+) -> Dict:
+    """
+    Insert or update model record in ai_models table.
+    Supports version overwriting.
+    Returns: model record
+    """
+    try:
+        # Check if model already exists (org_id + name + version unique)
+        existing = supabase.table('ai_models')\
+            .select('id')\
+            .eq('organisation_id', org_id)\
+            .eq('name', name)\
+            .eq('version', version)\
+            .is_('deleted_at', 'null')\
+            .execute()
+        
+        model_data = {
+            "name": name,
+            "version": version,
+            "description": description or f"Converted Edge Impulse model - {name} v{version}",
+            "organisation_id": org_id,
+            "uploaded_by": user_id,
+            "modified_by": user_id,
+            "storage_path": storage_path,
+            "file_size_bytes": file_size_bytes,
+            "file_type": "manifest",
+            "detection_capabilities": detection_capabilities
+        }
+        
+        if existing.data and len(existing.data) > 0:
+            # Update existing model (version overwrite)
+            model_id = existing.data[0]['id']
+            response = supabase.table('ai_models')\
+                .update(model_data)\
+                .eq('id', model_id)\
+                .execute()
+            st.info(f"ℹ️ Overwriting existing model version")
+        else:
+            # Insert new model
+            response = supabase.table('ai_models')\
+                .insert(model_data)\
+                .execute()
+        
+        return response.data[0]
+        
+    except Exception as e:
+        # Rollback: delete from storage
+        try:
+            supabase.storage.from_('ai-models').remove([storage_path])
+        except:
+            pass
+        raise Exception(f"Database registration failed: {str(e)}")
+
+
+def upload_and_register_model(
+    supabase: Client,
+    manifest_bytes: bytes,
+    model_name: str,
+    model_version: str,
+    description: str,
+    labels: List[str],
+    org_id: str
+) -> bool:
+    """
+    Complete workflow: Upload to storage + Register in database
+    Returns True on success, False on failure
+    """
+    user = st.session_state.user
+    
+    # 1. Check permissions
+    if not check_user_role(supabase, user.id, org_id):
+        st.error("❌ You don't have permission to upload models")
+        st.info("💡 Required role: **organisation_manager** or **ww_admin**")
+        return False
+    
+    # 2. Upload to storage
+    with st.spinner("📤 Uploading to storage..."):
+        try:
+            storage_path = upload_model_to_storage(
+                supabase=supabase,
+                manifest_bytes=manifest_bytes,
+                model_name=model_name,
+                version=model_version,
+                org_id=org_id
+            )
+            st.success(f"✅ Uploaded to storage: `{storage_path}`")
+        except Exception as e:
+            st.error(f"❌ {str(e)}")
+            return False
+    
+    # 3. Register in database
+    with st.spinner("💾 Registering model in database..."):
+        try:
+            model_record = register_model_in_db(
+                supabase=supabase,
+                name=model_name,
+                version=model_version,
+                description=description,
+                org_id=org_id,
+                user_id=user.id,
+                storage_path=storage_path,
+                file_size_bytes=len(manifest_bytes),
+                detection_capabilities=labels
+            )
+            st.success(f"✅ Model registered with ID: `{model_record['id']}`")
+            st.balloons()
+            return True
+        except Exception as e:
+            st.error(f"❌ {str(e)}")
+            return False
+
 # --- Streamlit UI ---
 
 st.set_page_config(layout="centered")
+
+# Initialize Supabase client
+supabase = init_supabase()
+
+# Show authentication sidebar if Supabase is configured
+if supabase:
+    is_logged_in = render_login(supabase)
+else:
+    st.sidebar.warning("⚠️ Supabase not configured")
+    st.sidebar.info("Set SUPABASE_URL and SUPABASE_ANON_KEY in .env file to enable upload")
+    is_logged_in = False
 
 st.image(
     "http://wildlife.ai/wp-content/uploads/2025/10/wildlife_ai_logo_dark_lightbackg_1772x591.png",
@@ -251,20 +548,99 @@ if uploaded_file is not None:
             with st.spinner("Running conversion pipeline... This may take a minute."):
                 # run_conversion now returns bytes
                 zip_bytes = run_conversion(uploaded_file)
-                # store in session state so subsequent reruns keep the bytes
+                
+                # Store in session state
                 if zip_bytes:
                     st.session_state['manifest_bytes'] = zip_bytes
+                    
+                    # Also parse and store model name/version for upload
+                    try:
+                        model_name, model_version = parse_model_zip_name(uploaded_file.name)
+                        st.session_state['model_name'] = model_name
+                        st.session_state['model_version'] = model_version
+                    except:
+                        pass
 
         except Exception as e:
             st.error(f"An error occurred: {e}")
 
-        # Use session_state stored bytes for the download button
-        if 'manifest_bytes' in st.session_state and st.session_state['manifest_bytes']:
-            st.download_button(
-                label="Download Manifest.zip",
-                data=st.session_state['manifest_bytes'],
-                file_name="Manifest.zip",
-                mime="application/zip"
-            )
-            # Optionally clear the bytes after download to free memory
-            # del st.session_state['manifest_bytes']
+# Show download and upload options if conversion completed
+if 'manifest_bytes' in st.session_state and st.session_state['manifest_bytes']:
+    
+    st.divider()
+    st.subheader("✅ Conversion Complete!")
+    
+    # Extract labels from session state (from run_conversion)
+    labels = st.session_state.get('labels', [])
+    if labels:
+        st.info(f"🏷️ Detected {len(labels)} classes: {', '.join(labels)}")
+    
+    # Always show download button
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.download_button(
+            label="💾 Download Manifest.zip",
+            data=st.session_state['manifest_bytes'],
+            file_name="Manifest.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
+    
+    # Show upload button if logged in
+    if supabase and is_logged_in:
+        with col2:
+            st.button("📤 Upload to Database", key="upload_toggle", use_container_width=True, on_click=lambda: st.session_state.update({"show_upload": True}))
+        
+        # Show upload form if user clicked upload
+        if st.session_state.get('show_upload', False):
+            st.divider()
+            st.subheader("📤 Upload to Wildlife Watcher")
+            
+            # Get user's organizations
+            user_id = st.session_state.user.id
+            orgs = get_user_organizations(supabase, user_id)
+            
+            if not orgs:
+                st.warning("⚠️ You are not a member of any organization.")
+                st.info("💡 Contact your organization manager to get added to an organization.")
+            else:
+                # Organization selector
+                selected_org_name = st.selectbox(
+                    "Select Organization",
+                    options=list(orgs.keys()),
+                    help="Choose which organization to upload this model to"
+                )
+                selected_org_id = orgs[selected_org_name]
+                
+                # Model description
+                model_name = st.session_state.get('model_name', 'unknown')
+                model_version = st.session_state.get('model_version', 'unknown')
+                
+                description = st.text_area(
+                    "Model Description (optional)",
+                    value=f"Converted Edge Impulse model - {model_name} v{model_version}",
+                    help="Describe what this model detects and any important details"
+                )
+                
+                # Upload button
+                if st.button("🚀 Upload Model", type="primary", use_container_width=True):
+                    success = upload_and_register_model(
+                        supabase=supabase,
+                        manifest_bytes=st.session_state['manifest_bytes'],
+                        model_name=model_name,
+                        model_version=model_version,
+                        description=description,
+                        labels=labels,
+                        org_id=selected_org_id
+                    )
+                    
+                    if success:
+                        #  Clear upload form
+                        st.session_state['show_upload'] = False
+    else:
+        with col2:
+            if supabase:
+                st.info("🔒 Login to upload to database", icon="ℹ️")
+            else:
+                st.info("⚙️ Configure Supabase to enable upload", icon="ℹ️")
