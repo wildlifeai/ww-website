@@ -556,9 +556,12 @@ def register_model_in_db(
             "detection_capabilities": detection_capabilities
         }
         
+        st.write(f"🔍 DEBUG: Registering model in DB: {model_data}")
+        
         if existing.data:
             # Update existing model (version overwrite)
             model_id = existing.data[0]['id']
+            st.write(f"🔍 DEBUG: Updating existing record ID: {model_id}")
             response = supabase.table('ai_models')\
                 .update(model_data)\
                 .eq('id', model_id)\
@@ -566,15 +569,20 @@ def register_model_in_db(
             st.info(f"ℹ️ Overwriting existing model version")
         else:
             # Insert new model
+            st.write(f"🔍 DEBUG: Inserting new record")
             response = supabase.table('ai_models')\
                 .insert(model_data)\
                 .execute()
         
         if not response.data:
+            st.error(f"❌ DEBUG: Database response empty! Response: {response}")
             raise Exception("Database operation did not return the expected model record.")
+        
+        st.success(f"✅ Database record created/updated: {response.data[0]['id']}")
         return response.data[0]
         
     except Exception as e:
+        st.error(f"❌ Database registration failed: {str(e)}")
         # Rollback: delete from storage
         try:
             supabase.storage.from_('ai-models').remove([storage_path])
