@@ -13,8 +13,6 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from typing import Optional, Dict, List
 
-from typing import Optional, Dict, List
-
 # Load environment variables
 load_dotenv()
 
@@ -288,31 +286,17 @@ def check_user_role(supabase: Client, user_id: str, org_id: str) -> bool:
     Returns True if authorized, False otherwise.
     """
     try:
-        # Check for ww_admin (system scope)
-        admin_response = supabase.table('user_roles')\
+        # Optimized: Check for ww_admin OR organisation_manager in a single query
+        # This combines both role checks into one database call
+        response = supabase.table('user_roles')\
             .select('role')\
             .eq('user_id', user_id)\
-            .eq('role', 'ww_admin')\
-            .eq('scope_type', 'system')\
             .eq('is_active', True)\
             .is_('deleted_at', 'null')\
+            .or_(f'and(role.eq.ww_admin,scope_type.eq.system),and(role.eq.organisation_manager,scope_type.eq.organisation,scope_id.eq.{org_id})')\
             .execute()
         
-        if admin_response.data and len(admin_response.data) > 0:
-            return True
-        
-        # Check for organisation_manager in specific org
-        manager_response = supabase.table('user_roles')\
-            .select('role')\
-            .eq('user_id', user_id)\
-            .eq('role', 'organisation_manager')\
-            .eq('scope_type', 'organisation')\
-            .eq('scope_id', org_id)\
-            .eq('is_active', True)\
-            .is_('deleted_at', 'null')\
-            .execute()
-        
-        return manager_response.data and len(manager_response.data) > 0
+        return bool(response.data)
         
     except Exception as e:
         st.error(f"❌ Role check failed: {str(e)}")
@@ -334,12 +318,10 @@ def get_user_organizations(supabase: Client, user_id: str) -> Dict[str, str]:
             .is_('deleted_at', 'null')\
             .execute()
         
-        orgs = {}
-        for role in response.data:
-            if role.get('organisations'):
-                org_data = role['organisations']
-                orgs[org_data['name']] = org_data['id']
-        
+        orgs = {
+            role['organisations']['name']: role['organisations']['id']
+            for role in response.data if role.get('organisations')
+        }
         return orgs
         
     except Exception as e:
@@ -438,8 +420,10 @@ def register_model_in_db(
         # Rollback: delete from storage
         try:
             supabase.storage.from_('ai-models').remove([storage_path])
-        except:
-            pass
+        except Exception as rollback_e:
+            # Log critical rollback failure
+            st.error(f"⚠️ CRITICAL: Failed to rollback storage file {storage_path}. Error: {rollback_e}")
+            st.warning(f"⚠️ Manual cleanup required: Please remove '{storage_path}' from the 'ai-models' bucket in Supabase.")
         raise Exception(f"Database registration failed: {str(e)}")
 
 
@@ -558,8 +542,12 @@ if uploaded_file is not None:
                         model_name, model_version = parse_model_zip_name(uploaded_file.name)
                         st.session_state['model_name'] = model_name
                         st.session_state['model_version'] = model_version
-                    except:
-                        pass
+                    except ValueError as e:
+                        st.warning(f"⚠️ Could not parse model name/version from filename: {e}")
+                        st.info("💡 Using default values. You can edit the description when uploading.")
+                        # Set defaults so the app doesn't crash, but the user is aware
+                        st.session_state['model_name'] = 'unknown'
+                        st.session_state['model_version'] = 'unknown'
 
         except Exception as e:
             st.error(f"An error occurred: {e}")
