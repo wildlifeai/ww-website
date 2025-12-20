@@ -516,7 +516,7 @@ else:
 
 st.image(
     "http://wildlife.ai/wp-content/uploads/2025/10/wildlife_ai_logo_dark_lightbackg_1772x591.png",
-    use_container_width=True,
+    width="stretch",
 )
 st.title("Edge Impulse Model Converter (Vela)")
 st.markdown("""
@@ -587,13 +587,13 @@ if 'manifest_bytes' in st.session_state and st.session_state['manifest_bytes']:
             data=st.session_state['manifest_bytes'],
             file_name="Manifest.zip",
             mime="application/zip",
-            use_container_width=True
+            width="stretch"
         )
     
     # Show upload button if logged in
     if supabase and is_logged_in:
         with col2:
-            st.button("📤 Upload to Database", key="upload_toggle", use_container_width=True, on_click=lambda: st.session_state.update({"show_upload": True}))
+            st.button("📤 Upload to Database", key="upload_toggle", width="stretch", on_click=lambda: st.session_state.update({"show_upload": True}))
         
         # Show upload form if user clicked upload
         if st.session_state.get('show_upload', False):
@@ -628,7 +628,7 @@ if 'manifest_bytes' in st.session_state and st.session_state['manifest_bytes']:
                 )
                 
                 # Upload button
-                if st.button("🚀 Upload Model", type="primary", use_container_width=True):
+                if st.button("🚀 Upload Model", type="primary", width="stretch"):
                     success = upload_and_register_model(
                         supabase=supabase,
                         manifest_bytes=st.session_state['manifest_bytes'],

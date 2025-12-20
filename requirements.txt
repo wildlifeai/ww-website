@@ -1,4 +1,5 @@
 streamlit
 ethos-u-vela
-supabase==2.3.4
+supabase==2.27.0
 python-dotenv==1.0.1
+websockets==15.0.1
