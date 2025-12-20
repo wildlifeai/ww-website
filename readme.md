@@ -90,6 +90,63 @@ The application will open at `http://localhost:8501`.
 - **ML Compiler:** Ethos-U Vela
 - **Deployment:** Streamlit Community Cloud
 
+## 🧩 How It Works: Manifest Generation
+
+The **public MANIFEST.zip download** feature dynamically assembles the package on-the-fly:
+
+1.  **Config Firmware**: Fetches the latest active firmware record of type `config` from Supabase.
+2.  **AI Model**: Fetches the latest active AI model for the **General Organization** (`550e...`).
+3.  **Merging**:
+    - Downloads both zip files from Supabase Storage.
+    - Extracts them into a temporary structure.
+    - Zips the combined result into a single `MANIFEST.zip`.
+
+> [!NOTE]
+> If either the Config Firmware or the Default AI Model is missing in the database, the app will warn the user and skip including that component in the final zip.
+
+## 💻 Local Development & Testing
+
+### Prerequisites
+- Python 3.9+
+- pip
+
+### Setup
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/wildlifeai/wildlife-watcher-model-conversion.git
+   cd wildlife-watcher-model-conversion
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configure environment variables:**
+   Create a `.env` file in the root directory (do NOT commit this file):
+   ```env
+   SUPABASE_URL=https://your-project.supabase.co/
+   SUPABASE_ANON_KEY=your-anon-key-here
+   ```
+   > **Note:** Ensure `SUPABASE_URL` has a trailing slash to avoid client warnings.
+
+4. **Run the app:**
+   ```bash
+   streamlit run app.py
+   ```
+   The application will open at `http://localhost:8501`.
+
+### Verification Scripts
+We provide helper scripts to verify database connectivity and RLS policies locally:
+
+- `check_db_status.py`: Checks if Config Firmware and AI Models exist in the DB (using your `.env` keys).
+- `check_anon_access.py`: Simulates a public user (ANON key) to verify RLS policies allow reading data.
+
+Run them via:
+```bash
+python check_db_status.py
+```
+
 ## 📁 File Structure
 - `app.py` - Main Streamlit application
 - `requirements.txt` - Python dependencies
