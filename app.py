@@ -274,6 +274,8 @@ def render_login(supabase: Client) -> bool:
                 st.sidebar.success("Login successful!")
                 st.rerun()
             except Exception as e:
+                # Catch auth-specific errors (gotrue.errors.AuthApiError)
+                # Using Exception to handle both auth errors and network issues
                 st.sidebar.error(f"Login failed: {str(e)}")
                 return False
     
@@ -286,6 +288,11 @@ def check_user_role(supabase: Client, user_id: str, org_id: str) -> bool:
     Returns True if authorized, False otherwise.
     """
     try:
+        # Validate org_id to prevent injection vulnerabilities
+        if not re.match(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", org_id):
+            st.error("❌ Invalid organization ID format.")
+            return False
+        
         # Optimized: Check for ww_admin OR organisation_manager in a single query
         # This combines both role checks into one database call
         response = supabase.table('user_roles')\
@@ -414,6 +421,8 @@ def register_model_in_db(
                 .insert(model_data)\
                 .execute()
         
+        if not response.data:
+            raise Exception("Database operation did not return the expected model record.")
         return response.data[0]
         
     except Exception as e:
