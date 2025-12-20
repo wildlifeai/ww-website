@@ -71,58 +71,6 @@ Wildlife Watcher Model Converter & Upload Tool
    ```
 
 3. **Configure environment variables:**
-   Create `.env` file:
-   ```env
-   SUPABASE_URL=https://your-project.supabase.co
-   SUPABASE_ANON_KEY=your-anon-key-here
-   ```
-
-4. **Run the app:**
-   ```bash
-   streamlit run app.py
-   ```
-
-The application will open at `http://localhost:8501`.
-
-## 🔧 Tech Stack
-- **Frontend:** Streamlit
-- **Backend:** Supabase (PostgreSQL + Storage)
-- **ML Compiler:** Ethos-U Vela
-- **Deployment:** Streamlit Community Cloud
-
-## 🧩 How It Works: Manifest Generation
-
-The **public MANIFEST.zip download** feature dynamically assembles the package on-the-fly:
-
-1.  **Config Firmware**: Fetches the latest active firmware record of type `config` from Supabase.
-2.  **AI Model**: Fetches the latest active AI model for the **General Organization** (`550e...`).
-3.  **Merging**:
-    - Downloads both zip files from Supabase Storage.
-    - Extracts them into a temporary structure.
-    - Zips the combined result into a single `MANIFEST.zip`.
-
-> [!NOTE]
-> If either the Config Firmware or the Default AI Model is missing in the database, the app will warn the user and skip including that component in the final zip.
-
-## 💻 Local Development & Testing
-
-### Prerequisites
-- Python 3.9+
-- pip
-
-### Setup
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/wildlifeai/wildlife-watcher-model-conversion.git
-   cd wildlife-watcher-model-conversion
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Configure environment variables:**
    Create a `.env` file in the root directory (do NOT commit this file):
    ```env
    SUPABASE_URL=https://your-project.supabase.co/
@@ -146,6 +94,27 @@ Run them via:
 ```bash
 python check_db_status.py
 ```
+
+
+## 🔧 Tech Stack
+- **Frontend:** Streamlit
+- **Backend:** Supabase (PostgreSQL + Storage)
+- **ML Compiler:** Ethos-U Vela
+- **Deployment:** Streamlit Community Cloud
+
+## 🧩 How It Works: Manifest Generation
+
+The **public MANIFEST.zip download** feature dynamically assembles the package on-the-fly:
+
+1.  **Config Firmware**: Fetches the latest active firmware record of type `config` from Supabase.
+2.  **AI Model**: Fetches the latest active AI model for the **General Organization** (`550e...`).
+3.  **Merging**:
+    - Downloads both zip files from Supabase Storage.
+    - Extracts them into a temporary structure.
+    - Zips the combined result into a single `MANIFEST.zip`.
+
+> [!NOTE]
+> If either the Config Firmware or the Default AI Model is missing in the database, the app will warn the user and skip including that component in the final zip.
 
 ## 📁 File Structure
 - `app.py` - Main Streamlit application
