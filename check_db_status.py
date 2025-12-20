@@ -22,7 +22,7 @@ try:
     response = supabase.table("firmware") \
         .select("*") \
         .eq("type", "config") \
-        .eq("is_active", "true") \
+        .eq("is_active", True) \
         .is_("deleted_at", "null") \
         .order("created_at", desc=True) \
         .limit(1) \
