@@ -314,18 +314,30 @@ def get_user_organizations(supabase: Client, user_id: str) -> List[Dict[str, str
     Returns a list of dicts, each with 'name' and 'id' of an org.
     """
     try:
-        # Get user roles for organisations
-        response = supabase.table('user_roles')\
-            .select('scope_id, organisations:scope_id(id, name)')\
+        # Step 1: Get user roles for organisations (fetch scope_ids)
+        roles_response = supabase.table('user_roles')\
+            .select('scope_id')\
             .eq('user_id', user_id)\
             .eq('scope_type', 'organisation')\
             .eq('is_active', True)\
             .is_('deleted_at', 'null')\
             .execute()
         
+        if not roles_response.data:
+            return []
+        
+        # Extract unique org IDs
+        org_ids = list(set(role['scope_id'] for role in roles_response.data))
+        
+        # Step 2: Fetch organization details
+        orgs_response = supabase.table('organisations')\
+            .select('id, name')\
+            .in_('id', org_ids)\
+            .execute()
+        
         orgs = [
-            {"name": role['organisations']['name'], "id": role['organisations']['id']}
-            for role in response.data if role.get('organisations')
+            {"name": org['name'], "id": org['id']}
+            for org in orgs_response.data
         ]
         # Sort by name for a better user experience
         orgs.sort(key=lambda x: x['name'])
@@ -333,7 +345,7 @@ def get_user_organizations(supabase: Client, user_id: str) -> List[Dict[str, str
         
     except Exception as e:
         st.error(f"❌ Failed to fetch organizations: {str(e)}")
-        return {}
+        return []
 
 
 def upload_model_to_storage(
