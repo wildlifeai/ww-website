@@ -405,7 +405,7 @@ def register_model_in_db(
             "detection_capabilities": detection_capabilities
         }
         
-        if existing.data and len(existing.data) > 0:
+        if existing.data:
             # Update existing model (version overwrite)
             model_id = existing.data[0]['id']
             response = supabase.table('ai_models')\
