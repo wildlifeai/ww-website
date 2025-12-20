@@ -240,6 +240,130 @@ def run_conversion(uploaded_file):
         st.success("Manifest.zip created successfully!")
         return manifest_bytes
 
+# --- Public MANIFEST Download Functions ---
+
+def fetch_latest_config_firmware(supabase: Client) -> Optional[Dict]:
+    """
+    Fetch the latest active config firmware from the firmware table.
+    Returns dict with location_path and metadata, or None if not found.
+    """
+    try:
+        response = supabase.table('firmware')\
+            .select('*')\
+            .eq('type', 'config')\
+            .eq('is_active', True)\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+    except Exception as e:
+        st.warning(f"Could not fetch config firmware: {str(e)}")
+        return None
+
+def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
+    """
+    Fetch the latest default AI model from the General organization.
+    Returns dict with storage_path and metadata, or None if not found.
+    """
+    try:
+        # General org ID from seed data
+        GENERAL_ORG_ID = '550e8400-e29b-41d4-a716-446655440002'
+        
+        response = supabase.table('ai_models')\
+            .select('*')\
+            .eq('organisation_id', GENERAL_ORG_ID)\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+    except Exception as e:
+        st.warning(f"Could not fetch default AI model: {str(e)}")
+        return None
+
+def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path) -> bool:
+    """
+    Download a file from Supabase Storage to local path.
+    Returns True on success, False on failure.
+    """
+    try:
+        response = supabase.storage.from_(bucket).download(path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(response)
+        return True
+    except Exception as e:
+        st.error(f"Download failed for {path}: {str(e)}")
+        return False
+
+def create_manifest_package(supabase: Client) -> Optional[bytes]:
+    """
+    Create a complete MANIFEST.zip package containing:
+    - Latest config firmware files (CONFIG.TXT, HMSTB1.BIN, README.TXT, config_file.md)
+    - Latest default AI model (Manifest.zip)
+    
+    Returns bytes of the final zip, or None on failure.
+    """
+    temp_dir = None
+    try:
+        # Create temporary directory
+        temp_dir = Path(tempfile.mkdtemp())
+        manifest_dir = temp_dir / "MANIFEST"
+        manifest_dir.mkdir()
+        
+        # 1. Fetch latest config firmware
+        config_firmware = fetch_latest_config_firmware(supabase)
+        if not config_firmware:
+            st.warning("⚠️ No config firmware found. MANIFEST will not include config files.")
+        else:
+            # Download config firmware zip
+            config_zip_path = temp_dir / "config_firmware.zip"
+            if download_from_storage(supabase, 'firmware', config_firmware['location_path'], config_zip_path):
+                # Extract config firmware contents to MANIFEST folder
+                with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(manifest_dir)
+                st.success(f"✅ Added config firmware {config_firmware['version']}")
+            else:
+                st.warning("⚠️ Failed to download config firmware")
+        
+        # 2. Fetch latest default AI model
+        ai_model = fetch_latest_default_model(supabase)
+        if not ai_model:
+            st.warning("⚠️ No default AI model found. MANIFEST will not include AI model.")
+        else:
+            # Download AI model Manifest.zip directly to MANIFEST folder
+            model_manifest_path = manifest_dir / "Manifest.zip"
+            if download_from_storage(supabase, 'ai-models', ai_model['storage_path'], model_manifest_path):
+                st.success(f"✅ Added AI model {ai_model['name']} v{ai_model['version']}")
+            else:
+                st.warning("⚠️ Failed to download AI model")
+        
+        # 3. Create final MANIFEST.zip
+        final_zip_path = temp_dir / "MANIFEST.zip"
+        with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file in manifest_dir.rglob('*'):
+                if file.is_file():
+                    arcname = f"MANIFEST/{file.relative_to(manifest_dir)}"
+                    zipf.write(file, arcname)
+        
+        # Read final zip as bytes
+        manifest_bytes = final_zip_path.read_bytes()
+        return manifest_bytes
+        
+    except Exception as e:
+        st.error(f"❌ Failed to create MANIFEST package: {str(e)}")
+        return None
+    finally:
+        # Cleanup temp directory
+        if temp_dir and temp_dir.exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
 # --- Supabase Integration Functions ---
 
 def render_login(supabase: Client) -> bool:
@@ -539,6 +663,47 @@ This tool will:
 3.  Extract labels from `model_variables.h`.
 4.  Package the converted `.tflite` and `labels.txt` into `Manifest.zip`.
 """)
+
+# Public MANIFEST Download Section (No Auth Required)
+st.divider()
+st.subheader("📦 Download Latest MANIFEST Package")
+st.info("""
+**Get everything you need for your camera device in one click!**
+
+This package combines:
+- ✅ Latest device configuration files (CONFIG.TXT, HMSTB1.BIN, etc.)
+- ✅ Latest default AI wildlife detection model
+
+Simply extract to your SD card root and insert into the camera device!
+""")
+
+col1, col2 = st.columns([1, 3])
+with col1:
+    if st.button("🚀 Download MANIFEST.zip", type="primary", width="stretch", disabled=not supabase):
+        with st.spinner("Preparing MANIFEST package..."):
+            manifest_bytes = create_manifest_package(supabase)
+            if manifest_bytes:
+                st.session_state['public_manifest_bytes'] = manifest_bytes
+                st.success("✅ MANIFEST package ready!")
+                st.rerun()
+
+with col2:
+    if 'public_manifest_bytes' in st.session_state:
+        st.download_button(
+            label="💾 Save MANIFEST.zip to your computer",
+            data=st.session_state['public_manifest_bytes'],
+            file_name="MANIFEST.zip",
+            mime="application/zip",
+            width="stretch"
+        )
+        if st.button("Clear", width="stretch"):
+            del st.session_state['public_manifest_bytes']
+            st.rerun()
+
+if not supabase:
+    st.warning("⚠️ Supabase not configured. Public download unavailable.")
+
+st.divider()
 
 with st.expander("License Information"):
     st.markdown("""
