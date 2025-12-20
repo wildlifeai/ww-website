@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from gotrue.errors import AuthApiError
 from typing import Optional, Dict, List
 
 # Load environment variables
@@ -273,10 +274,11 @@ def render_login(supabase: Client) -> bool:
                 st.session_state.session = response.session
                 st.sidebar.success("Login successful!")
                 st.rerun()
+            except AuthApiError as e:
+                st.sidebar.error(f"Login failed: {e}")
+                return False
             except Exception as e:
-                # Catch auth-specific errors (gotrue.errors.AuthApiError)
-                # Using Exception to handle both auth errors and network issues
-                st.sidebar.error(f"Login failed: {str(e)}")
+                st.sidebar.error(f"An unexpected error occurred: {e}")
                 return False
     
     return False
@@ -288,20 +290,12 @@ def check_user_role(supabase: Client, user_id: str, org_id: str) -> bool:
     Returns True if authorized, False otherwise.
     """
     try:
-        # Validate org_id to prevent injection vulnerabilities
-        if not re.match(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", org_id):
-            st.error("❌ Invalid organization ID format.")
-            return False
-        
-        # Optimized: Check for ww_admin OR organisation_manager in a single query
-        # This combines both role checks into one database call
-        response = supabase.table('user_roles')\
-            .select('role')\
-            .eq('user_id', user_id)\
-            .eq('is_active', True)\
-            .is_('deleted_at', 'null')\
-            .or_(f'and(role.eq.ww_admin,scope_type.eq.system),and(role.eq.organisation_manager,scope_type.eq.organisation,scope_id.eq.{org_id})')\
-            .execute()
+        # Use RPC function for secure role checking
+        # This prevents injection vulnerabilities and moves logic to the database
+        response = supabase.rpc('check_user_uploader_role', {
+            'p_user_id': user_id,
+            'p_org_id': org_id
+        }).execute()
         
         return bool(response.data)
         
@@ -348,8 +342,12 @@ def upload_model_to_storage(
     Storage path: <org_id>/<model_name>-custom-<version>/Manifest.zip
     Returns: storage_path
     """
+    # Sanitize model_name and version to prevent path traversal
+    safe_model_name = os.path.basename(model_name)
+    safe_version = os.path.basename(version)
+    
     # Generate storage path following the naming convention
-    storage_path = f"{org_id}/{model_name}-custom-{version}/Manifest.zip"
+    storage_path = f"{org_id}/{safe_model_name}-custom-{safe_version}/Manifest.zip"
     
     try:
         # Upload to ai-models bucket
@@ -433,7 +431,9 @@ def register_model_in_db(
             # Log critical rollback failure
             st.error(f"⚠️ CRITICAL: Failed to rollback storage file {storage_path}. Error: {rollback_e}")
             st.warning(f"⚠️ Manual cleanup required: Please remove '{storage_path}' from the 'ai-models' bucket in Supabase.")
-        raise Exception(f"Database registration failed: {str(e)}")
+
+        # Re-raise with context
+        raise Exception(f"Database registration failed: {str(e)}") from e
 
 
 def upload_and_register_model(
