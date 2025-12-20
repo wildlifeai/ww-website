@@ -542,7 +542,7 @@ def register_model_in_db(
         model_data = {
             "name": name,
             "version": version,
-            "description": description or f"Converted Edge Impulse model - {name} v{version}",
+            "description": description,
             "organisation_id": org_id,
             "uploaded_by": user_id,
             "modified_by": user_id,
