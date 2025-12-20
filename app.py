@@ -17,6 +17,9 @@ from typing import Optional, Dict, List
 # Load environment variables
 load_dotenv()
 
+# Constants
+GENERAL_ORG_ID = '550e8400-e29b-41d4-a716-446655440002'  # General organization from seed data
+
 # Initialize Supabase client
 @st.cache_resource
 def init_supabase() -> Optional[Client]:
@@ -270,9 +273,6 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
     Returns dict with storage_path and metadata, or None if not found.
     """
     try:
-        # General org ID from seed data
-        GENERAL_ORG_ID = '550e8400-e29b-41d4-a716-446655440002'
-        
         response = supabase.table('ai_models')\
             .select('*')\
             .eq('organisation_id', GENERAL_ORG_ID)\
@@ -294,21 +294,17 @@ def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path) 
     Returns True on success, False on failure.
     """
     try:
-        st.write(f"🔍 DEBUG: Attempting download from bucket='{bucket}', path='{path}'")
         response = supabase.storage.from_(bucket).download(path)
         
         if response:
-            st.write(f"✅ DEBUG: Downloaded {len(response)} bytes")
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_bytes(response)
             return True
         else:
-            st.error(f"❌ DEBUG: Download returned empty response for {path}")
+            st.error(f"Failed to download file from '{path}'. The file may not exist or permissions are incorrect.")
             return False
     except Exception as e:
-        st.error(f"❌ Download failed for bucket='{bucket}', path='{path}': {type(e).__name__}: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+        st.error(f"An error occurred while downloading the file: {str(e)}")
         return False
 
 def create_manifest_package(supabase: Client) -> Optional[bytes]:
@@ -556,12 +552,9 @@ def register_model_in_db(
             "detection_capabilities": detection_capabilities
         }
         
-        st.write(f"🔍 DEBUG: Registering model in DB: {model_data}")
-        
         if existing.data:
             # Update existing model (version overwrite)
             model_id = existing.data[0]['id']
-            st.write(f"🔍 DEBUG: Updating existing record ID: {model_id}")
             response = supabase.table('ai_models')\
                 .update(model_data)\
                 .eq('id', model_id)\
@@ -569,20 +562,17 @@ def register_model_in_db(
             st.info(f"ℹ️ Overwriting existing model version")
         else:
             # Insert new model
-            st.write(f"🔍 DEBUG: Inserting new record")
             response = supabase.table('ai_models')\
                 .insert(model_data)\
                 .execute()
         
         if not response.data:
-            st.error(f"❌ DEBUG: Database response empty! Response: {response}")
             raise Exception("Database operation did not return the expected model record.")
         
-        st.success(f"✅ Database record created/updated: {response.data[0]['id']}")
+        st.success(f"✅ Model registered successfully")
         return response.data[0]
         
     except Exception as e:
-        st.error(f"❌ Database registration failed: {str(e)}")
         # Rollback: delete from storage
         try:
             supabase.storage.from_('ai-models').remove([storage_path])
