@@ -28,13 +28,13 @@ Wildlife Watcher Model Converter & Upload Tool
 ### 🔄 Model Conversion
 - Convert Edge Impulse models using Vela compiler (`ethos-u55-64`)
 - Extract labels from `model_variables.h`
-- Package into `Manifest.zip` for Wildlife Watcher devices
+- Package into an **uncompressed, flattened** `ai_model.zip` (ready for Wildlife Watcher devices)
 
-### 📤 Upload to Supabase (Login Required)
-- Upload custom models to your organization
-- Requires `organisation_manager` or `ww_admin` role
-- Automatic version management
-- Rollback on failure
+### 📤 Upload & Direct Upload (Login Required)
+- **Convert & Upload:** Seamlessly convert an Edge Impulse export and upload it to Supabase
+- **Direct Upload:** Upload pre-converted `ai_model.zip` files (helpful if you already have optimized `.tfl` and `labels.txt`)
+- Upload to your organization with `organisation_manager` or `ww_admin` role
+- Automatic versioning and storage path management: `{org_id}/{model_name}-custom-{version}/ai_model.zip`
 
 ## 🎯 Usage
 
@@ -46,10 +46,10 @@ Wildlife Watcher Model Converter & Upload Tool
 
 ### Upload Custom Model
 1. **Login** with your Wildlife Watcher account (sidebar)
-2. **Upload** your Edge Impulse model zip (format: `modelname-custom-version.zip`)
-3. **Convert** - app runs Vela optimization
-4. **Download** converted model (optional)
-5. **Upload to Database** - select your organization
+2. **Select Workflow:** Choose **Convert & Upload** for raw exports, or **Direct Upload** if you already have an `ai_model.zip`.
+3. **Configure Metadata:** Provide model name, version, and detection labels.
+4. **Prepare/Convert:** Tool prepares the optimized package.
+5. **Upload to Database:** Confirm organization and description.
 6. Model is now available in the Wildlife Watcher mobile app!
 
 ## 💻 Local Development
@@ -107,11 +107,13 @@ python check_db_status.py
 The **public MANIFEST.zip download** feature dynamically assembles the package on-the-fly:
 
 1.  **Config Firmware**: Fetches the latest active firmware record of type `config` from Supabase.
-2.  **AI Model**: Fetches the latest active AI model for the **General Organization** (`550e...`).
-3.  **Merging**:
-    - Downloads both zip files from Supabase Storage.
-    - Extracts them into a temporary structure.
-    - Zips the combined result into a single `MANIFEST.zip`.
+2.  **AI Model**: 
+    - **Priority**: Searches for a model named **"Person Detector"** in the General organization.
+    - **Fallback**: Uses the latest available AI model if the above is not found.
+3.  **Structure**: 
+    - Downloads and extracts components into a temporary `MANIFEST/` directory.
+    - **Flattens** the structure so all files are at the root level of the folder.
+    - Packages the result into an **uncompressed** `MANIFEST.zip` (method 0).
 
 > [!NOTE]
 > If either the Config Firmware or the Default AI Model is missing in the database, the app will warn the user and skip including that component in the final zip.
@@ -123,7 +125,6 @@ The **public MANIFEST.zip download** feature dynamically assembles the package o
 - `readme.md` - This file
 
 ## 👥 Contributors
-- Will McEwan
 - Tobyn Packer
 - Victor Anton
 
