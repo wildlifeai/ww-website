@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 from gotrue.errors import AuthApiError
 from typing import Optional, Dict, List
+from urllib.parse import urlparse
 
 # Load environment variables
 load_dotenv()
@@ -302,12 +303,18 @@ def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path) 
     Returns True on success, False on failure.
     """
     try:
-        # Some paths might be full URLs or just keys
+        # Robust URL parsing if a full URL is provided
         if path.startswith('http'):
-            # Extract the path from the URL if needed, but supabase client usually expects the relative path
-            # However, if it's a direct download URL, we might need a different approach.
-            # For now, assume it's the storage path key.
-            path = path.split('/object/public/')[-1].split('/', 1)[-1]
+            parsed_url = urlparse(path)
+            # Path typically follows /storage/v1/object/public/bucket-name/relative/path
+            path_parts = parsed_url.path.strip('/').split('/')
+            try:
+                # Find the index of the bucket name and get everything following it
+                bucket_index = path_parts.index(bucket)
+                path = '/'.join(path_parts[bucket_index + 1:])
+            except (ValueError, IndexError):
+                st.error(f"Could not extract path for bucket '{bucket}' from URL: {path}")
+                return False
             
         response = supabase.storage.from_(bucket).download(path)
         
