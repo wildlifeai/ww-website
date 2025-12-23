@@ -44,12 +44,13 @@ def parse_model_zip_name(zip_path: str):
     if not name.endswith('.zip'):
         raise ValueError('Zip file must end with .zip')
     base = name[:-4]
-    if '-custom-' not in base:
-        raise ValueError("Filename must contain '-custom-' (e.g. mymodel-custom-v10.zip)")
-    modelname, version = base.split('-custom-', 1)
-    if not modelname or not version:
-        raise ValueError('Invalid filename segments before/after -custom-')
-    return modelname, version
+    if '-custom-' in base:
+        modelname, version = base.split('-custom-', 1)
+        if modelname and version:
+            return modelname, version
+    
+    # Fallback if pattern is not found
+    return "unknown", "1.0.0"
 
 def safe_move(src: Path, dst: Path):
     """Safely move a file, creating parent dirs and overwriting old file."""
@@ -213,35 +214,25 @@ def run_conversion(uploaded_file):
         
         st.write(f"Labels extracted: {labels}")
 
-        # 5. Package Manifest
-        manifest_dir = work_dir / 'Manifest'
-        manifest_dir.mkdir(parents=True, exist_ok=True)
+        # 5. Package AI Model
+        # The AI model package itself is stored as ai_model.zip in the bucket
+        ai_model_zip_path = work_dir / 'ai_model.zip'
+        
+        # Create a store-compressed zip (no compression) containing labels.txt and the model file
+        with zipfile.ZipFile(ai_model_zip_path, mode='w', compression=zipfile.ZIP_STORED) as zf:
+            # We want these files at the root of ai_model.zip
+            zf.write(vela_final_path, vela_final_path.name)
+            zf.write(labels_txt_path, 'labels.txt')
 
-        shutil.copy2(vela_final_path, manifest_dir / vela_final_path.name)
-        shutil.copy2(labels_txt_path, manifest_dir / 'labels.txt')
-
-        # Zip Manifest using STORE (no compression)
-        manifest_dir_path = work_dir / 'Manifest'
-        manifest_zip_path = work_dir / 'Manifest.zip'
-        # Create a store-compressed zip so files are stored without deflate
-        with zipfile.ZipFile(manifest_zip_path, mode='w', compression=zipfile.ZIP_STORED) as zf:
-            for root, _, files in os.walk(manifest_dir_path):
-                for fname in files:
-                    full_path = Path(root) / fname
-                    # write with arcname relative to Manifest directory
-                    arcname = full_path.relative_to(work_dir)
-                    zf.write(full_path, arcname)
-
-        final_zip_path = manifest_zip_path
-        if not final_zip_path.exists():
-            raise FileNotFoundError(f"Failed to create Manifest.zip at {final_zip_path}")
+        if not ai_model_zip_path.exists():
+            raise FileNotFoundError(f"Failed to create ai_model.zip at {ai_model_zip_path}")
 
         # Read bytes while tempdir is still valid and return them to caller
-        with open(final_zip_path, 'rb') as f:
-            manifest_bytes = f.read()
+        with open(ai_model_zip_path, 'rb') as f:
+            model_bytes = f.read()
 
-        st.success("Manifest.zip created successfully!")
-        return manifest_bytes
+        st.success("ai_model.zip created successfully!")
+        return model_bytes
 
 # --- Public MANIFEST Download Functions ---
 
@@ -269,10 +260,26 @@ def fetch_latest_config_firmware(supabase: Client) -> Optional[Dict]:
 
 def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
     """
-    Fetch the latest default AI model from the General organization.
+    Fetch the default AI model.
+    Prioritizes the 'Person Detector' model, otherwise falls back to the latest 
+    available model from the General organization.
     Returns dict with storage_path and metadata, or None if not found.
     """
     try:
+        # First, try to find the specific Person Detector model
+        response = supabase.table('ai_models')\
+            .select('*')\
+            .eq('organisation_id', GENERAL_ORG_ID)\
+            .eq('name', 'Person Detector')\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+            
+        # Fallback to the latest model in the organization if Person Detector is missing
         response = supabase.table('ai_models')\
             .select('*')\
             .eq('organisation_id', GENERAL_ORG_ID)\
@@ -283,6 +290,7 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
         
         if response.data and len(response.data) > 0:
             return response.data[0]
+            
         return None
     except Exception as e:
         st.warning(f"Could not fetch default AI model: {str(e)}")
@@ -294,6 +302,13 @@ def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path) 
     Returns True on success, False on failure.
     """
     try:
+        # Some paths might be full URLs or just keys
+        if path.startswith('http'):
+            # Extract the path from the URL if needed, but supabase client usually expects the relative path
+            # However, if it's a direct download URL, we might need a different approach.
+            # For now, assume it's the storage path key.
+            path = path.split('/object/public/')[-1].split('/', 1)[-1]
+            
         response = supabase.storage.from_(bucket).download(path)
         
         if response:
@@ -307,11 +322,38 @@ def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path) 
         st.error(f"An error occurred while downloading the file: {str(e)}")
         return False
 
+def flatten_directory(directory: Path):
+    """
+    Move all files from subdirectories to the root of 'directory' and remove subdirectories.
+    """
+    for item in list(directory.rglob('*')):
+        if item.is_file():
+            # If the file is not already in the root, move it
+            if item.parent != directory:
+                target = directory / item.name
+                if target.exists():
+                    target.unlink() # Overwrite if duplicate name
+                shutil.move(str(item), str(target))
+    
+    # Remove empty directories
+    for item in list(directory.walk(top_down=False)):
+        root, dirs, files = item
+        dir_path = Path(root)
+        if dir_path != directory and not dirs and not files:
+            dir_path.rmdir()
+
 def create_manifest_package(supabase: Client) -> Optional[bytes]:
     """
     Create a complete MANIFEST.zip package containing:
-    - Latest config firmware files (CONFIG.TXT, HMSTB1.BIN, README.TXT, config_file.md)
-    - Latest default AI model (Manifest.zip)
+    - Latest config firmware files
+    - Latest default AI model
+    
+    Structure:
+    MANIFEST/
+      CONFIG.TXT
+      labels.txt
+      <model>.tfl
+      ...
     
     Returns bytes of the final zip, or None on failure.
     """
@@ -322,39 +364,44 @@ def create_manifest_package(supabase: Client) -> Optional[bytes]:
         manifest_dir = temp_dir / "MANIFEST"
         manifest_dir.mkdir()
         
-        # 1. Fetch latest config firmware
+        # 1. Fetch and download latest config firmware
         config_firmware = fetch_latest_config_firmware(supabase)
         if not config_firmware:
             st.warning("⚠️ No config firmware found. MANIFEST will not include config files.")
         else:
-            # Download config firmware zip
             config_zip_path = temp_dir / "config_firmware.zip"
             if download_from_storage(supabase, 'firmware', config_firmware['location_path'], config_zip_path):
-                # Extract config firmware contents to MANIFEST folder
                 with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
                     zip_ref.extractall(manifest_dir)
                 st.success(f"✅ Added config firmware {config_firmware['version']}")
             else:
                 st.warning("⚠️ Failed to download config firmware")
         
-        # 2. Fetch latest default AI model
+        # 2. Fetch and download latest default AI model
         ai_model = fetch_latest_default_model(supabase)
         if not ai_model:
             st.warning("⚠️ No default AI model found. MANIFEST will not include AI model.")
         else:
-            # Download AI model Manifest.zip directly to MANIFEST folder
-            model_manifest_path = manifest_dir / "Manifest.zip"
-            if download_from_storage(supabase, 'ai-models', ai_model['storage_path'], model_manifest_path):
+            # Download AI model ai_model.zip
+            model_zip_path = temp_dir / "ai_model.zip"
+            # Note: storage_path in DB should now point to ai_model.zip
+            if download_from_storage(supabase, 'ai-models', ai_model['storage_path'], model_zip_path):
+                with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
+                    zip_ref.extractall(manifest_dir)
                 st.success(f"✅ Added AI model {ai_model['name']} v{ai_model['version']}")
             else:
                 st.warning("⚠️ Failed to download AI model")
         
-        # 3. Create final MANIFEST.zip
-        final_zip_path = temp_dir / "MANIFEST.zip"
-        with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for file in manifest_dir.rglob('*'):
+        # 3. Flatten the directory structure
+        flatten_directory(manifest_dir)
+        
+        # 4. Create final MANIFEST.zip (uncompressed)
+        final_zip_path = temp_dir / "MANIFEST_final.zip"
+        # Use ZIP_STORED (method=0)
+        with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_STORED) as zipf:
+            for file in manifest_dir.glob('*'):
                 if file.is_file():
-                    arcname = f"MANIFEST/{file.relative_to(manifest_dir)}"
+                    arcname = f"MANIFEST/{file.name}"
                     zipf.write(file, arcname)
         
         # Read final zip as bytes
@@ -485,8 +532,8 @@ def upload_model_to_storage(
     org_id: str
 ) -> str:
     """
-    Upload Manifest.zip to Supabase Storage.
-    Storage path: <org_id>/<model_name>-custom-<version>/Manifest.zip
+    Upload ai_model.zip to Supabase Storage.
+    Storage path: <org_id>/<model_name>-custom-<version>/ai_model.zip
     Returns: storage_path
     """
     # Sanitize model_name and version to prevent path traversal
@@ -494,7 +541,8 @@ def upload_model_to_storage(
     safe_version = os.path.basename(version)
     
     # Generate storage path following the naming convention
-    storage_path = f"{org_id}/{safe_model_name}-custom-{safe_version}/Manifest.zip"
+    # New format: {org_id}/{model_name}-custom-{version}/ai_model.zip
+    storage_path = f"{org_id}/{safe_model_name}-custom-{safe_version}/ai_model.zip"
     
     try:
         # Upload to ai-models bucket
@@ -668,7 +716,7 @@ This tool will:
 1.  Unzip the file.
 2.  Run the `vela` command (`ethos-u55-64`).
 3.  Extract labels from `model_variables.h`.
-4.  Package the converted `.tflite` and `labels.txt` into `Manifest.zip`.
+4.  Package the converted `.tflite` and `labels.txt` into `ai_model.zip`.
 """)
 
 # Public MANIFEST Download Section (No Auth Required)
@@ -717,42 +765,73 @@ with st.expander("License Information"):
     This tool is provided under the GPL-3.0 license. The source code and license can be found on GitHub.
     """)
 
-uploaded_file = st.file_uploader(
-    "Choose your <modelname>-custom-<version>.zip",
-    type="zip",
-    accept_multiple_files=False
-)
+tab1, tab2 = st.tabs(["🔄 Convert & Upload", "📤 Direct Upload"])
 
-if uploaded_file is not None:
-    if st.button(f"Convert {uploaded_file.name}"):
-        
-        zip_bytes = None
-        try:
-            with st.spinner("Running conversion pipeline... This may take a minute."):
-                # run_conversion now returns bytes
-                zip_bytes = run_conversion(uploaded_file)
-                
-                # Store in session state
-                if zip_bytes:
-                    st.session_state['manifest_bytes'] = zip_bytes
+with tab1:
+    st.markdown("### Convert Edge Impulse Export")
+    uploaded_file = st.file_uploader(
+        "Choose your <modelname>-custom-<version>.zip",
+        type="zip",
+        accept_multiple_files=False,
+        key="converter_uploader"
+    )
+
+    if uploaded_file is not None:
+        if st.button(f"Convert {uploaded_file.name}", key="convert_btn"):
+            
+            zip_bytes = None
+            try:
+                with st.spinner("Running conversion pipeline... This may take a minute."):
+                    # run_conversion now returns bytes of ai_model.zip
+                    model_zip_bytes = run_conversion(uploaded_file)
                     
-                    # Also parse and store model name/version for upload
-                    try:
+                    # Store in session state
+                    if model_zip_bytes:
+                        st.session_state['ai_model_zip_bytes'] = model_zip_bytes
+                        
+                        # Also parse and store model name/version for upload
                         model_name, model_version = parse_model_zip_name(uploaded_file.name)
                         st.session_state['model_name'] = model_name
                         st.session_state['model_version'] = model_version
-                    except ValueError as e:
-                        st.warning(f"⚠️ Could not parse model name/version from filename: {e}")
-                        st.info("💡 Using default values. You can edit the description when uploading.")
-                        # Set defaults so the app doesn't crash, but the user is aware
-                        st.session_state['model_name'] = 'unknown'
-                        st.session_state['model_version'] = 'unknown'
+                        if model_name == 'unknown':
+                            st.warning("⚠️ Could not parse model metadata from filename. Please check the 'Upload' section below.")
 
-        except Exception as e:
-            st.error(f"An error occurred: {e}")
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+
+with tab2:
+    st.markdown("### Upload Pre-converted Model")
+    st.info("💡 Use this if you already have an `ai_model.zip` (containing the model and labels.txt).")
+    
+    direct_file = st.file_uploader(
+        "Choose your ai_model.zip",
+        type="zip",
+        accept_multiple_files=False,
+        key="direct_uploader"
+    )
+    
+    if direct_file is not None:
+        st.write(f"Ready to upload: {direct_file.name}")
+        
+        # User provides metadata
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            m_name = st.text_input("Model Name", value="Person Detector", placeholder="e.g. My Custom Model")
+        with col_m2:
+            m_ver = st.text_input("Version", value="1.0.0", placeholder="e.g. 1.0.0")
+            
+        m_labels_raw = st.text_input("Detection Labels (comma-separated)", value="no_person, person", help="Enter the labels in order (index 0, index 1...)")
+        
+        if st.button("Prepare for Upload", key="prepare_direct_btn"):
+            st.session_state['ai_model_zip_bytes'] = direct_file.getvalue()
+            st.session_state['model_name'] = m_name
+            st.session_state['model_version'] = m_ver
+            st.session_state['labels'] = [l.strip() for l in m_labels_raw.split(',') if l.strip()]
+            st.session_state['show_upload'] = True
+            st.success("✅ Model data prepared! See the 'Upload to Database' section below.")
 
 # Show download and upload options if conversion completed
-if 'manifest_bytes' in st.session_state and st.session_state['manifest_bytes']:
+if 'ai_model_zip_bytes' in st.session_state and st.session_state['ai_model_zip_bytes']:
     
     st.divider()
     st.subheader("✅ Conversion Complete!")
@@ -767,9 +846,9 @@ if 'manifest_bytes' in st.session_state and st.session_state['manifest_bytes']:
     
     with col1:
         st.download_button(
-            label="💾 Download Manifest.zip",
-            data=st.session_state['manifest_bytes'],
-            file_name="Manifest.zip",
+            label="💾 Download ai_model.zip",
+            data=st.session_state['ai_model_zip_bytes'],
+            file_name="ai_model.zip",
             mime="application/zip",
             width="stretch"
         )
@@ -815,7 +894,7 @@ if 'manifest_bytes' in st.session_state and st.session_state['manifest_bytes']:
                 if st.button("🚀 Upload Model", type="primary", width="stretch"):
                     success = upload_and_register_model(
                         supabase=supabase,
-                        manifest_bytes=st.session_state['manifest_bytes'],
+                        manifest_bytes=st.session_state['ai_model_zip_bytes'],
                         model_name=model_name,
                         model_version=model_version,
                         description=description,
