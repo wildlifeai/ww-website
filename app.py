@@ -335,12 +335,11 @@ def flatten_directory(directory: Path):
                     target.unlink() # Overwrite if duplicate name
                 shutil.move(str(item), str(target))
     
-    # Remove empty directories
-    for item in list(directory.walk(top_down=False)):
-        root, dirs, files = item
-        dir_path = Path(root)
-        if dir_path != directory and not dirs and not files:
-            dir_path.rmdir()
+    # Remove now-empty subdirectories, which may contain other empty directories.
+    for item in directory.iterdir():
+        if item.is_dir():
+            shutil.rmtree(item)
+
 
 def create_manifest_package(supabase: Client) -> Optional[bytes]:
     """
