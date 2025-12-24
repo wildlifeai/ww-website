@@ -10,7 +10,7 @@ from supabase import create_client, Client
 # Constants
 GENERAL_ORG_ID = os.environ.get("GENERAL_ORG_ID", "b0000000-0000-0000-0000-000000000001")
 DEFAULT_EMAIL = os.environ.get("UPLOADER_EMAIL", "apps@wildlife.ai")
-DEFAULT_PASSWORD = os.environ.get("UPLOADER_PASSWORD", "test123")
+DEFAULT_PASSWORD = os.environ.get("UPLOADER_PASSWORD")
 
 def deploy_model(supabase: Client, file_path: Path, model_name: str, version: str, description: str, labels: list):
     """Uploads model to storage and registers in database."""
