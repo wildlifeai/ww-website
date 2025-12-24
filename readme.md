@@ -5,57 +5,128 @@
 </p>
 
 <h1 align="center">
-Wildlife Watcher Model Conversion Tool
+Wildlife Watcher Model Converter & Upload Tool
 </h1>
 
 <p align="center">
-  <strong>A web tool to convert Edge Impulse models for use with Wildlife Watcher devices.</strong>
+  <strong>Convert Edge Impulse models and download complete MANIFEST packages for Wildlife Watcher devices.</strong>
   <br />
-  <a href="https://wildlife-watcher-model-conversion-4umtawwfwbj3webexi4fnn.streamlit.app/" target="_blank">
+  <a href="https://wildlife-watcher.streamlit.app" target="_blank">
     <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" />
   </a>
 </p>
 
-## 🚀 Project
+## 🚀 Features
 
-This Streamlit application provides a simple web interface for converting Edge Impulse models into the format required by Wildlife Watcher hardware.
+### 📦 Public MANIFEST Download (No Login Required)
+- **One-click download** of complete camera device package
+- Automatically combines:
+  - Latest config firmware (CONFIG.TXT, HMSTB1.BIN, etc.)
+  - Latest default AI wildlife detection model
+- Ready to extract to SD card and use immediately
 
-The tool automates the process described in the original `WildlifeWatcher_model_preparation.ipynb` notebook. It accepts a standard Edge Impulse `.zip` file and performs the following steps:
+### 🔄 Model Conversion
+- Convert Edge Impulse models using Vela compiler (`ethos-u55-64`)
+- Extract labels from `model_variables.h`
+- Package into an **uncompressed, flattened** `ai_model.zip` (ready for Wildlife Watcher devices)
 
-1. Unzips the model file.
-2. Runs the `vela` compiler (for the `ethos-u55-64` accelerator) on the `trained.tflite` file.
-3. Extracts class labels from the `model_variables.h` header file.
-4. Packages the newly compiled `_vela.tflite` model and the `labels.txt` file into a downloadable `Manifest.zip`.
+### 📤 Upload & Direct Upload (Login Required)
+- **Convert & Upload:** Seamlessly convert an Edge Impulse export and upload it to Supabase
+- **Direct Upload:** Upload pre-converted `ai_model.zip` files (helpful if you already have optimized `.tfl` and `labels.txt`)
+- Upload to your organization with `organisation_manager` or `ww_admin` role
+- Automatic versioning and storage path management: `{org_id}/{model_name}-custom-{version}/ai_model.zip`
 
-## 💻 Development
+## 🎯 Usage
 
-To run this application locally, ensure you have Python 3 and pip installed.
+### Download MANIFEST Package
+1. Visit [wildlife-watcher.streamlit.app](https://wildlife-watcher.streamlit.app)
+2. Click **"🚀 Download MANIFEST.zip"** (top of page)
+3. Extract to SD card root directory
+4. Insert SD card into Wildlife Watcher camera device
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/your-username/your-repo-name.git
-    cd your-repo-name
-    ```
-    *(Note: Replace the URL with your actual repository link.)*
-2.  **Install dependencies:**
-    This will install `streamlit` and `ethos-u-vela`.
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  **Run the app:**
-    ```bash
-    streamlit run app.py
-    ```
+### Upload Custom Model
+1. **Login** with your Wildlife Watcher account (sidebar)
+2. **Select Workflow:** Choose **Convert & Upload** for raw exports, or **Direct Upload** if you already have an `ai_model.zip`.
+3. **Configure Metadata:** Provide model name, version, and detection labels.
+4. **Prepare/Convert:** Tool prepares the optimized package.
+5. **Upload to Database:** Confirm organization and description.
+6. Model is now available in the Wildlife Watcher mobile app!
 
-The application will open in your default web browser.
+## 💻 Local Development
+
+### Prerequisites
+- Python 3.9+
+- pip
+
+### Setup
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/wildlifeai/wildlife-watcher-model-conversion.git
+   cd wildlife-watcher-model-conversion
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. **Configure environment variables:**
+   Create a `.env` file in the root directory (do NOT commit this file):
+   ```env
+   SUPABASE_URL=https://your-project.supabase.co/
+   SUPABASE_ANON_KEY=your-anon-key-here
+   ```
+   > **Note:** Ensure `SUPABASE_URL` has a trailing slash to avoid client warnings.
+
+4. **Run the app:**
+   ```bash
+   streamlit run app.py
+   ```
+   The application will open at `http://localhost:8501`.
+
+### Verification Scripts
+We provide helper scripts to verify database connectivity and RLS policies locally:
+
+- `check_db_status.py`: Checks if Config Firmware and AI Models exist in the DB (using your `.env` keys).
+- `check_anon_access.py`: Simulates a public user (ANON key) to verify RLS policies allow reading data.
+
+Run them via:
+```bash
+python check_db_status.py
+```
+
+
+## 🔧 Tech Stack
+- **Frontend:** Streamlit
+- **Backend:** Supabase (PostgreSQL + Storage)
+- **ML Compiler:** Ethos-U Vela
+- **Deployment:** Streamlit Community Cloud
+
+## 🧩 How It Works: Manifest Generation
+
+The **public MANIFEST.zip download** feature dynamically assembles the package on-the-fly:
+
+1.  **Config Firmware**: Fetches the latest active firmware record of type `config` from Supabase.
+2.  **AI Model**: 
+    - **Priority**: Searches for a model named **"Person Detector"** in the General organization.
+    - **Fallback**: Uses the latest available AI model if the above is not found.
+3.  **Structure**: 
+    - Downloads and extracts components into a temporary `MANIFEST/` directory.
+    - **Flattens** the structure so all files are at the root level of the folder.
+    - Packages the result into an **uncompressed** `MANIFEST.zip` (method 0).
+
+> [!NOTE]
+> If either the Config Firmware or the Default AI Model is missing in the database, the app will warn the user and skip including that component in the final zip.
+
+## 📁 File Structure
+- `app.py` - Main Streamlit application
+- `requirements.txt` - Python dependencies
+- `.env` - Supabase credentials (local only)
+- `readme.md` - This file
 
 ## 👥 Contributors
-
-This tool was developed by members of the Wildlife.ai team:
-- Will McEwan
 - Tobyn Packer
 - Victor Anton
 
 ## 📜 License
-
 This project is licensed under the **GPL-3.0 License** - see the `LICENSE` file for details.
