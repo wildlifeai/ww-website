@@ -49,11 +49,8 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
                 file_options={"content-type": "application/zip", "upsert": "true"}
             )
         except Exception as e:
-            if "already exists" in str(e).lower():
-                print(f"   ℹ️ Storage file already exists, skipping upload.")
-            else:
-                print(f"   ❌ Storage upload failed: {e}")
-                return False
+            print(f"   ❌ Storage upload failed: {e}")
+            return False
 
         # 4. Register in Database
         model_data = {
@@ -71,21 +68,13 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
     
     try:
         print(f"   Registering in database...")
-        # Check if exists
-        existing = supabase.table("ai_models")\
-            .select("id")\
-            .eq("organisation_id", GENERAL_ORG_ID)\
-            .eq("name", model_name)\
-            .eq("version", version)\
-            .execute()
-        
-        if existing.data:
-            supabase.table("ai_models").update(model_data).eq("id", existing.data[0]["id"]).execute()
-            print(f"   ✅ Updated existing model record.")
-        else:
-            supabase.table("ai_models").insert(model_data).execute()
-            print(f"   ✅ Created new model record.")
-            
+        # Use upsert for an atomic and cleaner operation.
+        # This assumes a unique constraint exists on (organisation_id, name, version).
+        supabase.table("ai_models").upsert(
+            model_data,
+            on_conflict="organisation_id,name,version"
+        ).execute()
+        print(f"   ✅ Upserted model record.")
         return True
     except Exception as e:
         print(f"   ❌ Database registration failed: {e}")
