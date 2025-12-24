@@ -2,7 +2,6 @@ import os
 import argparse
 import zipfile
 import tempfile
-import shutil
 from pathlib import Path
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -35,17 +34,16 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
             zf.write(file_path, file_path.name)
             zf.write(labels_path, "labels.txt")
             
-        file_bytes = zip_path.read_bytes()
-        
         # 3. Upload to Storage
         # Standardize path for MANIFEST generator compatibility
         storage_path = f"models/{model_name.lower().replace(' ', '_')}_{version}.zip"
         
         try:
             print(f"   Uploading to storage: {storage_path}...")
+            # Memory efficient: pass the file path instead of bytes
             supabase.storage.from_('ai-models').upload(
                 path=storage_path,
-                file=file_bytes,
+                file=str(zip_path), 
                 file_options={"content-type": "application/zip", "upsert": "true"}
             )
         except Exception as e:
@@ -53,32 +51,36 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
             return False
 
         # 4. Register in Database
-        model_data = {
-            "name": model_name,
-            "version": version,
-            "description": description,
-            "organisation_id": GENERAL_ORG_ID,
-            "storage_path": storage_path,
-            "file_size_bytes": len(file_bytes),
-            "file_type": "manifest",
-            "detection_capabilities": labels,
-            "modified_by": supabase.auth.get_user().user.id,
-            "uploaded_by": supabase.auth.get_user().user.id
-        }
-    
-    try:
-        print(f"   Registering in database...")
-        # Use upsert for an atomic and cleaner operation.
-        # This assumes a unique constraint exists on (organisation_id, name, version).
-        supabase.table("ai_models").upsert(
-            model_data,
-            on_conflict="organisation_id,name,version"
-        ).execute()
-        print(f"   ✅ Upserted model record.")
-        return True
-    except Exception as e:
-        print(f"   ❌ Database registration failed: {e}")
-        return False
+        try:
+            print(f"   Registering in database...")
+            # Reduction of redundant API calls: call once
+            user_response = supabase.auth.get_user()
+            user_id = user_response.user.id
+            
+            model_data = {
+                "name": model_name,
+                "version": version,
+                "description": description,
+                "organisation_id": GENERAL_ORG_ID,
+                "storage_path": storage_path,
+                "file_size_bytes": zip_path.stat().st_size,
+                "file_type": "manifest",
+                "detection_capabilities": labels,
+                "modified_by": user_id,
+                "uploaded_by": user_id
+            }
+            
+            # Use upsert for an atomic and cleaner operation.
+            # This assumes a unique constraint exists on (organisation_id, name, version).
+            supabase.table("ai_models").upsert(
+                model_data,
+                on_conflict="organisation_id,name,version"
+            ).execute()
+            print(f"   ✅ Upserted model record.")
+            return True
+        except Exception as e:
+            print(f"   ❌ Database registration failed: {e}")
+            return False
 
 def main():
     parser = argparse.ArgumentParser(description="Deploy AI models to Supabase using apps@wildlife.ai persona")
@@ -94,6 +96,11 @@ def main():
 
     if not url or not key:
         print("❌ Error: SUPABASE_URL and SUPABASE_ANON_KEY are required.")
+        return
+
+    # Early validation of password
+    if not args.password:
+        print("❌ Error: Password is required. Set UPLOADER_PASSWORD or use --password.")
         return
 
     supabase: Client = create_client(url, key)
