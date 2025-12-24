@@ -11,7 +11,7 @@ Wildlife Watcher Model Converter & Upload Tool
 <p align="center">
   <strong>Convert Edge Impulse models and download complete MANIFEST packages for Wildlife Watcher devices.</strong>
   <br />
-  <a href="https://wildlife-watcher.streamlit.app" target="_blank">
+  <a href="https://wildlifewatcher.streamlit.app" target="_blank">
     <img src="https://static.streamlit.io/badges/streamlit_badge_black_white.svg" alt="Streamlit App" />
   </a>
 </p>
@@ -39,7 +39,7 @@ Wildlife Watcher Model Converter & Upload Tool
 ## 🎯 Usage
 
 ### Download MANIFEST Package
-1. Visit [wildlife-watcher.streamlit.app](https://wildlife-watcher.streamlit.app)
+1. Visit [wildlifewatcher.streamlit.app](https://wildlifewatcher.streamlit.app/)
 2. Click **"🚀 Download MANIFEST.zip"** (top of page)
 3. Extract to SD card root directory
 4. Insert SD card into Wildlife Watcher camera device
