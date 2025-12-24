@@ -35,7 +35,7 @@ def download_file_from_google_drive(file_id, destination):
         file_size = os.path.getsize(destination)
         print(f"✅ Successfully downloaded {destination} ({file_size} bytes)")
         
-    except Exception as e:
+    except (urllib.error.URLError, http.client.HTTPException) as e:
         print(f"❌ Error downloading {destination}: {str(e)}")
 
 if __name__ == "__main__":
