@@ -35,14 +35,14 @@ def download_file_from_google_drive(file_id, destination):
         file_size = os.path.getsize(destination)
         print(f"✅ Successfully downloaded {destination} ({file_size} bytes)")
         
-    except (urllib.error.URLError, http.client.HTTPException) as e:
-        print(f"❌ Error downloading {destination}: {str(e)}")
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
+        print(f"❌ Network/HTTP Error downloading {destination}: {e}")
+    except Exception as e:
+        print(f"❌ Unexpected Error downloading {destination}: {str(e)}")
 
 if __name__ == "__main__":
     # Ensure models directory exists
-    if not os.path.exists('models'):
-        os.makedirs('models')
-        print("Created 'models' directory.")
+    os.makedirs('models', exist_ok=True)
         
     models = {
         '1r6COitGZbkkvnIIQSDbHH9ga_968Prfx': 'models/person_detection.tflite',
