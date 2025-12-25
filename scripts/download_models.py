@@ -1,4 +1,5 @@
 import os
+import sys
 import urllib.request
 import http.cookiejar
 import hashlib
@@ -6,7 +7,7 @@ import hashlib
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 
 def verify_checksum(file_path, expected_checksum):
-    """Verify SHA256 checksum of a file."""
+    """Verify SHA256 checksum of a file. Returns (is_match, actual_hash)"""
     h = hashlib.sha256()
     try:
         with open(file_path, 'rb') as f:
@@ -15,10 +16,11 @@ def verify_checksum(file_path, expected_checksum):
                 if not chunk:
                     break
                 h.update(chunk)
-        return h.hexdigest().lower() == expected_checksum.lower()
+        actual_hash = h.hexdigest().lower()
+        return actual_hash == expected_checksum.lower(), actual_hash
     except Exception as e:
         print(f"❌ Error during checksum verification: {e}")
-        return False
+        return False, None
 
 def download_file_from_google_drive(file_id, destination, expected_checksum=None):
     url = f"https://docs.google.com/uc?export=download&id={file_id}"
@@ -54,10 +56,13 @@ def download_file_from_google_drive(file_id, destination, expected_checksum=None
             response.close()
         
         if expected_checksum:
-            if verify_checksum(destination, expected_checksum):
+            is_match, actual_hash = verify_checksum(destination, expected_checksum)
+            if is_match:
                 print(f"✅ Successfully downloaded and verified {destination}")
             else:
                 print(f"❌ Checksum verification failed for {destination}")
+                print(f"   Expected: {expected_checksum}")
+                print(f"   Actual:   {actual_hash}")
                 os.remove(destination)
         else:
             file_size = os.path.getsize(destination)
@@ -75,7 +80,7 @@ if __name__ == "__main__":
     models = {
         '1r6COitGZbkkvnIIQSDbHH9ga_968Prfx': {
             'path': 'models/person_detection.tflite',
-            'hash': '23f2661c4234b74d45c69cef1206d19468ac1394dafbc024b582f51f1d33b79a'
+            'hash': '16a68cdfea312ac022d43581749b55d4a516ec2e6f6488df4085fbc2c58987e3'
         },
         '1SXMds8ho22pSIIVzm1_JLno-BkxFfA0E': {
             'path': 'models/rat_detection.tflite',
@@ -84,9 +89,21 @@ if __name__ == "__main__":
     }
     
     print("🚀 Starting AI Model Downloads...")
+    all_success = True
     for file_id, info in models.items():
         dest = info['path']
         expected_hash = info['hash']
         print(f"📡 Requesting {dest}...")
-        download_file_from_google_drive(file_id, dest, expected_hash)
+        try:
+            download_file_from_google_drive(file_id, dest, expected_hash)
+            if not os.path.exists(dest):
+                all_success = False
+        except Exception as e:
+            print(f"❌ Error downloading {dest}: {e}")
+            all_success = False
+            
+    if not all_success:
+        print("❌ One or more downloads failed.")
+        sys.exit(1)
+        
     print("✨ Finished.")
