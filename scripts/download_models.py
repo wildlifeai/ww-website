@@ -80,7 +80,7 @@ if __name__ == "__main__":
     models = {
         '1r6COitGZbkkvnIIQSDbHH9ga_968Prfx': {
             'path': 'models/person_detection.tflite',
-            'hash': '1c5b023e9c559dd1cca0520c46c0080f7d8b3d2dec76cf5ca466f47dbabb56c0'
+            'hash': '16a68cdfea312ac022d43581749b55d4a516ec2e6f6488df4085fbc2c58987e3'
         },
         '1SXMds8ho22pSIIVzm1_JLno-BkxFfA0E': {
             'path': 'models/rat_detection.tflite',
