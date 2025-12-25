@@ -76,7 +76,7 @@ if __name__ == "__main__":
     models = {
         '1r6COitGZbkkvnIIQSDbHH9ga_968Prfx': {
             'path': 'models/person_detection.tflite',
-            'hash': '23f2661c4234b74d45c69cef1206d19468ac1394dafbc024b582f51f1d33b79a'
+            'hash': '1c5b023e9c559dd1cca0520c46c0080f7d8b3d2dec76cf5ca466f47dbabb56c0'
         },
         '1SXMds8ho22pSIIVzm1_JLno-BkxFfA0E': {
             'path': 'models/rat_detection.tflite',
