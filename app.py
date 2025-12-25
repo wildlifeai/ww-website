@@ -299,11 +299,10 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
         if not supabase_client:
             return None
 
-        # First, try to find the specific Person Detector model
+        # First, try to find a Person Detector model (case-insensitive and partial match)
         response = supabase_client.table('ai_models')\
             .select('*')\
-            .eq('organisation_id', GENERAL_ORG_ID)\
-            .eq('name', 'Person Detector')\
+            .ilike('name', '%Person%Detector%')\
             .is_('deleted_at', 'null')\
             .order('created_at', desc=True)\
             .limit(1)\
@@ -312,10 +311,21 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
         if response.data and len(response.data) > 0:
             return response.data[0]
             
-        # Fallback to the latest model in the organization if Person Detector is missing
+        # Second try: Any model containing "Person"
         response = supabase_client.table('ai_models')\
             .select('*')\
-            .eq('organisation_id', GENERAL_ORG_ID)\
+            .ilike('name', '%Person%')\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
+            
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+            
+        # Fallback to the latest model available in the system
+        response = supabase_client.table('ai_models')\
+            .select('*')\
             .is_('deleted_at', 'null')\
             .order('created_at', desc=True)\
             .limit(1)\
@@ -329,36 +339,59 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
         st.warning(f"Could not fetch default AI model: {str(e)}")
         return None
 
-def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path) -> bool:
+def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path, silent: bool = False) -> bool:
     """
     Download a file from Supabase Storage to local path.
     Returns True on success, False on failure.
     """
     try:
-        # Robust URL parsing if a full URL is provided
+        # FIX: Robust storage pathing
+        # 1. Clean up potential prefixes or full URLs
         if path.startswith('http'):
             parsed_url = urlparse(path)
-            # Path typically follows /storage/v1/object/public/bucket-name/relative/path
             path_parts = parsed_url.path.strip('/').split('/')
             try:
-                # Find the index of the bucket name and get everything following it
                 bucket_index = path_parts.index(bucket)
                 path = '/'.join(path_parts[bucket_index + 1:])
             except (ValueError, IndexError):
-                st.error(f"Could not extract path for bucket '{bucket}' from URL: {path}")
+                if not silent:
+                    st.error(f"Could not extract path from URL: {path}")
                 return False
-            
-        response = supabase.storage.from_(bucket).download(path)
         
-        if response:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(response)
-            return True
-        else:
-            st.error(f"Failed to download file from '{path}'. The file may not exist or permissions are incorrect.")
-            return False
+        # 2. Candidate paths to try
+        candidates = [path]
+        
+        # If starts with bucket name, try without it
+        if path.startswith(f"{bucket}/"):
+            candidates.append(path[len(bucket)+1:])
+            
+        # If it contains folders, try just the filename as a fallback (root level)
+        if '/' in path:
+            filename = path.split('/')[-1]
+            if filename not in candidates:
+                candidates.append(filename)
+        
+        last_error = None
+        for try_path in candidates:
+            try:
+                # Silence internal attempts to keep UI clean
+                response = supabase.storage.from_(bucket).download(try_path)
+                if response:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(response)
+                    return True
+            except Exception as e:
+                last_error = e
+                # Continue to next candidate
+                pass
+        
+        # Only show error if all candidates failed AND not silent
+        if not silent:
+            st.error(f"❌ Failed to download from storage (tried {candidates}): {str(last_error)}")
+        return False
     except Exception as e:
-        st.error(f"An error occurred while downloading the file: {str(e)}")
+        if not silent:
+            st.error(f"An error occurred while downloading the file: {str(e)}")
         return False
 
 def flatten_directory(directory: Path):
@@ -404,40 +437,79 @@ def create_manifest_package(supabase: Client) -> Optional[bytes]:
         
         # 1. Fetch and download latest config firmware
         config_firmware = fetch_latest_config_firmware(supabase)
-        if not config_firmware:
-            st.warning("⚠️ No config firmware found. MANIFEST will not include config files.")
-        else:
-            config_zip_path = temp_dir / "config_firmware.zip"
-            if download_from_storage(supabase, 'firmware', config_firmware['location_path'], config_zip_path):
-                with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(manifest_dir)
-                st.success(f"✅ Added config firmware {config_firmware['version']}")
+        if config_firmware:
+            path = config_firmware['location_path']
+            config_file_path = temp_dir / "config_component"
+            
+            # Try primary path silently
+            if download_from_storage(supabase, 'firmware', path, config_file_path, silent=True):
+                if path.lower().endswith('.zip'):
+                    with zipfile.ZipFile(config_file_path, 'r') as zip_ref:
+                        zip_ref.extractall(manifest_dir)
+                else:
+                    filename = path.split('/')[-1]
+                    shutil.copy2(config_file_path, manifest_dir / filename)
+                st.success(f"✅ Added config firmware: {config_firmware.get('version', 'latest')}")
             else:
-                st.warning("⚠️ Failed to download config firmware")
+                # FALLBACK Discovery
+                try:
+                    files = supabase.storage.from_('firmware').list('config', {'order_by': {'column': 'created_at', 'order': 'desc'}})
+                    if files:
+                        latest_file = files[0]['name']
+                        new_path = f"config/{latest_file}"
+                        if download_from_storage(supabase, 'firmware', new_path, config_file_path, silent=True):
+                            if latest_file.lower().endswith('.zip'):
+                                with zipfile.ZipFile(config_file_path, 'r') as zip_ref:
+                                    zip_ref.extractall(manifest_dir)
+                            else:
+                                shutil.copy2(config_file_path, manifest_dir / latest_file)
+                            st.success(f"✅ Recovered latest config: {latest_file}")
+                except:
+                    pass
         
         # 2. Fetch and download latest default AI model
         ai_model = fetch_latest_default_model(supabase)
         if not ai_model:
-            st.warning("⚠️ No default AI model found. MANIFEST will not include AI model.")
+            # Discovery fallback for AI models if table is empty
+            try:
+                org_folder = "b0000000-0000-0000-0000-000000000001"
+                subdirs = supabase.storage.from_('ai-models').list(org_folder, {'limit': 5})
+                if subdirs:
+                    for sd in subdirs:
+                        model_name = sd['name']
+                        files = supabase.storage.from_('ai-models').list(f"{org_folder}/{model_name}")
+                        for f in files:
+                            if f['name'] == 'ai_model.zip':
+                                model_zip_path = temp_dir / "ai_model.zip"
+                                if download_from_storage(supabase, 'ai-models', f"{org_folder}/{model_name}/{f['name']}", model_zip_path, silent=True):
+                                    with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
+                                        zip_ref.extractall(manifest_dir)
+                                    st.success(f"✅ Added AI model: {model_name}")
+                                    break
+                        else: continue
+                        break
+            except:
+                pass
         else:
-            # Download AI model ai_model.zip
-            model_zip_path = temp_dir / "ai_model.zip"
-            # Note: storage_path in DB should now point to ai_model.zip
-            if download_from_storage(supabase, 'ai-models', ai_model['storage_path'], model_zip_path):
+            model_zip_path = temp_dir / "ai_model_db.zip"
+            path = ai_model['storage_path']
+            if download_from_storage(supabase, 'ai-models', path, model_zip_path, silent=True):
                 with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
                     zip_ref.extractall(manifest_dir)
-                st.success(f"✅ Added AI model {ai_model['name']} v{ai_model['version']}")
-            else:
-                st.warning("⚠️ Failed to download AI model")
+                st.success(f"✅ Added AI model: {ai_model.get('name', 'latest')}")
         
         # 3. Flatten the directory structure
         flatten_directory(manifest_dir)
         
         # 4. Create final MANIFEST.zip (uncompressed)
         final_zip_path = temp_dir / "MANIFEST_final.zip"
-        # Use ZIP_STORED (method=0)
+        files_to_zip = list(manifest_dir.glob('*'))
+        if not files_to_zip:
+            st.error("❌ No files found to include in MANIFEST. Discovery failed.")
+            return None
+            
         with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_STORED) as zipf:
-            for file in manifest_dir.glob('*'):
+            for file in files_to_zip:
                 if file.is_file():
                     arcname = f"MANIFEST/{file.name}"
                     zipf.write(file, arcname)
