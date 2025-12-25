@@ -65,6 +65,15 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
             user_response = supabase.auth.get_user()
             user_id = user_response.user.id
             
+            # Check if model already exists (org_id + name + version unique)
+            existing = supabase.table('ai_models')\
+                .select('id')\
+                .eq('organisation_id', GENERAL_ORG_ID)\
+                .eq('name', model_name)\
+                .eq('version', version)\
+                .is_('deleted_at', 'null')\
+                .execute()
+            
             model_data = {
                 "name": model_name,
                 "version": version,
@@ -78,13 +87,21 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
                 "uploaded_by": user_id
             }
             
-            # Use upsert for an atomic and cleaner operation.
-            # This assumes a unique constraint exists on (organisation_id, name, version).
-            supabase.table("ai_models").upsert(
-                model_data,
-                on_conflict="organisation_id,name,version"
-            ).execute()
-            print(f"   ✅ Upserted model record.")
+            if existing.data:
+                # Update existing model (version overwrite)
+                model_id = existing.data[0]['id']
+                supabase.table('ai_models')\
+                    .update(model_data)\
+                    .eq('id', model_id)\
+                    .execute()
+                print(f"   ✅ Updated existing model record.")
+            else:
+                # Insert new model
+                supabase.table('ai_models')\
+                    .insert(model_data)\
+                    .execute()
+                print(f"   ✅ Inserted new model record.")
+            
             return True
         except Exception as e:
             print(f"   ❌ Database registration failed: {e}")
