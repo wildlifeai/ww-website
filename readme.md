@@ -124,6 +124,35 @@ The **public MANIFEST.zip download** feature dynamically assembles the package o
 - `.env` - Supabase credentials (local only)
 - `readme.md` - This file
 
+---
+
+## 🔄 Automated Model Deployment (Database Seeding)
+
+The `scripts/` directory contains automation for deploying the baseline person detection model to Supabase. This is primarily used for **initial database setup**, not routine model uploads.
+
+### Scripts
+- **`convert_github_model.py`** - Extracts TFLite model from GitHub C source
+- **`deploy_models.py`** - Uploads model to Supabase and registers in database
+
+### CI/CD Workflow
+The `.github/workflows/deploy-models.yml` workflow runs during database initialization to:
+1. Convert the person detection model from [Seeed Grove Vision AI source](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2)
+2. Deploy it as the default baseline model for new database instances
+
+**Model Details:**
+- **Labels:** `person`, `no person`
+- **Size:** ~251KB
+- **Version:** 1.0.0
+
+**When to use:** This workflow is part of the database seeding process. For ongoing model management, users should use the Streamlit web interface above.
+
+**Required CI Secrets:**
+- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `GENERAL_ORG_ID`
+- `UPLOADER_EMAIL` (set to `apps@wildlife.ai`)
+- `UPLOADER_PASSWORD`
+
+---
+
 ## 👥 Contributors
 - Tobyn Packer
 - Victor Anton
