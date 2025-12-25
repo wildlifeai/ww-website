@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 import zipfile
 import tempfile
@@ -111,7 +112,7 @@ def main():
         print("✅ Login successful.")
     except Exception as e:
         print(f"❌ Login failed: {e}")
-        return
+        sys.exit(1)
 
     # Define models to deploy
     # Note: These paths assume you are running from the backend root or have the models folder
@@ -132,8 +133,16 @@ def main():
         }
     ]
 
+    success_all = True
     for m in models_to_deploy:
-        deploy_model(supabase, m["path"], m["name"], m["version"], m["description"], m["labels"])
+        if not deploy_model(supabase, m["path"], m["name"], m["version"], m["description"], m["labels"]):
+            success_all = False
+    
+    if not success_all:
+        print("❌ One or more deployments failed.")
+        sys.exit(1)
+    else:
+        print("🏁 All deployments completed successfully.")
 
 if __name__ == "__main__":
     main()
