@@ -19,23 +19,47 @@ from urllib.parse import urlparse
 load_dotenv()
 
 # Constants
-GENERAL_ORG_ID = '550e8400-e29b-41d4-a716-446655440002'  # General organization from seed data
+GENERAL_ORG_ID = 'b0000000-0000-0000-0000-000000000001'  # General organization from seed data
 
 # Initialize Supabase client
-@st.cache_resource
-def init_supabase() -> Optional[Client]:
-    """Initialize Supabase client with caching"""
+def get_supabase() -> Optional[Client]:
+    """
+    Get a Supabase client that is correctly initialized with the 
+    user's session token if they are logged in.
+    """
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_ANON_KEY")
     
     if not url or not key:
         return None
+        
+    # Ensure URL has trailing slash to avoid warnings and potential path issues
+    if not url.endswith("/"):
+        url += "/"
     
     try:
-        return create_client(url, key)
+        # Create client
+        client = create_client(url, key)
+        
+        # If user is logged in, restore the session
+        # This is the most reliable way to propagate auth to all sub-clients (DB, Storage, etc.)
+        if 'session' in st.session_state and st.session_state.session:
+            try:
+                client.auth.set_session(
+                    access_token=st.session_state.session.access_token,
+                    refresh_token=st.session_state.session.refresh_token
+                )
+            except Exception as auth_e:
+                st.warning(f"Failed to restore session: {auth_e}")
+            
+        return client
     except Exception as e:
         st.error(f"Failed to initialize Supabase client: {str(e)}")
         return None
+
+def init_supabase() -> Optional[Client]:
+    """Initialize or update the global Supabase client"""
+    return get_supabase()
 
 # --- Helper Functions from your Notebook ---
 
@@ -243,7 +267,11 @@ def fetch_latest_config_firmware(supabase: Client) -> Optional[Dict]:
     Returns dict with location_path and metadata, or None if not found.
     """
     try:
-        response = supabase.table('firmware')\
+        supabase_client = get_supabase()
+        if not supabase_client:
+            return None
+            
+        response = supabase_client.table('firmware')\
             .select('*')\
             .eq('type', 'config')\
             .eq('is_active', True)\
@@ -267,11 +295,14 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
     Returns dict with storage_path and metadata, or None if not found.
     """
     try:
-        # First, try to find the specific Person Detector model
-        response = supabase.table('ai_models')\
+        supabase_client = get_supabase()
+        if not supabase_client:
+            return None
+
+        # First, try to find a Person Detector model (case-insensitive and partial match)
+        response = supabase_client.table('ai_models')\
             .select('*')\
-            .eq('organisation_id', GENERAL_ORG_ID)\
-            .eq('name', 'Person Detector')\
+            .ilike('name', '%Person%Detector%')\
             .is_('deleted_at', 'null')\
             .order('created_at', desc=True)\
             .limit(1)\
@@ -280,10 +311,21 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
         if response.data and len(response.data) > 0:
             return response.data[0]
             
-        # Fallback to the latest model in the organization if Person Detector is missing
-        response = supabase.table('ai_models')\
+        # Second try: Any model containing "Person"
+        response = supabase_client.table('ai_models')\
             .select('*')\
-            .eq('organisation_id', GENERAL_ORG_ID)\
+            .ilike('name', '%Person%')\
+            .is_('deleted_at', 'null')\
+            .order('created_at', desc=True)\
+            .limit(1)\
+            .execute()
+            
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+            
+        # Fallback to the latest model available in the system
+        response = supabase_client.table('ai_models')\
+            .select('*')\
             .is_('deleted_at', 'null')\
             .order('created_at', desc=True)\
             .limit(1)\
@@ -297,36 +339,59 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
         st.warning(f"Could not fetch default AI model: {str(e)}")
         return None
 
-def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path) -> bool:
+def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path, silent: bool = False) -> bool:
     """
     Download a file from Supabase Storage to local path.
     Returns True on success, False on failure.
     """
     try:
-        # Robust URL parsing if a full URL is provided
+        # FIX: Robust storage pathing
+        # 1. Clean up potential prefixes or full URLs
         if path.startswith('http'):
             parsed_url = urlparse(path)
-            # Path typically follows /storage/v1/object/public/bucket-name/relative/path
             path_parts = parsed_url.path.strip('/').split('/')
             try:
-                # Find the index of the bucket name and get everything following it
                 bucket_index = path_parts.index(bucket)
                 path = '/'.join(path_parts[bucket_index + 1:])
             except (ValueError, IndexError):
-                st.error(f"Could not extract path for bucket '{bucket}' from URL: {path}")
+                if not silent:
+                    st.error(f"Could not extract path from URL: {path}")
                 return False
-            
-        response = supabase.storage.from_(bucket).download(path)
         
-        if response:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(response)
-            return True
-        else:
-            st.error(f"Failed to download file from '{path}'. The file may not exist or permissions are incorrect.")
-            return False
+        # 2. Candidate paths to try
+        candidates = [path]
+        
+        # If starts with bucket name, try without it
+        if path.startswith(f"{bucket}/"):
+            candidates.append(path[len(bucket)+1:])
+            
+        # If it contains folders, try just the filename as a fallback (root level)
+        if '/' in path:
+            filename = path.split('/')[-1]
+            if filename not in candidates:
+                candidates.append(filename)
+        
+        last_error = None
+        for try_path in candidates:
+            try:
+                # Silence internal attempts to keep UI clean
+                response = supabase.storage.from_(bucket).download(try_path)
+                if response:
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_bytes(response)
+                    return True
+            except Exception as e:
+                last_error = e
+                # Continue to next candidate
+                pass
+        
+        # Only show error if all candidates failed AND not silent
+        if not silent:
+            st.error(f"❌ Failed to download from storage (tried {candidates}): {str(last_error)}")
+        return False
     except Exception as e:
-        st.error(f"An error occurred while downloading the file: {str(e)}")
+        if not silent:
+            st.error(f"An error occurred while downloading the file: {str(e)}")
         return False
 
 def flatten_directory(directory: Path):
@@ -372,40 +437,79 @@ def create_manifest_package(supabase: Client) -> Optional[bytes]:
         
         # 1. Fetch and download latest config firmware
         config_firmware = fetch_latest_config_firmware(supabase)
-        if not config_firmware:
-            st.warning("⚠️ No config firmware found. MANIFEST will not include config files.")
-        else:
-            config_zip_path = temp_dir / "config_firmware.zip"
-            if download_from_storage(supabase, 'firmware', config_firmware['location_path'], config_zip_path):
-                with zipfile.ZipFile(config_zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(manifest_dir)
-                st.success(f"✅ Added config firmware {config_firmware['version']}")
+        if config_firmware:
+            path = config_firmware['location_path']
+            config_file_path = temp_dir / "config_component"
+            
+            # Try primary path silently
+            if download_from_storage(supabase, 'firmware', path, config_file_path, silent=True):
+                if path.lower().endswith('.zip'):
+                    with zipfile.ZipFile(config_file_path, 'r') as zip_ref:
+                        zip_ref.extractall(manifest_dir)
+                else:
+                    filename = path.split('/')[-1]
+                    shutil.copy2(config_file_path, manifest_dir / filename)
+                st.success(f"✅ Added config firmware: {config_firmware.get('version', 'latest')}")
             else:
-                st.warning("⚠️ Failed to download config firmware")
+                # FALLBACK Discovery
+                try:
+                    files = supabase.storage.from_('firmware').list('config', {'order_by': {'column': 'created_at', 'order': 'desc'}})
+                    if files:
+                        latest_file = files[0]['name']
+                        new_path = f"config/{latest_file}"
+                        if download_from_storage(supabase, 'firmware', new_path, config_file_path, silent=True):
+                            if latest_file.lower().endswith('.zip'):
+                                with zipfile.ZipFile(config_file_path, 'r') as zip_ref:
+                                    zip_ref.extractall(manifest_dir)
+                            else:
+                                shutil.copy2(config_file_path, manifest_dir / latest_file)
+                            st.success(f"✅ Recovered latest config: {latest_file}")
+                except:
+                    pass
         
         # 2. Fetch and download latest default AI model
         ai_model = fetch_latest_default_model(supabase)
         if not ai_model:
-            st.warning("⚠️ No default AI model found. MANIFEST will not include AI model.")
+            # Discovery fallback for AI models if table is empty
+            try:
+                org_folder = "b0000000-0000-0000-0000-000000000001"
+                subdirs = supabase.storage.from_('ai-models').list(org_folder, {'limit': 5})
+                if subdirs:
+                    for sd in subdirs:
+                        model_name = sd['name']
+                        files = supabase.storage.from_('ai-models').list(f"{org_folder}/{model_name}")
+                        for f in files:
+                            if f['name'] == 'ai_model.zip':
+                                model_zip_path = temp_dir / "ai_model.zip"
+                                if download_from_storage(supabase, 'ai-models', f"{org_folder}/{model_name}/{f['name']}", model_zip_path, silent=True):
+                                    with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
+                                        zip_ref.extractall(manifest_dir)
+                                    st.success(f"✅ Added AI model: {model_name}")
+                                    break
+                        else: continue
+                        break
+            except:
+                pass
         else:
-            # Download AI model ai_model.zip
-            model_zip_path = temp_dir / "ai_model.zip"
-            # Note: storage_path in DB should now point to ai_model.zip
-            if download_from_storage(supabase, 'ai-models', ai_model['storage_path'], model_zip_path):
+            model_zip_path = temp_dir / "ai_model_db.zip"
+            path = ai_model['storage_path']
+            if download_from_storage(supabase, 'ai-models', path, model_zip_path, silent=True):
                 with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
                     zip_ref.extractall(manifest_dir)
-                st.success(f"✅ Added AI model {ai_model['name']} v{ai_model['version']}")
-            else:
-                st.warning("⚠️ Failed to download AI model")
+                st.success(f"✅ Added AI model: {ai_model.get('name', 'latest')}")
         
         # 3. Flatten the directory structure
         flatten_directory(manifest_dir)
         
         # 4. Create final MANIFEST.zip (uncompressed)
         final_zip_path = temp_dir / "MANIFEST_final.zip"
-        # Use ZIP_STORED (method=0)
+        files_to_zip = list(manifest_dir.glob('*'))
+        if not files_to_zip:
+            st.error("❌ No files found to include in MANIFEST. Discovery failed.")
+            return None
+            
         with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_STORED) as zipf:
-            for file in manifest_dir.glob('*'):
+            for file in files_to_zip:
                 if file.is_file():
                     arcname = f"MANIFEST/{file.name}"
                     zipf.write(file, arcname)
@@ -430,11 +534,33 @@ def render_login(supabase: Client) -> bool:
     Returns True if user is logged in, False otherwise.
     """
     st.sidebar.title("🔐 Authentication")
-    
     if 'user' in st.session_state and st.session_state.get('user'):
         user_email = st.session_state.user.email
+        user_id = st.session_state.user.id
         st.sidebar.success(f"✅ Logged in as:  \n**{user_email}**")
         
+        # Diagnostic Info
+        with st.sidebar.expander("🔍 Account Diagnostics"):
+            st.code(f"Streamlit User ID: {user_id}")
+            try:
+                # 1. Verify what Supabase thinks the user is
+                supabase_user = supabase.auth.get_user()
+                if supabase_user and supabase_user.user:
+                    st.success(f"Supabase-side ID: {supabase_user.user.id}")
+                else:
+                    st.error("Supabase client is NOT authenticated!")
+                
+                # 2. Check for roles in DB
+                resp = supabase.table('user_roles').select('role, scope_type').eq('user_id', user_id).execute()
+                if resp.data:
+                    st.write("Roles found in DB:")
+                    for r in resp.data:
+                        st.write(f"- {r['role']} ({r['scope_type']})")
+                else:
+                    st.warning("No roles found for this ID in DB.")
+            except Exception as e:
+                st.error(f"Diagnostic Error: {e}")
+
         if st.sidebar.button("Logout", use_container_width=True):
             supabase.auth.sign_out()
             st.session_state.clear()
@@ -476,9 +602,13 @@ def check_user_role(supabase: Client, user_id: str, org_id: str) -> bool:
     Returns True if authorized, False otherwise.
     """
     try:
+        supabase_client = get_supabase()
+        if not supabase_client:
+            return False
+
         # Use RPC function for secure role checking
         # This prevents injection vulnerabilities and moves logic to the database
-        response = supabase.rpc('check_user_uploader_role', {
+        response = supabase_client.rpc('check_user_uploader_role', {
             'p_user_id': user_id,
             'p_org_id': org_id
         }).execute()
@@ -496,8 +626,12 @@ def get_user_organizations(supabase: Client, user_id: str) -> List[Dict[str, str
     Returns a list of dicts, each with 'name' and 'id' of an org.
     """
     try:
+        supabase_client = get_supabase()
+        if not supabase_client:
+            return []
+
         # Step 1: Get user roles for organisations (fetch scope_ids)
-        roles_response = supabase.table('user_roles')\
+        roles_response = supabase_client.table('user_roles')\
             .select('scope_id')\
             .eq('user_id', user_id)\
             .eq('scope_type', 'organisation')\
@@ -512,7 +646,7 @@ def get_user_organizations(supabase: Client, user_id: str) -> List[Dict[str, str
         org_ids = list(set(role['scope_id'] for role in roles_response.data))
         
         # Step 2: Fetch organization details
-        orgs_response = supabase.table('organisations')\
+        orgs_response = supabase_client.table('organisations')\
             .select('id, name')\
             .in_('id', org_ids)\
             .execute()

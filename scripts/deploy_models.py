@@ -41,8 +41,10 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
             zf.write(labels_path, "labels.txt")
             
         # 3. Upload to Storage
-        # Standardize path for MANIFEST generator compatibility
-        storage_path = f"models/{model_name.lower().replace(' ', '_')}_{version}.zip"
+        # NEW FORMAT: {org_id}/{model_name}-custom-{version}/ai_model.zip
+        # This matches the RLS policy regex requirement and Streamlit app convention
+        safe_model_name = model_name.lower().replace(' ', '-')
+        storage_path = f"{GENERAL_ORG_ID}/{safe_model_name}-custom-{version}/ai_model.zip"
         
         try:
             print(f"   Uploading to storage: {storage_path}...")
@@ -63,6 +65,15 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
             user_response = supabase.auth.get_user()
             user_id = user_response.user.id
             
+            # Check if model already exists (org_id + name + version unique)
+            existing = supabase.table('ai_models')\
+                .select('id')\
+                .eq('organisation_id', GENERAL_ORG_ID)\
+                .eq('name', model_name)\
+                .eq('version', version)\
+                .is_('deleted_at', 'null')\
+                .execute()
+            
             model_data = {
                 "name": model_name,
                 "version": version,
@@ -76,13 +87,21 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
                 "uploaded_by": user_id
             }
             
-            # Use upsert for an atomic and cleaner operation.
-            # This assumes a unique constraint exists on (organisation_id, name, version).
-            supabase.table("ai_models").upsert(
-                model_data,
-                on_conflict="organisation_id,name,version"
-            ).execute()
-            print(f"   ✅ Upserted model record.")
+            if existing.data:
+                # Update existing model (version overwrite)
+                model_id = existing.data[0]['id']
+                supabase.table('ai_models')\
+                    .update(model_data)\
+                    .eq('id', model_id)\
+                    .execute()
+                print(f"   ✅ Updated existing model record.")
+            else:
+                # Insert new model
+                supabase.table('ai_models')\
+                    .insert(model_data)\
+                    .execute()
+                print(f"   ✅ Inserted new model record.")
+            
             return True
         except Exception as e:
             print(f"   ❌ Database registration failed: {e}")
@@ -120,21 +139,14 @@ def main():
         sys.exit(1)
 
     # Define models to deploy
-    # Note: These paths assume you are running from the backend root or have the models folder
+    # Note: Person detection model is converted from GitHub source
     models_to_deploy = [
         {
             "path": Path("models/person_detection.tflite"),
             "name": "Person Detection Model",
             "version": "1.0.0",
             "description": "High-accuracy model for detecting human presence in camera trap footage",
-            "labels": ["person", "background"]
-        },
-        {
-            "path": Path("models/rat_detection.tflite"),
-            "name": "Rat Detection Model",
-            "version": "1.0.0",
-            "description": "Specialized model for detecting invasive rat species",
-            "labels": ["rat", "background"]
+            "labels": ["person", "no person"]
         }
     ]
 
