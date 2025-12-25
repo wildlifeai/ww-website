@@ -41,8 +41,10 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
             zf.write(labels_path, "labels.txt")
             
         # 3. Upload to Storage
-        # Standardize path for MANIFEST generator compatibility
-        storage_path = f"models/{model_name.lower().replace(' ', '_')}_{version}.zip"
+        # NEW FORMAT: {org_id}/{model_name}-custom-{version}/ai_model.zip
+        # This matches the RLS policy regex requirement and Streamlit app convention
+        safe_model_name = model_name.lower().replace(' ', '-')
+        storage_path = f"{GENERAL_ORG_ID}/{safe_model_name}-custom-{version}/ai_model.zip"
         
         try:
             print(f"   Uploading to storage: {storage_path}...")

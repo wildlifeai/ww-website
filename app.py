@@ -19,23 +19,47 @@ from urllib.parse import urlparse
 load_dotenv()
 
 # Constants
-GENERAL_ORG_ID = '550e8400-e29b-41d4-a716-446655440002'  # General organization from seed data
+GENERAL_ORG_ID = 'b0000000-0000-0000-0000-000000000001'  # General organization from seed data
 
 # Initialize Supabase client
-@st.cache_resource
-def init_supabase() -> Optional[Client]:
-    """Initialize Supabase client with caching"""
+def get_supabase() -> Optional[Client]:
+    """
+    Get a Supabase client that is correctly initialized with the 
+    user's session token if they are logged in.
+    """
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_ANON_KEY")
     
     if not url or not key:
         return None
+        
+    # Ensure URL has trailing slash to avoid warnings and potential path issues
+    if not url.endswith("/"):
+        url += "/"
     
     try:
-        return create_client(url, key)
+        # Create client
+        client = create_client(url, key)
+        
+        # If user is logged in, restore the session
+        # This is the most reliable way to propagate auth to all sub-clients (DB, Storage, etc.)
+        if 'session' in st.session_state and st.session_state.session:
+            try:
+                client.auth.set_session(
+                    access_token=st.session_state.session.access_token,
+                    refresh_token=st.session_state.session.refresh_token
+                )
+            except Exception as auth_e:
+                st.warning(f"Failed to restore session: {auth_e}")
+            
+        return client
     except Exception as e:
         st.error(f"Failed to initialize Supabase client: {str(e)}")
         return None
+
+def init_supabase() -> Optional[Client]:
+    """Initialize or update the global Supabase client"""
+    return get_supabase()
 
 # --- Helper Functions from your Notebook ---
 
@@ -243,7 +267,11 @@ def fetch_latest_config_firmware(supabase: Client) -> Optional[Dict]:
     Returns dict with location_path and metadata, or None if not found.
     """
     try:
-        response = supabase.table('firmware')\
+        supabase_client = get_supabase()
+        if not supabase_client:
+            return None
+            
+        response = supabase_client.table('firmware')\
             .select('*')\
             .eq('type', 'config')\
             .eq('is_active', True)\
@@ -267,8 +295,12 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
     Returns dict with storage_path and metadata, or None if not found.
     """
     try:
+        supabase_client = get_supabase()
+        if not supabase_client:
+            return None
+
         # First, try to find the specific Person Detector model
-        response = supabase.table('ai_models')\
+        response = supabase_client.table('ai_models')\
             .select('*')\
             .eq('organisation_id', GENERAL_ORG_ID)\
             .eq('name', 'Person Detector')\
@@ -281,7 +313,7 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
             return response.data[0]
             
         # Fallback to the latest model in the organization if Person Detector is missing
-        response = supabase.table('ai_models')\
+        response = supabase_client.table('ai_models')\
             .select('*')\
             .eq('organisation_id', GENERAL_ORG_ID)\
             .is_('deleted_at', 'null')\
@@ -430,11 +462,33 @@ def render_login(supabase: Client) -> bool:
     Returns True if user is logged in, False otherwise.
     """
     st.sidebar.title("🔐 Authentication")
-    
     if 'user' in st.session_state and st.session_state.get('user'):
         user_email = st.session_state.user.email
+        user_id = st.session_state.user.id
         st.sidebar.success(f"✅ Logged in as:  \n**{user_email}**")
         
+        # Diagnostic Info
+        with st.sidebar.expander("🔍 Account Diagnostics"):
+            st.code(f"Streamlit User ID: {user_id}")
+            try:
+                # 1. Verify what Supabase thinks the user is
+                supabase_user = supabase.auth.get_user()
+                if supabase_user and supabase_user.user:
+                    st.success(f"Supabase-side ID: {supabase_user.user.id}")
+                else:
+                    st.error("Supabase client is NOT authenticated!")
+                
+                # 2. Check for roles in DB
+                resp = supabase.table('user_roles').select('role, scope_type').eq('user_id', user_id).execute()
+                if resp.data:
+                    st.write("Roles found in DB:")
+                    for r in resp.data:
+                        st.write(f"- {r['role']} ({r['scope_type']})")
+                else:
+                    st.warning("No roles found for this ID in DB.")
+            except Exception as e:
+                st.error(f"Diagnostic Error: {e}")
+
         if st.sidebar.button("Logout", use_container_width=True):
             supabase.auth.sign_out()
             st.session_state.clear()
@@ -476,9 +530,13 @@ def check_user_role(supabase: Client, user_id: str, org_id: str) -> bool:
     Returns True if authorized, False otherwise.
     """
     try:
+        supabase_client = get_supabase()
+        if not supabase_client:
+            return False
+
         # Use RPC function for secure role checking
         # This prevents injection vulnerabilities and moves logic to the database
-        response = supabase.rpc('check_user_uploader_role', {
+        response = supabase_client.rpc('check_user_uploader_role', {
             'p_user_id': user_id,
             'p_org_id': org_id
         }).execute()
@@ -496,8 +554,12 @@ def get_user_organizations(supabase: Client, user_id: str) -> List[Dict[str, str
     Returns a list of dicts, each with 'name' and 'id' of an org.
     """
     try:
+        supabase_client = get_supabase()
+        if not supabase_client:
+            return []
+
         # Step 1: Get user roles for organisations (fetch scope_ids)
-        roles_response = supabase.table('user_roles')\
+        roles_response = supabase_client.table('user_roles')\
             .select('scope_id')\
             .eq('user_id', user_id)\
             .eq('scope_type', 'organisation')\
@@ -512,7 +574,7 @@ def get_user_organizations(supabase: Client, user_id: str) -> List[Dict[str, str
         org_ids = list(set(role['scope_id'] for role in roles_response.data))
         
         # Step 2: Fetch organization details
-        orgs_response = supabase.table('organisations')\
+        orgs_response = supabase_client.table('organisations')\
             .select('id, name')\
             .in_('id', org_ids)\
             .execute()
