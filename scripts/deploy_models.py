@@ -18,6 +18,11 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
     
     if not file_path.exists():
         print(f"❌ Error: File {file_path} not found.")
+        print(f"   Current Working Directory: {os.getcwd()}")
+        if os.path.exists('models'):
+            print(f"   Contents of 'models' directory: {os.listdir('models')}")
+        else:
+            print("   'models' directory does NOT exist.")
         return False
 
     # Package into ai_model.zip compatible with Manifest generator

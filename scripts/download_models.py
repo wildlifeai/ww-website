@@ -1,4 +1,5 @@
 import os
+import sys
 import urllib.request
 import http.cookiejar
 import hashlib
@@ -84,9 +85,21 @@ if __name__ == "__main__":
     }
     
     print("🚀 Starting AI Model Downloads...")
+    all_success = True
     for file_id, info in models.items():
         dest = info['path']
         expected_hash = info['hash']
         print(f"📡 Requesting {dest}...")
-        download_file_from_google_drive(file_id, dest, expected_hash)
+        try:
+            download_file_from_google_drive(file_id, dest, expected_hash)
+            if not os.path.exists(dest):
+                all_success = False
+        except Exception as e:
+            print(f"❌ Error downloading {dest}: {e}")
+            all_success = False
+            
+    if not all_success:
+        print("❌ One or more downloads failed.")
+        sys.exit(1)
+        
     print("✨ Finished.")
