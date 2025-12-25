@@ -120,21 +120,14 @@ def main():
         sys.exit(1)
 
     # Define models to deploy
-    # Note: These paths assume you are running from the backend root or have the models folder
+    # Note: Person detection model is converted from GitHub source
     models_to_deploy = [
         {
             "path": Path("models/person_detection.tflite"),
             "name": "Person Detection Model",
             "version": "1.0.0",
             "description": "High-accuracy model for detecting human presence in camera trap footage",
-            "labels": ["person", "background"]
-        },
-        {
-            "path": Path("models/rat_detection.tflite"),
-            "name": "Rat Detection Model",
-            "version": "1.0.0",
-            "description": "Specialized model for detecting invasive rat species",
-            "labels": ["rat", "background"]
+            "labels": ["person", "no person"]
         }
     ]
 
