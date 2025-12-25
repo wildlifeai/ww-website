@@ -7,7 +7,7 @@ import hashlib
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 
 def verify_checksum(file_path, expected_checksum):
-    """Verify SHA256 checksum of a file."""
+    """Verify SHA256 checksum of a file. Returns (is_match, actual_hash)"""
     h = hashlib.sha256()
     try:
         with open(file_path, 'rb') as f:
@@ -16,10 +16,11 @@ def verify_checksum(file_path, expected_checksum):
                 if not chunk:
                     break
                 h.update(chunk)
-        return h.hexdigest().lower() == expected_checksum.lower()
+        actual_hash = h.hexdigest().lower()
+        return actual_hash == expected_checksum.lower(), actual_hash
     except Exception as e:
         print(f"❌ Error during checksum verification: {e}")
-        return False
+        return False, None
 
 def download_file_from_google_drive(file_id, destination, expected_checksum=None):
     url = f"https://docs.google.com/uc?export=download&id={file_id}"
@@ -55,10 +56,13 @@ def download_file_from_google_drive(file_id, destination, expected_checksum=None
             response.close()
         
         if expected_checksum:
-            if verify_checksum(destination, expected_checksum):
+            is_match, actual_hash = verify_checksum(destination, expected_checksum)
+            if is_match:
                 print(f"✅ Successfully downloaded and verified {destination}")
             else:
                 print(f"❌ Checksum verification failed for {destination}")
+                print(f"   Expected: {expected_checksum}")
+                print(f"   Actual:   {actual_hash}")
                 os.remove(destination)
         else:
             file_size = os.path.getsize(destination)
