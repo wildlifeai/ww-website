@@ -47,13 +47,14 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
         storage_path = f"{GENERAL_ORG_ID}/{safe_model_name}-custom-{version}/ai_model.zip"
         
         try:
-            print(f"   Uploading to storage: {storage_path}...")
+            print(f"   Uploading to storage: {storage_path}")
             # Memory efficient: pass the file path instead of bytes
-            supabase.storage.from_('ai-models').upload(
-                path=storage_path,
-                file=str(zip_path), 
-                file_options={"content-type": "application/zip", "upsert": "true"}
-            )
+            with open(zip_path, 'rb') as f:
+                supabase.storage.from_('ai-models').upload(
+                    path=storage_path,
+                    file=f.read(),
+                    file_options={"content-type": "application/zip", "upsert": "true"}
+                )
         except Exception as e:
             print(f"   ❌ Storage upload failed: {e}")
             return False
