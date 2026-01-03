@@ -21,14 +21,32 @@ load_dotenv()
 # Constants
 GENERAL_ORG_ID = 'b0000000-0000-0000-0000-000000000001'  # General organization from seed data
 
+# Helper: Get configuration from secrets or environment
+def get_config(key: str, default: Optional[str] = None) -> Optional[str]:
+    """
+    Retrieve config value from Streamlit secrets (priority) or environment variables.
+    This function handles flat (top-level) keys.
+    """
+    # 1. Try Streamlit Secrets
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+        # Check for nested keys (e.g. SUPABASE_URL -> supabase.url is not automatic, 
+        # but commonly secrets are grouped. We handle flat keys here to match env vars)
+    except FileNotFoundError:
+        pass # No secrets file
+    
+    # 2. Fallback to Environment Variables
+    return os.environ.get(key, default)
+
 # Initialize Supabase client
 def get_supabase() -> Optional[Client]:
     """
     Get a Supabase client that is correctly initialized with the 
     user's session token if they are logged in.
     """
-    url = os.environ.get("SUPABASE_URL")
-    key = os.environ.get("SUPABASE_ANON_KEY")
+    url = get_config("SUPABASE_URL")
+    key = get_config("SUPABASE_ANON_KEY")
     
     if not url or not key:
         return None
@@ -261,17 +279,44 @@ def run_conversion(uploaded_file):
 
 # --- Public MANIFEST Download Functions ---
 
+def get_privileged_supabase() -> Optional[Client]:
+    """
+    Get a Supabase client authenticated as the Service Account (Uploader).
+    This is used for public operations (like Manifest download) that require
+    read access to protected buckets.
+    """
+    url = get_config("SUPABASE_URL")
+    key = get_config("SUPABASE_ANON_KEY")
+    email = get_config("UPLOADER_EMAIL", "apps@wildlife.ai")
+    password = get_config("UPLOADER_PASSWORD")
+    
+    if not url or not key or not password:
+        st.warning("⚠️ Service account credentials missing. Public download may fail.")
+        return get_supabase() # Fallback to user/anon client
+
+    if not url.endswith("/"):
+        url += "/"
+
+    try:
+        # Create a fresh client to avoid side effects on the global session
+        client = create_client(url, key)
+        client.auth.sign_in_with_password({"email": email, "password": password})
+        return client
+    except Exception as e:
+        st.warning(f"Failed to authenticate service account: {e}")
+        return get_supabase() # Fallback
+
 def fetch_latest_config_firmware(supabase: Client) -> Optional[Dict]:
     """
     Fetch the latest active config firmware from the firmware table.
     Returns dict with location_path and metadata, or None if not found.
     """
     try:
-        supabase_client = get_supabase()
-        if not supabase_client:
+        # FIX: Use the passed client, do not call get_supabase()
+        if not supabase:
             return None
             
-        response = supabase_client.table('firmware')\
+        response = supabase.table('firmware')\
             .select('*')\
             .eq('type', 'config')\
             .eq('is_active', True)\
@@ -295,12 +340,12 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
     Returns dict with storage_path and metadata, or None if not found.
     """
     try:
-        supabase_client = get_supabase()
-        if not supabase_client:
+        # FIX: Use the passed client, do not call get_supabase()
+        if not supabase:
             return None
 
         # First, try to find a Person Detector model (case-insensitive and partial match)
-        response = supabase_client.table('ai_models')\
+        response = supabase.table('ai_models')\
             .select('*')\
             .ilike('name', '%Person%Detector%')\
             .is_('deleted_at', 'null')\
@@ -312,7 +357,7 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
             return response.data[0]
             
         # Second try: Any model containing "Person"
-        response = supabase_client.table('ai_models')\
+        response = supabase.table('ai_models')\
             .select('*')\
             .ilike('name', '%Person%')\
             .is_('deleted_at', 'null')\
@@ -324,7 +369,7 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
             return response.data[0]
             
         # Fallback to the latest model available in the system
-        response = supabase_client.table('ai_models')\
+        response = supabase.table('ai_models')\
             .select('*')\
             .is_('deleted_at', 'null')\
             .order('created_at', desc=True)\
@@ -387,7 +432,9 @@ def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path, 
         
         # Only show error if all candidates failed AND not silent
         if not silent:
-            st.error(f"❌ Failed to download from storage (tried {candidates}): {str(last_error)}")
+            # st.error(f"❌ Failed to download from storage (tried {candidates}): {str(last_error)}") 
+            # Suppress UI error for cleaner manifest generation flow, log to console if needed
+            print(f"Failed to download: {candidates}. Error: {last_error}")
         return False
     except Exception as e:
         if not silent:
@@ -413,21 +460,22 @@ def flatten_directory(directory: Path):
             shutil.rmtree(item)
 
 
-def create_manifest_package(supabase: Client) -> Optional[bytes]:
+def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]:
     """
-    Create a complete MANIFEST.zip package containing:
-    - Latest config firmware files
-    - Latest default AI model
+    Create a complete MANIFEST.zip package containing the latest config firmware
+    and the latest default AI model.
+    The package is structured for SD card deployment on a camera device.
     
-    Structure:
-    MANIFEST/
-      CONFIG.TXT
-      labels.txt
-      <model>.tfl
-      ...
-    
-    Returns bytes of the final zip, or None on failure.
+    This function uses a Privileged Client (Service Account) to ensure it has
+    read access to all necessary files in storage.
+    Returns bytes of the final zip file, or None on failure.
     """
+    # 1. Get Privileged Client
+    supabase = get_privileged_supabase()
+    if not supabase:
+        st.error("❌ Failed to initialize privileged client for download.")
+        return None
+
     temp_dir = None
     try:
         # Create temporary directory
