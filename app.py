@@ -462,8 +462,13 @@ def flatten_directory(directory: Path):
 
 def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]:
     """
-    Create a complete MANIFEST.zip package.
-    Uses a Privileged Client (Service Account) to ensure access to files.
+    Create a complete MANIFEST.zip package containing the latest config firmware
+    and the latest default AI model.
+    The package is structured for SD card deployment on a camera device.
+    
+    This function uses a Privileged Client (Service Account) to ensure it has
+    read access to all necessary files in storage.
+    Returns bytes of the final zip file, or None on failure.
     """
     # 1. Get Privileged Client
     supabase = get_privileged_supabase()
