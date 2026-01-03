@@ -48,6 +48,12 @@ def deploy_model(supabase: Client, file_path: Path, model_name: str, version: st
         
         try:
             print(f"   Uploading to storage: {storage_path}")
+            
+            # DEBUG: Verify authentication state
+            auth_user = supabase.auth.get_user()
+            print(f"   🔍 DEBUG: Authenticated as user_id={auth_user.user.id}, email={auth_user.user.email}")
+            print(f"   🔍 DEBUG: Upload path first part={GENERAL_ORG_ID}")
+            
             # Memory efficient: pass the file path instead of bytes
             with open(zip_path, 'rb') as f:
                 supabase.storage.from_('ai-models').upload(
