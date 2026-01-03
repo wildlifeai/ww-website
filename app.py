@@ -25,7 +25,7 @@ GENERAL_ORG_ID = 'b0000000-0000-0000-0000-000000000001'  # General organization 
 def get_config(key: str, default: Optional[str] = None) -> Optional[str]:
     """
     Retrieve config value from Streamlit secrets (priority) or environment variables.
-    Handles nested keys in secrets (e.g. "supabase.url" -> st.secrets["supabase"]["url"]).
+    This function handles flat (top-level) keys.
     """
     # 1. Try Streamlit Secrets
     try:
