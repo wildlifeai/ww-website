@@ -5,7 +5,7 @@
 </p>
 
 <h1 align="center">
-Wildlife Watcher Model Converter & Upload Tool
+Wildlife Watcher Toolkit - Camera Firmware & AI Models
 </h1>
 
 <p align="center">
