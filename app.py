@@ -1431,8 +1431,9 @@ elif mode == "☁️ Upload/Convert Model":
                  if orgs:
                      tgt_org = st.selectbox("Target Organization", orgs, format_func=lambda x: x['name'])
                      
-                     if st.button("🚀 Start Processing & Upload", type="primary"):
-                         with st.spinner("Processing..."):
+                     # Step 1: Process the model
+                     if st.button("🔄 Process Model", type="primary"):
+                         with st.spinner("Processing model..."):
                              final_zip_bytes = None
                              labels = []
                              
@@ -1441,18 +1442,63 @@ elif mode == "☁️ Upload/Convert Model":
                                  labels = st.session_state.get('labels', [])
                              else:
                                  final_zip_bytes = uploaded_file.getvalue()
-                                 labels = ["unknown"] 
+                                 labels = ["unknown"]
                              
                              if final_zip_bytes:
-                                  upload_and_register_model(
-                                      supabase=supabase,
-                                      manifest_bytes=final_zip_bytes,
-                                      model_name=m_name,
-                                      model_version=m_ver,
-                                      description=m_desc,
-                                      labels=labels,
-                                      org_id=tgt_org['id']
-                                  )
+                                 # Store processed model in session state
+                                 st.session_state['processed_model'] = {
+                                     'bytes': final_zip_bytes,
+                                     'labels': labels,
+                                     'name': m_name,
+                                     'version': m_ver,
+                                     'description': m_desc,
+                                     'org_id': tgt_org['id']
+                                 }
+                                 st.success("✅ Model processed successfully!")
+                                 st.rerun()
+                     
+                     # Step 2: Show upload and download options if model is processed
+                     if 'processed_model' in st.session_state:
+                         st.divider()
+                         st.markdown("#### 📦 Processed Model Ready")
+                         
+                         proc_data = st.session_state['processed_model']
+                         st.info(f"**Model**: {proc_data['name']} v{proc_data['version']}")
+                         
+                         col_upload, col_download = st.columns(2)
+                         
+                         # Option 2a: Upload to Cloud
+                         with col_upload:
+                             if st.button("☁️ Upload to Cloud", type="primary", use_container_width=True):
+                                 with st.spinner("Uploading to cloud..."):
+                                     upload_and_register_model(
+                                         supabase=supabase,
+                                         manifest_bytes=proc_data['bytes'],
+                                         model_name=proc_data['name'],
+                                         model_version=proc_data['version'],
+                                         description=proc_data['description'],
+                                         labels=proc_data['labels'],
+                                         org_id=proc_data['org_id']
+                                     )
+                                     # Clear processed model after successful upload
+                                     del st.session_state['processed_model']
+                                     st.rerun()
+                         
+                         # Option 2b: Download locally
+                         with col_download:
+                             st.download_button(
+                                 label="💾 Download Locally",
+                                 data=proc_data['bytes'],
+                                 file_name=f"{proc_data['name']}_v{proc_data['version']}.zip",
+                                 mime="application/zip",
+                                 type="secondary",
+                                 use_container_width=True
+                             )
+                         
+                         # Option to clear and start over
+                         if st.button("🔄 Process Another Model", use_container_width=True):
+                             del st.session_state['processed_model']
+                             st.rerun()
                  else:
                      st.error("You must belong to an organization to upload.")
 
