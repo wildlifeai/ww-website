@@ -406,50 +406,7 @@ CAMERA_CONFIGS = {
     }
 }
 
-def build_manifest_from_bytes(config_bytes: bytes, model_zip_bytes: bytes) -> bytes:
-    """
-    Creates a MANIFEST.zip in memory using provided component bytes.
-    config_bytes: Content of CONFIG.TXT (or a zip containing it)
-    model_zip_bytes: Content of ai_model.zip
-    """
-    try:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            base = Path(temp_dir)
-            manifest_dir = base / "MANIFEST"
-            manifest_dir.mkdir()
-            
-            # 1. Handle Config
-            # If config_bytes looks like a zip, extract it. Otherwise treat as text/binary file.
-            # Simple check: zip magic bytes PK..
-            if config_bytes.startswith(b'PK\x03\x04'):
-                 with zipfile.ZipFile(io.BytesIO(config_bytes), 'r') as z:
-                    z.extractall(manifest_dir)
-            else:
-                # It's a raw config file (e.g. CONFIG.TXT)
-                # We might need other firmare files (HMSTB1.BIN etc) for a full working manifest.
-                # ideally these come from the 'config firmware' package in DB.
-                # FAST FIX: If we only have CONFIG.TXT, we might be missing the bootloader.
-                # For now, write it as CONFIG.TXT
-                (manifest_dir / "CONFIG.TXT").write_bytes(config_bytes)
-                
-            # 2. Handle Model
-            # model_zip_bytes is ai_model.zip. Extract it to manifest_dir
-            if model_zip_bytes:
-                with zipfile.ZipFile(io.BytesIO(model_zip_bytes), 'r') as z:
-                    z.extractall(manifest_dir)
-            
-            # 3. Zip up MANIFEST
-            final_zip_path = base / "MANIFEST_final.zip"
-            with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_STORED) as zf:
-                for file in manifest_dir.glob('*'):
-                    if file.is_file():
-                        zf.write(file, f"MANIFEST/{file.name}")
-            
-            return final_zip_path.read_bytes()
-            
-    except Exception as e:
-        st.error(f"Error building manifest: {e}")
-        return None
+
 
 
 # --- Public MANIFEST Download Functions ---
@@ -1112,7 +1069,7 @@ if supabase and 'session' in st.session_state:
 # --- Main Header ---
 col_logo, col_title = st.columns([1, 5])
 with col_logo:
-    st.image("icon.png", width="stretch")
+    st.image("icon.png", use_column_width=True)
 with col_title:
     st.title("Wildlife Watcher Toolkit - Camera Firmware & AI Models")
 
@@ -1209,7 +1166,7 @@ if mode == "⬇️ Download Firmware/Models":
                  sel_org = st.selectbox("Organization", orgs, format_func=lambda x: x['name'])
                  # Fetch models
                  try:
-                     models_resp = supabase.table('ai_models').select('*').eq('organisation_id', sel_org['id']).eq('deleted_at', None).execute()
+                     models_resp = supabase.table('ai_models').select('*').eq('organisation_id', sel_org['id']).is_('deleted_at', 'null').execute()
                      if models_resp.data:
                          model_opts = {f"{m['name']} v{m['version']}": m for m in models_resp.data}
                          sel_model_key = st.selectbox("Select Model", list(model_opts.keys()))
