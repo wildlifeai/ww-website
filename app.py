@@ -1069,7 +1069,7 @@ if supabase and 'session' in st.session_state:
 # --- Main Header ---
 col_logo, col_title = st.columns([1, 5])
 with col_logo:
-    st.image("icon.png", use_column_width=True)
+    st.image("icon.png", use_container_width=True)
 with col_title:
     st.title("Wildlife Watcher Toolkit - Camera Firmware & AI Models")
 
