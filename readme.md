@@ -18,39 +18,89 @@ Wildlife Watcher Model Converter & Upload Tool
 
 ## 🚀 Features
 
-### 📦 Public MANIFEST Download (No Login Required)
-- **One-click download** of complete camera device package
-- Automatically combines:
-  - Latest config firmware (CONFIG.TXT, HMSTB1.BIN, etc.)
-  - Latest default AI wildlife detection model
-- Ready to extract to SD card and use immediately
+The app has two main modes to support different workflows:
 
-### 🔄 Model Conversion
-- Convert Edge Impulse models using Vela compiler (`ethos-u55-64`)
+### ⬇️ Download Firmware/Models Mode
+
+**Download complete packages for your Wildlife Watcher camera device:**
+- **Pre-trained Models**: Select from curated models (Person Detection, YOLOv11, etc.)
+- **Organization Models**: Access custom models from your organization (login required)
+- **No Model**: Download firmware only without AI model
+- **Camera Configuration**: Choose between Raspberry Pi or HM0360 sensor configurations
+- **Model Versioning**: Set Project ID and Version numbers for firmware compatibility
+- **One-click Download**: Get ready-to-use MANIFEST.zip packages
+
+### ☁️ Upload/Convert Model Mode
+
+**Process and deploy your custom Edge Impulse models:**
+
+#### Step 1: Process Model
+- Upload Edge Impulse C++ Library export (ZIP)
+- Optional Vela compiler optimization (`ethos-u55-64`)
 - Extract labels from `model_variables.h`
-- Package into an **uncompressed, flattened** `ai_model.zip` (ready for Wildlife Watcher devices)
+- Convert to Wildlife Watcher format
 
-### 📤 Upload & Direct Upload (Login Required)
-- **Convert & Upload:** Seamlessly convert an Edge Impulse export and upload it to Supabase
-- **Direct Upload:** Upload pre-converted `ai_model.zip` files (helpful if you already have optimized `.tfl` and `labels.txt`)
-- Upload to your organization with `organisation_manager` or `ww_admin` role
-- Automatic versioning and storage path management: `{org_id}/{model_name}-custom-{version}/ai_model.zip`
+#### Step 2: Upload or Download
+- **Upload to Cloud**: Deploy to your organization for mobile app access
+- **Download Locally**: Save the processed model to your computer
+- Both options available after processing completes
 
-## 🎯 Usage
+**Key Benefits:**
+- Role-based access control (`organisation_manager` or `ww_admin`)
+- Automatic versioning and metadata management
+- Flexible deployment options
 
-### Download MANIFEST Package
-1. Visit [wildlifewatcher.streamlit.app](https://wildlifewatcher.streamlit.app/)
-2. Click **"🚀 Download MANIFEST.zip"** (top of page)
-3. Extract to SD card root directory
-4. Insert SD card into Wildlife Watcher camera device
+## 🎯 Usage Guide
 
-### Upload Custom Model
-1. **Login** with your Wildlife Watcher account (sidebar)
-2. **Select Workflow:** Choose **Convert & Upload** for raw exports, or **Direct Upload** if you already have an `ai_model.zip`.
-3. **Configure Metadata:** Provide model name, version, and detection labels.
-4. **Prepare/Convert:** Tool prepares the optimized package.
-5. **Upload to Database:** Confirm organization and description.
-6. Model is now available in the Wildlife Watcher mobile app!
+### Mode 1: Download Firmware/Models
+
+**For getting pre-configured packages for your camera:**
+
+1. **Select Camera Device**: Choose your sensor (Raspberry Pi or HM0360)
+2. **Choose Model Source**:
+   - **Pre-trained Model**: Select architecture (Person Detection, YOLOv11, etc.) and resolution
+   - **My Organization Models**: Login and select from your organization's models
+   - **No Model**: Skip AI model inclusion
+3. **Set Model Versioning** (if model selected):
+   - **Project ID (OP 14)**: Corresponds to firmware parameter
+   - **Version (OP 15)**: Model version number
+   - Creates filename: `{ProjectID}V{Version}.TFL`
+4. **Generate & Download**: Click "🚀 Generate MANIFEST.zip"
+5. **Deploy**: Extract to SD card root and insert into camera device
+
+### Mode 2: Upload/Convert Model
+
+**For deploying your custom trained models:**
+
+#### Prerequisites
+- Edge Impulse C++ Library export (ZIP file)
+- Wildlife Watcher account with organization access
+- `organisation_manager` or `ww_admin` role
+
+#### Steps
+
+**Step 1: Upload & Configure**
+1. **Login** using the interface
+2. **Upload Model**: Select your Edge Impulse ZIP file
+3. **Enable Conversion**: Check "Convert with Vela" (recommended for Vision AI V2)
+4. **Set Metadata**:
+   - Model Name (auto-extracted from filename)
+   - Version number
+   - Description
+5. **Select Organization**: Choose target organization
+
+**Step 2: Process**
+1. Click "🔄 Process Model"
+2. Wait for conversion to complete
+3. Success message appears when ready
+
+**Step 3: Deploy**
+- **Option A**: Click "☁️ Upload to Cloud" to deploy to your organization
+- **Option B**: Click "💾 Download Locally" to save to your computer
+- **Start Over**: Click "🔄 Process Another Model" to begin again
+
+The uploaded model will be immediately available in the Wildlife Watcher mobile app for your organization members.
+
 
 ## 💻 Local Development
 
