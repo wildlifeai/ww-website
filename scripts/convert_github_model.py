@@ -89,7 +89,7 @@ if __name__ == "__main__":
     
     # Create labels file (for reference, not used in deployment ZIP)
     labels_path = 'models/labels.txt'
-    labels = ['person', 'no person']
+    labels = ['no person', 'person']
     create_labels(labels_path, labels)
     
     print("✨ Conversion complete!")
