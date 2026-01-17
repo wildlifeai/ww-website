@@ -15,6 +15,7 @@ from gotrue.errors import AuthApiError
 from typing import Optional, Dict, List
 from urllib.parse import urlparse
 import io
+import urllib.request
 
 # Load environment variables
 load_dotenv()
@@ -155,7 +156,7 @@ def get_model_config(model_type: str, resolution: str) -> dict:
 
 
 
-import urllib.request
+
 
 class DownloadError(Exception):
     pass
@@ -391,6 +392,7 @@ def run_conversion(uploaded_file):
             model_bytes = f.read()
 
         st.success("ai_model.zip created successfully!")
+        return model_bytes
 
 # Camera Configuration Registry
 CAMERA_CONFIGS = {
@@ -1046,12 +1048,16 @@ st.set_page_config(layout="centered", page_title="Wildlife Watcher Firmware Tool
 supabase = create_supabase_client()
 
 # --- Maintain Auth State ---
+is_logged_in = False
+
 # This ensures session persistence across reruns
 if supabase and 'session' in st.session_state:
     try:
         current_user = supabase.auth.get_user()
         if not current_user:
             st.session_state.clear()
+        else:
+            is_logged_in = True
     except:
         pass
 
@@ -1150,7 +1156,7 @@ if mode == "⬇️ Download Firmware/Models":
              can_generate = False # User unchecked it
 
     elif model_source == "My Organization Models":
-        if 'is_logged_in' in locals() and is_logged_in:
+        if is_logged_in:
              user_id = st.session_state.user.id
              orgs = get_user_organizations(supabase, user_id)
              if orgs:
@@ -1334,6 +1340,10 @@ if mode == "⬇️ Download Firmware/Models":
 # --- Journey 2: Upload Model ---
 elif mode == "☁️ Upload/Convert Model":
     
+    if 'upload_success_message' in st.session_state:
+         st.success(st.session_state['upload_success_message'])
+         del st.session_state['upload_success_message']
+
     if not supabase:
         st.error("Supabase not configured. Cannot upload models.")
     else: 
@@ -1429,6 +1439,7 @@ elif mode == "☁️ Upload/Convert Model":
                                          org_id=proc_data['org_id']
                                      )
                                      # Clear processed model after successful upload
+                                     st.session_state['upload_success_message'] = f"✅ Model '{proc_data['name']} v{proc_data['version']}' uploaded successfully!"
                                      del st.session_state['processed_model']
                                      st.rerun()
                          
