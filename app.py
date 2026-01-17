@@ -161,7 +161,7 @@ def get_model_config(model_type: str, resolution: str) -> dict:
 class DownloadError(Exception):
     pass
 
-def download_url_content(url):
+def download_url_content(url: str) -> bytes:
     """Download content from URL"""
     print(f"Downloading from {url}...")
     try:
@@ -170,7 +170,7 @@ def download_url_content(url):
     except Exception as e:
         raise DownloadError(f"Error downloading file from {url}: {e}")
 
-def extract_hex_array(c_content_str):
+def extract_hex_array(c_content_str: str) -> bytes:
     """Parse C array and extract hex values from string content"""
     # Pattern: const unsigned char array_name[] = { 0xNN, 0xNN, ... };
     pattern = r'const\s+unsigned\s+char\s+\w+\[\]\s*=\s*\{([^}]+)\}'
@@ -187,7 +187,7 @@ def extract_hex_array(c_content_str):
         
     return bytes([int(h, 16) for h in hex_values])
 
-def process_github_model(model_type, resolution):
+def process_github_model(model_type: str, resolution: str) -> tuple[Optional[bytes], List[str]]:
     """
     Downloads and packages a pre-trained model from GitHub.
     Returns (zip_bytes, labels_list) or (None, []) on failure.
@@ -1058,7 +1058,7 @@ if supabase and 'session' in st.session_state:
             st.session_state.clear()
         else:
             is_logged_in = True
-    except:
+    except Exception:
         pass
 
 
@@ -1139,6 +1139,7 @@ if mode == "⬇️ Download Firmware/Models":
     # Model Configuration Logic
     selected_model_bytes = None
     selected_model_name = "None"
+    selected_model_data = None
     
     # Logic for model fetch...
     can_generate = True
@@ -1163,7 +1164,7 @@ if mode == "⬇️ Download Firmware/Models":
                  sel_org = st.selectbox("Organization", orgs, format_func=lambda x: x['name'])
                  # Fetch models
                  try:
-                     models_resp = supabase.table('ai_models').select('*').eq('organisation_id', sel_org['id']).is_('deleted_at', 'null').execute()
+                     models_resp = supabase.table('ai_models').select('name, version, storage_path, description, id').eq('organisation_id', sel_org['id']).is_('deleted_at', 'null').execute()
                      if models_resp.data:
                          model_opts = {f"{m['name']} v{m['version']}": m for m in models_resp.data}
                          sel_model_key = st.selectbox("Select Model", list(model_opts.keys()))
@@ -1263,7 +1264,7 @@ if mode == "⬇️ Download Firmware/Models":
                     if model_source == "Pre-trained Model":
                          model_zip_bytes, _ = process_github_model(pt_type, pt_res)
                          
-                    elif model_source == "My Organization Models" and 'is_logged_in' in locals() and is_logged_in and 'selected_model_data' in locals():
+                    elif model_source == "My Organization Models" and is_logged_in and selected_model_data:
                          mz_path = base_dir / "model_temp.zip"
                          if download_from_storage(supabase, 'ai-models', selected_model_data['storage_path'], mz_path, silent=True):
                                 model_zip_bytes = mz_path.read_bytes()
