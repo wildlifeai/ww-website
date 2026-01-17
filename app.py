@@ -530,9 +530,8 @@ def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]
                                 shutil.copy2(config_file_path, manifest_dir / latest_file)
                             st.success(f"✅ Recovered latest config: {latest_file}")
             except Exception as e:
-                # Only log if necessary
-                # print(f"Fallback discovery failed: {e}")
-                pass
+                # Log the error for debugging purposes. The UI won't show an error since this is a fallback.
+                print(f"Fallback config discovery failed: {e}")
         
         # 2. Fetch and download latest default AI model
         ai_model = fetch_latest_default_model(supabase)
