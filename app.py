@@ -14,11 +14,76 @@ from supabase import create_client, Client
 from gotrue.errors import AuthApiError
 from typing import Optional, Dict, List
 from urllib.parse import urlparse
-import io
+
 import urllib.request
 
 # Load environment variables
 load_dotenv()
+
+# --- Configuration Registry ---
+MODEL_REGISTRY = {
+    "Person Detection": {
+        "resolutions": {
+            "96x96": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/EPII_CM55M_APP_S/app/scenario_app/allon_sensor_tflm/person_detect_model_data_vela.cc",
+                "type": "cc_array",
+                "filename": "person_detect_model_data_vela.cc"
+            }
+        },
+        "labels": ["no person", "person"]
+    },
+
+    "YOLOv8 Object Detection": {
+        "resolutions": {
+            "192x192": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_od/yolov8n_od_192_delete_transpose_0xB7B000.tflite",
+                "type": "tflite",
+                "filename": "yolov8n_od_192.tflite"
+            }
+        },
+        "labels": ["object"] 
+    },
+    "YOLOv11 Object Detection": {
+        "resolutions": {
+            "192x192": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_192_241219_batch_matmul_vela.tflite",
+                "type": "tflite",
+                "filename": "yolo11n_od_192.tflite"
+            },
+            "224x224": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_vela_imgz_224_kris_nopost_241230.tflite",
+                "type": "tflite",
+                "filename": "yolo11n_od_224.tflite"
+            }
+        },
+        "labels": ["object"]
+    },
+    "YOLOv8 Pose Estimation": {
+        "resolutions": {
+            "256x256": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_pose/yolov8n_pose_256_vela_3_9_0x3BB000.tflite",
+                "type": "tflite",
+                "filename": "yolov8n_pose_256.tflite"
+            }
+        },
+        "labels": ["person_pose"]
+    }
+}
+
+# Camera Configuration Registry
+CAMERA_CONFIGS = {
+    "Raspberry Pi": {
+        "description": "Standard configuration (OV5647)",
+        "url": None, # Will fetch from DB 'latest' or use default placeholder if needed
+        "filename": "CONFIG.TXT"
+    },
+    "HM0360": {
+        "description": "Configuration for Himax HM0360 sensor",
+        "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/_Tools/hm0360_md_medium.txt",
+        "filename": "CONFIG.TXT" 
+    }
+}
+
 
 # Constants
 GENERAL_ORG_ID = 'b0000000-0000-0000-0000-000000000001'  # General organization from seed data
@@ -394,26 +459,13 @@ def run_conversion(uploaded_file):
         st.success("ai_model.zip created successfully!")
         return model_bytes
 
-# Camera Configuration Registry
-CAMERA_CONFIGS = {
-    "Raspberry Pi": {
-        "description": "Standard configuration (OV5647)",
-        "url": None, # Will fetch from DB 'latest' or use default placeholder if needed
-        "filename": "CONFIG.TXT"
-    },
-    "HM0360": {
-        "description": "Configuration for Himax HM0360 sensor",
-        "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/_Tools/hm0360_md_medium.txt",
-        "filename": "CONFIG.TXT" 
-    }
-}
+
 
 
 
 
 # --- Public MANIFEST Download Functions ---
 
-# --- Public MANIFEST Download Functions ---
 
 
 def fetch_latest_config_firmware(supabase: Client) -> Optional[Dict]:
@@ -989,55 +1041,7 @@ def upload_and_register_model(
             return False
 
 
-# --- Configuration Registry ---
-MODEL_REGISTRY = {
-    "Person Detection": {
-        "resolutions": {
-            "96x96": {
-                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/EPII_CM55M_APP_S/app/scenario_app/allon_sensor_tflm/person_detect_model_data_vela.cc",
-                "type": "cc_array",
-                "filename": "person_detect_model_data_vela.cc"
-            }
-        },
-        "labels": ["no person", "person"]
-    },
 
-    "YOLOv8 Object Detection": {
-        "resolutions": {
-            "192x192": {
-                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_od/yolov8n_od_192_delete_transpose_0xB7B000.tflite",
-                "type": "tflite",
-                "filename": "yolov8n_od_192.tflite"
-            }
-        },
-        "labels": ["object"] 
-    },
-    "YOLOv11 Object Detection": {
-        "resolutions": {
-            "192x192": {
-                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_192_241219_batch_matmul_vela.tflite",
-                "type": "tflite",
-                "filename": "yolo11n_od_192.tflite"
-            },
-            "224x224": {
-                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_vela_imgz_224_kris_nopost_241230.tflite",
-                "type": "tflite",
-                "filename": "yolo11n_od_224.tflite"
-            }
-        },
-        "labels": ["object"]
-    },
-    "YOLOv8 Pose Estimation": {
-        "resolutions": {
-            "256x256": {
-                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_pose/yolov8n_pose_256_vela_3_9_0x3BB000.tflite",
-                "type": "tflite",
-                "filename": "yolov8n_pose_256.tflite"
-            }
-        },
-        "labels": ["person_pose"]
-    }
-}
 
 # --- Streamlit UI ---
 
@@ -1321,7 +1325,7 @@ if mode == "⬇️ Download Firmware/Models":
                     final_bytes = final_zip_path.read_bytes()
                     
                     st.session_state['ready_manifest'] = final_bytes
-                    st.generated_manifest_name = "MANIFEST.zip"
+                    st.session_state['generated_manifest_name'] = "MANIFEST.zip"
                     st.success("✅ Package ready!")
                     st.rerun()
 
@@ -1374,6 +1378,10 @@ elif mode == "☁️ Upload/Convert Model":
              
              enable_conversion = st.checkbox("Convert with Vela", value=True, help="Optimize model for Ethos-U55 NPU (Required for Vision AI V2)")
              
+             custom_labels_input = "unknown"
+             if not enable_conversion:
+                 custom_labels_input = st.text_input("Enter labels (comma-separated)", value="unknown", help="Example: person, cat, dog")
+             
              if uploaded_file:
                  c1, c2 = st.columns(2)
                  with c1:
@@ -1401,7 +1409,7 @@ elif mode == "☁️ Upload/Convert Model":
                                  labels = st.session_state.get('labels', [])
                              else:
                                  final_zip_bytes = uploaded_file.getvalue()
-                                 labels = ["unknown"]
+                                 labels = [l.strip() for l in custom_labels_input.split(",") if l.strip()]
                              
                              if final_zip_bytes:
                                  # Store processed model in session state
