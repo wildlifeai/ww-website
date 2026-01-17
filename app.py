@@ -232,7 +232,7 @@ def download_url_content(url: str) -> bytes:
     try:
         with urllib.request.urlopen(url) as response:
             return response.read() # Returns bytes
-    except Exception as e:
+    except (urllib.error.HTTPError, urllib.error.URLError) as e:
         raise DownloadError(f"Error downloading file from {url}: {e}")
 
 def extract_hex_array(c_content_str: str) -> bytes:
