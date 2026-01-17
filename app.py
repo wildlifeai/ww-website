@@ -1270,7 +1270,7 @@ if mode == "⬇️ Download Firmware/Models":
                          
                     elif model_source == "My Organization Models" and is_logged_in and selected_model_data:
                          mz_path = base_dir / "model_temp.zip"
-                         if download_from_storage(supabase, 'ai-models', selected_model_data['storage_path'], mz_path, silent=True):
+                         if download_from_storage(supabase, 'ai-models', selected_model_data['storage_path'], mz_path, silent=False):
                                 model_zip_bytes = mz_path.read_bytes()
                     
                     if model_zip_bytes:
