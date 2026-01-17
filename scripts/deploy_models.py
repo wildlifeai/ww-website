@@ -153,7 +153,7 @@ def main():
             "name": "Person Detection Model",
             "version": "1.0.0",
             "description": "High-accuracy model for detecting human presence in camera trap footage",
-            "labels": ["person", "no person"]
+            "labels": ["no person", "person"]
         }
     ]
 

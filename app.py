@@ -485,9 +485,11 @@ def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]
         
         # 1. Fetch and download latest config firmware
         config_firmware = fetch_latest_config_firmware(supabase)
+        config_found = False
+        config_file_path = temp_dir / "config_component"
+
         if config_firmware:
             path = config_firmware['location_path']
-            config_file_path = temp_dir / "config_component"
             
             # Try primary path silently
             if download_from_storage(supabase, 'firmware', path, config_file_path, silent=True):
@@ -498,10 +500,25 @@ def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]
                     filename = path.split('/')[-1]
                     shutil.copy2(config_file_path, manifest_dir / filename)
                 st.success(f"✅ Added config firmware: {config_firmware.get('version', 'latest')}")
-            else:
-                # FALLBACK Discovery
-                try:
-                    files = supabase.storage.from_('firmware').list('config', {'order_by': {'column': 'created_at', 'order': 'desc'}})
+                config_found = True
+
+        if not config_found:
+            # FALLBACK Discovery (if DB record missing OR download failed)
+            try:
+                # Try to list files in the 'config' folder of the firmware bucket
+                # Using 'sortBy' because 'order_by' might be implementation specific to the JS client logic vs Python
+                files = supabase.storage.from_('firmware').list('config', {'sortBy': {'column': 'created_at', 'order': 'desc'}})
+                
+                # If that fails or returns empty, try without sort options (some mock/local servers can be picky)
+                if not files:
+                    files = supabase.storage.from_('firmware').list('config')
+                    # Sort manually by name if needed, assuming standard naming
+                    files.sort(key=lambda x: x.get('created_at', x.get('name')), reverse=True)
+
+                if files:
+                    # Filter out placeholders or folders
+                    files = [f for f in files if f['name'] != '.emptyFolderPlaceholder' and not f['name'].endswith('/')]
+                    
                     if files:
                         latest_file = files[0]['name']
                         new_path = f"config/{latest_file}"
@@ -512,8 +529,9 @@ def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]
                             else:
                                 shutil.copy2(config_file_path, manifest_dir / latest_file)
                             st.success(f"✅ Recovered latest config: {latest_file}")
-                except:
-                    pass
+            except Exception as e:
+                # Log the error for debugging purposes. The UI won't show an error since this is a fallback.
+                print(f"Fallback config discovery failed: {e}")
         
         # 2. Fetch and download latest default AI model
         ai_model = fetch_latest_default_model(supabase)
