@@ -14,6 +14,7 @@ from supabase import create_client, Client
 from gotrue.errors import AuthApiError
 from typing import Optional, Dict, List
 from urllib.parse import urlparse
+import io
 
 # Load environment variables
 load_dotenv()
@@ -40,44 +41,50 @@ def get_config(key: str, default: Optional[str] = None) -> Optional[str]:
     return os.environ.get(key, default)
 
 # Initialize Supabase client
-def get_supabase() -> Optional[Client]:
-    """
-    Get a Supabase client that is correctly initialized with the 
-    user's session token if they are logged in.
-    """
+def create_supabase_client(privileged: bool = False) -> Optional[Client]:
+    """Factory to create standard or privileged clients."""
     url = get_config("SUPABASE_URL")
-    key = get_config("SUPABASE_ANON_KEY")
     
+    # Prefer Service Role Key for backend ops, fallback to Anon
+    if privileged:
+        key = get_config("SUPABASE_SERVICE_ROLE_KEY") or get_config("SUPABASE_ANON_KEY")
+    else:
+        key = get_config("SUPABASE_ANON_KEY")
+
     if not url or not key:
         return None
         
-    # Ensure URL has trailing slash to avoid warnings and potential path issues
     if not url.endswith("/"):
         url += "/"
-    
+        
     try:
-        # Create client
         client = create_client(url, key)
         
-        # If user is logged in, restore the session
-        # This is the most reliable way to propagate auth to all sub-clients (DB, Storage, etc.)
-        if 'session' in st.session_state and st.session_state.session:
-            try:
+        # If not using Service Role but need privilege, handle login (Legacy method)
+        if privileged and not get_config("SUPABASE_SERVICE_ROLE_KEY"):
+            email = get_config("UPLOADER_EMAIL")
+            password = get_config("UPLOADER_PASSWORD")
+            if email and password:
+                client.auth.sign_in_with_password({"email": email, "password": password})
+        
+        # If standard client & logged in via UI session, restore session
+        elif not privileged and 'session' in st.session_state and st.session_state.session:
+             try:
                 client.auth.set_session(
                     access_token=st.session_state.session.access_token,
                     refresh_token=st.session_state.session.refresh_token
                 )
-            except Exception as auth_e:
+             except Exception as auth_e:
                 st.warning(f"Failed to restore session: {auth_e}")
-            
+                
         return client
     except Exception as e:
-        st.error(f"Failed to initialize Supabase client: {str(e)}")
+        if privileged:
+             st.warning(f"Privileged auth failed: {e}")
+        else:
+             st.error(f"Failed to initialize Supabase client: {str(e)}")
         return None
 
-def init_supabase() -> Optional[Client]:
-    """Initialize or update the global Supabase client"""
-    return get_supabase()
 
 # --- Helper Functions from your Notebook ---
 
@@ -135,65 +142,23 @@ def find_vela_output(work_dir: Path, original_tflite_name: str) -> Path:
 
 
 # Validated GitHub Model Registry
-MODEL_REGISTRY = {
-    "Person Detection": {
-        "resolutions": {
-            "96x96": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/EPII_CM55M_APP_S/app/scenario_app/allon_sensor_tflm/person_detect_model_data_vela.cc",
-                "type": "cc_array",
-                "filename": "person_detect_model_data_vela.cc"
-            }
-        },
-        "labels": ["no person", "person"]
-    },
-    "Rat Detection": {
-        "resolutions": {
-            "Unknown (Quantized)": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/rat_detection/model_int8_quantized_vela.tflite",
-                "type": "tflite",
-                "filename": "rat_detection.tflite"
-            }
-        },
-        "labels": ["rat"] # Default single class
-    },
-    "YOLOv8 Object Detection": {
-        "resolutions": {
-            "192x192": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_od/yolov8n_od_192_delete_transpose_0xB7B000.tflite",
-                "type": "tflite",
-                "filename": "yolov8n_od_192.tflite"
-            }
-        },
-        "labels": ["object"] 
-    },
-    "YOLOv11 Object Detection": {
-        "resolutions": {
-            "192x192": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_192_241219_batch_matmul_vela.tflite",
-                "type": "tflite",
-                "filename": "yolo11n_od_192.tflite"
-            },
-            "224x224": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_vela_imgz_224_kris_nopost_241230.tflite",
-                "type": "tflite",
-                "filename": "yolo11n_od_224.tflite"
-            }
-        },
-         "labels": ["object"]
-    },
-    "YOLOv8 Pose Estimation": {
-        "resolutions": {
-             "256x256": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_pose/yolov8n_pose_256_vela_3_9_0x3BB000.tflite",
-                "type": "tflite",
-                "filename": "yolov8n_pose_256.tflite"
-            }
-        },
-        "labels": ["person_pose"]
-    }
-}
+# Helper for Model Config
+def get_model_config(model_type: str, resolution: str) -> dict:
+    """Safe retrieval of model config."""
+    try:
+        return MODEL_REGISTRY[model_type]["resolutions"][resolution]
+    except KeyError:
+        raise ValueError(f"Configuration not found for {model_type} at {resolution}")
+
+
+
+
+
 
 import urllib.request
+
+class DownloadError(Exception):
+    pass
 
 def download_url_content(url):
     """Download content from URL"""
@@ -202,8 +167,7 @@ def download_url_content(url):
         with urllib.request.urlopen(url) as response:
             return response.read() # Returns bytes
     except Exception as e:
-        st.error(f"Error downloading file: {e}")
-        return None
+        raise DownloadError(f"Error downloading file from {url}: {e}")
 
 def extract_hex_array(c_content_str):
     """Parse C array and extract hex values from string content"""
@@ -212,170 +176,26 @@ def extract_hex_array(c_content_str):
     match = re.search(pattern, c_content_str, re.DOTALL)
     
     if not match:
-        st.error("Could not find byte array in C file")
-        return None
+        raise ValueError("Could not find byte array in C file")
     
     array_content = match.group(1)
     hex_values = re.findall(r'0x([0-9a-fA-F]{2})', array_content)
     
     if not hex_values:
-        st.error("No hex values found in array")
-        return None
+        raise ValueError("No hex values found in array")
         
     return bytes([int(h, 16) for h in hex_values])
 
 def process_github_model(model_type, resolution):
     """
     Downloads and packages a pre-trained model from GitHub.
-    Returns bytes of the 'ai_model.zip' ready for upload or download.
+    Returns (zip_bytes, labels_list) or (None, []) on failure.
     """
-    config = MODEL_REGISTRY.get(model_type, {}).get("resolutions", {}).get(resolution)
-    if not config:
-        st.error("Invalid model configuration selected.")
-        return None, []
-
-    labels = MODEL_REGISTRY[model_type].get("labels", ["unknown"])
-
-    # Create temp dir
-    with tempfile.TemporaryDirectory() as temp_dir:
-        work_dir = Path(temp_dir)
-        
-        # 1. Download source
-        content = download_url_content(config["url"])
-        if not content:
-            return None, []
-            
-        # 2. Convert if needed
-        model_binary = None
-        if config["type"] == "cc_array":
-            # decode bytes to string for regex
-            content_str = content.decode('utf-8')
-            model_binary = extract_hex_array(content_str)
-        else:
-            model_binary = content
-            
-        if not model_binary:
-            return None, []
-            
-        # 3. Save as .tflite
-        tflite_path = work_dir / "trained_vela.tflite" # Standardize name
-        with open(tflite_path, 'wb') as f:
-            f.write(model_binary)
-            
-        # 4. Create labels.txt
-        labels_txt_path = work_dir / "labels.txt"
-        with open(labels_txt_path, 'w') as f:
-            f.write('\n'.join(labels))
-            
-        # 5. Create ai_model.zip
-        ai_model_zip_path = work_dir / "ai_model.zip"
-        with zipfile.ZipFile(ai_model_zip_path, mode='w', compression=zipfile.ZIP_STORED) as zf:
-            zf.write(tflite_path, tflite_path.name)
-            zf.write(labels_txt_path, 'labels.txt')
-            
-        # Read final bytes
-        with open(ai_model_zip_path, 'rb') as f:
-            return f.read(), labels
-
-
-# Validated GitHub Model Registry
-MODEL_REGISTRY = {
-    "Person Detection": {
-        "resolutions": {
-            "96x96": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/EPII_CM55M_APP_S/app/scenario_app/allon_sensor_tflm/person_detect_model_data_vela.cc",
-                "type": "cc_array",
-                "filename": "person_detect_model_data_vela.cc"
-            }
-        },
-        "labels": ["no person", "person"]
-    },
-    "Rat Detection": {
-        "resolutions": {
-            "Unknown (Quantized)": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/rat_detection/model_int8_quantized_vela.tflite",
-                "type": "tflite",
-                "filename": "rat_detection.tflite"
-            }
-        },
-        "labels": ["rat"] # Default single class
-    },
-    "YOLOv8 Object Detection": {
-        "resolutions": {
-            "192x192": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_od/yolov8n_od_192_delete_transpose_0xB7B000.tflite",
-                "type": "tflite",
-                "filename": "yolov8n_od_192.tflite"
-            }
-        },
-        "labels": ["object"] 
-    },
-    "YOLOv11 Object Detection": {
-        "resolutions": {
-            "192x192": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_192_241219_batch_matmul_vela.tflite",
-                "type": "tflite",
-                "filename": "yolo11n_od_192.tflite"
-            },
-            "224x224": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_vela_imgz_224_kris_nopost_241230.tflite",
-                "type": "tflite",
-                "filename": "yolo11n_od_224.tflite"
-            }
-        },
-         "labels": ["object"]
-    },
-    "YOLOv8 Pose Estimation": {
-        "resolutions": {
-             "256x256": {
-                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_pose/yolov8n_pose_256_vela_3_9_0x3BB000.tflite",
-                "type": "tflite",
-                "filename": "yolov8n_pose_256.tflite"
-            }
-        },
-        "labels": ["person_pose"]
-    }
-}
-
-import urllib.request
-
-def download_url_content(url):
-    """Download content from URL"""
-    print(f"Downloading from {url}...")
     try:
-        with urllib.request.urlopen(url) as response:
-            return response.read() # Returns bytes
-    except Exception as e:
-        st.error(f"Error downloading file: {e}")
-        return None
-
-def extract_hex_array(c_content_str):
-    """Parse C array and extract hex values from string content"""
-    # Pattern: const unsigned char array_name[] = { 0xNN, 0xNN, ... };
-    pattern = r'const\s+unsigned\s+char\s+\w+\[\]\s*=\s*\{([^}]+)\}'
-    match = re.search(pattern, c_content_str, re.DOTALL)
-    
-    if not match:
-        st.error("Could not find byte array in C file")
-        return None
-    
-    array_content = match.group(1)
-    hex_values = re.findall(r'0x([0-9a-fA-F]{2})', array_content)
-    
-    if not hex_values:
-        st.error("No hex values found in array")
-        return None
-        
-    return bytes([int(h, 16) for h in hex_values])
-
-def process_github_model(model_type, resolution):
-    """
-    Downloads and packages a pre-trained model from GitHub.
-    Returns bytes of the 'ai_model.zip' ready for upload or download.
-    """
-    config = MODEL_REGISTRY.get(model_type, {}).get("resolutions", {}).get(resolution)
-    if not config:
-        st.error("Invalid model configuration selected.")
+        # Use safe helper to get config
+        config = get_model_config(model_type, resolution)
+    except ValueError as e:
+        st.error(str(e))
         return None, []
 
     labels = MODEL_REGISTRY[model_type].get("labels", ["unknown"])
@@ -384,25 +204,31 @@ def process_github_model(model_type, resolution):
     with tempfile.TemporaryDirectory() as temp_dir:
         work_dir = Path(temp_dir)
         
-        # 1. Download source
-        content = download_url_content(config["url"])
-        if not content:
-            return None, []
+        try:
+            # 1. Download source
+            content = download_url_content(config["url"])
             
-        # 2. Convert if needed
-        model_binary = None
-        if config["type"] == "cc_array":
-            # decode bytes to string for regex
-            content_str = content.decode('utf-8')
-            model_binary = extract_hex_array(content_str)
-        else:
-            model_binary = content
+            # 2. Convert if needed
+            model_binary = None
+            if config["type"] == "cc_array":
+                # decode bytes to string for regex
+                content_str = content.decode('utf-8')
+                model_binary = extract_hex_array(content_str)
+            else:
+                model_binary = content
+        except (DownloadError, ValueError) as e:
+            st.error(f"Failed to process model: {e}")
+            return None, []
+        except Exception as e:
+            st.error(f"Unexpected error: {e}")
+            return None, []
             
         if not model_binary:
+            st.error("Model binary is empty.")
             return None, []
             
-        # 3. Save as .tflite
-        tflite_path = work_dir / "trained_vela.tflite" # Standardize name
+        # 3. Save as .TFL
+        tflite_path = work_dir / "trained_vela.TFL" # Standardize name
         with open(tflite_path, 'wb') as f:
             f.write(model_binary)
             
@@ -552,7 +378,9 @@ def run_conversion(uploaded_file):
         # Create a store-compressed zip (no compression) containing labels.txt and the model file
         with zipfile.ZipFile(ai_model_zip_path, mode='w', compression=zipfile.ZIP_STORED) as zf:
             # We want these files at the root of ai_model.zip
-            zf.write(vela_final_path, vela_final_path.name)
+            # Ensure model has .TFL extension for firmware compatibility
+            model_arcname = vela_final_path.stem + ".TFL"
+            zf.write(vela_final_path, model_arcname)
             zf.write(labels_txt_path, 'labels.txt')
 
         if not ai_model_zip_path.exists():
@@ -563,36 +391,71 @@ def run_conversion(uploaded_file):
             model_bytes = f.read()
 
         st.success("ai_model.zip created successfully!")
-        return model_bytes
+
+# Camera Configuration Registry
+CAMERA_CONFIGS = {
+    "Raspberry Pi": {
+        "description": "Standard configuration (OV5647)",
+        "url": None, # Will fetch from DB 'latest' or use default placeholder if needed
+        "filename": "CONFIG.TXT"
+    },
+    "HM0360": {
+        "description": "Configuration for Himax HM0360 sensor",
+        "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/_Tools/hm0360_md_medium.txt",
+        "filename": "CONFIG.TXT" 
+    }
+}
+
+def build_manifest_from_bytes(config_bytes: bytes, model_zip_bytes: bytes) -> bytes:
+    """
+    Creates a MANIFEST.zip in memory using provided component bytes.
+    config_bytes: Content of CONFIG.TXT (or a zip containing it)
+    model_zip_bytes: Content of ai_model.zip
+    """
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            manifest_dir = base / "MANIFEST"
+            manifest_dir.mkdir()
+            
+            # 1. Handle Config
+            # If config_bytes looks like a zip, extract it. Otherwise treat as text/binary file.
+            # Simple check: zip magic bytes PK..
+            if config_bytes.startswith(b'PK\x03\x04'):
+                 with zipfile.ZipFile(io.BytesIO(config_bytes), 'r') as z:
+                    z.extractall(manifest_dir)
+            else:
+                # It's a raw config file (e.g. CONFIG.TXT)
+                # We might need other firmare files (HMSTB1.BIN etc) for a full working manifest.
+                # ideally these come from the 'config firmware' package in DB.
+                # FAST FIX: If we only have CONFIG.TXT, we might be missing the bootloader.
+                # For now, write it as CONFIG.TXT
+                (manifest_dir / "CONFIG.TXT").write_bytes(config_bytes)
+                
+            # 2. Handle Model
+            # model_zip_bytes is ai_model.zip. Extract it to manifest_dir
+            if model_zip_bytes:
+                with zipfile.ZipFile(io.BytesIO(model_zip_bytes), 'r') as z:
+                    z.extractall(manifest_dir)
+            
+            # 3. Zip up MANIFEST
+            final_zip_path = base / "MANIFEST_final.zip"
+            with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_STORED) as zf:
+                for file in manifest_dir.glob('*'):
+                    if file.is_file():
+                        zf.write(file, f"MANIFEST/{file.name}")
+            
+            return final_zip_path.read_bytes()
+            
+    except Exception as e:
+        st.error(f"Error building manifest: {e}")
+        return None
+
 
 # --- Public MANIFEST Download Functions ---
 
-def get_privileged_supabase() -> Optional[Client]:
-    """
-    Get a Supabase client authenticated as the Service Account (Uploader).
-    This is used for public operations (like Manifest download) that require
-    read access to protected buckets.
-    """
-    url = get_config("SUPABASE_URL")
-    key = get_config("SUPABASE_ANON_KEY")
-    email = get_config("UPLOADER_EMAIL", "apps@wildlife.ai")
-    password = get_config("UPLOADER_PASSWORD")
-    
-    if not url or not key or not password:
-        st.warning("⚠️ Service account credentials missing. Public download may fail.")
-        return get_supabase() # Fallback to user/anon client
+# --- Public MANIFEST Download Functions ---
 
-    if not url.endswith("/"):
-        url += "/"
-
-    try:
-        # Create a fresh client to avoid side effects on the global session
-        client = create_client(url, key)
-        client.auth.sign_in_with_password({"email": email, "password": password})
-        return client
-    except Exception as e:
-        st.warning(f"Failed to authenticate service account: {e}")
-        return get_supabase() # Fallback
 
 def fetch_latest_config_firmware(supabase: Client) -> Optional[Dict]:
     """
@@ -675,59 +538,41 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
 def download_from_storage(supabase: Client, bucket: str, path: str, dest: Path, silent: bool = False) -> bool:
     """
     Download a file from Supabase Storage to local path.
+    Uses a simple two-step approach: SDK download → Public URL fallback.
     Returns True on success, False on failure.
     """
     try:
-        # FIX: Robust storage pathing
-        # 1. Clean up potential prefixes or full URLs
-        if path.startswith('http'):
-            parsed_url = urlparse(path)
-            path_parts = parsed_url.path.strip('/').split('/')
-            try:
-                bucket_index = path_parts.index(bucket)
-                path = '/'.join(path_parts[bucket_index + 1:])
-            except (ValueError, IndexError):
-                if not silent:
-                    st.error(f"Could not extract path from URL: {path}")
-                return False
-        
-        # 2. Candidate paths to try
-        candidates = [path]
-        
-        # If starts with bucket name, try without it
-        if path.startswith(f"{bucket}/"):
-            candidates.append(path[len(bucket)+1:])
-            
-        # If it contains folders, try just the filename as a fallback (root level)
-        if '/' in path:
-            filename = path.split('/')[-1]
-            if filename not in candidates:
-                candidates.append(filename)
-        
-        last_error = None
-        for try_path in candidates:
-            try:
-                # Silence internal attempts to keep UI clean
-                response = supabase.storage.from_(bucket).download(try_path)
-                if response:
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    dest.write_bytes(response)
-                    return True
-            except Exception as e:
-                last_error = e
-                # Continue to next candidate
-                pass
-        
-        # Only show error if all candidates failed AND not silent
-        if not silent:
-            # st.error(f"❌ Failed to download from storage (tried {candidates}): {str(last_error)}") 
-            # Suppress UI error for cleaner manifest generation flow, log to console if needed
-            print(f"Failed to download: {candidates}. Error: {last_error}")
-        return False
-    except Exception as e:
-        if not silent:
-            st.error(f"An error occurred while downloading the file: {str(e)}")
-        return False
+        # Step 1: Try standard SDK download
+        # This works for authenticated users with proper permissions
+        response = supabase.storage.from_(bucket).download(path)
+        if response:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(response)
+            return True
+    except Exception as sdk_error:
+        # Step 2: Fallback to Public URL
+        # If the bucket is public, we can bypass RLS/Auth by using the public URL
+        try:
+            base_url = get_config("SUPABASE_URL")
+            if base_url:
+                if not base_url.endswith("/"):
+                    base_url += "/"
+                
+                # Construct standard Supabase Storage public URL
+                public_url = f"{base_url}storage/v1/object/public/{bucket}/{path}"
+                
+                # Use existing download helper
+                content = download_url_content(public_url)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(content)
+                return True
+        except Exception as fallback_error:
+            if not silent:
+                st.error(f"Failed to download {path} from {bucket}: SDK failed ({sdk_error}), Public URL failed ({fallback_error})")
+            return False
+    
+    # Should not reach here, but just in case
+    return False
 
 def flatten_directory(directory: Path):
     """
@@ -759,7 +604,7 @@ def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]
     Returns bytes of the final zip file, or None on failure.
     """
     # 1. Get Privileged Client
-    supabase = get_privileged_supabase()
+    supabase = create_supabase_client(privileged=True)
     if not supabase:
         st.error("❌ Failed to initialize privileged client for download.")
         return None
@@ -884,17 +729,17 @@ def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]
 
 def render_login(supabase: Client) -> bool:
     """
-    Render authentication sidebar.
+    Render authentication section.
     Returns True if user is logged in, False otherwise.
     """
-    st.sidebar.title("🔐 Authentication")
+    st.subheader("🔐 Authentication")
     if 'user' in st.session_state and st.session_state.get('user'):
         user_email = st.session_state.user.email
         user_id = st.session_state.user.id
-        st.sidebar.success(f"✅ Logged in as:  \n**{user_email}**")
+        st.success(f"✅ Logged in as:  \n**{user_email}**")
         
         # Diagnostic Info
-        with st.sidebar.expander("🔍 Account Diagnostics"):
+        with st.expander("🔍 Account Diagnostics"):
             st.code(f"Streamlit User ID: {user_id}")
             try:
                 # 1. Verify what Supabase thinks the user is
@@ -915,20 +760,20 @@ def render_login(supabase: Client) -> bool:
             except Exception as e:
                 st.error(f"Diagnostic Error: {e}")
 
-        if st.sidebar.button("Logout", use_container_width=True):
+        if st.button("Logout", use_container_width=True):
             supabase.auth.sign_out()
             st.session_state.clear()
             st.rerun()
         return True
     
-    with st.sidebar.form("login_form"):
+    with st.form("login_form"):
         email = st.text_input("Email", placeholder="user@example.com")
         password = st.text_input("Password", type="password")
         submit = st.form_submit_button("Login", use_container_width=True)
         
         if submit:
             if not email or not password:
-                st.sidebar.error("Please enter both email and password")
+                st.error("Please enter both email and password")
                 return False
             
             try:
@@ -938,13 +783,13 @@ def render_login(supabase: Client) -> bool:
                 })
                 st.session_state.user = response.user
                 st.session_state.session = response.session
-                st.sidebar.success("Login successful!")
+                st.success("Login successful!")
                 st.rerun()
             except AuthApiError as e:
-                st.sidebar.error(f"Login failed: {e}")
+                st.error(f"Login failed: {e}")
                 return False
             except Exception as e:
-                st.sidebar.error(f"An unexpected error occurred: {e}")
+                st.error(f"An unexpected error occurred: {e}")
                 return False
     
     return False
@@ -956,7 +801,7 @@ def check_user_role(supabase: Client, user_id: str, org_id: str) -> bool:
     Returns True if authorized, False otherwise.
     """
     try:
-        supabase_client = get_supabase()
+        supabase_client = create_supabase_client()
         if not supabase_client:
             return False
 
@@ -980,7 +825,7 @@ def get_user_organizations(supabase: Client, user_id: str) -> List[Dict[str, str
     Returns a list of dicts, each with 'name' and 'id' of an org.
     """
     try:
-        supabase_client = get_supabase()
+        supabase_client = create_supabase_client()
         if not supabase_client:
             return []
 
@@ -1184,259 +1029,433 @@ def upload_and_register_model(
             st.error(f"❌ {str(e)}")
             return False
 
+
+# --- Configuration Registry ---
+MODEL_REGISTRY = {
+    "Person Detection": {
+        "resolutions": {
+            "96x96": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/EPII_CM55M_APP_S/app/scenario_app/allon_sensor_tflm/person_detect_model_data_vela.cc",
+                "type": "cc_array",
+                "filename": "person_detect_model_data_vela.cc"
+            }
+        },
+        "labels": ["no person", "person"]
+    },
+    "Rat Detection": {
+        "resolutions": {
+            "Unknown (Quantized)": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/rat_detection/model_int8_quantized_vela.tflite",
+                "type": "tflite",
+                "filename": "rat_detection.tflite"
+            }
+        },
+        "labels": ["rat"]
+    },
+    "YOLOv8 Object Detection": {
+        "resolutions": {
+            "192x192": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_od/yolov8n_od_192_delete_transpose_0xB7B000.tflite",
+                "type": "tflite",
+                "filename": "yolov8n_od_192.tflite"
+            }
+        },
+        "labels": ["object"] 
+    },
+    "YOLOv11 Object Detection": {
+        "resolutions": {
+            "192x192": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_192_241219_batch_matmul_vela.tflite",
+                "type": "tflite",
+                "filename": "yolo11n_od_192.tflite"
+            },
+            "224x224": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_vela_imgz_224_kris_nopost_241230.tflite",
+                "type": "tflite",
+                "filename": "yolo11n_od_224.tflite"
+            }
+        },
+        "labels": ["object"]
+    },
+    "YOLOv8 Pose Estimation": {
+        "resolutions": {
+            "256x256": {
+                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_pose/yolov8n_pose_256_vela_3_9_0x3BB000.tflite",
+                "type": "tflite",
+                "filename": "yolov8n_pose_256.tflite"
+            }
+        },
+        "labels": ["person_pose"]
+    }
+}
+
 # --- Streamlit UI ---
 
-st.set_page_config(layout="centered")
+# Configure page (Must be the first Streamlit command)
+st.set_page_config(layout="centered", page_title="Wildlife Watcher Firmware Tool", page_icon="📸")
 
 # Initialize Supabase client
-supabase = init_supabase()
+supabase = create_supabase_client()
 
-# Show authentication sidebar if Supabase is configured
-if supabase:
-    is_logged_in = render_login(supabase)
-else:
-    st.sidebar.warning("⚠️ Supabase not configured")
-    st.sidebar.info("Set SUPABASE_URL and SUPABASE_ANON_KEY in .env file to enable upload")
-    is_logged_in = False
+# --- Maintain Auth State ---
+# This ensures session persistence across reruns
+if supabase and 'session' in st.session_state:
+    try:
+        current_user = supabase.auth.get_user()
+        if not current_user:
+            st.session_state.clear()
+    except:
+        pass
 
-st.image(
-    "http://wildlife.ai/wp-content/uploads/2025/10/wildlife_ai_logo_dark_lightbackg_1772x591.png",
-    width="stretch",
+
+# --- Main Header ---
+# --- Main Header ---
+col_logo, col_title = st.columns([1, 5])
+with col_logo:
+    st.image("icon.png", width="stretch")
+with col_title:
+    st.title("Wildlife Watcher Toolkit - Camera Firmware & AI Models")
+
+st.divider()
+
+# --- Mode Selection ---
+# "Download firmware is selected as default"
+mode = st.radio(
+    "Select Action",
+    ["⬇️ Download Firmware/Models", "☁️ Upload/Convert Model"],
+    index=0,
+    horizontal=True,
+    label_visibility="collapsed" # Using custom headers instead or just letting the options speak
 )
-st.title("Edge Impulse Model Converter (Vela)")
-st.markdown("""
-Upload your Edge Impulse model zip file (e.g., `model-custom-v1.zip`).
-This tool will:
-1.  Unzip the file.
-2.  Run the `vela` command (`ethos-u55-64`).
-3.  Extract labels from `model_variables.h`.
-4.  Package the converted `.tflite` and `labels.txt` into `ai_model.zip`.
-""")
 
-# Public MANIFEST Download Section (No Auth Required)
+# Display specific description based on selection
+if mode == "⬇️ Download Firmware/Models":
+    st.info("Get the latest firmware and AI models for your camera device.")
+else:
+    st.info("Upload and convert your custom Edge Impulse models to the Wildlife Watcher cloud.")
+
 st.divider()
-st.subheader("📦 Download Latest MANIFEST Package")
-st.info("""
-**Get everything you need for your camera device in one click!**
 
-This package combines:
-- ✅ Latest device configuration files (CONFIG.TXT, HMSTB1.BIN, etc.)
-- ✅ Latest default AI wildlife detection model
-
-Simply extract to your SD card root and insert into the camera device!
-""")
-
-col1, col2 = st.columns([1, 3])
-with col1:
-    if st.button("🚀 Download MANIFEST.zip", type="primary", width="stretch", disabled=not supabase):
-        with st.spinner("Preparing MANIFEST package..."):
-            manifest_bytes = create_manifest_package(supabase)
-            if manifest_bytes:
-                st.session_state['public_manifest_bytes'] = manifest_bytes
-                st.success("✅ MANIFEST package ready!")
-                st.rerun()
-
-with col2:
-    if 'public_manifest_bytes' in st.session_state:
-        st.download_button(
-            label="💾 Save MANIFEST.zip to your computer",
-            data=st.session_state['public_manifest_bytes'],
-            file_name="MANIFEST.zip",
-            mime="application/zip",
-            width="stretch"
+# --- Journey 1: Download Firmware ---
+if mode == "⬇️ Download Firmware/Models":
+    
+    col1, col2 = st.columns(2)
+    
+    # Step 1: Camera Configuration
+    with col1:
+        st.subheader("1. Camera Device")
+        selected_camera = st.selectbox(
+            "Select Camera Type",
+            options=list(CAMERA_CONFIGS.keys()),
+            help="Choose the camera sensor connected to your Grove Vision AI V2"
         )
-        if st.button("Clear", width="stretch"):
-            del st.session_state['public_manifest_bytes']
-            st.rerun()
+        cam_config = CAMERA_CONFIGS[selected_camera]
+        st.caption(f"ℹ️ {cam_config['description']}")
 
-if not supabase:
-    st.warning("⚠️ Supabase not configured. Public download unavailable.")
+    # Step 2: AI Model Selection
+    with col2:
+        st.subheader("2. AI Model")
+        model_source = st.radio(
+            "Model Source",
+            ["Pre-trained Model", "My Organization Models", "No Model"],
+            help="Select where to get the AI model from"
+        )
 
-st.divider()
+    # Optional Auth for Organization Models
+    if model_source == "My Organization Models":
+        st.markdown("#### Organization Access")
+        if not supabase:
+             st.warning("⚠️ Supabase not configured")
+        else:
+             # Check if logged in
+             is_logged_in = False
+             if 'user' in st.session_state and st.session_state.user:
+                 is_logged_in = True
+             
+             if not is_logged_in:
+                 st.warning("Please login to access your organization's models.")
+                 render_login(supabase)
+             
+             # Re-check login status after render_login (it might have just logged in)
+             if 'user' in st.session_state and st.session_state.user:
+                 is_logged_in = True
 
-with st.expander("License Information"):
-    st.markdown("""
-    This tool is provided under the GPL-3.0 license. The source code and license can be found on GitHub.
-    """)
-
-tab1, tab2, tab3 = st.tabs(["🔄 Convert & Upload", "📤 Direct Upload", "🌐 Pre-trained Models"])
-
-with tab3:
-    st.markdown("### Download Pre-trained Models")
-    st.info("💡 Select from a curated list of models available in the Seeed Studio Model Zoo.")
+    st.divider()
     
-    # 1. Select Model Architecture
-    model_type = st.selectbox(
-        "Select Model Architecture",
-        options=list(MODEL_REGISTRY.keys()),
-        index=0
-    )
+    # Model Configuration Logic
+    selected_model_bytes = None
+    selected_model_name = "None"
     
-    # 2. Select Resolution (Dynamic based on type)
-    available_resolutions = list(MODEL_REGISTRY[model_type]["resolutions"].keys())
-    resolution = st.selectbox(
-        "Select Resolution",
-        options=available_resolutions,
-        index=0
-    )
+    # Logic for model fetch...
+    can_generate = True
     
-    # 3. Generate Button
-    if st.button(f"Generate {model_type} ({resolution})", key="generate_github_btn"):
-        with st.spinner(f"Fetching {model_type}..."):
-            zip_bytes, labels = process_github_model(model_type, resolution)
+    if model_source == "Pre-trained Model":
+        c1, c2 = st.columns(2)
+        with c1:
+            pt_type = st.selectbox("Model Architecture", list(MODEL_REGISTRY.keys()))
+        with c2:
+            pt_res = st.selectbox("Resolution", list(MODEL_REGISTRY[pt_type]["resolutions"].keys()))
             
-            if zip_bytes:
-                st.session_state['ai_model_zip_bytes'] = zip_bytes
-                
-                # Set metadata
-                st.session_state['model_name'] = model_type
-                st.session_state['model_version'] = f"GitHub-{resolution}"
-                st.session_state['labels'] = labels
-                st.session_state['show_upload'] = True # Ready to upload
-                
-                st.success(f"✅ Generated ai_model.zip for {model_type}!")
+        if st.checkbox(f"Include {pt_type} ({pt_res})", value=True):
+             selected_model_name = f"{pt_type} ({pt_res})"
+        else:
+             can_generate = False # User unchecked it
 
-with tab1:
-    st.markdown("### Convert Edge Impulse Export")
-    uploaded_file = st.file_uploader(
-        "Choose your <modelname>-custom-<version>.zip",
-        type="zip",
-        accept_multiple_files=False,
-        key="converter_uploader"
-    )
+    elif model_source == "My Organization Models":
+        if 'is_logged_in' in locals() and is_logged_in:
+             user_id = st.session_state.user.id
+             orgs = get_user_organizations(supabase, user_id)
+             if orgs:
+                 sel_org = st.selectbox("Organization", orgs, format_func=lambda x: x['name'])
+                 # Fetch models
+                 try:
+                     models_resp = supabase.table('ai_models').select('*').eq('organisation_id', sel_org['id']).eq('deleted_at', None).execute()
+                     if models_resp.data:
+                         model_opts = {f"{m['name']} v{m['version']}": m for m in models_resp.data}
+                         sel_model_key = st.selectbox("Select Model", list(model_opts.keys()))
+                         selected_model_data = model_opts[sel_model_key]
+                         selected_model_name = selected_model_data['name']
+                     else:
+                         st.warning("No models found for this organization.")
+                         can_generate = False
+                 except Exception as e:
+                     st.error(f"Error fetching models: {e}")
+             else:
+                 st.warning("You are not part of any organization.")
+                 can_generate = False
+        else:
+             can_generate = False
 
-    if uploaded_file is not None:
-        if st.button(f"Convert {uploaded_file.name}", key="convert_btn"):
-            
-            zip_bytes = None
+    # Step 3: Generation
+    st.subheader("3. Generate Package")
+
+    # NEW: Model Versioning Inputs
+    if selected_camera in CAMERA_CONFIGS:
+        # Camera Config Description
+        st.info(f"**Camera Config**: {CAMERA_CONFIGS[selected_camera]['description']}")
+
+        st.markdown("##### 🔢 Model Versioning")
+        st.markdown("Define the Project ID and Version matching your model. The firmware will use these to load the correct file.")
+        mv_col1, mv_col2 = st.columns(2)
+        with mv_col1:
+            model_project_id = st.number_input("Project ID (OP 14)", min_value=1, value=1, step=1, help="Corresponds to OP_PARAMETER_MODEL_PROJECT (was NUMBER)")
+        with mv_col2:
+            model_version = st.number_input("Version (OP 15)", min_value=1, value=1, step=1, help="Corresponds to OP_PARAMETER_MODEL_VERSION")
+
+        target_model_filename = f"{model_project_id}V{model_version}.TFL"
+        st.caption(f"Target Filename: `{target_model_filename}`")
+
+    if st.button("🚀 Generate MANIFEST.zip", type="primary", disabled=not can_generate):
+        with st.spinner("Assembling firmware package..."):
             try:
-                with st.spinner("Running conversion pipeline... This may take a minute."):
-                    # run_conversion now returns bytes of ai_model.zip
-                    model_zip_bytes = run_conversion(uploaded_file)
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    base_dir = Path(temp_dir)
+                    manifest_dir = base_dir / "MANIFEST"
+                    manifest_dir.mkdir()
+
+                    # --- A. Base Configuration (Bootloader + Defaults) ---
+                    # Always fetch the base firmware package first
+                    # Use privileged client to ensure access to firmware bucket
+                    priv_client = create_supabase_client(privileged=True)
+                    target_client = priv_client if priv_client else supabase
+
+                    latest_fw = fetch_latest_config_firmware(target_client)
+                    if not latest_fw:
+                        # Fallback for offline dev: create basic structure if DB fails
+                         st.warning("Could not fetch base firmware from DB. Creating minimal config.")
+                         with open(manifest_dir / "CONFIG.TXT", "w") as f:
+                             f.write("# Minimal Config\n")
+                    else:
+                        # Download and unzip base package
+                        base_zip_path = base_dir / "base_config.zip"
+                        # DEBUG: Remove silent=True to see errors
+                        if download_from_storage(target_client, 'firmware', latest_fw['location_path'], base_zip_path, silent=False):
+                            with zipfile.ZipFile(base_zip_path, 'r') as z:
+                                z.extractall(manifest_dir)
+
+                        # UPDATE CONFIG.TXT with Project ID and Version
+                        config_path = manifest_dir / "CONFIG.TXT"
+                        if config_path.exists():
+                            # Append or Update? Simple append works if firmware reads last value or we just rely on it not being there.
+                            # But safer to read and rewrite if we want to be clean.
+                            # For now, simplistic append is likely fine as defaults are usually commented out or minimal.
+                            # Let's read, filter existing 14/15, and append new.
+                            existing_lines = config_path.read_text().splitlines()
+                            new_lines = [l for l in existing_lines if not (l.strip().startswith("14 ") or l.strip().startswith("15 "))]
+                            new_lines.append(f"14 {model_project_id} # Auto-injected Project ID")
+                            new_lines.append(f"15 {model_version}    # Auto-injected Version")
+                            config_path.write_text("\n".join(new_lines) + "\n")
+                        else:
+                            # Create if missing
+                            config_path.write_text(f"14 {model_project_id}\n15 {model_version}\n")
+
+                    # --- B. Camera Specific Overrides ---
+                    # If specific camera config URL exists, download and overwrite CONFIG.TXT
+                    if cam_config['url']:
+                        extra_config = download_url_content(cam_config['url'])
+                        if extra_config:
+                            # If it's the Himax HM0360, it might need the binary too.
+                            # Current URL is just text. We assume the Base Package (step A) might contain
+                            # shared binaries, or we just rely on this text file.
+                            # Write/Overwrite CONFIG.TXT
+                            with open(manifest_dir / "CONFIG.TXT", "wb") as f:
+                                f.write(extra_config)
+                            
+                            # Special case: HM0360 might likely need a specific line in CONFIG.TXT or an external bin
+                            # For now, we trust the downloaded text file is the complete CONFIG.TXT replacement.
+
+                    # --- C. AI Model Integration ---
+                    model_zip_bytes = None
+                    if model_source == "Pre-trained Model":
+                         model_zip_bytes, _ = process_github_model(pt_type, pt_res)
+                         
+                    elif model_source == "My Organization Models" and 'is_logged_in' in locals() and is_logged_in and 'selected_model_data' in locals():
+                         mz_path = base_dir / "model_temp.zip"
+                         if download_from_storage(supabase, 'ai-models', selected_model_data['storage_path'], mz_path, silent=True):
+                                model_zip_bytes = mz_path.read_bytes()
                     
-                    # Store in session state
                     if model_zip_bytes:
-                        st.session_state['ai_model_zip_bytes'] = model_zip_bytes
+                        # Extract model zip into MANIFEST
+                        # We need to handle if model zip contains "MANIFEST" folder or just files
+                        # Logic: Write bytes to temp zip, then extract
+                        m_zip_path = base_dir / "model_insert.zip"
+                        m_zip_path.write_bytes(model_zip_bytes)
                         
-                        # Also parse and store model name/version for upload
-                        model_name, model_version = parse_model_zip_name(uploaded_file.name)
-                        st.session_state['model_name'] = model_name
-                        st.session_state['model_version'] = model_version
-                        if model_name == 'unknown':
-                            st.warning("⚠️ Could not parse model metadata from filename. Please check the 'Upload' section below.")
+                        with zipfile.ZipFile(m_zip_path, 'r') as z:
+                            # Check structure
+                            has_manifest_folder = any(n.startswith('MANIFEST/') for n in z.namelist())
+                            if has_manifest_folder:
+                                # Extract fully, merging folders
+                                z.extractall(base_dir) 
+                            else:
+                                # Extract files directly into MANIFEST
+                                z.extractall(manifest_dir)
+
+                        # POST-PROCESS: Rename model to {Project}V{Version}.TFL
+                        # Firmware strictly requires this pattern now.
+                        # Find ANY .TFL or .tflite and rename it.
+                        model_candidates = list(manifest_dir.glob('*.TFL')) + list(manifest_dir.glob('*.tflite'))
+                        # Remove duplicates if any
+                        model_candidates = list(set(model_candidates))
+                        
+                        if model_candidates:
+                            # Take the first one found (assuming only one model per package)
+                            src_model = model_candidates[0]
+                            dest_model = manifest_dir / target_model_filename
+                            
+                            # Rename
+                            if src_model != dest_model:
+                                src_model.rename(dest_model)
+                                # If there were others, delete them to avoid confusion?
+                                for extra in model_candidates[1:]:
+                                    os.remove(extra)
+                        else:
+                            if model_source != "None":
+                                st.warning(f"No model file found to rename to {target_model_filename}")
+
+                    # --- D. Final Packaging ---
+                    final_zip_path = base_dir / "MANIFEST_final.zip"
+                    with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_STORED) as zf:
+                        # Walk MANIFEST directory and zip it up, ensuring 'MANIFEST/' prefix
+                        for root, dirs, files in os.walk(manifest_dir):
+                            for file in files:
+                                file_path = Path(root) / file
+                                arcname = f"MANIFEST/{file_path.relative_to(manifest_dir)}"
+                                zf.write(file_path, arcname)
+                    
+                    final_bytes = final_zip_path.read_bytes()
+                    
+                    st.session_state['ready_manifest'] = final_bytes
+                    st.generated_manifest_name = "MANIFEST.zip"
+                    st.success("✅ Package ready!")
+                    st.rerun()
 
             except Exception as e:
-                st.error(f"An error occurred: {e}")
-
-with tab2:
-    st.markdown("### Upload Pre-converted Model")
-    st.info("💡 Use this if you already have an `ai_model.zip` (containing the model and labels.txt).")
+                st.error(f"Error generating package: {e}")
     
-    direct_file = st.file_uploader(
-        "Choose your ai_model.zip",
-        type="zip",
-        accept_multiple_files=False,
-        key="direct_uploader"
-    )
-    
-    if direct_file is not None:
-        st.write(f"Ready to upload: {direct_file.name}")
-        
-        # User provides metadata
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            m_name = st.text_input("Model Name", value="Person Detector", placeholder="e.g. My Custom Model")
-        with col_m2:
-            m_ver = st.text_input("Version", value="1.0.0", placeholder="e.g. 1.0.0")
-            
-        m_labels_raw = st.text_input("Detection Labels (comma-separated)", value="no_person, person", help="Enter the labels in order (index 0, index 1...)")
-        
-        if st.button("Prepare for Upload", key="prepare_direct_btn"):
-            st.session_state['ai_model_zip_bytes'] = direct_file.getvalue()
-            st.session_state['model_name'] = m_name
-            st.session_state['model_version'] = m_ver
-            st.session_state['labels'] = [l.strip() for l in m_labels_raw.split(',') if l.strip()]
-            st.session_state['show_upload'] = True
-            st.success("✅ Model data prepared! See the 'Upload to Database' section below.")
-
-# Show download and upload options if conversion completed
-if 'ai_model_zip_bytes' in st.session_state and st.session_state['ai_model_zip_bytes']:
-    
-    st.divider()
-    st.subheader("✅ Conversion Complete!")
-    
-    # Extract labels from session state (from run_conversion)
-    labels = st.session_state.get('labels', [])
-    if labels:
-        st.info(f"🏷️ Detected {len(labels)} classes: {', '.join(labels)}")
-    
-    # Always show download button
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
+    if 'ready_manifest' in st.session_state:
         st.download_button(
-            label="💾 Download ai_model.zip",
-            data=st.session_state['ai_model_zip_bytes'],
-            file_name="ai_model.zip",
+            label="💾 Download MANIFEST.zip",
+            data=st.session_state['ready_manifest'],
+            file_name="MANIFEST.zip",
             mime="application/zip",
-            width="stretch"
+            type="primary"
         )
+
+
+# --- Journey 2: Upload Model ---
+elif mode == "☁️ Upload/Convert Model":
     
-    # Show upload button if logged in
-    if supabase and is_logged_in:
-        with col2:
-            st.button("📤 Upload to Database", key="upload_toggle", width="stretch", on_click=lambda: st.session_state.update({"show_upload": True}))
-        
-        # Show upload form if user clicked upload
-        if st.session_state.get('show_upload', False):
-            st.divider()
-            st.subheader("📤 Upload to Wildlife Watcher")
+    if not supabase:
+        st.error("Supabase not configured. Cannot upload models.")
+    else: 
+        # Check login
+        is_logged_in = False
+        if 'user' in st.session_state and st.session_state.user:
+            is_logged_in = True
             
-            # Get user's organizations
-            user_id = st.session_state.user.id
-            orgs = get_user_organizations(supabase, user_id)
-            
-            if not orgs:
-                st.warning("⚠️ You are not a member of any organization.")
-                st.info("💡 Contact your organization manager to get added to an organization.")
-            else:
-                # Organization selector - handles duplicate names correctly
-                selected_org = st.selectbox(
-                    "Select Organization",
-                    options=orgs,
-                    format_func=lambda org: org['name'],
-                    help="Choose which organization to upload this model to"
-                )
-                selected_org_id = selected_org['id']
-                
-                # Model description
-                model_name = st.session_state.get('model_name', 'unknown')
-                model_version = st.session_state.get('model_version', 'unknown')
-                
-                description = st.text_area(
-                    "Model Description (optional)",
-                    value=f"Converted Edge Impulse model - {model_name} v{model_version}",
-                    help="Describe what this model detects and any important details"
-                )
-                
-                # Upload button
-                if st.button("🚀 Upload Model", type="primary", width="stretch"):
-                    success = upload_and_register_model(
-                        supabase=supabase,
-                        manifest_bytes=st.session_state['ai_model_zip_bytes'],
-                        model_name=model_name,
-                        model_version=model_version,
-                        description=description,
-                        labels=labels,
-                        org_id=selected_org_id
-                    )
-                    
-                    if success:
-                        #  Clear upload form
-                        st.session_state['show_upload'] = False
-    else:
-        with col2:
-            if supabase:
-                st.info("🔒 Login to upload to database", icon="ℹ️")
-            else:
-                st.info("⚙️ Configure Supabase to enable upload", icon="ℹ️")
+        if not is_logged_in:
+             st.markdown("### Authentication Required")
+             st.info("Please login to upload models to the Wildlife Watcher cloud.")
+             render_login(supabase)
+        else:
+             # Already logged in - show logout option small somewhere?
+             # render_login shows the "Logged in as..." and "Logout" button so we can just call it
+             render_login(supabase)
+             st.divider()
+
+             st.markdown("### Upload Custom Model")
+             st.info("💡 Supports Edge Impulse C++ Library exports (ZIP).")
+             
+             uploaded_file = st.file_uploader(
+                 "Upload Model (ZIP)",
+                 type="zip",
+                 help="Upload the .zip file exported from Edge Impulse"
+             )
+             
+             enable_conversion = st.checkbox("Convert with Vela", value=True, help="Optimize model for Ethos-U55 NPU (Required for Vision AI V2)")
+             
+             if uploaded_file:
+                 c1, c2 = st.columns(2)
+                 with c1:
+                     val_name, val_ver = parse_model_zip_name(uploaded_file.name)
+                     m_name = st.text_input("Model Name", value=val_name)
+                 with c2:
+                     m_ver = st.text_input("Version", value=val_ver)
+                     
+                 m_desc = st.text_area("Description", value=f"Converted from {uploaded_file.name}")
+                 
+                 user_id = st.session_state.user.id
+                 orgs = get_user_organizations(supabase, user_id)
+                 
+                 if orgs:
+                     tgt_org = st.selectbox("Target Organization", orgs, format_func=lambda x: x['name'])
+                     
+                     if st.button("🚀 Start Processing & Upload", type="primary"):
+                         with st.spinner("Processing..."):
+                             final_zip_bytes = None
+                             labels = []
+                             
+                             if enable_conversion:
+                                 final_zip_bytes = run_conversion(uploaded_file)
+                                 labels = st.session_state.get('labels', [])
+                             else:
+                                 final_zip_bytes = uploaded_file.getvalue()
+                                 labels = ["unknown"] 
+                             
+                             if final_zip_bytes:
+                                  upload_and_register_model(
+                                      supabase=supabase,
+                                      manifest_bytes=final_zip_bytes,
+                                      model_name=m_name,
+                                      model_version=m_ver,
+                                      description=m_desc,
+                                      labels=labels,
+                                      org_id=tgt_org['id']
+                                  )
+                 else:
+                     st.error("You must belong to an organization to upload.")
+
+
+
+
