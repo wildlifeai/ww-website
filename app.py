@@ -133,6 +133,294 @@ def find_vela_output(work_dir: Path, original_tflite_name: str) -> Path:
     raise FileNotFoundError(f"Could not find Vela output file in {work_dir}. Looked for {possible_names}.")
 
 
+
+# Validated GitHub Model Registry
+MODEL_REGISTRY = {
+    "Person Detection": {
+        "resolutions": {
+            "96x96": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/EPII_CM55M_APP_S/app/scenario_app/allon_sensor_tflm/person_detect_model_data_vela.cc",
+                "type": "cc_array",
+                "filename": "person_detect_model_data_vela.cc"
+            }
+        },
+        "labels": ["no person", "person"]
+    },
+    "Rat Detection": {
+        "resolutions": {
+            "Unknown (Quantized)": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/rat_detection/model_int8_quantized_vela.tflite",
+                "type": "tflite",
+                "filename": "rat_detection.tflite"
+            }
+        },
+        "labels": ["rat"] # Default single class
+    },
+    "YOLOv8 Object Detection": {
+        "resolutions": {
+            "192x192": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_od/yolov8n_od_192_delete_transpose_0xB7B000.tflite",
+                "type": "tflite",
+                "filename": "yolov8n_od_192.tflite"
+            }
+        },
+        "labels": ["object"] 
+    },
+    "YOLOv11 Object Detection": {
+        "resolutions": {
+            "192x192": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_192_241219_batch_matmul_vela.tflite",
+                "type": "tflite",
+                "filename": "yolo11n_od_192.tflite"
+            },
+            "224x224": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_vela_imgz_224_kris_nopost_241230.tflite",
+                "type": "tflite",
+                "filename": "yolo11n_od_224.tflite"
+            }
+        },
+         "labels": ["object"]
+    },
+    "YOLOv8 Pose Estimation": {
+        "resolutions": {
+             "256x256": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_pose/yolov8n_pose_256_vela_3_9_0x3BB000.tflite",
+                "type": "tflite",
+                "filename": "yolov8n_pose_256.tflite"
+            }
+        },
+        "labels": ["person_pose"]
+    }
+}
+
+import urllib.request
+
+def download_url_content(url):
+    """Download content from URL"""
+    print(f"Downloading from {url}...")
+    try:
+        with urllib.request.urlopen(url) as response:
+            return response.read() # Returns bytes
+    except Exception as e:
+        st.error(f"Error downloading file: {e}")
+        return None
+
+def extract_hex_array(c_content_str):
+    """Parse C array and extract hex values from string content"""
+    # Pattern: const unsigned char array_name[] = { 0xNN, 0xNN, ... };
+    pattern = r'const\s+unsigned\s+char\s+\w+\[\]\s*=\s*\{([^}]+)\}'
+    match = re.search(pattern, c_content_str, re.DOTALL)
+    
+    if not match:
+        st.error("Could not find byte array in C file")
+        return None
+    
+    array_content = match.group(1)
+    hex_values = re.findall(r'0x([0-9a-fA-F]{2})', array_content)
+    
+    if not hex_values:
+        st.error("No hex values found in array")
+        return None
+        
+    return bytes([int(h, 16) for h in hex_values])
+
+def process_github_model(model_type, resolution):
+    """
+    Downloads and packages a pre-trained model from GitHub.
+    Returns bytes of the 'ai_model.zip' ready for upload or download.
+    """
+    config = MODEL_REGISTRY.get(model_type, {}).get("resolutions", {}).get(resolution)
+    if not config:
+        st.error("Invalid model configuration selected.")
+        return None, []
+
+    labels = MODEL_REGISTRY[model_type].get("labels", ["unknown"])
+
+    # Create temp dir
+    with tempfile.TemporaryDirectory() as temp_dir:
+        work_dir = Path(temp_dir)
+        
+        # 1. Download source
+        content = download_url_content(config["url"])
+        if not content:
+            return None, []
+            
+        # 2. Convert if needed
+        model_binary = None
+        if config["type"] == "cc_array":
+            # decode bytes to string for regex
+            content_str = content.decode('utf-8')
+            model_binary = extract_hex_array(content_str)
+        else:
+            model_binary = content
+            
+        if not model_binary:
+            return None, []
+            
+        # 3. Save as .tflite
+        tflite_path = work_dir / "trained_vela.tflite" # Standardize name
+        with open(tflite_path, 'wb') as f:
+            f.write(model_binary)
+            
+        # 4. Create labels.txt
+        labels_txt_path = work_dir / "labels.txt"
+        with open(labels_txt_path, 'w') as f:
+            f.write('\n'.join(labels))
+            
+        # 5. Create ai_model.zip
+        ai_model_zip_path = work_dir / "ai_model.zip"
+        with zipfile.ZipFile(ai_model_zip_path, mode='w', compression=zipfile.ZIP_STORED) as zf:
+            zf.write(tflite_path, tflite_path.name)
+            zf.write(labels_txt_path, 'labels.txt')
+            
+        # Read final bytes
+        with open(ai_model_zip_path, 'rb') as f:
+            return f.read(), labels
+
+
+# Validated GitHub Model Registry
+MODEL_REGISTRY = {
+    "Person Detection": {
+        "resolutions": {
+            "96x96": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/EPII_CM55M_APP_S/app/scenario_app/allon_sensor_tflm/person_detect_model_data_vela.cc",
+                "type": "cc_array",
+                "filename": "person_detect_model_data_vela.cc"
+            }
+        },
+        "labels": ["no person", "person"]
+    },
+    "Rat Detection": {
+        "resolutions": {
+            "Unknown (Quantized)": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/rat_detection/model_int8_quantized_vela.tflite",
+                "type": "tflite",
+                "filename": "rat_detection.tflite"
+            }
+        },
+        "labels": ["rat"] # Default single class
+    },
+    "YOLOv8 Object Detection": {
+        "resolutions": {
+            "192x192": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_od/yolov8n_od_192_delete_transpose_0xB7B000.tflite",
+                "type": "tflite",
+                "filename": "yolov8n_od_192.tflite"
+            }
+        },
+        "labels": ["object"] 
+    },
+    "YOLOv11 Object Detection": {
+        "resolutions": {
+            "192x192": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_192_241219_batch_matmul_vela.tflite",
+                "type": "tflite",
+                "filename": "yolo11n_od_192.tflite"
+            },
+            "224x224": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolo11_od/yolo11n_full_integer_quant_vela_imgz_224_kris_nopost_241230.tflite",
+                "type": "tflite",
+                "filename": "yolo11n_od_224.tflite"
+            }
+        },
+         "labels": ["object"]
+    },
+    "YOLOv8 Pose Estimation": {
+        "resolutions": {
+             "256x256": {
+                "url": "https://raw.githubusercontent.com/HimaxWiseEyePlus/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/tflm_yolov8_pose/yolov8n_pose_256_vela_3_9_0x3BB000.tflite",
+                "type": "tflite",
+                "filename": "yolov8n_pose_256.tflite"
+            }
+        },
+        "labels": ["person_pose"]
+    }
+}
+
+import urllib.request
+
+def download_url_content(url):
+    """Download content from URL"""
+    print(f"Downloading from {url}...")
+    try:
+        with urllib.request.urlopen(url) as response:
+            return response.read() # Returns bytes
+    except Exception as e:
+        st.error(f"Error downloading file: {e}")
+        return None
+
+def extract_hex_array(c_content_str):
+    """Parse C array and extract hex values from string content"""
+    # Pattern: const unsigned char array_name[] = { 0xNN, 0xNN, ... };
+    pattern = r'const\s+unsigned\s+char\s+\w+\[\]\s*=\s*\{([^}]+)\}'
+    match = re.search(pattern, c_content_str, re.DOTALL)
+    
+    if not match:
+        st.error("Could not find byte array in C file")
+        return None
+    
+    array_content = match.group(1)
+    hex_values = re.findall(r'0x([0-9a-fA-F]{2})', array_content)
+    
+    if not hex_values:
+        st.error("No hex values found in array")
+        return None
+        
+    return bytes([int(h, 16) for h in hex_values])
+
+def process_github_model(model_type, resolution):
+    """
+    Downloads and packages a pre-trained model from GitHub.
+    Returns bytes of the 'ai_model.zip' ready for upload or download.
+    """
+    config = MODEL_REGISTRY.get(model_type, {}).get("resolutions", {}).get(resolution)
+    if not config:
+        st.error("Invalid model configuration selected.")
+        return None, []
+
+    labels = MODEL_REGISTRY[model_type].get("labels", ["unknown"])
+
+    # Create temp dir
+    with tempfile.TemporaryDirectory() as temp_dir:
+        work_dir = Path(temp_dir)
+        
+        # 1. Download source
+        content = download_url_content(config["url"])
+        if not content:
+            return None, []
+            
+        # 2. Convert if needed
+        model_binary = None
+        if config["type"] == "cc_array":
+            # decode bytes to string for regex
+            content_str = content.decode('utf-8')
+            model_binary = extract_hex_array(content_str)
+        else:
+            model_binary = content
+            
+        if not model_binary:
+            return None, []
+            
+        # 3. Save as .tflite
+        tflite_path = work_dir / "trained_vela.tflite" # Standardize name
+        with open(tflite_path, 'wb') as f:
+            f.write(model_binary)
+            
+        # 4. Create labels.txt
+        labels_txt_path = work_dir / "labels.txt"
+        with open(labels_txt_path, 'w') as f:
+            f.write('\n'.join(labels))
+            
+        # 5. Create ai_model.zip
+        ai_model_zip_path = work_dir / "ai_model.zip"
+        with zipfile.ZipFile(ai_model_zip_path, mode='w', compression=zipfile.ZIP_STORED) as zf:
+            zf.write(tflite_path, tflite_path.name)
+            zf.write(labels_txt_path, 'labels.txt')
+            
+        # Read final bytes
+        with open(ai_model_zip_path, 'rb') as f:
+            return f.read(), labels
+
 # --- Main Conversion Logic ---
 
 def run_conversion(uploaded_file):
@@ -971,7 +1259,42 @@ with st.expander("License Information"):
     This tool is provided under the GPL-3.0 license. The source code and license can be found on GitHub.
     """)
 
-tab1, tab2 = st.tabs(["🔄 Convert & Upload", "📤 Direct Upload"])
+tab1, tab2, tab3 = st.tabs(["🔄 Convert & Upload", "📤 Direct Upload", "🌐 Pre-trained Models"])
+
+with tab3:
+    st.markdown("### Download Pre-trained Models")
+    st.info("💡 Select from a curated list of models available in the Seeed Studio Model Zoo.")
+    
+    # 1. Select Model Architecture
+    model_type = st.selectbox(
+        "Select Model Architecture",
+        options=list(MODEL_REGISTRY.keys()),
+        index=0
+    )
+    
+    # 2. Select Resolution (Dynamic based on type)
+    available_resolutions = list(MODEL_REGISTRY[model_type]["resolutions"].keys())
+    resolution = st.selectbox(
+        "Select Resolution",
+        options=available_resolutions,
+        index=0
+    )
+    
+    # 3. Generate Button
+    if st.button(f"Generate {model_type} ({resolution})", key="generate_github_btn"):
+        with st.spinner(f"Fetching {model_type}..."):
+            zip_bytes, labels = process_github_model(model_type, resolution)
+            
+            if zip_bytes:
+                st.session_state['ai_model_zip_bytes'] = zip_bytes
+                
+                # Set metadata
+                st.session_state['model_name'] = model_type
+                st.session_state['model_version'] = f"GitHub-{resolution}"
+                st.session_state['labels'] = labels
+                st.session_state['show_upload'] = True # Ready to upload
+                
+                st.success(f"✅ Generated ai_model.zip for {model_type}!")
 
 with tab1:
     st.markdown("### Convert Edge Impulse Export")
