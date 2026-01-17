@@ -999,16 +999,7 @@ MODEL_REGISTRY = {
         },
         "labels": ["no person", "person"]
     },
-    "Rat Detection": {
-        "resolutions": {
-            "Unknown (Quantized)": {
-                "url": "https://raw.githubusercontent.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/main/model_zoo/rat_detection/model_int8_quantized_vela.tflite",
-                "type": "tflite",
-                "filename": "rat_detection.tflite"
-            }
-        },
-        "labels": ["rat"]
-    },
+
     "YOLOv8 Object Detection": {
         "resolutions": {
             "192x192": {
