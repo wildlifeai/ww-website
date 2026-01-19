@@ -12,8 +12,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from gotrue.errors import AuthApiError
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Tuple
 from urllib.parse import urlparse
+import json
 
 import urllib.request
 
@@ -312,6 +313,105 @@ def process_github_model(model_type: str, resolution: str) -> tuple[Optional[byt
         # Read final bytes
         with open(ai_model_zip_path, 'rb') as f:
             return f.read(), labels
+
+# --- SSCMA Zoo Integration ---
+@st.cache_data(ttl=3600)
+def fetch_sscma_models() -> List[Dict]:
+    """Fetch and cache models from SSCMA Zoo."""
+    url = "https://raw.githubusercontent.com/Seeed-Studio/sscma-model-zoo/main/models.json"
+    try:
+        content = download_url_content(url)
+        data = json.loads(content)
+        return data.get("models", [])
+    except (DownloadError, json.JSONDecodeError) as e:
+        st.error(f"Failed to fetch or parse SSCMA models: {e}")
+        return []
+    except Exception as e:
+        st.error(f"Unexpected error fetching SSCMA models: {e}")
+        return []
+
+def process_sscma_model(model_entry: Dict) -> tuple[Optional[bytes], List[str]]:
+    """Download best asset from SSCMA model entry."""
+    benchmarks = model_entry.get("benchmark", [])
+    best_asset = None
+    target_type = "tflite" 
+    
+    # Define search preferences in order of priority
+    preferences = [
+        {'backend': 'TFLite(vela)', 'devices': ('we2', 'grove_vision_ai_we2'), 'target': 'vela'},
+        {'backend': 'TFLite', 'precision': 'INT8', 'target': 'tflite'},
+        {'backend': 'TFLite', 'precision': 'FLOAT32', 'target': 'tflite'},
+    ]
+
+    for pref in preferences:
+        for b in benchmarks:
+            if b.get('backend') == pref['backend']:
+                if 'devices' in pref:
+                    if any(d in b.get('device', []) for d in pref['devices']):
+                        best_asset = b
+                        target_type = pref['target']
+                        break
+                # Handle precision matching safely
+                elif b.get('precision') == pref.get('precision'):
+                    best_asset = b
+                    target_type = pref['target']
+                    break
+        if best_asset:
+            break
+                
+    if not best_asset:
+        st.error("No compatible TFLite model found in SSCMA entry.")
+        return None, []
+        
+    url = best_asset["url"]
+    
+    try:
+        content = download_url_content(url)
+        labels = model_entry.get("classes", ["unknown"])
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            work_dir = Path(temp_dir)
+            
+            if target_type == "vela":
+                 tfl_path = work_dir / "trained_vela.TFL"
+                 tfl_path.write_bytes(content)
+            else:
+                 # Need conversion
+                 input_path = work_dir / "trained.tflite"
+                 input_path.write_bytes(content)
+                 
+                 # Run Vela
+                 cmd = [
+                    'vela',
+                    '--accelerator-config', 'ethos-u55-64',
+                    '--memory-mode', 'Shared_Sram',
+                    '--output-dir', str(work_dir),
+                    str(input_path),
+                ]
+                 subprocess.run(cmd, capture_output=True, text=True, check=True)
+                 
+                 vela_out = find_vela_output(work_dir, input_path.name)
+                 tfl_path = work_dir / "trained_vela.TFL"
+                 safe_move(vela_out, tfl_path)
+
+            labels_path = work_dir / "labels.txt"
+            labels_path.write_text('\n'.join(labels))
+                 
+            zip_path = work_dir / "ai_model.zip"
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zf:
+                 zf.write(tfl_path, tfl_path.name)
+                 zf.write(labels_path, labels_path.name)
+                 
+            return zip_path.read_bytes(), labels
+
+    except subprocess.CalledProcessError as e:
+        st.error(f"Vela conversion failed (Return code: {e.returncode})")
+        if e.stdout: st.code(e.stdout)
+        if e.stderr: st.code(e.stderr)
+        return None, []
+    except Exception as e:
+        st.error(f"Failed to process SSCMA model: {e}")
+        return None, []
 
 # --- Main Conversion Logic ---
 
@@ -1115,7 +1215,7 @@ if mode == "⬇️ Download Firmware/Models":
         st.subheader("2. AI Model")
         model_source = st.radio(
             "Model Source",
-            ["Pre-trained Model", "My Organization Models", "No Model"],
+            ["Pre-trained Model", "SenseCap Models", "My Organization Models", "No Model"],
             help="Select where to get the AI model from"
         )
 
@@ -1144,11 +1244,13 @@ if mode == "⬇️ Download Firmware/Models":
     selected_model_bytes = None
     selected_model_name = "None"
     selected_model_data = None
+    selected_sscma_entry = None
     
     # Logic for model fetch...
     can_generate = True
     
     if model_source == "Pre-trained Model":
+        st.info("Select a model from the Grovevision repo")
         c1, c2 = st.columns(2)
         with c1:
             pt_type = st.selectbox("Model Architecture", list(MODEL_REGISTRY.keys()))
@@ -1159,6 +1261,52 @@ if mode == "⬇️ Download Firmware/Models":
              selected_model_name = f"{pt_type} ({pt_res})"
         else:
              can_generate = False # User unchecked it
+
+    elif model_source == "SenseCap Models":
+        st.info("Select a model from the Seeed Studio SSCMA Zoo.")
+        sscma_models = fetch_sscma_models()
+        if sscma_models:
+             # Helper to get resolution string
+             def get_res_str(m):
+                 try:
+                     shape = m.get('network', {}).get('input', {}).get('shape', [])
+                     if len(shape) >= 2:
+                         return f"{shape[0]}x{shape[1]}"
+                 except (IndexError, TypeError):
+                     pass
+                 return "Unknown"
+
+             # Group models by category for efficiency
+             models_by_category = {}
+             for m in sscma_models:
+                 cat = m.get("category", "Unknown")
+                 if cat not in models_by_category:
+                     models_by_category[cat] = []
+                 models_by_category[cat].append(m)
+
+             categories = sorted(models_by_category.keys())
+             sel_cat = st.selectbox("Category", categories)
+             
+             # Filter Models
+             cat_models = models_by_category.get(sel_cat, [])
+             
+             sscma_selected = st.selectbox(
+                 "Model", 
+                 cat_models, 
+                 format_func=lambda x: f"{x['name']} ({get_res_str(x)})"
+             )
+             
+             if sscma_selected:
+                 res_str = get_res_str(sscma_selected)
+                 st.caption(f"**Resolution**: {res_str} | **Algorithm**: {sscma_selected.get('algorithm')}")
+                 st.text(sscma_selected.get("description", ""))
+                 st.text(f"Key Classes: {', '.join(sscma_selected.get('classes', [])[:5])}")
+                 
+                 selected_model_name = sscma_selected['name']
+                 selected_sscma_entry = sscma_selected # Store for later
+        else:
+             st.warning("Could not load SenseCap models.")
+             can_generate = False
 
     elif model_source == "My Organization Models":
         if is_logged_in:
@@ -1267,6 +1415,10 @@ if mode == "⬇️ Download Firmware/Models":
                     model_zip_bytes = None
                     if model_source == "Pre-trained Model":
                          model_zip_bytes, _ = process_github_model(pt_type, pt_res)
+
+                    elif model_source == "SenseCap Models":
+                         if selected_sscma_entry:
+                             model_zip_bytes, _ = process_sscma_model(selected_sscma_entry)
                          
                     elif model_source == "My Organization Models" and is_logged_in and selected_model_data:
                          mz_path = base_dir / "model_temp.zip"
@@ -1362,8 +1514,6 @@ elif mode == "☁️ Upload/Convert Model":
              st.info("Please login to upload models to the Wildlife Watcher cloud.")
              render_login(supabase)
         else:
-             # Already logged in - show logout option small somewhere?
-             # render_login shows the "Logged in as..." and "Logout" button so we can just call it
              render_login(supabase)
              st.divider()
 
@@ -1415,13 +1565,13 @@ elif mode == "☁️ Upload/Convert Model":
                                  # Store processed model in session state
                                  st.session_state['processed_model'] = {
                                      'bytes': final_zip_bytes,
-                                     'labels': labels,
                                      'name': m_name,
                                      'version': m_ver,
                                      'description': m_desc,
-                                     'org_id': tgt_org['id']
+                                     'org_id': tgt_org['id'],
+                                     'labels': labels
                                  }
-                                 st.success("✅ Model processed successfully!")
+                                 st.session_state['upload_success_message'] = None # Reset
                                  st.rerun()
                      
                      # Step 2: Show upload and download options if model is processed
@@ -1469,7 +1619,4 @@ elif mode == "☁️ Upload/Convert Model":
                              st.rerun()
                  else:
                      st.error("You must belong to an organization to upload.")
-
-
-
 
