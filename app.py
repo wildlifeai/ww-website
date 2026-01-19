@@ -323,8 +323,11 @@ def fetch_sscma_models() -> List[Dict]:
         content = download_url_content(url)
         data = json.loads(content)
         return data.get("models", [])
+    except (DownloadError, json.JSONDecodeError) as e:
+        st.error(f"Failed to fetch or parse SSCMA models: {e}")
+        return []
     except Exception as e:
-        st.error(f"Failed to fetch SSCMA models: {e}")
+        st.error(f"Unexpected error fetching SSCMA models: {e}")
         return []
 
 def process_sscma_model(model_entry: Dict) -> tuple[Optional[bytes], List[str]]:
@@ -333,31 +336,28 @@ def process_sscma_model(model_entry: Dict) -> tuple[Optional[bytes], List[str]]:
     best_asset = None
     target_type = "tflite" 
     
-    # 1. Search for Vela (WE2)
-    for b in benchmarks:
-        if b.get("backend") == "TFLite(vela)":
-            devices = b.get("device", [])
-            # Grove Vision AI V2 uses WE2 chip
-            if "we2" in devices or "grove_vision_ai_we2" in devices:
-                best_asset = b
-                target_type = "vela"
-                break
-    
-    # 2. Fallback to Int8
-    if not best_asset:
+    # Define search preferences in order of priority
+    preferences = [
+        {'backend': 'TFLite(vela)', 'devices': ('we2', 'grove_vision_ai_we2'), 'target': 'vela'},
+        {'backend': 'TFLite', 'precision': 'INT8', 'target': 'tflite'},
+        {'backend': 'TFLite', 'precision': 'FLOAT32', 'target': 'tflite'},
+    ]
+
+    for pref in preferences:
         for b in benchmarks:
-            if b.get("backend") == "TFLite" and b.get("precision") == "INT8":
-                best_asset = b
-                target_type = "tflite"
-                break
-                
-    # 3. Fallback to Float32
-    if not best_asset:
-        for b in benchmarks:
-            if b.get("backend") == "TFLite" and b.get("precision") == "FLOAT32":
-                best_asset = b
-                target_type = "tflite"
-                break
+            if b.get('backend') == pref['backend']:
+                if 'devices' in pref:
+                    if any(d in b.get('device', []) for d in pref['devices']):
+                        best_asset = b
+                        target_type = pref['target']
+                        break
+                # Handle precision matching safely
+                elif b.get('precision') == pref.get('precision'):
+                    best_asset = b
+                    target_type = pref['target']
+                    break
+        if best_asset:
+            break
                 
     if not best_asset:
         st.error("No compatible TFLite model found in SSCMA entry.")
@@ -404,6 +404,11 @@ def process_sscma_model(model_entry: Dict) -> tuple[Optional[bytes], List[str]]:
                  
             return zip_path.read_bytes(), labels
 
+    except subprocess.CalledProcessError as e:
+        st.error(f"Vela conversion failed (Return code: {e.returncode})")
+        if e.stdout: st.code(e.stdout)
+        if e.stderr: st.code(e.stderr)
+        return None, []
     except Exception as e:
         st.error(f"Failed to process SSCMA model: {e}")
         return None, []
@@ -1267,16 +1272,23 @@ if mode == "⬇️ Download Firmware/Models":
                      shape = m.get('network', {}).get('input', {}).get('shape', [])
                      if len(shape) >= 2:
                          return f"{shape[0]}x{shape[1]}"
-                 except:
+                 except (IndexError, TypeError):
                      pass
                  return "Unknown"
 
-             # Filter by Category
-             categories = sorted(list(set(m.get("category", "Unknown") for m in sscma_models)))
+             # Group models by category for efficiency
+             models_by_category = {}
+             for m in sscma_models:
+                 cat = m.get("category", "Unknown")
+                 if cat not in models_by_category:
+                     models_by_category[cat] = []
+                 models_by_category[cat].append(m)
+
+             categories = sorted(models_by_category.keys())
              sel_cat = st.selectbox("Category", categories)
              
              # Filter Models
-             cat_models = [m for m in sscma_models if m.get("category") == sel_cat]
+             cat_models = models_by_category.get(sel_cat, [])
              
              sscma_selected = st.selectbox(
                  "Model", 
@@ -1400,6 +1412,7 @@ if mode == "⬇️ Download Firmware/Models":
                             # For now, we trust the downloaded text file is the complete CONFIG.TXT replacement.
 
                     # --- C. AI Model Integration ---
+                    model_zip_bytes = None
                     if model_source == "Pre-trained Model":
                          model_zip_bytes, _ = process_github_model(pt_type, pt_res)
 
