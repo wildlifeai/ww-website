@@ -123,11 +123,7 @@ def create_supabase_client(privileged: bool = False) -> Optional[Client]:
         
     if not url.endswith("/"):
         url += "/"
-    else:
-        # Warn if trailing slash is missing but valid otherwise? 
-        # Actually client warns if it IS valid but has no slash. 
-        # The library warning says "Storage endpoint URL should have a trailing slash"
-        pass
+
         
     try:
         client = create_client(url, key)
