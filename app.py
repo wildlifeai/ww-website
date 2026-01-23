@@ -74,7 +74,7 @@ MODEL_REGISTRY = {
 # Camera Configuration Registry
 CAMERA_CONFIGS = {
     "Raspberry Pi": {
-        "description": "Standard configuration (OV5647)",
+        "description": "Standard configuration (RPi v1/v2/v3)",
         "url": None, # Will fetch from DB 'latest' or use default placeholder if needed
         "filename": "CONFIG.TXT"
     },
@@ -123,6 +123,11 @@ def create_supabase_client(privileged: bool = False) -> Optional[Client]:
         
     if not url.endswith("/"):
         url += "/"
+    else:
+        # Warn if trailing slash is missing but valid otherwise? 
+        # Actually client warns if it IS valid but has no slash. 
+        # The library warning says "Storage endpoint URL should have a trailing slash"
+        pass
         
     try:
         client = create_client(url, key)
@@ -307,8 +312,10 @@ def process_github_model(model_type: str, resolution: str) -> tuple[Optional[byt
         # 5. Create ai_model.zip
         ai_model_zip_path = work_dir / "ai_model.zip"
         with zipfile.ZipFile(ai_model_zip_path, mode='w', compression=zipfile.ZIP_STORED) as zf:
+            # Match the label filename to the model filename (e.g. model.TFL -> model.TXT)
+            label_arcname = tflite_path.stem + ".TXT"
             zf.write(tflite_path, tflite_path.name)
-            zf.write(labels_txt_path, 'labels.txt')
+            zf.write(labels_txt_path, label_arcname)
             
         # Read final bytes
         with open(ai_model_zip_path, 'rb') as f:
@@ -399,8 +406,10 @@ def process_sscma_model(model_entry: Dict) -> tuple[Optional[bytes], List[str]]:
                  
             zip_path = work_dir / "ai_model.zip"
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_STORED) as zf:
+                 # Match the label filename to the model filename (e.g. model.TFL -> model.TXT)
+                 label_arcname = tfl_path.stem + ".TXT"
                  zf.write(tfl_path, tfl_path.name)
-                 zf.write(labels_path, labels_path.name)
+                 zf.write(labels_path, label_arcname)
                  
             return zip_path.read_bytes(), labels
 
@@ -490,10 +499,10 @@ def run_conversion(uploaded_file):
             _pid_m = re.search(r"\.project_id\s*=\s*(\d+)", _hdr)
             _ver_m = re.search(r"\.deploy_version\s*=\s*(\d+)", _hdr)
             if _pid_m and _ver_m:
-                _pid = _pid_m.group(1)
-                _ver = str(int(_ver_m.group(1)))  # normalize to no leading zeros
-                _last4 = _pid[-4:].rjust(4, '0')
-                _base = f"{_last4}V{_ver}"
+                _pid = str(int(_pid_m.group(1))) # normalize to no leading zeros
+                _ver = str(int(_ver_m.group(1))) # normalize to no leading zeros
+                # Firmware expects %dV%d format, no padding (e.g. 1V1.TFL)
+                _base = f"{_pid}V{_ver}"
                 if len(_base) > 8:
                     st.warning(f"Generated filename '{_base}' exceeds 8 characters; truncating to 8 for 8.3 compliance.")
                     _base = _base[:8]
@@ -546,8 +555,10 @@ def run_conversion(uploaded_file):
             # We want these files at the root of ai_model.zip
             # Ensure model has .TFL extension for firmware compatibility
             model_arcname = vela_final_path.stem + ".TFL"
+            # Match the label filename to the model filename (e.g. model.TFL -> model.TXT)
+            label_arcname = vela_final_path.stem + ".TXT"
             zf.write(vela_final_path, model_arcname)
-            zf.write(labels_txt_path, 'labels.txt')
+            zf.write(labels_txt_path, label_arcname)
 
         if not ai_model_zip_path.exists():
             raise FileNotFoundError(f"Failed to create ai_model.zip at {ai_model_zip_path}")
@@ -880,7 +891,7 @@ def render_login(supabase: Client) -> bool:
     with st.form("login_form"):
         email = st.text_input("Email", placeholder="user@example.com")
         password = st.text_input("Password", type="password")
-        submit = st.form_submit_button("Login", use_container_width=True)
+        submit = st.form_submit_button("Login", width="stretch")
         
         if submit:
             if not email or not password:
@@ -1170,7 +1181,7 @@ if supabase and 'session' in st.session_state:
 # --- Main Header ---
 col_logo, col_title = st.columns([1, 5])
 with col_logo:
-    st.image("icon.png", use_container_width=True)
+    st.image("icon.png", width="stretch")
 with col_title:
     st.title("Wildlife Watcher Toolkit - Camera Firmware & AI Models")
 
@@ -1342,14 +1353,21 @@ if mode == "⬇️ Download Firmware/Models":
         st.info(f"**Camera Config**: {CAMERA_CONFIGS[selected_camera]['description']}")
 
         st.markdown("##### 🔢 Model Versioning")
-        st.markdown("Define the Project ID and Version matching your model. The firmware will use these to load the correct file.")
+        st.markdown("Define the Model ID and Version matching your model. The firmware will use these to load the correct file.")
+        # Default to 1, or use selected model's DB ID/Version if available
+        default_pid = 1
+        default_ver = 1
+        if selected_model_data:
+             default_pid = selected_model_data.get('id', 1)
+             default_ver = selected_model_data.get('version', 1)
+
         mv_col1, mv_col2 = st.columns(2)
         with mv_col1:
-            model_project_id = st.number_input("Project ID (OP 14)", min_value=1, value=1, step=1, help="Corresponds to OP_PARAMETER_MODEL_PROJECT (was NUMBER)")
+            model_id = st.number_input("Model ID (OP 14)", min_value=1, value=default_pid, step=1, help="Corresponds to OP_PARAMETER_MODEL_PROJECT (internally Project ID). This matches the Database Model ID.", key=f"pid_{selected_model_name}")
         with mv_col2:
-            model_version = st.number_input("Version (OP 15)", min_value=1, value=1, step=1, help="Corresponds to OP_PARAMETER_MODEL_VERSION")
+            model_version = st.number_input("Version (OP 15)", min_value=1, value=default_ver, step=1, help="Corresponds to OP_PARAMETER_MODEL_VERSION", key=f"ver_{selected_model_name}")
 
-        target_model_filename = f"{model_project_id}V{model_version}.TFL"
+        target_model_filename = f"{model_id}V{model_version}.TFL"
         st.caption(f"Target Filename: `{target_model_filename}`")
 
     if st.button("🚀 Generate MANIFEST.zip", type="primary", disabled=not can_generate):
@@ -1389,12 +1407,25 @@ if mode == "⬇️ Download Firmware/Models":
                             # Let's read, filter existing 14/15, and append new.
                             existing_lines = config_path.read_text().splitlines()
                             new_lines = [l for l in existing_lines if not (l.strip().startswith("14 ") or l.strip().startswith("15 "))]
-                            new_lines.append(f"14 {model_project_id} # Auto-injected Project ID")
-                            new_lines.append(f"15 {model_version}    # Auto-injected Version")
+                            new_lines.append(f"14 {model_id}")
+                            new_lines.append(f"15 {model_version}")
+                            
+                            # Sort lines numerically by the first integer ID.
+                            # Comments (starting with #) should come first.
+                            def config_sort_key(line):
+                                line = line.strip()
+                                if line.startswith("#"):
+                                    return (-1, 0)
+                                parts = line.split()
+                                if parts and parts[0].isdigit():
+                                    return (0, int(parts[0]))
+                                return (1, 0) # Fallback for non-standard lines
+                                
+                            new_lines.sort(key=config_sort_key)
                             config_path.write_text("\n".join(new_lines) + "\n")
                         else:
                             # Create if missing
-                            config_path.write_text(f"14 {model_project_id}\n15 {model_version}\n")
+                            config_path.write_text(f"14 {model_id}\n15 {model_version}\n")
 
                     # --- B. Camera Specific Overrides ---
                     # If specific camera config URL exists, download and overwrite CONFIG.TXT
@@ -1454,12 +1485,42 @@ if mode == "⬇️ Download Firmware/Models":
                             src_model = model_candidates[0]
                             dest_model = manifest_dir / target_model_filename
                             
-                            # Rename
+                            # Rename Model
                             if src_model != dest_model:
                                 src_model.rename(dest_model)
+                                st.write(f"Renamed model: {src_model.name} -> {dest_model.name}")
                                 # If there were others, delete them to avoid confusion?
                                 for extra in model_candidates[1:]:
                                     os.remove(extra)
+                            
+                            # Rename Label File to match model (e.g. 1V1.TXT)
+                            # 1. Try finding file with same stem as original model (e.g. trained_vela.TXT)
+                            # 2. Try 'labels.txt'
+                            # 3. Try 'trained.txt'
+                            
+                            src_label_candidates = [
+                                src_model.with_suffix(".TXT"),
+                                src_model.with_suffix(".txt"),
+                                manifest_dir / "labels.txt",
+                                manifest_dir / "labels.TXT",
+                                manifest_dir / "trained.txt",
+                                manifest_dir / "trained.TXT"
+                            ]
+                            
+                            found_label = None
+                            for cand in src_label_candidates:
+                                if cand.exists():
+                                    found_label = cand
+                                    break
+                            
+                            if found_label:
+                                dest_label = dest_model.with_suffix(".TXT")
+                                if found_label != dest_label:
+                                    found_label.rename(dest_label)
+                                    st.write(f"Renamed labels: {found_label.name} -> {dest_label.name}")
+                            else:
+                                st.warning("No matching label file found to rename. Ensure labels are named matching the model or 'labels.txt'.")
+
                         else:
                             if model_source != "None":
                                 st.warning(f"No model file found to rename to {target_model_filename}")
@@ -1478,7 +1539,7 @@ if mode == "⬇️ Download Firmware/Models":
                     
                     st.session_state['ready_manifest'] = final_bytes
                     st.session_state['generated_manifest_name'] = "MANIFEST.zip"
-                    st.success("✅ Package ready!")
+                    st.success("✅ Package ready! (Model & Labels renamed for firmware compatibility)")
                     st.rerun()
 
             except Exception as e:
@@ -1586,7 +1647,7 @@ elif mode == "☁️ Upload/Convert Model":
                          
                          # Option 2a: Upload to Cloud
                          with col_upload:
-                             if st.button("☁️ Upload to Cloud", type="primary", use_container_width=True):
+                             if st.button("☁️ Upload to Cloud", type="primary", width="stretch"):
                                  with st.spinner("Uploading to cloud..."):
                                      upload_and_register_model(
                                          supabase=supabase,
@@ -1610,11 +1671,11 @@ elif mode == "☁️ Upload/Convert Model":
                                  file_name=f"{proc_data['name']}_v{proc_data['version']}.zip",
                                  mime="application/zip",
                                  type="secondary",
-                                 use_container_width=True
+                                 width="stretch"
                              )
                          
                          # Option to clear and start over
-                         if st.button("🔄 Process Another Model", use_container_width=True):
+                         if st.button("🔄 Process Another Model", width="stretch"):
                              del st.session_state['processed_model']
                              st.rerun()
                  else:
