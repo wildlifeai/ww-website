@@ -860,26 +860,45 @@ def render_login(supabase: Client) -> bool:
         st.success(f"✅ Logged in as:  \n**{user_email}**")
         
         # Diagnostic Info
-        with st.expander("🔍 Account Diagnostics"):
-            st.code(f"Streamlit User ID: {user_id}")
+        with st.expander("🔍 Account Overview"):
             try:
-                # 1. Verify what Supabase thinks the user is
-                supabase_user = supabase.auth.get_user()
-                if supabase_user and supabase_user.user:
-                    st.success(f"Supabase-side ID: {supabase_user.user.id}")
-                else:
-                    st.error("Supabase client is NOT authenticated!")
-                
-                # 2. Check for roles in DB
-                resp = supabase.table('user_roles').select('role, scope_type').eq('user_id', user_id).execute()
+                # 1. Check for roles in DB
+                resp = supabase.table('user_roles').select('role, scope_id, scope_type').eq('user_id', user_id).execute()
                 if resp.data:
-                    st.write("Roles found in DB:")
-                    for r in resp.data:
-                        st.write(f"- {r['role']} ({r['scope_type']})")
+                    org_roles = [r for r in resp.data if r['scope_type'] == 'organisation']
+                    proj_roles = [r for r in resp.data if r['scope_type'] == 'project']
+                    
+                    if org_roles:
+                        org_ids = list(set([r['scope_id'] for r in org_roles]))
+                        orgs_resp = supabase.table('organisations').select('id, name').in_('id', org_ids).execute()
+                        org_dict = {o['id']: o['name'] for o in orgs_resp.data} if orgs_resp.data else {}
+                        st.markdown("##### 🏢 Organizations")
+                        for r in org_roles:
+                            st.write(f"- **{org_dict.get(r['scope_id'], 'Unknown Org')}** - *{r['role']}*")
+                            
+                    if proj_roles:
+                        proj_ids = list(set([r['scope_id'] for r in proj_roles]))
+                        projs_resp = supabase.table('projects').select('id, name').in_('id', proj_ids).execute()
+                        proj_dict = {p['id']: p['name'] for p in projs_resp.data} if projs_resp.data else {}
+                        st.markdown("##### 🌳 Projects")
+                        for r in proj_roles:
+                            st.write(f"- **{proj_dict.get(r['scope_id'], 'Unknown Project')}** - *{r['role']}*")
+                    
+                    if not org_roles and not proj_roles:
+                         st.info("No organization or project roles assigned.")
                 else:
                     st.warning("No roles found for this ID in DB.")
+                    
+                # 2. Technical IDs hidden by default
+                with st.expander("🛠️ Advanced Details", expanded=False):
+                    st.code(f"Streamlit User ID: {user_id}")
+                    supabase_user = supabase.auth.get_user()
+                    if supabase_user and supabase_user.user:
+                        st.success(f"Supabase-side ID: {supabase_user.user.id}")
+                    else:
+                        st.error("Supabase client is NOT authenticated!")
             except Exception as e:
-                st.error(f"Diagnostic Error: {e}")
+                st.error(f"Overview Error: {e}")
 
         if st.button("Logout", use_container_width=True):
             supabase.auth.sign_out()
@@ -1791,11 +1810,12 @@ elif mode == "📊 Export Data":
                     f"**{len(data['devices']['rows'])}** devices."
                 )
 
+                st.markdown("#### 📥 Download Data")
                 col1, col2, col3 = st.columns(3)
 
                 with col1:
                     st.download_button(
-                        label=f"📁 Projects ({len(data['projects']['rows'])})",
+                        label=f"📄 Projects ({len(data['projects']['rows'])})",
                         data=rows_to_csv_bytes(data['projects']['rows'], data['projects']['cols']),
                         file_name=f"projects_{today}.csv",
                         mime="text/csv",
@@ -1804,7 +1824,7 @@ elif mode == "📊 Export Data":
 
                 with col2:
                     st.download_button(
-                        label=f"📁 Deployments ({len(data['deployments']['rows'])})",
+                        label=f"📄 Deployments ({len(data['deployments']['rows'])})",
                         data=rows_to_csv_bytes(data['deployments']['rows'], data['deployments']['cols']),
                         file_name=f"deployments_{today}.csv",
                         mime="text/csv",
@@ -1813,7 +1833,7 @@ elif mode == "📊 Export Data":
 
                 with col3:
                     st.download_button(
-                        label=f"📁 Devices ({len(data['devices']['rows'])})",
+                        label=f"📄 Devices ({len(data['devices']['rows'])})",
                         data=rows_to_csv_bytes(data['devices']['rows'], data['devices']['cols']),
                         file_name=f"devices_{today}.csv",
                         mime="text/csv",
@@ -1821,8 +1841,21 @@ elif mode == "📊 Export Data":
                     )
 
                 # Preview section
+                st.markdown("#### 👀 Preview Data")
+                with st.expander("👀 Preview Projects"):
+                    if data['projects']['rows']:
+                        st.dataframe(data['projects']['rows'], use_container_width=True)
+                    else:
+                        st.write("No projects found.")
+
                 with st.expander("👀 Preview Deployments"):
                     if data['deployments']['rows']:
                         st.dataframe(data['deployments']['rows'], use_container_width=True)
                     else:
                         st.write("No deployments found.")
+
+                with st.expander("👀 Preview Devices"):
+                    if data['devices']['rows']:
+                        st.dataframe(data['devices']['rows'], use_container_width=True)
+                    else:
+                        st.write("No devices found.")
