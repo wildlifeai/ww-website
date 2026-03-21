@@ -8,7 +8,13 @@ import zipfile
 import shutil
 import subprocess
 import tempfile
+import csv
+import io
+import time
+import struct
+import pandas as pd
 from pathlib import Path
+from datetime import date
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from gotrue.errors import AuthApiError
@@ -857,26 +863,42 @@ def render_login(supabase: Client) -> bool:
         st.success(f"✅ Logged in as:  \n**{user_email}**")
         
         # Diagnostic Info
-        with st.expander("🔍 Account Diagnostics"):
-            st.code(f"Streamlit User ID: {user_id}")
+        with st.expander("🔍 Account Overview"):
             try:
-                # 1. Verify what Supabase thinks the user is
-                supabase_user = supabase.auth.get_user()
-                if supabase_user and supabase_user.user:
-                    st.success(f"Supabase-side ID: {supabase_user.user.id}")
-                else:
-                    st.error("Supabase client is NOT authenticated!")
-                
-                # 2. Check for roles in DB
-                resp = supabase.table('user_roles').select('role, scope_type').eq('user_id', user_id).execute()
+                # 1. Check for roles in DB
+                resp = supabase.table('user_roles').select('role, scope_id, scope_type').eq('user_id', user_id).execute()
                 if resp.data:
-                    st.write("Roles found in DB:")
-                    for r in resp.data:
-                        st.write(f"- {r['role']} ({r['scope_type']})")
+                    def _display_roles(roles, table_name, title, unknown_text):
+                        if not roles:
+                            return
+                        ids = list(set([r['scope_id'] for r in roles]))
+                        name_resp = supabase.table(table_name).select('id, name').in_('id', ids).execute()
+                        name_dict = {item['id']: item['name'] for item in name_resp.data} if name_resp.data else {}
+                        st.markdown(f"##### {title}")
+                        for r in roles:
+                            st.write(f"- **{name_dict.get(r['scope_id'], unknown_text)}** - *{r['role']}*")
+
+                    org_roles = [r for r in resp.data if r['scope_type'] == 'organisation']
+                    proj_roles = [r for r in resp.data if r['scope_type'] == 'project']
+
+                    _display_roles(org_roles, 'organisations', '🏢 Organizations', 'Unknown Org')
+                    _display_roles(proj_roles, 'projects', '🌳 Projects', 'Unknown Project')
+                    
+                    if not org_roles and not proj_roles:
+                         st.info("No organization or project roles assigned.")
                 else:
                     st.warning("No roles found for this ID in DB.")
+                    
+                # 2. Technical IDs hidden by default
+                with st.expander("🛠️ Advanced Details", expanded=False):
+                    st.code(f"Streamlit User ID: {user_id}")
+                    supabase_user = supabase.auth.get_user()
+                    if supabase_user and supabase_user.user:
+                        st.success(f"Supabase-side ID: {supabase_user.user.id}")
+                    else:
+                        st.error("Supabase client is NOT authenticated!")
             except Exception as e:
-                st.error(f"Diagnostic Error: {e}")
+                st.error(f"Overview Error: {e}")
 
         if st.button("Logout", use_container_width=True):
             supabase.auth.sign_out()
@@ -1187,7 +1209,7 @@ st.divider()
 # "Download firmware is selected as default"
 mode = st.radio(
     "Select Action",
-    ["⬇️ Download Firmware/Models", "☁️ Upload/Convert Model"],
+    ["⬇️ Download Firmware/Models", "☁️ Upload/Convert Model", "📊 Export Data", "🔍 Analyze Images"],
     index=0,
     horizontal=True,
     label_visibility="collapsed" # Using custom headers instead or just letting the options speak
@@ -1196,8 +1218,12 @@ mode = st.radio(
 # Display specific description based on selection
 if mode == "⬇️ Download Firmware/Models":
     st.info("Get the latest firmware and AI models for your camera device.")
-else:
+elif mode == "☁️ Upload/Convert Model":
     st.info("Upload and convert your custom Edge Impulse models to the Wildlife Watcher cloud.")
+elif mode == "📊 Export Data":
+    st.info("Export your projects, deployments, and devices as CSV files for local image processing.")
+else:
+    st.info("Extract EXIF metadata from uploaded images and cross-reference with database records.")
 
 st.divider()
 
@@ -1677,3 +1703,262 @@ elif mode == "☁️ Upload/Convert Model":
                  else:
                      st.error("You must belong to an organization to upload.")
 
+
+# --- Journey 3: Export Data ---
+elif mode == "📊 Export Data":
+    st.markdown("### 📊 Export Project Data")
+    st.markdown(
+        "Download your projects, deployments, and devices as CSV files. "
+        "Use the **deployment ID** column to cross-reference with EXIF metadata in your camera trap images."
+    )
+
+    if not supabase:
+        st.error("Supabase not configured. Cannot export data.")
+    else:
+        # Check login
+        export_logged_in = bool(st.session_state.get('user'))
+
+        if not export_logged_in:
+            st.markdown("#### Authentication Required")
+            st.warning("Please login to export your data. You will only see data from projects you have access to.")
+            render_login(supabase)
+        else:
+            render_login(supabase)
+            st.divider()
+
+            def fetch_all_rows_for_export(table: str, select: str, order_by: str = "created_at") -> list:
+                """Fetch all rows with pagination."""
+                all_rows = []
+                offset = 0
+                page_size = 1000
+                while True:
+                    response = (
+                        supabase.table(table)
+                        .select(select)
+                        .is_("deleted_at", "null")
+                        .order(order_by, desc=True)
+                        .range(offset, offset + page_size - 1)
+                        .execute()
+                    )
+                    if not response.data:
+                        break
+                    all_rows.extend(response.data)
+                    if len(response.data) < page_size:
+                        break
+                    offset += page_size
+                return all_rows
+
+            def rows_to_csv_bytes(rows: list, columns: list) -> bytes:
+                """Convert rows to CSV bytes for Streamlit download."""
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(rows)
+                return output.getvalue().encode("utf-8")
+
+            today = date.today().isoformat()
+
+            if st.button("🔄 Fetch My Data", type="primary"):
+                with st.spinner("Fetching data from Supabase..."):
+                    try:
+                        # Projects
+                        project_cols = [
+                            "id", "name", "description", "organisation_id",
+                            "capture_method_id", "activity_detection_sensitivity_id",
+                            "timelapse_interval_seconds", "model_id",
+                            "is_active", "is_baited", "created_at", "updated_at",
+                        ]
+                        projects_data = fetch_all_rows_for_export("projects", ", ".join(project_cols))
+
+                        # Deployments
+                        deployment_cols = [
+                            "id", "name", "project_id", "device_id", "device_preparation_id",
+                            "deployment_start", "deployment_end", "deployment_status_id",
+                            "setup_by", "ended_by",
+                            "location_name", "location_description",
+                            "latitude", "longitude", "altitude", "accuracy",
+                            "camera_height",
+                            "capture_method_id", "activity_detection_sensitivity_id",
+                            "timelapse_interval_seconds",
+                            "start_deployment_comments", "end_deployment_comments",
+                            "created_at", "updated_at",
+                        ]
+                        deployments_data = fetch_all_rows_for_export(
+                            "deployments", ", ".join(deployment_cols), order_by="deployment_start"
+                        )
+
+                        # Devices
+                        device_cols = [
+                            "id", "name", "bluetooth_id", "device_eui",
+                            "organisation_id", "created_at", "updated_at",
+                        ]
+                        devices_data = fetch_all_rows_for_export("devices", ", ".join(device_cols))
+
+                        st.session_state['export_data'] = {
+                            'projects': {'rows': projects_data, 'cols': project_cols},
+                            'deployments': {'rows': deployments_data, 'cols': deployment_cols},
+                            'devices': {'rows': devices_data, 'cols': device_cols},
+                        }
+                    except Exception as e:
+                        st.error(f"Failed to fetch data: {e}")
+
+            if 'export_data' in st.session_state:
+                data = st.session_state['export_data']
+                st.success(
+                    f"Found **{len(data['projects']['rows'])}** projects, "
+                    f"**{len(data['deployments']['rows'])}** deployments, "
+                    f"**{len(data['devices']['rows'])}** devices."
+                )
+
+                st.markdown("#### 📥 Download Data")
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.download_button(
+                        label=f"📄 Projects ({len(data['projects']['rows'])})",
+                        data=rows_to_csv_bytes(data['projects']['rows'], data['projects']['cols']),
+                        file_name=f"projects_{today}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+                with col2:
+                    st.download_button(
+                        label=f"📄 Deployments ({len(data['deployments']['rows'])})",
+                        data=rows_to_csv_bytes(data['deployments']['rows'], data['deployments']['cols']),
+                        file_name=f"deployments_{today}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+                with col3:
+                    st.download_button(
+                        label=f"📄 Devices ({len(data['devices']['rows'])})",
+                        data=rows_to_csv_bytes(data['devices']['rows'], data['devices']['cols']),
+                        file_name=f"devices_{today}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+                # Preview section
+                st.markdown("#### 👀 Preview Data")
+                with st.expander("👀 Preview Projects"):
+                    if data['projects']['rows']:
+                        st.dataframe(data['projects']['rows'], use_container_width=True)
+                    else:
+                        st.write("No projects found.")
+
+                with st.expander("👀 Preview Deployments"):
+                    if data['deployments']['rows']:
+                        st.dataframe(data['deployments']['rows'], use_container_width=True)
+                    else:
+                        st.write("No deployments found.")
+
+                with st.expander("👀 Preview Devices"):
+                    if data['devices']['rows']:
+                        st.dataframe(data['devices']['rows'], use_container_width=True)
+                    else:
+                        st.write("No devices found.")
+
+# --- Journey 4: Analyze Images ---
+elif mode == "🔍 Analyze Images":
+    st.markdown("### 🔍 Image EXIF Analysis")
+    st.markdown("Upload images from your camera to extract metadata and cross-reference deployments.")
+    
+    uploaded_files = st.file_uploader("Drop images here", accept_multiple_files=True, type=["jpg", "jpeg"])
+    
+    if uploaded_files:
+        st.info(f"Processing {len(uploaded_files)} images...")
+        import exif_parser
+        
+        results = []
+        for file in uploaded_files:
+            try:
+                data = exif_parser.extract_exif_from_bytes(file.read())
+                data['filename'] = file.name
+                results.append(data)
+            except Exception as e:
+                st.warning(f"Failed to parse {file.name}: {e}")
+                
+        if results:
+            df = pd.DataFrame(results)
+            
+            # Summary Table
+            st.markdown("#### 📊 Summary")
+            total_pics = len(df)
+            first_date = df['date'].min() if 'date' in df.columns else "Unknown"
+            last_date = df['date'].max() if 'date' in df.columns else "Unknown"
+            
+            deps = [d for d in df['deployment_id'].unique() if d is not None] if 'deployment_id' in df.columns else []
+            has_coords = 'latitude' in df.columns and 'longitude' in df.columns
+            if has_coords:
+                gps_locs = list(set([f"{lat}, {lon}" for lat, lon in zip(df['latitude'], df['longitude']) if pd.notnull(lat)]))
+            else:
+                gps_locs = []
+            
+            st.info(f"📅 **Date Range**: `{first_date}` &nbsp;—&nbsp; `{last_date}`")
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Pictures", total_pics)
+            c2.metric("Unique Deployments", len(deps))
+            c3.metric("Unique Locations", len(gps_locs))
+            
+            with st.expander("👀 View Raw Data Table"):
+                st.dataframe(df, use_container_width=True)
+                
+            # Supabase Enrichment
+            st.markdown("#### 🔗 Database Cross-Reference")
+            if not supabase:
+                 st.warning("Supabase not configured.")
+            else:
+                 # Check login
+                 if not is_logged_in:
+                      st.markdown("Please **Login** to fetch deployment details from the database.")
+                      render_login(supabase)
+                 else:
+                      if len(deps) > 0:
+                          st.success("Authenticated! Fetching deployment details...")
+                          for dep_id in deps:
+                               try:
+                                   found = False
+                                   
+                                   # 1. Try direct deployment ID match
+                                   dep_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').eq('id', dep_id).execute()
+                                   if dep_resp.data:
+                                       found = True
+                                       d = dep_resp.data[0]
+                                       proj_name = d.get('projects', {}).get('name', 'Unknown') if d.get('projects') else "Unknown"
+                                       device_data = d.get('devices', {}) or {}
+                                       
+                                       with st.expander(f"🟢 Deployment: {proj_name} - {d.get('location_name', 'Unnamed Location')}", expanded=True):
+                                            st.write(f"**Project**: {proj_name}")
+                                            st.write(f"**Device**: {device_data.get('name', 'Unknown')} (MAC: {device_data.get('bluetooth_id', 'N/A')})")
+                                            st.write(f"**Location**: {d.get('location_name', 'Unnamed')} (Lat: {d.get('latitude')}, Lon: {d.get('longitude')})")
+                                            st.write(f"**Duration**: {d.get('deployment_start')} to {d.get('deployment_end') or 'Ongoing'}")
+                                            st.write(f"**Setup By User ID**: {d.get('setup_by')}")
+                                            st.caption(f"Matched by: Deployment ID = {dep_id}")
+                                   
+                                   # 2. Try device_preparation_id match (Prepare & Test flow stores preparation.id in EXIF)
+                                   if not found:
+                                       prep_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').eq('device_preparation_id', dep_id).execute()
+                                       if prep_resp.data:
+                                           found = True
+                                           d = prep_resp.data[0]
+                                           proj_name = d.get('projects', {}).get('name', 'Unknown') if d.get('projects') else "Unknown"
+                                           device_data = d.get('devices', {}) or {}
+                                           
+                                           with st.expander(f"🟡 Deployment (via Preparation): {proj_name} - {d.get('location_name', 'Unnamed Location')}", expanded=True):
+                                                st.info("ℹ️ This image's EXIF contains a **Device Preparation ID** (from the Prepare & Test flow), which was linked to this deployment.")
+                                                st.write(f"**Project**: {proj_name}")
+                                                st.write(f"**Device**: {device_data.get('name', 'Unknown')} (MAC: {device_data.get('bluetooth_id', 'N/A')})")
+                                                st.write(f"**Location**: {d.get('location_name', 'Unnamed')} (Lat: {d.get('latitude')}, Lon: {d.get('longitude')})")
+                                                st.write(f"**Duration**: {d.get('deployment_start')} to {d.get('deployment_end') or 'Ongoing'}")
+                                                st.write(f"**Setup By User ID**: {d.get('setup_by')}")
+                                                st.caption(f"Matched by: device_preparation_id = {dep_id} → Deployment ID = {d.get('id')}")
+                                   
+                                   if not found:
+                                       st.warning(f"ID `{dep_id}` not found in Deployments or Preparations (or no access). This device may have been prepared but not yet deployed/synced.")
+                               except Exception as e:
+                                   st.error(f"Error checking DB for {dep_id}: {str(e)}")
+                      else:
+                          st.info("No deployment IDs extracted from images to cross-reference.")

@@ -16,3 +16,11 @@ env/
 
 # Streamlit
 .streamlit/
+
+# Agent files
+.agents/
+.cursorrules
+.windsurfrules
+
+# Exported data
+exports/
