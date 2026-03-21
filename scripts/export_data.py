@@ -11,9 +11,9 @@ Requires SUPABASE_URL and SUPABASE_ANON_KEY in .env (see .env.example).
 Authenticates with your email/password and exports only data visible to you (RLS-scoped).
 
 Output files are written to exports/ with timestamped names:
-    exports/projects_2026-03-22.csv
-    exports/deployments_2026-03-22.csv
-    exports/devices_2026-03-22.csv
+    exports/projects_YYYY-MM-DD.csv
+    exports/deployments_YYYY-MM-DD.csv
+    exports/devices_YYYY-MM-DD.csv
 """
 
 import csv
