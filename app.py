@@ -8,7 +8,10 @@ import zipfile
 import shutil
 import subprocess
 import tempfile
+import csv
+import io
 from pathlib import Path
+from datetime import date
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from gotrue.errors import AuthApiError
@@ -1187,7 +1190,7 @@ st.divider()
 # "Download firmware is selected as default"
 mode = st.radio(
     "Select Action",
-    ["⬇️ Download Firmware/Models", "☁️ Upload/Convert Model"],
+    ["⬇️ Download Firmware/Models", "☁️ Upload/Convert Model", "📊 Export Data"],
     index=0,
     horizontal=True,
     label_visibility="collapsed" # Using custom headers instead or just letting the options speak
@@ -1196,8 +1199,10 @@ mode = st.radio(
 # Display specific description based on selection
 if mode == "⬇️ Download Firmware/Models":
     st.info("Get the latest firmware and AI models for your camera device.")
-else:
+elif mode == "☁️ Upload/Convert Model":
     st.info("Upload and convert your custom Edge Impulse models to the Wildlife Watcher cloud.")
+else:
+    st.info("Export your projects, deployments, and devices as CSV files for local image processing.")
 
 st.divider()
 
@@ -1677,3 +1682,147 @@ elif mode == "☁️ Upload/Convert Model":
                  else:
                      st.error("You must belong to an organization to upload.")
 
+
+# --- Journey 3: Export Data ---
+elif mode == "📊 Export Data":
+    st.markdown("### 📊 Export Project Data")
+    st.markdown(
+        "Download your projects, deployments, and devices as CSV files. "
+        "Use the **deployment ID** column to cross-reference with EXIF metadata in your camera trap images."
+    )
+
+    if not supabase:
+        st.error("Supabase not configured. Cannot export data.")
+    else:
+        # Check login
+        export_logged_in = False
+        if 'user' in st.session_state and st.session_state.get('user'):
+            export_logged_in = True
+
+        if not export_logged_in:
+            st.markdown("#### Authentication Required")
+            st.warning("Please login to export your data. You will only see data from projects you have access to.")
+            render_login(supabase)
+        else:
+            render_login(supabase)
+            st.divider()
+
+            def fetch_all_rows_for_export(table: str, select: str, order_by: str = "created_at") -> list:
+                """Fetch all rows with pagination."""
+                all_rows = []
+                offset = 0
+                page_size = 1000
+                while True:
+                    response = (
+                        supabase.table(table)
+                        .select(select)
+                        .is_("deleted_at", "null")
+                        .order(order_by, desc=True)
+                        .range(offset, offset + page_size - 1)
+                        .execute()
+                    )
+                    if not response.data:
+                        break
+                    all_rows.extend(response.data)
+                    if len(response.data) < page_size:
+                        break
+                    offset += page_size
+                return all_rows
+
+            def rows_to_csv_bytes(rows: list, columns: list) -> bytes:
+                """Convert rows to CSV bytes for Streamlit download."""
+                output = io.StringIO()
+                writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(rows)
+                return output.getvalue().encode("utf-8")
+
+            today = date.today().isoformat()
+
+            if st.button("🔄 Fetch My Data", type="primary"):
+                with st.spinner("Fetching data from Supabase..."):
+                    try:
+                        # Projects
+                        project_cols = [
+                            "id", "name", "description", "organisation_id",
+                            "capture_method_id", "activity_detection_sensitivity_id",
+                            "timelapse_interval_seconds", "model_id",
+                            "is_active", "is_baited", "created_at", "updated_at",
+                        ]
+                        projects_data = fetch_all_rows_for_export("projects", ", ".join(project_cols))
+
+                        # Deployments
+                        deployment_cols = [
+                            "id", "name", "project_id", "device_id", "device_preparation_id",
+                            "deployment_start", "deployment_end", "deployment_status_id",
+                            "setup_by", "ended_by",
+                            "location_name", "location_description",
+                            "latitude", "longitude", "altitude", "accuracy",
+                            "camera_height",
+                            "capture_method_id", "activity_detection_sensitivity_id",
+                            "timelapse_interval_seconds",
+                            "start_deployment_comments", "end_deployment_comments",
+                            "created_at", "updated_at",
+                        ]
+                        deployments_data = fetch_all_rows_for_export(
+                            "deployments", ", ".join(deployment_cols), order_by="deployment_start"
+                        )
+
+                        # Devices
+                        device_cols = [
+                            "id", "name", "bluetooth_id", "device_eui",
+                            "organisation_id", "created_at", "updated_at",
+                        ]
+                        devices_data = fetch_all_rows_for_export("devices", ", ".join(device_cols))
+
+                        st.session_state['export_data'] = {
+                            'projects': {'rows': projects_data, 'cols': project_cols},
+                            'deployments': {'rows': deployments_data, 'cols': deployment_cols},
+                            'devices': {'rows': devices_data, 'cols': device_cols},
+                        }
+                    except Exception as e:
+                        st.error(f"Failed to fetch data: {e}")
+
+            if 'export_data' in st.session_state:
+                data = st.session_state['export_data']
+                st.success(
+                    f"Found **{len(data['projects']['rows'])}** projects, "
+                    f"**{len(data['deployments']['rows'])}** deployments, "
+                    f"**{len(data['devices']['rows'])}** devices."
+                )
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.download_button(
+                        label=f"📁 Projects ({len(data['projects']['rows'])})",
+                        data=rows_to_csv_bytes(data['projects']['rows'], data['projects']['cols']),
+                        file_name=f"projects_{today}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+                with col2:
+                    st.download_button(
+                        label=f"📁 Deployments ({len(data['deployments']['rows'])})",
+                        data=rows_to_csv_bytes(data['deployments']['rows'], data['deployments']['cols']),
+                        file_name=f"deployments_{today}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+                with col3:
+                    st.download_button(
+                        label=f"📁 Devices ({len(data['devices']['rows'])})",
+                        data=rows_to_csv_bytes(data['devices']['rows'], data['devices']['cols']),
+                        file_name=f"devices_{today}.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                    )
+
+                # Preview section
+                with st.expander("👀 Preview Deployments"):
+                    if data['deployments']['rows']:
+                        st.dataframe(data['deployments']['rows'], use_container_width=True)
+                    else:
+                        st.write("No deployments found.")
