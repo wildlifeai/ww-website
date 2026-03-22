@@ -1906,6 +1906,28 @@ elif mode == "🔍 Analyze Images":
                               deps_by_id = {d['id']: d for d in deps_by_id_resp.data} if deps_by_id_resp.data else {}
                               deps_by_prep_id = {d['device_preparation_id']: d for d in deps_by_prep_id_resp.data} if deps_by_prep_id_resp.data else {}
 
+                              def render_deployment_details(d_match, match_type, dep_id):
+                                  proj_name = (d_match.get('projects') or {}).get('name', 'Unknown')
+                                  device_data = d_match.get('devices', {}) or {}
+                                  
+                                  is_id_match = (match_type == 'id')
+                                  title_prefix = "🟢 Deployment:" if is_id_match else "🟡 Deployment (via Preparation):"
+                                  
+                                  with st.expander(f"{title_prefix} {proj_name} - {d_match.get('location_name', 'Unnamed Location')}", expanded=True):
+                                      if not is_id_match:
+                                          st.info("ℹ️ This image's EXIF contains a **Device Preparation ID** (from the Prepare & Test flow), which was linked to this deployment.")
+                                      
+                                      st.write(f"**Project**: {proj_name}")
+                                      st.write(f"**Device**: {device_data.get('name', 'Unknown')} (MAC: {device_data.get('bluetooth_id', 'N/A')})")
+                                      st.write(f"**Location**: {d_match.get('location_name', 'Unnamed')} (Lat: {d_match.get('latitude')}, Lon: {d_match.get('longitude')})")
+                                      st.write(f"**Duration**: {d_match.get('deployment_start')} to {d_match.get('deployment_end') or 'Ongoing'}")
+                                      st.write(f"**Setup By User ID**: {d_match.get('setup_by')}")
+                                      
+                                      if is_id_match:
+                                          st.caption(f"Matched by: Deployment ID = {dep_id}")
+                                      else:
+                                          st.caption(f"Matched by: device_preparation_id = {dep_id} → Deployment ID = {d_match.get('id')}")
+
                               for dep_id in dep_ids_to_fetch:
                                   d = None
                                   match_type = None
@@ -1918,29 +1940,7 @@ elif mode == "🔍 Analyze Images":
                                       match_type = 'prep_id'
 
                                   if d:
-                                      def render_deployment_details(d_match, match_type):
-                                          proj_name = d_match.get('projects', {}).get('name', 'Unknown') if d_match.get('projects') else "Unknown"
-                                          device_data = d_match.get('devices', {}) or {}
-                                          
-                                          is_id_match = (match_type == 'id')
-                                          title_prefix = "🟢 Deployment:" if is_id_match else "🟡 Deployment (via Preparation):"
-                                          
-                                          with st.expander(f"{title_prefix} {proj_name} - {d_match.get('location_name', 'Unnamed Location')}", expanded=True):
-                                              if not is_id_match:
-                                                  st.info("ℹ️ This image's EXIF contains a **Device Preparation ID** (from the Prepare & Test flow), which was linked to this deployment.")
-                                              
-                                              st.write(f"**Project**: {proj_name}")
-                                              st.write(f"**Device**: {device_data.get('name', 'Unknown')} (MAC: {device_data.get('bluetooth_id', 'N/A')})")
-                                              st.write(f"**Location**: {d_match.get('location_name', 'Unnamed')} (Lat: {d_match.get('latitude')}, Lon: {d_match.get('longitude')})")
-                                              st.write(f"**Duration**: {d_match.get('deployment_start')} to {d_match.get('deployment_end') or 'Ongoing'}")
-                                              st.write(f"**Setup By User ID**: {d_match.get('setup_by')}")
-                                              
-                                              if is_id_match:
-                                                  st.caption(f"Matched by: Deployment ID = {dep_id}")
-                                              else:
-                                                  st.caption(f"Matched by: device_preparation_id = {dep_id} → Deployment ID = {d_match.get('id')}")
-
-                                      render_deployment_details(d, match_type)
+                                      render_deployment_details(d, match_type, dep_id)
                                   else:
                                       st.warning(f"ID `{dep_id}` not found in Deployments or Preparations (or no access). This device may have been prepared but not yet deployed/synced.")
                           except Exception as e:
