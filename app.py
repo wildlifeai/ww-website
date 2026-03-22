@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 import json
 
 import urllib.request
+from db_utils import fetch_all_rows
 
 # Load environment variables
 load_dotenv()
@@ -1726,28 +1727,6 @@ elif mode == "📊 Export Data":
             render_login(supabase)
             st.divider()
 
-            def fetch_all_rows_for_export(table: str, select: str, order_by: str = "created_at") -> list:
-                """Fetch all rows with pagination."""
-                all_rows = []
-                offset = 0
-                page_size = 1000
-                while True:
-                    response = (
-                        supabase.table(table)
-                        .select(select)
-                        .is_("deleted_at", "null")
-                        .order(order_by, desc=True)
-                        .range(offset, offset + page_size - 1)
-                        .execute()
-                    )
-                    if not response.data:
-                        break
-                    all_rows.extend(response.data)
-                    if len(response.data) < page_size:
-                        break
-                    offset += page_size
-                return all_rows
-
             def rows_to_csv_bytes(rows: list, columns: list) -> bytes:
                 """Convert rows to CSV bytes for Streamlit download."""
                 output = io.StringIO()
@@ -1768,7 +1747,7 @@ elif mode == "📊 Export Data":
                             "timelapse_interval_seconds", "model_id",
                             "is_active", "is_baited", "created_at", "updated_at",
                         ]
-                        projects_data = fetch_all_rows_for_export("projects", ", ".join(project_cols))
+                        projects_data = fetch_all_rows(supabase, "projects", ", ".join(project_cols))
 
                         # Deployments
                         deployment_cols = [
@@ -1783,8 +1762,8 @@ elif mode == "📊 Export Data":
                             "start_deployment_comments", "end_deployment_comments",
                             "created_at", "updated_at",
                         ]
-                        deployments_data = fetch_all_rows_for_export(
-                            "deployments", ", ".join(deployment_cols), order_by="deployment_start"
+                        deployments_data = fetch_all_rows(
+                            supabase, "deployments", ", ".join(deployment_cols), order_by="deployment_start"
                         )
 
                         # Devices
@@ -1792,7 +1771,7 @@ elif mode == "📊 Export Data":
                             "id", "name", "bluetooth_id", "device_eui",
                             "organisation_id", "created_at", "updated_at",
                         ]
-                        devices_data = fetch_all_rows_for_export("devices", ", ".join(device_cols))
+                        devices_data = fetch_all_rows(supabase, "devices", ", ".join(device_cols))
 
                         st.session_state['export_data'] = {
                             'projects': {'rows': projects_data, 'cols': project_cols},
@@ -1918,47 +1897,50 @@ elif mode == "🔍 Analyze Images":
                  else:
                       if len(deps) > 0:
                           st.success("Authenticated! Fetching deployment details...")
-                          for dep_id in deps:
-                               try:
-                                   found = False
-                                   
-                                   # 1. Try direct deployment ID match
-                                   dep_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').eq('id', dep_id).execute()
-                                   if dep_resp.data:
-                                       found = True
-                                       d = dep_resp.data[0]
-                                       proj_name = d.get('projects', {}).get('name', 'Unknown') if d.get('projects') else "Unknown"
-                                       device_data = d.get('devices', {}) or {}
-                                       
-                                       with st.expander(f"🟢 Deployment: {proj_name} - {d.get('location_name', 'Unnamed Location')}", expanded=True):
-                                            st.write(f"**Project**: {proj_name}")
-                                            st.write(f"**Device**: {device_data.get('name', 'Unknown')} (MAC: {device_data.get('bluetooth_id', 'N/A')})")
-                                            st.write(f"**Location**: {d.get('location_name', 'Unnamed')} (Lat: {d.get('latitude')}, Lon: {d.get('longitude')})")
-                                            st.write(f"**Duration**: {d.get('deployment_start')} to {d.get('deployment_end') or 'Ongoing'}")
-                                            st.write(f"**Setup By User ID**: {d.get('setup_by')}")
-                                            st.caption(f"Matched by: Deployment ID = {dep_id}")
-                                   
-                                   # 2. Try device_preparation_id match (Prepare & Test flow stores preparation.id in EXIF)
-                                   if not found:
-                                       prep_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').eq('device_preparation_id', dep_id).execute()
-                                       if prep_resp.data:
-                                           found = True
-                                           d = prep_resp.data[0]
-                                           proj_name = d.get('projects', {}).get('name', 'Unknown') if d.get('projects') else "Unknown"
-                                           device_data = d.get('devices', {}) or {}
-                                           
-                                           with st.expander(f"🟡 Deployment (via Preparation): {proj_name} - {d.get('location_name', 'Unnamed Location')}", expanded=True):
-                                                st.info("ℹ️ This image's EXIF contains a **Device Preparation ID** (from the Prepare & Test flow), which was linked to this deployment.")
-                                                st.write(f"**Project**: {proj_name}")
-                                                st.write(f"**Device**: {device_data.get('name', 'Unknown')} (MAC: {device_data.get('bluetooth_id', 'N/A')})")
-                                                st.write(f"**Location**: {d.get('location_name', 'Unnamed')} (Lat: {d.get('latitude')}, Lon: {d.get('longitude')})")
-                                                st.write(f"**Duration**: {d.get('deployment_start')} to {d.get('deployment_end') or 'Ongoing'}")
-                                                st.write(f"**Setup By User ID**: {d.get('setup_by')}")
-                                                st.caption(f"Matched by: device_preparation_id = {dep_id} → Deployment ID = {d.get('id')}")
-                                   
-                                   if not found:
-                                       st.warning(f"ID `{dep_id}` not found in Deployments or Preparations (or no access). This device may have been prepared but not yet deployed/synced.")
-                               except Exception as e:
-                                   st.error(f"Error checking DB for {dep_id}: {str(e)}")
+                          try:
+                              # Fetch all deployments matching by ID or preparation ID in bulk
+                              dep_ids_to_fetch = list(set(deps))
+                              deps_by_id_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').in_('id', dep_ids_to_fetch).execute()
+                              deps_by_prep_id_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').in_('device_preparation_id', dep_ids_to_fetch).execute()
+
+                              deps_by_id = {d['id']: d for d in deps_by_id_resp.data} if deps_by_id_resp.data else {}
+                              deps_by_prep_id = {d['device_preparation_id']: d for d in deps_by_prep_id_resp.data} if deps_by_prep_id_resp.data else {}
+
+                              for dep_id in dep_ids_to_fetch:
+                                  d = None
+                                  match_type = None
+
+                                  if dep_id in deps_by_id:
+                                      d = deps_by_id[dep_id]
+                                      match_type = 'id'
+                                  elif dep_id in deps_by_prep_id:
+                                      d = deps_by_prep_id[dep_id]
+                                      match_type = 'prep_id'
+
+                                  if d:
+                                      proj_name = d.get('projects', {}).get('name', 'Unknown') if d.get('projects') else "Unknown"
+                                      device_data = d.get('devices', {}) or {}
+                                      
+                                      if match_type == 'id':
+                                          with st.expander(f"🟢 Deployment: {proj_name} - {d.get('location_name', 'Unnamed Location')}", expanded=True):
+                                              st.write(f"**Project**: {proj_name}")
+                                              st.write(f"**Device**: {device_data.get('name', 'Unknown')} (MAC: {device_data.get('bluetooth_id', 'N/A')})")
+                                              st.write(f"**Location**: {d.get('location_name', 'Unnamed')} (Lat: {d.get('latitude')}, Lon: {d.get('longitude')})")
+                                              st.write(f"**Duration**: {d.get('deployment_start')} to {d.get('deployment_end') or 'Ongoing'}")
+                                              st.write(f"**Setup By User ID**: {d.get('setup_by')}")
+                                              st.caption(f"Matched by: Deployment ID = {dep_id}")
+                                      elif match_type == 'prep_id':
+                                          with st.expander(f"🟡 Deployment (via Preparation): {proj_name} - {d.get('location_name', 'Unnamed Location')}", expanded=True):
+                                              st.info("ℹ️ This image's EXIF contains a **Device Preparation ID** (from the Prepare & Test flow), which was linked to this deployment.")
+                                              st.write(f"**Project**: {proj_name}")
+                                              st.write(f"**Device**: {device_data.get('name', 'Unknown')} (MAC: {device_data.get('bluetooth_id', 'N/A')})")
+                                              st.write(f"**Location**: {d.get('location_name', 'Unnamed')} (Lat: {d.get('latitude')}, Lon: {d.get('longitude')})")
+                                              st.write(f"**Duration**: {d.get('deployment_start')} to {d.get('deployment_end') or 'Ongoing'}")
+                                              st.write(f"**Setup By User ID**: {d.get('setup_by')}")
+                                              st.caption(f"Matched by: device_preparation_id = {dep_id} → Deployment ID = {d.get('id')}")
+                                  else:
+                                      st.warning(f"ID `{dep_id}` not found in Deployments or Preparations (or no access). This device may have been prepared but not yet deployed/synced.")
+                          except Exception as e:
+                              st.error(f"Error checking DB for deployments: {str(e)}")
                       else:
                           st.info("No deployment IDs extracted from images to cross-reference.")

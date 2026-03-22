@@ -1,5 +1,6 @@
 import struct
 import io
+import re
 
 EXIF_TAGS = {
     0x0132: "DateTime",
@@ -84,10 +85,7 @@ def parse_ifd(fp, base_offset, ifd_offset, endian, parsed_data, check_next_ifd=T
 
         if tag_name:
             fmt_val = format_value(value, type_id)
-            if "_" in tag_name: # Handle lists for rational coordinates
-                 parsed_data[tag_name] = fmt_val
-            else:
-                 parsed_data[tag_name] = fmt_val
+            parsed_data[tag_name] = fmt_val
 
         # Auto-follow pointer tags
         if tag == 0x8825:  # GPSInfoIFDPointer
@@ -175,7 +173,6 @@ def extract_exif_from_bytes(file_bytes):
          
     # Clean deployment_id (uuid format check fallback)
     if deployment_id:
-        import re
         match = re.search(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', str(deployment_id).lower())
         if match:
              deployment_id = match.group(0)

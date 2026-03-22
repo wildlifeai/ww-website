@@ -23,6 +23,12 @@ import getpass
 from datetime import date
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Add the project root to sys.path so we can import shared modules
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root))
+
+from db_utils import fetch_all_rows
 from supabase import create_client
 
 # Resolve paths relative to repo root (parent of scripts/)
@@ -60,35 +66,6 @@ def init_supabase():
         sys.exit(1)
 
     return client
-
-
-def fetch_all_rows(client, table: str, select: str, order_by: str = "created_at"):
-    """Fetch all rows from a table, handling Supabase's 1000-row default limit."""
-    all_rows = []
-    offset = 0
-    page_size = 1000
-
-    while True:
-        response = (
-            client.table(table)
-            .select(select)
-            .is_("deleted_at", "null")
-            .order(order_by, desc=True)
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-
-        if not response.data:
-            break
-
-        all_rows.extend(response.data)
-
-        if len(response.data) < page_size:
-            break  # Last page
-
-        offset += page_size
-
-    return all_rows
 
 
 def write_csv(rows: list, filepath: Path, columns: list):
