@@ -1751,7 +1751,7 @@ elif mode == "📊 Export Data":
 
                         # Deployments
                         deployment_cols = [
-                            "id", "name", "project_id", "device_id", "device_preparation_id",
+                            "id", "name", "project_id", "device_id", "device_preparation_id_deprecated",
                             "deployment_start", "deployment_end", "deployment_status_id",
                             "setup_by", "ended_by",
                             "location_name", "location_description",
@@ -1901,10 +1901,10 @@ elif mode == "🔍 Analyze Images":
                               # Fetch all deployments matching by ID or preparation ID in bulk
                               dep_ids_to_fetch = list(set(deps))
                               deps_by_id_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').in_('id', dep_ids_to_fetch).execute()
-                              deps_by_prep_id_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').in_('device_preparation_id', dep_ids_to_fetch).execute()
+                              deps_by_prep_id_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').in_('device_preparation_id_deprecated', dep_ids_to_fetch).execute()
 
                               deps_by_id = {d['id']: d for d in deps_by_id_resp.data} if deps_by_id_resp.data else {}
-                              deps_by_prep_id = {d['device_preparation_id']: d for d in deps_by_prep_id_resp.data} if deps_by_prep_id_resp.data else {}
+                              deps_by_prep_id = {d['device_preparation_id_deprecated']: d for d in deps_by_prep_id_resp.data} if deps_by_prep_id_resp.data else {}
 
                               def render_deployment_details(d_match, match_type, dep_id):
                                   proj_name = (d_match.get('projects') or {}).get('name', 'Unknown')
@@ -1926,7 +1926,7 @@ elif mode == "🔍 Analyze Images":
                                       if is_id_match:
                                           st.caption(f"Matched by: Deployment ID = {dep_id}")
                                       else:
-                                          st.caption(f"Matched by: device_preparation_id = {dep_id} → Deployment ID = {d_match.get('id')}")
+                                          st.caption(f"Matched by: device_preparation_id_deprecated = {dep_id} → Deployment ID = {d_match.get('id')}")
 
                               for dep_id in dep_ids_to_fetch:
                                   d = None
