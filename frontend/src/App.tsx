@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
 import { useAuth } from './hooks/useAuth'
+import { ToolkitPage } from './pages/ToolkitPage'
 import './styles/index.css'
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -19,7 +20,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           <Link to="/" style={{ textDecoration: 'none', color: 'var(--text-color)', fontWeight: 'bold', fontSize: '1.25rem' }}>
             Wildlife Watcher V2
           </Link>
-          <nav style={{ display: 'flex', gap: '1rem' }}>
+          <nav style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <Link to="/toolkit" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>Toolkit</Link>
             {user ? (
               <span style={{ fontSize: '0.875rem', opacity: 0.8 }}>{user.email}</span>
@@ -60,29 +61,9 @@ function LandingPage() {
       <p style={{ fontSize: '1.25rem', opacity: 0.8, marginBottom: '2rem' }}>
         Deploy robust camera trap models, monitor real-time telemetry via LoRaWAN, and generate firmware config—all in one place.
       </p>
-      <Link to="/toolkit" className="btn" style={{ fontSize: '1.125rem', padding: '0.75rem 2rem' }}>
+      <Link to="/toolkit" className="btn" style={{ fontSize: '1.125rem', padding: '0.75rem 2rem', textDecoration: 'none' }}>
         Open Toolkit
       </Link>
-    </div>
-  )
-}
-
-function ToolkitDummy() {
-  return (
-    <div>
-      <h2>Toolkit</h2>
-      <p>The Toolkit interface will go here (Download Firmware, Upload Model, EXIF Parser).</p>
-      
-      <div className="card" style={{ marginTop: '2rem' }}>
-        <h3>Scaffolding Status</h3>
-        <ul style={{ paddingLeft: '1.5rem', marginTop: '1rem' }}>
-          <li>✅ React + Vite + TypeScript</li>
-          <li>✅ TanStack Query setup</li>
-          <li>✅ React Router setup</li>
-          <li>✅ Supabase + useAuth Hook</li>
-          <li>✅ Global CSS Variables</li>
-        </ul>
-      </div>
     </div>
   )
 }
@@ -94,7 +75,7 @@ export default function App() {
         <Layout>
           <Routes>
             <Route path="/" element={<LandingPage />} />
-            <Route path="/toolkit" element={<ToolkitDummy />} />
+            <Route path="/toolkit" element={<ToolkitPage />} />
           </Routes>
         </Layout>
       </BrowserRouter>
