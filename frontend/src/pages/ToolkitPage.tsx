@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import { DownloadFirmware } from '../components/toolkit/DownloadFirmware'
 import { UploadModel } from '../components/toolkit/UploadModel'
-import { AnalyzeImages } from '../components/toolkit/AnalyzeImages'
+import { AnalyseImages } from '../components/toolkit/AnalyseImages'
 import { GenerateManifest } from '../components/toolkit/GenerateManifest'
 
 const TABS = [
   { id: 'download', label: '📥 Download Model', component: DownloadFirmware },
   { id: 'upload', label: '📤 Upload Model', component: UploadModel },
   { id: 'manifest', label: '⚙️ Generate Manifest', component: GenerateManifest },
-  { id: 'analyze', label: '🖼️ Analyze Images', component: AnalyzeImages },
+  { id: 'analyse', label: '🖼️ Analyse Images', component: AnalyseImages },
 ] as const
 
 export function ToolkitPage() {

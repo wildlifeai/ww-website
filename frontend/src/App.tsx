@@ -7,7 +7,7 @@ import { ToolkitPage } from './pages/ToolkitPage'
 import './styles/index.css'
 
 function Layout({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth()
+  const { user, login, logout } = useAuth()
 
   return (
     <>
@@ -18,14 +18,17 @@ function Layout({ children }: { children: React.ReactNode }) {
       }}>
         <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Link to="/" style={{ textDecoration: 'none', color: 'var(--text-color)', fontWeight: 'bold', fontSize: '1.25rem' }}>
-            Wildlife Watcher V2
+            Wildlife Watcher Web
           </Link>
           <nav style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
             <Link to="/toolkit" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>Toolkit</Link>
             {user ? (
-              <span style={{ fontSize: '0.875rem', opacity: 0.8 }}>{user.email}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.875rem', opacity: 0.8 }}>{user.email}</span>
+                <button className="btn" onClick={logout} style={{ padding: '0.25rem 0.75rem', backgroundColor: 'transparent', border: '1px solid var(--border)' }}>Logout</button>
+              </div>
             ) : (
-              <button className="btn" style={{ padding: '0.25rem 0.75rem' }}>Login</button>
+              <button className="btn" onClick={login} style={{ padding: '0.25rem 0.75rem' }}>Login</button>
             )}
           </nav>
         </div>

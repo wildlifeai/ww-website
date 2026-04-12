@@ -12,12 +12,12 @@ interface ExifResult {
   matched_deployment: string | null
 }
 
-export function AnalyzeImages() {
+export function AnalyseImages() {
   const [files, setFiles] = useState<File[]>([])
   const [results, setResults] = useState<ExifResult[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const analyzeMutation = useMutation({
+  const analyseMutation = useMutation({
     mutationFn: async (imageFiles: File[]) => {
       const formData = new FormData()
       for (const f of imageFiles) {
@@ -41,7 +41,7 @@ export function AnalyzeImages() {
 
   return (
     <div>
-      <h3 style={{ marginBottom: '0.5rem' }}>Analyze Camera Trap Images</h3>
+      <h3 style={{ marginBottom: '0.5rem' }}>Analyse Camera Trap Images</h3>
       <p style={{ opacity: 0.7, marginBottom: '1.5rem' }}>
         Upload JPEG images from your Wildlife Watcher device. The EXIF data will be
         parsed to extract deployment IDs, GPS coordinates, timestamps, and matched
@@ -71,7 +71,7 @@ export function AnalyzeImages() {
         ) : (
           <div>
             <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🖼️</div>
-            <p>Select JPEG images to analyze</p>
+            <p>Select JPEG images to analyse</p>
           </div>
         )}
       </div>
@@ -80,18 +80,18 @@ export function AnalyzeImages() {
         <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
           <button
             className="btn"
-            disabled={analyzeMutation.isPending}
-            onClick={() => analyzeMutation.mutate(files)}
+            disabled={analyseMutation.isPending}
+            onClick={() => analyseMutation.mutate(files)}
             style={{ padding: '0.75rem 2rem' }}
           >
-            {analyzeMutation.isPending ? 'Analyzing…' : `Analyze ${files.length} Image${files.length > 1 ? 's' : ''}`}
+            {analyseMutation.isPending ? 'Analysing…' : `Analyse ${files.length} Image${files.length > 1 ? 's' : ''}`}
           </button>
         </div>
       )}
 
-      {analyzeMutation.isError && (
+      {analyseMutation.isError && (
         <p style={{ color: 'var(--error)', marginTop: '1rem', textAlign: 'center' }}>
-          {(analyzeMutation.error as Error).message}
+          {(analyseMutation.error as Error).message}
         </p>
       )}
 
