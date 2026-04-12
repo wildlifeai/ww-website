@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
 import { useAuth } from './hooks/useAuth'
-import { ToolkitPage } from './pages/ToolkitPage'
+import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
 import './styles/index.css'
 
@@ -22,7 +22,6 @@ function Layout({ children }: { children: React.ReactNode }) {
             Wildlife Watcher Web
           </Link>
           <nav style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-            <Link to="/toolkit" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>Toolkit</Link>
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.875rem', opacity: 0.8 }}>{user.email}</span>
@@ -58,29 +57,14 @@ function Layout({ children }: { children: React.ReactNode }) {
   )
 }
 
-function LandingPage() {
-  return (
-    <div style={{ textAlign: 'center', maxWidth: '800px', margin: '0 auto', padding: '4rem 0' }}>
-      <h1 style={{ fontSize: '3rem', color: 'var(--primary)', marginBottom: '1rem' }}>Monitor Wildlife Globally</h1>
-      <p style={{ fontSize: '1.25rem', opacity: 0.8, marginBottom: '2rem' }}>
-        Deploy robust camera trap models, monitor real-time telemetry via LoRaWAN, and generate firmware config—all in one place.
-      </p>
-      <Link to="/toolkit" className="btn" style={{ fontSize: '1.125rem', padding: '0.75rem 2rem', textDecoration: 'none' }}>
-        Open Toolkit
-      </Link>
-    </div>
-  )
-}
-
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Layout>
           <Routes>
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
-            <Route path="/toolkit" element={<ToolkitPage />} />
           </Routes>
         </Layout>
       </BrowserRouter>

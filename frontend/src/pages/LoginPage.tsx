@@ -11,7 +11,7 @@ export function LoginPage() {
 
   useEffect(() => {
     if (user) {
-      navigate('/toolkit')
+      navigate('/')
     }
   }, [user, navigate])
 
@@ -23,7 +23,7 @@ export function LoginPage() {
         appearance={{ theme: ThemeSupa }}
         theme="light"
         providers={['github', 'google']}
-        redirectTo={window.location.origin + '/toolkit'}
+        redirectTo={window.location.origin + '/'}
       />
     </div>
   )

@@ -9,7 +9,7 @@ const TABS = [
   { id: 'upload', label: '📤 Upload Model', component: UploadModel },
 ] as const
 
-export function ToolkitPage() {
+export function HomePage() {
   const [activeTab, setActiveTab] = useState<string>('analyse')
 
   const ActiveComponent = TABS.find((t) => t.id === activeTab)?.component ?? AnalyseImages
@@ -17,6 +17,13 @@ export function ToolkitPage() {
 
   return (
     <div>
+      <div style={{ textAlign: 'center', maxWidth: '800px', margin: '0 auto', padding: '0 0 4rem 0' }}>
+        <h1 style={{ fontSize: '3rem', color: 'var(--primary)', marginBottom: '1rem' }}>Monitor Wildlife Globally</h1>
+        <p style={{ fontSize: '1.25rem', opacity: 0.8 }}>
+          Deploy robust camera trap models, monitor real-time telemetry via LoRaWAN, and generate firmware config—all in one place.
+        </p>
+      </div>
+
       <h2 style={{ marginBottom: '1.5rem' }}>Toolkit</h2>
 
       {/* Tab bar */}
