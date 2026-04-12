@@ -134,6 +134,16 @@ The uploaded model will be immediately available in the Wildlife Watcher mobile 
    ```
    The application will open at `http://localhost:8501`.
 
+### iNaturalist OAuth (optional)
+
+If you want users to connect their own iNaturalist account (Stage 1 of the iNat integration), add these to your local `.env` (see `.env.example`), or to Streamlit Community Cloud **App → Settings → Secrets**:
+
+- `INAT_CLIENT_ID`
+- `INAT_CLIENT_SECRET`
+- `INAT_REDIRECT_URI`
+
+The redirect URI must match exactly what you register in your iNaturalist OAuth application.
+
 ### Verification Scripts
 We provide helper scripts to verify database connectivity and RLS policies locally:
 
