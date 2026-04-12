@@ -1,20 +1,19 @@
 import { useState } from 'react'
-import { DownloadFirmware } from '../components/toolkit/DownloadFirmware'
 import { UploadModel } from '../components/toolkit/UploadModel'
 import { AnalyseImages } from '../components/toolkit/AnalyseImages'
 import { GenerateManifest } from '../components/toolkit/GenerateManifest'
 
 const TABS = [
-  { id: 'download', label: '📥 Download Model', component: DownloadFirmware },
-  { id: 'upload', label: '📤 Upload Model', component: UploadModel },
-  { id: 'manifest', label: '⚙️ Generate Manifest', component: GenerateManifest },
   { id: 'analyse', label: '🖼️ Analyse Images', component: AnalyseImages },
+  { id: 'manifest', label: '⚙️ Generate Manifest', component: GenerateManifest },
+  { id: 'upload', label: '📤 Upload Model', component: UploadModel },
 ] as const
 
 export function ToolkitPage() {
-  const [activeTab, setActiveTab] = useState<string>('download')
+  const [activeTab, setActiveTab] = useState<string>('analyse')
 
-  const ActiveComponent = TABS.find((t) => t.id === activeTab)?.component ?? DownloadFirmware
+  const ActiveComponent = TABS.find((t) => t.id === activeTab)?.component ?? AnalyseImages
+
 
   return (
     <div>
