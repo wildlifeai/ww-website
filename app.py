@@ -12,6 +12,7 @@ import csv
 import io
 import time
 import struct
+import secrets
 import pandas as pd
 from pathlib import Path
 from datetime import date
@@ -24,9 +25,99 @@ import json
 
 import urllib.request
 from db_utils import fetch_all_rows
+from inat_oauth import (
+    load_oauth_config_from_env,
+    make_pkce_pair,
+    build_authorize_url,
+    exchange_code_for_token,
+)
 
 # Load environment variables
 load_dotenv()
+
+
+def render_inat_oauth_panel():
+    """Stage 1: iNaturalist OAuth login.
+
+    This is intentionally self-contained and uses only in-session storage to
+    make it easy to test and iterate.
+    """
+
+    st.sidebar.subheader("iNaturalist")
+
+    cfg = load_oauth_config_from_env(get=get_config)
+    if not cfg:
+        st.sidebar.info(
+            "To enable iNaturalist login, set INAT_CLIENT_ID / INAT_CLIENT_SECRET / INAT_REDIRECT_URI."
+        )
+        return
+
+    if "inat_oauth" not in st.session_state:
+        st.session_state.inat_oauth = {}
+
+    qp = st.query_params
+    code = qp.get("code")
+    state = qp.get("state")
+    oauth_err = qp.get("error")
+
+    if oauth_err:
+        st.sidebar.error(f"iNaturalist login error: {oauth_err}")
+
+    token = st.session_state.inat_oauth.get("token")
+    access_token = token.get("access_token") if isinstance(token, dict) else None
+
+    cols = st.sidebar.columns([1, 1])
+    with cols[0]:
+        connect_clicked = st.button("Connect iNaturalist", use_container_width=True)
+    with cols[1]:
+        disconnect_clicked = st.button("Disconnect", use_container_width=True, disabled=not access_token)
+
+    if disconnect_clicked:
+        st.session_state.inat_oauth = {}
+        st.sidebar.success("Disconnected.")
+        return
+
+    # Finish OAuth if redirected back with ?code=
+    if code and state and not access_token:
+        expected_state = st.session_state.inat_oauth.get("state")
+        code_verifier = st.session_state.inat_oauth.get("pkce_verifier")
+        if not expected_state or state != expected_state:
+            st.sidebar.error("OAuth state mismatch. Please try connecting again.")
+        else:
+            try:
+                token_json = exchange_code_for_token(cfg, code, code_verifier=code_verifier)
+                st.session_state.inat_oauth["token"] = token_json
+                st.sidebar.success("Connected to iNaturalist.")
+                # Clean up URL to avoid re-exchanging on rerun.
+                st.query_params.clear()
+            except Exception as e:
+                st.sidebar.error(f"Token exchange failed: {e}")
+
+    if connect_clicked and not access_token:
+        state_val = secrets.token_urlsafe(24)
+        verifier, challenge = make_pkce_pair()
+
+        st.session_state.inat_oauth.update(
+            {
+                "state": state_val,
+                "pkce_verifier": verifier,
+            }
+        )
+
+        auth_url = build_authorize_url(cfg, state=state_val, code_challenge=challenge)
+        st.sidebar.link_button("Continue to iNaturalist →", auth_url, use_container_width=True)
+        st.sidebar.caption("After authorizing, you’ll be redirected back here.")
+
+    # Status display
+    token = st.session_state.inat_oauth.get("token")
+    access_token = token.get("access_token") if isinstance(token, dict) else None
+    if access_token:
+        st.sidebar.success("✅ Logged in")
+        expires_in = token.get("expires_in")
+        if expires_in:
+            st.sidebar.caption(f"Token expires in ~{expires_in} seconds (as reported by iNat).")
+        st.sidebar.caption("Stage 2 will use this token to create observations.")
+
 
 # --- Configuration Registry ---
 MODEL_REGISTRY = {
@@ -1180,6 +1271,9 @@ st.set_page_config(layout="centered", page_title="Wildlife Watcher Firmware Tool
 
 # Initialize Supabase client
 supabase = create_supabase_client()
+
+# Stage 1: iNaturalist OAuth (sidebar)
+render_inat_oauth_panel()
 
 # --- Maintain Auth State ---
 is_logged_in = False

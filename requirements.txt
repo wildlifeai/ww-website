@@ -4,3 +4,4 @@ supabase==2.27.0
 python-dotenv==1.0.1
 websockets==15.0.1
 gotrue
+requests>=2.31.0
