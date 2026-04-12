@@ -212,9 +212,44 @@ async def export_camtrapdp_job(ctx, job_id: str, org_id: str, params: dict):
         raise
 
 
+async def download_pretrained_job(ctx, job_id: str, user_id: str, sscma_uuid: str, org_id: str):
+    """Download, convert, and register an SSCMA pretrained model."""
+    logger.info("job_start", job_type="download_pretrained", job_id=job_id)
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
+
+    try:
+        from app.domain.model import convert_pretrained_model, upload_and_register
+
+        # 1. Download, optionally compile with Vela, package labels
+        # Could take 30-60s if Vela is invoked
+        model_bytes, labels, metadata = await convert_pretrained_model(sscma_uuid)
+        await update_job(job_id, progress=0.6)
+
+        # 2. Upload to storage and register in DB
+        db_model = await upload_and_register(
+            model_bytes=model_bytes,
+            model_name=metadata.get("name", "Unknown SSCMA Model"),
+            model_version=metadata.get("version", "1.0.0"),
+            description=metadata.get("description", "Imported from Seeed Studio Model Zoo"),
+            labels=labels,
+            org_id=org_id,
+            user_id=user_id,
+        )
+
+        await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0)
+        logger.info("job_complete", job_type="download_pretrained", job_id=job_id, model_id=db_model["id"])
+
+    except Exception as e:
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+        logger.error(
+            "job_failed", job_type="download_pretrained", job_id=job_id, error=str(e)
+        )
+        raise
+
 # Register jobs for ARQ worker discovery
 JOBS = [
     func(convert_model_job, name="convert_model"),
     func(generate_manifest_job, name="generate_manifest"),
     func(export_camtrapdp_job, name="export_camtrapdp"),
+    func(download_pretrained_job, name="download_pretrained"),
 ]

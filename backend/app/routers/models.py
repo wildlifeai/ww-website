@@ -78,29 +78,72 @@ async def convert_model(
     )
 
 
+from pydantic import BaseModel
+
+class PretrainedModelRequest(BaseModel):
+    sscma_uuid: str
+
 @router.get("/sscma/catalog")
 async def sscma_catalog(request: Request):
     """Return cached SSCMA model zoo catalog.
 
     Uses Redis cache with 1-hour TTL to avoid hitting GitHub on every request.
     """
-    from app.services.cache import cached
-    from app.services.http_client import download_url_content
-    import json
-
-    SSCMA_URL = "https://raw.githubusercontent.com/Seeed-Studio/sscma-model-zoo/main/models.json"
-
-    async def fetch_catalog():
-        content = await download_url_content(SSCMA_URL)
-        data = json.loads(content)
-        return data.get("models", [])
+    from app.services.sscma import get_sscma_catalog
 
     try:
-        models = await cached("sscma:catalog", ttl=3600, fetch_fn=fetch_catalog)
+        models = await get_sscma_catalog()
     except Exception:
         models = []
 
     return ApiResponse(
         data=models,
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
+    )
+
+
+@router.post("/pretrained")
+async def download_pretrained(
+    body: PretrainedModelRequest,
+    request: Request,
+    user=Depends(get_current_user),
+):
+    """Download, package, and register an SSCMA pre-trained model via async job."""
+    
+    # We must retrieve the org ID the user is operating in.
+    # For now, we query the first org admin/owner.
+    from app.services.supabase_client import create_service_client
+    
+    client = create_service_client()
+    roles = (
+        client.table("user_roles")
+        .select("organisation_id")
+        .eq("user_id", user.id)
+        .in_("role", ["admin", "owner", "member"])
+        .execute()
+    )
+
+    if not roles.data:
+        raise HTTPException(403, detail="User must belong to an organisation")
+
+    org_id = roles.data[0]["organisation_id"]
+
+    job_id = await create_job()
+
+    # Enqueue via ARQ
+    arq_pool = getattr(request.app.state, "arq_pool", None)
+    if arq_pool:
+        await arq_pool.enqueue_job(
+            "download_pretrained",
+            job_id=job_id,
+            user_id=user.id,
+            sscma_uuid=body.sscma_uuid,
+            org_id=org_id,
+        )
+
+    return ApiResponse(
+        data=JobCreateResponse(job_id=job_id).model_dump(),
+        meta=ApiMeta(
+            request_id=getattr(request.state, "request_id", None) if request else None
+        ),
     )

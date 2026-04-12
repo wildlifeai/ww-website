@@ -274,3 +274,101 @@ async def upload_and_register(
                 error=str(rollback_e),
             )
         raise ModelDomainError(f"Database registration failed: {e}") from e
+
+async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], Dict[str, Any]]:
+    """Download, convert, and package a pretrained SSCMA model.
+
+    Args:
+        sscma_uuid: Standard UUID from Seeed model zoo.
+
+    Returns:
+        Tuple of (ai_model_zip_bytes, labels_list, model_metadata).
+    """
+    from app.services.sscma import get_sscma_model
+    from app.services.http_client import download_url_content
+
+    try:
+        model_info = await get_sscma_model(sscma_uuid)
+    except ValueError as e:
+        raise ModelDomainError(str(e))
+
+    # Determine best benchmark URL
+    benchmarks = model_info.get("benchmark", [])
+    vela_url = None
+    tflite_url = None
+
+    for b in benchmarks:
+        backend = b.get("backend", "")
+        precision = b.get("precision", "")
+        if backend == "TFLite(vela)":
+            vela_url = b.get("url")
+            break  # Highest priority
+        elif backend == "TFLite" and precision == "INT8":
+            tflite_url = b.get("url")
+
+    # Fallback to Float32 if no INT8 found
+    if not vela_url and not tflite_url:
+        for b in benchmarks:
+            if b.get("backend") == "TFLite":
+                tflite_url = b.get("url")
+                break
+
+    target_url = vela_url or tflite_url
+    if not target_url:
+        raise ModelDomainError("No suitable TFLite benchmark found for this model")
+
+    logger.info("sscma_downloading", uuid=sscma_uuid, url=target_url)
+
+    # We download the model
+    try:
+        model_bytes = await download_url_content(target_url)
+    except Exception as e:
+        raise ModelDomainError(f"Failed to download model: {e}")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        work_dir = Path(temp_dir)
+        source_name = target_url.split("/")[-1]
+        tflite_path = work_dir / source_name
+        tflite_path.write_bytes(model_bytes)
+
+        # Run Vela if we couldn't get a pre-compiled version
+        if not vela_url:
+            logger.info("sscma_compiling_vela", model=model_info.get("name"))
+            try:
+                vela_output = await run_vela_conversion(tflite_path, work_dir)
+            except VelaConversionError as e:
+                raise ModelDomainError(f"Vela compilation failed: {e}") from e
+        else:
+            vela_output = tflite_path
+
+        # Rename for deployment
+        # Pretrained models don't have model_variables.h with an ID, we useMOD00001
+        target_name = "MOD00001.tfl"
+        vela_final_path = work_dir / target_name
+        if vela_output != vela_final_path:
+            _safe_move(vela_output, vela_final_path)
+
+        labels = model_info.get("classes", ["unknown"])
+        labels_txt_path = work_dir / "labels.txt"
+        labels_txt_path.write_text("\n".join(labels))
+
+        ai_model_zip_path = work_dir / "ai_model.zip"
+        
+        with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
+            zf.write(vela_final_path, "MOD00001.TFL")
+            zf.write(labels_txt_path, "MOD00001.TXT")
+
+        if not ai_model_zip_path.exists():
+            raise ModelDomainError("Failed to create ai_model.zip")
+
+        result_bytes = ai_model_zip_path.read_bytes()
+        
+        # Prepare metadata for uploading script
+        metadata = {
+            "name": model_info.get("name"),
+            "version": model_info.get("version"),
+            "description": model_info.get("description"),
+            "labels": labels
+        }
+
+        return result_bytes, labels, metadata
