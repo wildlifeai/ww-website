@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Model conversion and upload endpoints — async via job queue.
 
-POST /api/models/convert  → validates + enqueues conversion job
+POST /api/models/convert  → validates + stores blob + enqueues conversion job
 POST /api/models/upload   → enqueues upload + registration job
 GET  /api/models/sscma/catalog → cached SSCMA model list (sync)
 POST /api/models/pretrained → download + package GitHub model (async)
@@ -14,6 +14,7 @@ from app.schemas.common import ApiResponse, ApiMeta
 from app.schemas.job import JobCreateResponse
 from app.jobs.store import create_job
 from app.dependencies import get_current_user
+from app.services.blob_store import store_blob
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -27,7 +28,11 @@ async def convert_model(
     request: Request = None,
     user=Depends(get_current_user),
 ):
-    """Upload a ZIP and enqueue Vela conversion job."""
+    """Upload a ZIP and enqueue Vela conversion job.
+
+    The uploaded file is stored in Redis as a temp blob so the ARQ worker
+    can retrieve it without shared filesystem access.
+    """
     # Validate MIME type
     if file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(400, detail=f"Invalid file type: {file.content_type}")
@@ -45,16 +50,24 @@ async def convert_model(
 
     job_id = await create_job()
 
+    # Store the uploaded file in Redis for the worker to retrieve
+    await store_blob(
+        job_id,
+        content,
+        metadata={
+            "filename": file.filename,
+            "user_id": user.id,
+            "content_type": file.content_type,
+        },
+    )
+
     # Enqueue via ARQ
     arq_pool = getattr(request.app.state, "arq_pool", None)
     if arq_pool:
-        # TODO: Save content to temp storage path for worker access
         await arq_pool.enqueue_job(
             "convert_model",
             job_id=job_id,
-            file_path="pending",  # Worker will need access to the file
             user_id=user.id,
-            org_id="pending",
         )
 
     return ApiResponse(
