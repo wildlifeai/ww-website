@@ -1,0 +1,16 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.0
+pydantic-settings>=2.0
+python-dotenv>=1.0
+python-multipart>=0.0.12
+supabase>=2.27.0
+gotrue>=2.0
+httpx>=0.28.0
+ethos-u-vela>=3.10
+arq>=0.26
+redis[hiredis]>=5.0
+structlog>=24.0
+sentry-sdk[fastapi]>=2.0
+slowapi>=0.1.9
+tenacity>=9.0
