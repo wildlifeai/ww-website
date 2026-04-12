@@ -31,6 +31,7 @@ from inat_oauth import (
     build_authorize_url,
     exchange_code_for_token,
 )
+from cluster_utils import build_cluster_manifest
 
 # Load environment variables
 load_dotenv()
@@ -1935,6 +1936,111 @@ elif mode == "📊 Export Data":
 
 # --- Journey 4: Analyze Images ---
 elif mode == "🔍 Analyze Images":
+    st.markdown("### 🔍 Analyze Images")
+    st.caption("Stage 2A preview: cluster near-duplicate frames and select representatives for upload.")
+
+    uploaded_images = st.file_uploader(
+        "Upload images for clustering",
+        type=["jpg", "jpeg", "png", "webp"],
+        accept_multiple_files=True,
+        help="Upload a small batch first (e.g., 50–300 images) to validate clustering behavior.",
+    )
+
+    max_hamming = st.slider(
+        "Similarity threshold (dHash Hamming distance)",
+        min_value=0,
+        max_value=20,
+        value=10,
+        help="Lower = stricter (more clusters). Higher = more merging (fewer clusters).",
+    )
+
+    reps_per_cluster = st.slider(
+        "Representatives per cluster (MVP)",
+        min_value=1,
+        max_value=3,
+        value=1,
+        help="MVP picks the sharpest image; >1 will be added in the next iteration.",
+        disabled=True,
+    )
+
+    if uploaded_images:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tmp = Path(temp_dir)
+            for uf in uploaded_images:
+                (tmp / uf.name).write_bytes(uf.getbuffer())
+
+            with st.spinner("Clustering images..."):
+                records, clusters, reps = build_cluster_manifest(tmp, max_hamming=max_hamming)
+
+            st.success(
+                f"Clustered {len(records)} images into {len(clusters)} clusters. Selected {len(reps)} representatives."
+            )
+
+            # Build a small summary table
+            rows = []
+            # dense cluster ids
+            roots = list(clusters.keys())
+            root_to_cid = {r: i for i, r in enumerate(roots)}
+            for r, idxs in clusters.items():
+                rep_idx = reps.get(r)
+                rep_path = records[rep_idx].path.name if rep_idx is not None else None
+                rows.append(
+                    {
+                        "cluster_id": root_to_cid[r],
+                        "cluster_size": len(idxs),
+                        "representative": rep_path,
+                    }
+                )
+
+            st.dataframe(pd.DataFrame(rows).sort_values(["cluster_size"], ascending=False), use_container_width=True)
+
+            # Show representative thumbnails
+            st.markdown("#### Representatives")
+            rep_files = []
+            for r, rep_idx in reps.items():
+                rep_files.append(records[rep_idx].path)
+            rep_files = sorted(rep_files)
+
+            cols = st.columns(4)
+            for i, p in enumerate(rep_files[:40]):
+                with cols[i % 4]:
+                    st.image(str(p), caption=p.name, use_container_width=True)
+
+            if len(rep_files) > 40:
+                st.caption(f"Showing 40 of {len(rep_files)} representatives.")
+
+            # Export CSV for offline review
+            csv_rows = []
+            idx_to_root = {}
+            for r, idxs in clusters.items():
+                for idx in idxs:
+                    idx_to_root[idx] = r
+
+            for idx, rec in enumerate(records):
+                r = idx_to_root.get(idx)
+                if r is None:
+                    continue
+                csv_rows.append(
+                    {
+                        "path": rec.path.name,
+                        "cluster_id": root_to_cid[r],
+                        "cluster_size": len(clusters[r]),
+                        "is_representative": 1 if reps.get(r) == idx else 0,
+                        "sharpness": rec.sharpness,
+                        "width": rec.width,
+                        "height": rec.height,
+                    }
+                )
+
+            out_df = pd.DataFrame(csv_rows)
+            st.download_button(
+                "Download clustering CSV",
+                data=out_df.to_csv(index=False).encode("utf-8"),
+                file_name="clustering.csv",
+                mime="text/csv",
+                use_container_width=True,
+            )
+
     st.markdown("### 🔍 Image EXIF Analysis")
     st.markdown("Upload images from your camera to extract metadata and cross-reference deployments.")
     

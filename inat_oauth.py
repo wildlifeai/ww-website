@@ -90,3 +90,29 @@ def exchange_code_for_token(
     resp = requests.post(INAT_TOKEN_URL, data=data, timeout=30)
     resp.raise_for_status()
     return resp.json()
+
+
+def load_oauth_config_from_env(get: callable = os.environ.get) -> Optional[OAuthConfig]:
+    """Load OAuth config from env/secrets.
+
+    Expected keys:
+      - INAT_CLIENT_ID
+      - INAT_CLIENT_SECRET
+      - INAT_REDIRECT_URI
+      - INAT_SCOPE (optional; default write)
+    """
+
+    client_id = get("INAT_CLIENT_ID")
+    client_secret = get("INAT_CLIENT_SECRET")
+    redirect_uri = get("INAT_REDIRECT_URI")
+    scope = get("INAT_SCOPE") or "write"
+
+    if not client_id or not client_secret or not redirect_uri:
+        return None
+
+    return OAuthConfig(
+        client_id=str(client_id),
+        client_secret=str(client_secret),
+        redirect_uri=str(redirect_uri),
+        scope=str(scope),
+    )

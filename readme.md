@@ -136,7 +136,7 @@ The uploaded model will be immediately available in the Wildlife Watcher mobile 
 
 ### iNaturalist OAuth (optional)
 
-If you want users to connect their own iNaturalist account (Stage 1 of the iNat integration), add these to your local `.env` (see `.env.example`), or to Streamlit Community Cloud **App → Settings → Secrets**:
+If you want users to connect their own iNaturalist account, add these to your local `.env` (see `.env.example`), or to Streamlit Community Cloud **App → Settings → Secrets**:
 
 - `INAT_CLIENT_ID`
 - `INAT_CLIENT_SECRET`

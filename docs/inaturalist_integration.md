@@ -200,3 +200,56 @@ Stage 1 uses `requests`. Stage 2 will add ML deps (timm/torch or a smaller embed
 - OAuth helpers: `inat_oauth.py`
 - Streamlit UI: `app.py`
 - Supabase pagination helper: `db_utils.py`
+
+# 12/04/2026
+
+## Progress update (Stage 2A implemented)
+
+### What’s now implemented
+
+Stage 2A (clustering + representative selection) is now implemented and testable **without** any iNaturalist credentials.
+
+- New module: `cluster_utils.py`
+  - Computes a lightweight per-image embedding using **dHash** (perceptual hash)
+  - Clusters images by **Hamming distance** (union-find)
+  - Uses a simple sharpness metric (Laplacian variance) to choose **one representative per cluster**
+  - Adds a cheap “event grouping” heuristic using filesystem modified time (mtime) to reduce accidental merges and reduce comparisons
+
+- New CLI script: `scripts/cluster_images.py`
+  - Clusters a folder of images and writes a `clusters.csv` with:
+    - `cluster_id`, `cluster_size`
+    - `is_representative`
+    - `sharpness`, `width`, `height`
+
+- Streamlit UI wiring: `app.py` → mode **“🔍 Analyze Images”**
+  - Upload a batch of images
+  - Adjust the similarity threshold
+  - View cluster summary + representative thumbnails
+  - Download a CSV mapping of the results
+
+### Dependencies added (Stage 2A)
+
+- `Pillow`
+- `numpy`
+
+### Stage 1 fix
+
+- Restored missing helper `load_oauth_config_from_env()` in `inat_oauth.py` after an ImportError.
+
+### How to test Stage 2A
+1. Start the app
+2. Select **“🔍 Analyze Images”**
+3. Upload images (start with 50–300)
+4. Tune “Similarity threshold” and download the CSV
+
+### What’s next
+
+**Stage 2A next iteration**
+- Use EXIF timestamps for event grouping (instead of mtime) when available
+- Improve clustering scalability (avoid O(N²) comparisons for large datasets)
+- Add selection strategy to pick 2–3 representatives for large clusters (diversity sampling)
+
+**Stage 2B**
+- Use Stage 1 OAuth token to upload only the selected representatives as iNat observations
+- Poll for identification results
+- Show a results table and propagate representative results to other cluster members (with safeguards)
