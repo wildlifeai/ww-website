@@ -26,10 +26,12 @@ async def generate_manifest(
     """
     job_id = await create_job()
 
-    # TODO: Enqueue via ARQ when Redis pool is wired up in lifespan
-    # await request.app.state.arq_pool.enqueue_job(
-    #     "generate_manifest", job_id=job_id, params=body.model_dump()
-    # )
+    # Enqueue via ARQ
+    arq_pool = getattr(request.app.state, "arq_pool", None)
+    if arq_pool:
+        await arq_pool.enqueue_job(
+            "generate_manifest", job_id=job_id, params=body.model_dump()
+        )
 
     return ApiResponse(
         data=JobCreateResponse(job_id=job_id).model_dump(),
