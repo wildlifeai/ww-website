@@ -4,10 +4,11 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
 import { useAuth } from './hooks/useAuth'
 import { ToolkitPage } from './pages/ToolkitPage'
+import { LoginPage } from './pages/LoginPage'
 import './styles/index.css'
 
 function Layout({ children }: { children: React.ReactNode }) {
-  const { user, login, logout } = useAuth()
+  const { user, logout } = useAuth()
 
   return (
     <>
@@ -28,7 +29,7 @@ function Layout({ children }: { children: React.ReactNode }) {
                 <button className="btn" onClick={logout} style={{ padding: '0.25rem 0.75rem', backgroundColor: 'transparent', border: '1px solid var(--border)' }}>Logout</button>
               </div>
             ) : (
-              <button className="btn" onClick={login} style={{ padding: '0.25rem 0.75rem' }}>Login</button>
+              <Link to="/login" className="btn" style={{ padding: '0.25rem 0.75rem', textDecoration: 'none' }}>Login</Link>
             )}
           </nav>
         </div>
@@ -78,6 +79,7 @@ export default function App() {
         <Layout>
           <Routes>
             <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<LoginPage />} />
             <Route path="/toolkit" element={<ToolkitPage />} />
           </Routes>
         </Layout>
