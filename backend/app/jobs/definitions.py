@@ -160,8 +160,61 @@ async def generate_manifest_job(ctx, job_id: str, params: dict):
         raise
 
 
+async def export_camtrapdp_job(ctx, job_id: str, org_id: str, params: dict):
+    """Export deployment data as CamtrapDP package."""
+    logger.info("job_start", job_type="export_camtrapdp", job_id=job_id)
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
+
+    try:
+        from app.domain.public_api import generate_camtrapdp_package
+        from app.services.storage import upload_to_storage
+        from app.services.supabase_client import create_service_client
+
+        package_bytes = await generate_camtrapdp_package(
+            org_id=org_id,
+            project_id=params.get("project_id"),
+            deployment_ids=params.get("deployment_ids"),
+            date_from=params.get("date_from"),
+            date_to=params.get("date_to"),
+            include_observations=params.get("include_observations", True),
+        )
+
+        await update_job(job_id, progress=0.8)
+
+        result_path = f"temp/exports/{job_id}/camtrap-dp.zip"
+        uploaded = await upload_to_storage(
+            "firmware", result_path, package_bytes, "application/zip"
+        )
+
+        if uploaded:
+            client = create_service_client()
+            try:
+                signed = client.storage.from_("firmware").create_signed_url(
+                    result_path, expires_in=3600  # 1 hour for exports
+                )
+                result_url = signed.get("signedURL", result_path)
+            except Exception:
+                result_url = result_path
+
+            await update_job(
+                job_id, status=JobStatus.COMPLETED, progress=1.0, result_url=result_url,
+            )
+        else:
+            await update_job(
+                job_id, status=JobStatus.FAILED, error="Failed to upload export"
+            )
+
+        logger.info("job_complete", job_type="export_camtrapdp", job_id=job_id)
+
+    except Exception as e:
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+        logger.error("job_failed", job_type="export_camtrapdp", job_id=job_id, error=str(e))
+        raise
+
+
 # Register jobs for ARQ worker discovery
 JOBS = [
     func(convert_model_job, name="convert_model"),
     func(generate_manifest_job, name="generate_manifest"),
+    func(export_camtrapdp_job, name="export_camtrapdp"),
 ]

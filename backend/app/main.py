@@ -19,7 +19,7 @@ from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import limiter
 from app.services.cache import close_redis
 
-from app.routers import jobs, exif, lorawan, manifest, models
+from app.routers import jobs, exif, lorawan, manifest, models, public_api
 
 logger = structlog.get_logger()
 
@@ -94,6 +94,7 @@ app.include_router(exif.router)
 app.include_router(lorawan.router)
 app.include_router(manifest.router)
 app.include_router(models.router)
+app.include_router(public_api.router)
 
 
 # ── Health check ─────────────────────────────────────────────────────
