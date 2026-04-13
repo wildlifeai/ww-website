@@ -56,6 +56,18 @@ def _format_value(value: bytes, type_id: int):
                 num, denom = struct.unpack(fmt, value[i : i + 8])
                 pairs.append(num / denom if denom != 0 else 0.0)
             return pairs[0] if len(pairs) == 1 else pairs
+        elif type_id == 3:  # SHORT
+            try:
+                # We assume little endian because the value was sliced already.
+                # Strictly speaking, endianness should be passed in, but as a fallback unpack the first one
+                return struct.unpack("<H", value[:2])[0] if len(value) >= 2 else value.hex()
+            except Exception:
+                return value.hex()
+        elif type_id == 4:  # LONG
+            try:
+                return struct.unpack("<I", value[:4])[0] if len(value) >= 4 else value.hex()
+            except Exception:
+                return value.hex()
         elif type_id in (1, 7):  # BYTE or UNDEFINED
             try:
                 decoded = value.decode("ascii", errors="ignore").strip("\x00")
@@ -64,6 +76,9 @@ def _format_value(value: bytes, type_id: int):
             except Exception:
                 pass
             return value.hex()
+        
+        # Fallback for any unhandled byte types: Convert to hex string to prevent JSON serialization crashes
+        return value.hex()
     return value
 
 
