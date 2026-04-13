@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment secrets (keep .env.example tracked)
+.env
+.env.local
+.env.*.local
