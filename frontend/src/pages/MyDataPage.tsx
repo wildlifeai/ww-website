@@ -19,7 +19,6 @@ interface Deployment {
   longitude: number | null
   deployment_start: string | null
   deployment_end: string | null
-  status: string | null
   created_at: string
 }
 
@@ -63,7 +62,7 @@ export function MyDataPage() {
 
     let query = supabase
       .from('deployments')
-      .select('id, project_id, location_name, latitude, longitude, deployment_start, deployment_end, status, created_at, projects(name), devices(name)')
+      .select('id, project_id, location_name, latitude, longitude, deployment_start, deployment_end, created_at, projects(name), devices(name)')
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
 
@@ -145,8 +144,8 @@ export function MyDataPage() {
 
   const exportDeploymentsCsv = () => {
     downloadCsv('deployments.csv',
-      ['ID', 'Project', 'Device', 'Location', 'Latitude', 'Longitude', 'Start', 'End', 'Status', 'Created'],
-      sortedDeployments.map(d => [d.id, d.project_name, d.device_name, d.location_name || '', d.latitude || '', d.longitude || '', d.deployment_start || '', d.deployment_end || '', d.status || '', d.created_at])
+      ['ID', 'Project', 'Device', 'Location', 'Latitude', 'Longitude', 'Start', 'End', 'Created'],
+      sortedDeployments.map(d => [d.id, d.project_name, d.device_name, d.location_name || '', d.latitude || '', d.longitude || '', d.deployment_start || '', d.deployment_end || '', d.created_at])
     )
   }
 
@@ -309,12 +308,11 @@ export function MyDataPage() {
                 <th style={thStyle} onClick={() => handleSort('latitude')}>GPS <SortIcon col="latitude" /></th>
                 <th style={thStyle} onClick={() => handleSort('deployment_start')}>Start <SortIcon col="deployment_start" /></th>
                 <th style={thStyle} onClick={() => handleSort('deployment_end')}>End <SortIcon col="deployment_end" /></th>
-                <th style={thStyle} onClick={() => handleSort('status')}>Status <SortIcon col="status" /></th>
               </tr>
             </thead>
             <tbody>
               {sortedDeployments.length === 0 && (
-                <tr><td colSpan={7} style={{ ...tdStyle, textAlign: 'center', opacity: 0.5, padding: '2rem' }}>No deployments found</td></tr>
+                <tr><td colSpan={6} style={{ ...tdStyle, textAlign: 'center', opacity: 0.5, padding: '2rem' }}>No deployments found</td></tr>
               )}
               {sortedDeployments.map(d => (
                 <tr key={d.id}
@@ -330,19 +328,6 @@ export function MyDataPage() {
                   </td>
                   <td style={{ ...tdStyle, fontSize: '0.75rem' }}>{d.deployment_start ? new Date(d.deployment_start).toLocaleDateString() : '—'}</td>
                   <td style={{ ...tdStyle, fontSize: '0.75rem' }}>{d.deployment_end ? new Date(d.deployment_end).toLocaleDateString() : '—'}</td>
-                  <td style={tdStyle}>
-                    <span style={{
-                      display: 'inline-block',
-                      padding: '2px 8px',
-                      borderRadius: '9999px',
-                      fontSize: '0.6875rem',
-                      fontWeight: 600,
-                      backgroundColor: d.status === 'active' ? 'rgba(76,175,80,0.15)' : d.status === 'ended' ? 'rgba(158,158,158,0.15)' : 'rgba(255,152,0,0.15)',
-                      color: d.status === 'active' ? 'var(--success)' : d.status === 'ended' ? 'var(--text-color)' : '#f57c00',
-                    }}>
-                      {d.status || 'unknown'}
-                    </span>
-                  </td>
                 </tr>
               ))}
             </tbody>
