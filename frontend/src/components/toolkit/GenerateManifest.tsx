@@ -4,16 +4,18 @@ import { apiClient } from '../../lib/apiClient'
 import { JobProgress } from '../common'
 
 export function GenerateManifest() {
-  const [cameraType, setCameraType] = useState('Raspberry Pi')
-  const [modelSource, setModelSource] = useState('default')
+  const [modelSource, setModelSource] = useState('Pre-trained Model')
   const [resolution, setResolution] = useState('96')
+  const [modelId, setModelId] = useState<number>(1)
+  const [modelVersion, setModelVersion] = useState<number>(1)
   const [jobId, setJobId] = useState<string | null>(null)
 
   const generateMutation = useMutation({
     mutationFn: () =>
       apiClient.post('/api/manifest/generate', {
-        camera_type: cameraType,
         model_source: modelSource,
+        model_id: modelId,
+        model_version: modelVersion,
         resolution,
       }),
     onSuccess: (response: any) => {
@@ -29,32 +31,12 @@ export function GenerateManifest() {
         and configuration for your Wildlife Watcher device.
       </p>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', maxWidth: '600px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem', maxWidth: '600px' }}>
+        
+        {/* Model Source */}
         <div>
           <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-            Camera Type
-          </label>
-          <select
-            value={cameraType}
-            onChange={(e) => setCameraType(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              borderRadius: 'var(--radius)',
-              border: '1px solid var(--border)',
-              backgroundColor: 'var(--surface)',
-              color: 'var(--text-color)',
-            }}
-          >
-            <option>Raspberry Pi</option>
-            <option>ESP32-S3</option>
-            <option>Grove Vision AI V2</option>
-          </select>
-        </div>
-
-        <div>
-          <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-            Model Source
+            AI Model
           </label>
           <select
             value={modelSource}
@@ -68,13 +50,68 @@ export function GenerateManifest() {
               color: 'var(--text-color)',
             }}
           >
-            <option value="default">Default (Person Detection)</option>
-            <option value="sscma">SSCMA Model Zoo</option>
-            <option value="organisation">Organisation Model</option>
+            <option value="Pre-trained Model">Pre-trained Model</option>
+            <option value="SenseCap Models">SenseCap Models</option>
+            <option value="My Organization Models">My Organization Models</option>
+            <option value="No Model">No Model</option>
           </select>
+          <p style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.25rem' }}>Select where to get the AI model from</p>
         </div>
 
-        <div>
+        {/* Model Versioning */}
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
+          <h4 style={{ marginBottom: '0.5rem' }}>🔢 Model Versioning</h4>
+          <p style={{ fontSize: '0.8125rem', opacity: 0.8, marginBottom: '1rem' }}>
+            Define the Model ID and Version matching your model. The firmware will use these to load the correct file.
+          </p>
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
+                Model ID (OP 14)
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={modelId}
+                onChange={(e) => setModelId(Number(e.target.value) || 1)}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'var(--surface)',
+                  color: 'var(--text-color)',
+                }}
+              />
+            </div>
+            
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
+                Version (OP 15)
+              </label>
+              <input
+                type="number"
+                min={1}
+                value={modelVersion}
+                onChange={(e) => setModelVersion(Number(e.target.value) || 1)}
+                style={{
+                  width: '100%',
+                  padding: '0.5rem',
+                  borderRadius: 'var(--radius)',
+                  border: '1px solid var(--border)',
+                  backgroundColor: 'var(--surface)',
+                  color: 'var(--text-color)',
+                }}
+              />
+            </div>
+          </div>
+          <p style={{ fontSize: '0.8125rem', opacity: 0.7, marginTop: '1rem' }}>
+            Target Filename: <code>{modelId}V{modelVersion}.TFL</code>
+          </p>
+        </div>
+
+        {/* Resolution */}
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1.5rem' }}>
           <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
             Resolution
           </label>
@@ -97,7 +134,7 @@ export function GenerateManifest() {
         </div>
       </div>
 
-      <div style={{ marginTop: '1.5rem' }}>
+      <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border)' }}>
         <button
           className="btn"
           disabled={generateMutation.isPending || !!jobId}
