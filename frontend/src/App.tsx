@@ -45,7 +45,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             {user ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <span style={{ fontSize: '0.875rem', opacity: 0.8 }}>{user.email}</span>
-                <button className="btn" onClick={logout} style={{ padding: '0.25rem 0.75rem', backgroundColor: 'transparent', border: '1px solid var(--border)' }}>Logout</button>
+                <button className="btn" onClick={logout} style={{ padding: '0.25rem 0.75rem', backgroundColor: 'transparent', border: '1px solid var(--border)', color: 'var(--text-color)' }}>Logout</button>
               </div>
             ) : (
               <Link to="/login" className="btn" style={{ padding: '0.25rem 0.75rem', textDecoration: 'none' }}>Login</Link>
