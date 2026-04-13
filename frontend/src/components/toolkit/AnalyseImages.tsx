@@ -1,6 +1,14 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { apiClient } from '../../lib/apiClient'
+import { supabase } from '../../config/supabase'
+
+interface Deployment {
+  id: string
+  location_name: string | null
+  latitude: number | null
+  longitude: number | null
+}
 
 interface ExifResult {
   filename: string
@@ -15,7 +23,19 @@ interface ExifResult {
 export function AnalyseImages() {
   const [files, setFiles] = useState<File[]>([])
   const [results, setResults] = useState<ExifResult[]>([])
+  const [deployments, setDeployments] = useState<Deployment[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Fetch all deployments from Supabase on mount
+  useEffect(() => {
+    supabase
+      .from('deployments')
+      .select('id, location_name, latitude, longitude')
+      .is('deleted_at', null)
+      .then(({ data }) => {
+        if (data) setDeployments(data)
+      })
+  }, [])
 
   const analyseMutation = useMutation({
     mutationFn: async (imageFiles: File[]) => {
@@ -32,15 +52,30 @@ export function AnalyseImages() {
         const lat = exif.latitude ?? null
         const lon = exif.longitude ?? null
         // Treat 0,0 as "no GPS" since the firmware writes 0,0 when no fix is available
-        const hasGps = lat !== null && lon !== null && !(lat === 0 && lon === 0)
+        const hasExifGps = lat !== null && lon !== null && !(lat === 0 && lon === 0)
+
+        const depId = exif.deployment_id ?? null
+        // Try to match the deployment by ID
+        const matchedDep = depId
+          ? deployments.find((d) => d.id.toLowerCase() === depId.toLowerCase())
+          : null
+
+        // GPS priority: EXIF first, then deployment record
+        let finalLat = hasExifGps ? lat : null
+        let finalLon = hasExifGps ? lon : null
+        if (!finalLat && !finalLon && matchedDep?.latitude && matchedDep?.longitude) {
+          finalLat = matchedDep.latitude
+          finalLon = matchedDep.longitude
+        }
+
         return {
           filename: item.filename ?? 'unknown',
-          deployment_id: exif.deployment_id ?? null,
-          gps_lat: hasGps ? lat : null,
-          gps_lon: hasGps ? lon : null,
+          deployment_id: depId,
+          gps_lat: finalLat,
+          gps_lon: finalLon,
           datetime: exif.date ?? exif.Datetime_Original ?? exif.DateTime ?? null,
           detection: exif.UserComment ?? null,
-          matched_deployment: null,
+          matched_deployment: matchedDep?.location_name ?? null,
         }
       })
       setResults(mapped)
