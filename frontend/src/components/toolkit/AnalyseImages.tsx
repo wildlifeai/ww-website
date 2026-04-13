@@ -8,7 +8,7 @@ interface ExifResult {
   gps_lat: number | null
   gps_lon: number | null
   datetime: string | null
-  camera_model: string | null
+  detection: string | null
   matched_deployment: string | null
 }
 
@@ -26,7 +26,24 @@ export function AnalyseImages() {
       return apiClient.upload('/api/exif/parse', formData)
     },
     onSuccess: (response: any) => {
-      setResults(response.data ?? [])
+      const raw: any[] = response.data ?? []
+      const mapped: ExifResult[] = raw.map((item: any) => {
+        const exif = item.exif ?? {}
+        const lat = exif.latitude ?? null
+        const lon = exif.longitude ?? null
+        // Treat 0,0 as "no GPS" since the firmware writes 0,0 when no fix is available
+        const hasGps = lat !== null && lon !== null && !(lat === 0 && lon === 0)
+        return {
+          filename: item.filename ?? 'unknown',
+          deployment_id: exif.deployment_id ?? null,
+          gps_lat: hasGps ? lat : null,
+          gps_lon: hasGps ? lon : null,
+          datetime: exif.date ?? exif.Datetime_Original ?? exif.DateTime ?? null,
+          detection: exif.UserComment ?? null,
+          matched_deployment: null,
+        }
+      })
+      setResults(mapped)
     },
   })
 
@@ -104,7 +121,7 @@ export function AnalyseImages() {
                 <th style={{ padding: '0.5rem' }}>Deployment</th>
                 <th style={{ padding: '0.5rem' }}>GPS</th>
                 <th style={{ padding: '0.5rem' }}>Date/Time</th>
-                <th style={{ padding: '0.5rem' }}>Camera</th>
+                <th style={{ padding: '0.5rem' }}>Detection</th>
               </tr>
             </thead>
             <tbody>
@@ -124,7 +141,7 @@ export function AnalyseImages() {
                     {r.gps_lat && r.gps_lon ? `${r.gps_lat.toFixed(4)}, ${r.gps_lon.toFixed(4)}` : '—'}
                   </td>
                   <td style={{ padding: '0.5rem', fontSize: '0.75rem' }}>{r.datetime || '—'}</td>
-                  <td style={{ padding: '0.5rem', fontSize: '0.75rem' }}>{r.camera_model || '—'}</td>
+                  <td style={{ padding: '0.5rem', fontSize: '0.75rem' }}>{r.detection || '—'}</td>
                 </tr>
               ))}
             </tbody>
