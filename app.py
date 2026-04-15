@@ -1947,7 +1947,7 @@ elif mode == "🔍 Analyze Images":
     )
 
     max_hamming = st.slider(
-        "Similarity threshold (dHash Hamming distance)",
+        "Similarity threshold",
         min_value=0,
         max_value=20,
         value=10,

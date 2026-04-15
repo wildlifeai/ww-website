@@ -190,58 +190,30 @@ class _UnionFind:
 
 
 def cluster_by_dhash(records: List[ImageRecord], max_hamming: int = 10) -> Dict[int, List[int]]:
-    """Cluster indices by dHash within a Hamming threshold.
+    """Cluster indices by dHash within a Hamming threshold using a BK-tree.
 
-    This is O(N^2) and intended for small/medium batches.
-
-    For big deployments, we’ll add event grouping first and/or a BK-tree.
+    This scales much better than O(N^2) for thousands of images.
     """
 
     n = len(records)
+    if n == 0:
+        return {}
+
     uf = _UnionFind(n)
 
-    for i in range(n):
-        hi = records[i].dhash
-        for j in range(i + 1, n):
-            if hamming_distance64(hi, records[j].dhash) <= max_hamming:
-                uf.union(i, j)
+    tree = BKTree(distance=hamming_distance64)
+    for i, rec in enumerate(records):
+        # Query prior items for neighbors within threshold and union them.
+        for j in tree.query(rec.dhash, max_hamming):
+            uf.union(i, j)
+        tree.add(rec.dhash, i)
 
     clusters: Dict[int, List[int]] = {}
     for i in range(n):
         r = uf.find(i)
         clusters.setdefault(r, []).append(i)
 
-    # Sort clusters by size desc
     return dict(sorted(clusters.items(), key=lambda kv: (-len(kv[1]), kv[0])))
-
-
-def cluster_by_dhash_in_events(
-    records: List[ImageRecord],
-    max_hamming: int,
-    events: List[List[int]],
-) -> Dict[int, List[int]]:
-    """Cluster within each event group, then merge results.
-
-    This avoids comparing all images to all images, and reduces accidental merges
-    across distant capture times.
-    """
-
-    # Build clusters per event; roots are local to each event so we remap.
-    all_clusters: Dict[int, List[int]] = {}
-    next_root = 0
-
-    for ev in events:
-        if len(ev) == 0:
-            continue
-        sub = [records[i] for i in ev]
-        sub_clusters = cluster_by_dhash(sub, max_hamming=max_hamming)
-        # Map local indices back to global
-        for _, local_idxs in sub_clusters.items():
-            global_idxs = [ev[i] for i in local_idxs]
-            all_clusters[next_root] = global_idxs
-            next_root += 1
-
-    return dict(sorted(all_clusters.items(), key=lambda kv: (-len(kv[1]), kv[0])))
 
 
 def pick_representatives(records: List[ImageRecord], clusters: Dict[int, List[int]]) -> Dict[int, int]:
@@ -265,11 +237,63 @@ def build_cluster_manifest(
     paths = iter_image_paths(root)
     records = build_records(paths, hash_size=hash_size)
 
-    # Event grouping by mtime (cheap heuristic to reduce comparisons)
-    idx_by_path = {r.path: i for i, r in enumerate(records)}
-    events_paths = group_paths_by_mtime([r.path for r in records], max_gap_seconds=20)
-    events = [[idx_by_path[p] for p in grp if p in idx_by_path] for grp in events_paths]
-
-    clusters = cluster_by_dhash_in_events(records, max_hamming=max_hamming, events=events)
+    # Scalable clustering (BK-tree)
+    clusters = cluster_by_dhash(records, max_hamming=max_hamming)
     reps = pick_representatives(records, clusters)
     return records, clusters, reps
+
+
+class BKTree:
+    """BK-tree for fast "within-distance" queries in a metric space.
+
+    This implementation stores (value, payload) where payload is typically the
+    record index.
+    """
+
+    class _Node:
+        __slots__ = ("value", "payload", "children")
+
+        def __init__(self, value: int, payload: int):
+            self.value = value
+            self.payload = payload
+            self.children: Dict[int, "BKTree._Node"] = {}
+
+    def __init__(self, distance):
+        self._dist = distance
+        self._root: Optional[BKTree._Node] = None
+
+    def add(self, value: int, payload: int) -> None:
+        if self._root is None:
+            self._root = BKTree._Node(value, payload)
+            return
+
+        node = self._root
+        while True:
+            d = self._dist(value, node.value)
+            child = node.children.get(d)
+            if child is None:
+                node.children[d] = BKTree._Node(value, payload)
+                return
+            node = child
+
+    def query(self, value: int, max_dist: int) -> List[int]:
+        """Return payloads with distance <= max_dist."""
+
+        if self._root is None:
+            return []
+
+        out: List[int] = []
+        stack = [self._root]
+        while stack:
+            node = stack.pop()
+            d = self._dist(value, node.value)
+            if d <= max_dist:
+                out.append(node.payload)
+
+            lo = d - max_dist
+            hi = d + max_dist
+            for cd, child in node.children.items():
+                if lo <= cd <= hi:
+                    stack.append(child)
+
+        return out
