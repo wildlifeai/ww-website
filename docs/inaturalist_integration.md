@@ -253,3 +253,25 @@ Stage 2A (clustering + representative selection) is now implemented and testable
 - Use Stage 1 OAuth token to upload only the selected representatives as iNat observations
 - Poll for identification results
 - Show a results table and propagate representative results to other cluster members (with safeguards)
+
+# 15/04/2026
+
+## Progress update (Stage 2A hardening — BK-tree clustering)
+
+### What changed
+
+The Stage 2A near-duplicate clustering has been updated to use a **BK-tree** index for 64-bit dHash values. This avoids the previous O(N²) “compare every image to every image” approach and scales better as image volumes grow.
+
+- Updated module: `cluster_utils.py`
+  - Added `BKTree` implementation using **Hamming distance** (`hamming_distance64`) as the metric
+  - Updated `cluster_by_dhash()` to:
+    - insert each image hash into the BK-tree
+    - query neighbors within the user-selected Hamming threshold
+    - union those neighbors into clusters (union-find)
+  - Updated `build_cluster_manifest()` to use the BK-tree clustering path directly
+
+### Notes
+
+- Per the current direction, we **did not implement EXIF/UTC-based event grouping** in this iteration.
+- With typical burst sizes (often ≤10 images per trigger), this change is mainly about future-proofing larger batches and keeping clustering responsive.
+
