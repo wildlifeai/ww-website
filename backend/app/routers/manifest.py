@@ -26,12 +26,17 @@ async def generate_manifest(
     """
     job_id = await create_job()
 
-    # Enqueue via ARQ
+    # Enqueue via ARQ or run locally
     arq_pool = getattr(request.app.state, "arq_pool", None)
     if arq_pool:
         await arq_pool.enqueue_job(
             "generate_manifest", job_id=job_id, params=body.model_dump()
         )
+    else:
+        # Fallback for local dev without Redis/ARQ workers
+        import asyncio
+        from app.jobs.definitions import generate_manifest_job
+        asyncio.create_task(generate_manifest_job(None, job_id, body.model_dump()))
 
     return ApiResponse(
         data=JobCreateResponse(job_id=job_id).model_dump(),

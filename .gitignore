@@ -40,3 +40,6 @@ dist/
 
 # Exported data
 exports/
+
+# Google Drive
+backend/service-account.json

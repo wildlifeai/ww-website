@@ -271,32 +271,52 @@ async def _fetch_github_model(
 async def generate_manifest(
     model_source: str = "default",
     model_type: Optional[str] = None,
+    model_name: Optional[str] = None,
+    model_id: Optional[int] = None,
+    model_version: Optional[int] = None,
     resolution: Optional[str] = None,
     sscma_model_id: Optional[str] = None,
     org_model_id: Optional[str] = None,
-    camera_type: str = "Raspberry Pi",
+    camera_type: str = "Grove Vision AI V2",
 ) -> bytes:
     """Generate a complete MANIFEST.zip package for SD card deployment.
 
     Args:
-        model_source: One of 'default', 'github', 'sscma', 'organisation'.
-        model_type: For 'github' source — model name from MODEL_REGISTRY.
-        resolution: For 'github' source — e.g. '192x192'.
+        model_source: 'Pre-trained Model', 'SenseCap Models', etc., or legacy 'github'.
+        model_type: Legacy model name from MODEL_REGISTRY.
+        model_name: New frontend model name.
+        model_id: Target firmware OP14 ID.
+        model_version: Target firmware OP15 version.
+        resolution: e.g. '192x192'.
         sscma_model_id: For 'sscma' source — model catalog ID.
         org_model_id: For 'organisation' source — Supabase ai_models.id.
         camera_type: Camera config key from CAMERA_CONFIGS.
-
-    Returns:
-        Bytes of the final MANIFEST.zip.
-
-    Raises:
-        ManifestDomainError: If generation fails.
     """
+    # Map frontend friendly names to backend legacy names
+    if model_source == "Pre-trained Model":
+        model_source = "github"
+        if model_name:
+            # model_name comes in as 'Person Detection (96x96)', strip resolution for model_type
+            model_type = model_name.rsplit(" (", 1)[0]
+    elif model_source == "SenseCap Models":
+        model_source = "sscma"
+    elif model_source == "My Organization Models":
+        model_source = "organisation"
+    elif model_source == "No Model":
+        model_source = "none"
+
     client = create_service_client()
 
     temp_dir = Path(tempfile.mkdtemp())
     manifest_dir = temp_dir / "MANIFEST"
     manifest_dir.mkdir()
+
+    # Determine target filenames
+    tfl_name = "trained_vela.TFL"
+    txt_name = "trained_vela.TXT"
+    if model_id is not None and model_version is not None:
+        tfl_name = f"{model_id}V{model_version}.TFL"
+        txt_name = f"{model_id}V{model_version}.TXT"
 
     try:
         # 1. Fetch config firmware
@@ -317,7 +337,16 @@ async def generate_manifest(
         model_added = False
 
         if model_source == "github" and model_type and resolution:
+            # Reusing the github fetcher, but renaming the output files
             model_added = await _fetch_github_model(model_type, resolution, manifest_dir)
+            
+            # The github fetcher hardcodes 'trained_vela', rename if needed
+            if model_added and tfl_name != "trained_vela.TFL":
+                default_tfl = manifest_dir / "trained_vela.TFL"
+                default_txt = manifest_dir / "trained_vela.TXT"
+                if default_tfl.exists(): default_tfl.rename(manifest_dir / tfl_name)
+                if default_txt.exists(): default_txt.rename(manifest_dir / txt_name)
+
         elif model_source == "organisation" and org_model_id:
             # Fetch specific org model by ID
             try:
@@ -337,13 +366,23 @@ async def generate_manifest(
                         with zipfile.ZipFile(io.BytesIO(content)) as zf:
                             zf.extractall(manifest_dir)
                         model_added = True
+                        
+                        # Apply custom names if needed
+                        if tfl_name != "trained_vela.TFL":
+                            for f in manifest_dir.glob("*.TFL"):
+                                f.rename(manifest_dir / tfl_name)
+                            for f in manifest_dir.glob("*.TXT"):
+                                f.rename(manifest_dir / txt_name)
+                                
                         logger.info("org_model_added", name=model.get("name"))
             except Exception as e:
                 logger.error("org_model_failed", error=str(e))
         elif model_source == "sscma" and sscma_model_id:
             # SSCMA model processing would go here
-            # TODO: Port SSCMA model fetching + optional Vela conversion
             logger.warning("sscma_model_not_yet_implemented")
+        elif model_source == "none":
+            logger.info("skip_ai_model")
+            model_added = True
         else:
             # Default: fetch best available from DB
             model_added = await _fetch_default_model(client, manifest_dir)

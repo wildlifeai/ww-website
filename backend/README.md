@@ -109,6 +109,7 @@ arq app.jobs.worker.WorkerSettings
 │   + Supabase Realtime    │       │                               │
 └──────────────────────────┘       │  convert_model_job            │
                                    │  generate_manifest_job        │
+                                   │  upload_drive_images          │
                                    └───────────────────────────────┘
 ```
 
@@ -215,6 +216,15 @@ All configuration is managed via environment variables, validated at startup by 
 | `SENTRY_DSN` | _(none)_ | Sentry error tracking DSN |
 | `LOG_LEVEL` | `info` | Logging level (`debug`, `info`, `warning`, `error`) |
 | `GENERAL_ORG_ID` | `b0000000-0000-0000-0000-000000000001` | Default organisation UUID |
+
+### Google Drive Integration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GOOGLE_DRIVE_ENABLED` | `false` | Enable async uploads of analysed images to Google Drive |
+| `GOOGLE_DRIVE_FOLDER_ID` | `1jIWV3...` | Root Google Drive folder ID for uploads |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | _(none)_ | Path to service account JSON file, or inline JSON string |
+| `GOOGLE_DRIVE_MAX_FILE_SIZE_MB`| `50` | Max file size in MB accepted for Drive upload |
 
 ### LoRaWAN Webhook Secrets
 

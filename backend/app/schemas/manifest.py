@@ -3,7 +3,7 @@
 """Manifest generation request/response schemas."""
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional
 
 
 class ManifestRequest(BaseModel):
@@ -11,14 +11,14 @@ class ManifestRequest(BaseModel):
 
     model_source: str = Field(
         "default",
-        description="'default' | 'github' | 'sscma' | 'organisation'",
+        description="'Pre-trained Model' | 'SenseCap Models' | 'My Organization Models' | 'No Model'",
     )
-    # GitHub model selection
-    model_type: Optional[str] = Field(None, description="Model name from registry")
+    model_name: Optional[str] = Field(None, description="Human-readable model name")
+    model_id: Optional[int] = Field(None, description="Firmware OP14 model ID")
+    model_version: Optional[int] = Field(None, description="Firmware OP15 model version")
     resolution: Optional[str] = Field(None, description="e.g. '192x192'")
-    # SSCMA model selection
+    # Legacy fields kept for backward compatibility
+    model_type: Optional[str] = Field(None, description="Model name from registry")
     sscma_model_id: Optional[str] = Field(None, description="SSCMA model UUID/slug")
-    # Organisation model selection
     org_model_id: Optional[str] = Field(None, description="Supabase ai_models.id")
-    # Camera config
-    camera_type: str = Field("Raspberry Pi", description="Camera config key")
+    camera_type: str = Field("Grove Vision AI V2", description="Camera config key")

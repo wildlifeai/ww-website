@@ -24,7 +24,11 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         request_id = getattr(request.state, "request_id", "unknown")
         start = time.monotonic()
 
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            logger.exception("unhandled_error", error=str(e))
+            raise
 
         duration = time.monotonic() - start
         logger.info(

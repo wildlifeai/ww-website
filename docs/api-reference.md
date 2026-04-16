@@ -110,8 +110,29 @@ Get the current status of an async job.
     "status": "processing",
     "progress": 0.5,
     "created_at": "2026-04-12T03:00:00Z",
+    "updated_at": "2026-04-12T03:00:05Z",
     "result_url": null,
-    "error": null
+    "error": null,
+    "message": "📥 Downloading images from Supabase...",
+    "current_phase": "download",
+    "summary": {
+      "total": 38,
+      "downloaded": 10,
+      "uploaded": 0,
+      "skipped": 0,
+      "failed": 0,
+      "current_phase": "download",
+      "started_at": "2026-04-12T03:00:02Z"
+    },
+    "events": [
+      {
+        "type": "progress",
+        "phase": "download",
+        "timestamp": "2026-04-12T03:00:05Z",
+        "message": "Downloaded image 10/38 from Supabase ✓",
+        "seq": 10
+      }
+    ]
   },
   "meta": { "request_id": "..." }
 }
@@ -123,8 +144,9 @@ Get the current status of an async job.
 |--------|-------------|
 | `queued` | Job created, waiting for worker to pick up |
 | `processing` | Worker is actively processing the job |
-| `completed` | Done — `result_url` contains the download link |
-| `failed` | Error — `error` field has the failure reason |
+| `completed` | Done without errors |
+| `completed_with_errors` | Done, but some items (e.g. specific files) failed. Check summary/logs. |
+| `failed` | Complete failure — `error` field has the failure reason |
 
 **Status Codes:**
 

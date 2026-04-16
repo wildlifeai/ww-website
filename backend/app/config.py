@@ -67,6 +67,22 @@ class Settings(BaseSettings):
     UPLOADER_EMAIL: str = Field("apps@wildlife.ai")
     UPLOADER_PASSWORD: str = Field("")
 
+    # ── Google Drive ──────────────────────────────────────────────────
+    GOOGLE_DRIVE_ENABLED: bool = Field(
+        False, description="Enable async Google Drive upload of analysed images"
+    )
+    GOOGLE_DRIVE_FOLDER_ID: str = Field(
+        "1jIWV3OjSEnBK4Z64syHd2ugoRuXdVrK5",
+        description="Root Google Drive folder ID for uploads",
+    )
+    GOOGLE_SERVICE_ACCOUNT_JSON: str = Field(
+        "",
+        description="Path to service account JSON file, or inline JSON string",
+    )
+    GOOGLE_DRIVE_MAX_FILE_SIZE_MB: int = Field(
+        50, description="Max file size in MB accepted for Drive upload"
+    )
+
     # ── iNaturalist (Phase 6) ────────────────────────────────────────
     INAT_CLIENT_ID: str = Field("")
     INAT_CLIENT_SECRET: str = Field("")

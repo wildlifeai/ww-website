@@ -6,10 +6,20 @@ Each function here is executed by the worker process, not the API server.
 They delegate to domain layer classes for actual business logic.
 """
 
-from arq import func
+import time
+from datetime import datetime, timezone
 
-from app.schemas.job import JobStatus
-from app.jobs.store import update_job
+from arq import func, Retry
+
+from app.schemas.job import JobStatus, ProgressPhase, EventType, ProgressEvent
+from app.jobs.store import (
+    update_job,
+    emit_event,
+    update_summary,
+    start_phase,
+    complete_phase,
+    get_job,
+)
 
 import structlog
 
@@ -246,10 +256,332 @@ async def download_pretrained_job(ctx, job_id: str, user_id: str, sscma_uuid: st
         )
         raise
 
+async def upload_drive_images_job(ctx, job_id: str, payload: dict):
+    """Upload analysed images to Google Drive.
+
+    Emits structured ``ProgressEvent``\s throughout so the frontend can
+    render deterministic progress (no string parsing).  Runs through
+    three phases: DOWNLOAD → DRIVE_UPLOAD → CLEANUP.  Cleanup must
+    finish before the job is marked complete.
+
+    Payload shape::
+
+        {
+            "files": [
+                {"storage_path": "...", "filename": "...", "timestamp": "..."}
+            ],
+            "project": {"id": "...", "name": "..."} | None,
+            "deployment": {"id": "...", "date": "YYYY-MM-DD"} | None
+        }
+    """
+    import asyncio
+
+    logger.info("job_start", job_type="upload_drive_images", job_id=job_id)
+
+    file_entries = payload.get("files", [])
+    total_files = len(file_entries)
+
+    if not file_entries:
+        await update_job(
+            job_id, status=JobStatus.COMPLETED, progress=1.0,
+            message="No files to process.",
+        )
+        return
+
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.05)
+    await update_summary(
+        job_id, total=total_files,
+        started_at=datetime.now(timezone.utc),
+    )
+    await emit_event(job_id, ProgressEvent(
+        type=EventType.JOB_STARTED,
+        phase=ProgressPhase.DOWNLOAD,
+        total=total_files,
+        message=f"🚀 Starting pipeline for {total_files} images",
+    ))
+
+    try:
+        from app.services.google_drive import GoogleDriveService
+        from app.services.storage import (
+            download_from_storage,
+            delete_from_storage_with_progress,
+        )
+
+        # Shared mutable state for heartbeat visibility
+        last_event_ts = time.monotonic()
+
+        # ── Heartbeat helper (separate async task) ───────────
+        async def _heartbeat_loop(phase, get_progress, stop_event):
+            """Fires if no event for 10 s — guarantees the UI never stalls."""
+            while not stop_event.is_set():
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=10)
+                    break  # stop was set
+                except asyncio.TimeoutError:
+                    nonlocal last_event_ts
+                    if time.monotonic() - last_event_ts >= 10:
+                        c, t = get_progress()
+                        await emit_event(job_id, ProgressEvent(
+                            type=EventType.HEARTBEAT,
+                            phase=phase,
+                            current=c, total=t,
+                            message=f"Still working… ({c}/{t})",
+                        ))
+                        last_event_ts = time.monotonic()
+
+        # ── Phase 1: DOWNLOAD from Supabase ──────────────────
+        await start_phase(job_id, ProgressPhase.DOWNLOAD)
+
+        files_with_bytes = []
+        download_completed = 0
+        sem = asyncio.Semaphore(5)
+
+        async def fetch(idx, entry):
+            nonlocal download_completed, last_event_ts
+            async with sem:
+                content = await download_from_storage(
+                    "analysis-images", entry["storage_path"], silent=True,
+                )
+                download_completed += 1
+                progress = 0.05 + (0.35 * (download_completed / total_files))
+                await update_job(job_id, progress=min(progress, 0.40))
+
+                if content:
+                    await update_summary(job_id, downloaded_inc=1)
+                    await emit_event(job_id, ProgressEvent(
+                        type=EventType.FILE_SUCCESS,
+                        phase=ProgressPhase.DOWNLOAD,
+                        current=download_completed,
+                        total=total_files,
+                        file_index=idx + 1,
+                        filename=entry["filename"],
+                        message=f"📥 Downloaded image {download_completed}/{total_files} from Supabase ✓",
+                    ))
+                else:
+                    await update_summary(job_id, failed_inc=1)
+                    await emit_event(job_id, ProgressEvent(
+                        type=EventType.FILE_FAILURE,
+                        phase=ProgressPhase.DOWNLOAD,
+                        current=download_completed,
+                        total=total_files,
+                        file_index=idx + 1,
+                        filename=entry["filename"],
+                        message=f"⚠️ Image {download_completed}/{total_files} ({entry['filename']}) failed to download",
+                    ))
+
+                last_event_ts = time.monotonic()
+                return entry, content
+
+        hb_stop = asyncio.Event()
+        hb_task = asyncio.create_task(
+            _heartbeat_loop(
+                ProgressPhase.DOWNLOAD,
+                lambda: (download_completed, total_files),
+                hb_stop,
+            )
+        )
+
+        results = await asyncio.gather(
+            *[fetch(i, e) for i, e in enumerate(file_entries)]
+        )
+
+        hb_stop.set()
+        try:
+            await hb_task
+        except asyncio.CancelledError:
+            pass
+
+        for entry, content in results:
+            if content:
+                files_with_bytes.append({
+                    "file_bytes": content,
+                    "filename": entry["filename"],
+                    "timestamp": entry.get("timestamp"),
+                    "project": entry.get("project"),
+                    "deployment": entry.get("deployment"),
+                })
+
+        await complete_phase(job_id, ProgressPhase.DOWNLOAD)
+
+        if not files_with_bytes:
+            logger.warning("drive_upload_no_files_downloaded", job_id=job_id)
+            await update_job(
+                job_id, status=JobStatus.FAILED,
+                error="No files could be downloaded from storage",
+                message="Failed: could not download any files from Supabase.",
+            )
+            return
+
+        # ── Phase 2: DRIVE UPLOAD ────────────────────────────
+        await start_phase(job_id, ProgressPhase.DRIVE_UPLOAD)
+
+        drive = GoogleDriveService()
+        drive_total = len(files_with_bytes)
+        drive_completed = 0
+        last_event_ts = time.monotonic()
+
+        async def on_drive_file_event(
+            action, *, filename="", folder_name="",
+            index=0, total=0, error="",
+        ):
+            nonlocal drive_completed, last_event_ts
+            last_event_ts = time.monotonic()
+
+            if action == "folder_created":
+                await emit_event(job_id, ProgressEvent(
+                    type=EventType.FOLDER_CREATED,
+                    phase=ProgressPhase.DRIVE_UPLOAD,
+                    message=f"📁 Created folder \"{folder_name}\" in Google Drive",
+                ))
+            elif action == "uploaded":
+                drive_completed = index
+                await update_summary(job_id, uploaded_inc=1)
+                progress = 0.40 + (0.50 * (index / total))
+                await update_job(job_id, progress=min(progress, 0.90))
+                await emit_event(job_id, ProgressEvent(
+                    type=EventType.FILE_SUCCESS,
+                    phase=ProgressPhase.DRIVE_UPLOAD,
+                    current=index, total=total,
+                    filename=filename,
+                    message=f"☁️ Uploaded {filename} ({index}/{total}) ✓",
+                ))
+            elif action == "skipped":
+                drive_completed = index
+                await update_summary(job_id, skipped_inc=1)
+                progress = 0.40 + (0.50 * (index / total))
+                await update_job(job_id, progress=min(progress, 0.90))
+                await emit_event(job_id, ProgressEvent(
+                    type=EventType.FILE_SKIP,
+                    phase=ProgressPhase.DRIVE_UPLOAD,
+                    current=index, total=total,
+                    filename=filename,
+                    message=f"⏭️ {filename} ({index}/{total}) already exists (skipped)",
+                ))
+            elif action == "failed":
+                drive_completed = index
+                await update_summary(job_id, failed_inc=1)
+                await emit_event(job_id, ProgressEvent(
+                    type=EventType.FILE_FAILURE,
+                    phase=ProgressPhase.DRIVE_UPLOAD,
+                    current=index, total=total,
+                    filename=filename,
+                    message=f"⚠️ Failed to upload {filename} ({index}/{total}): {error}",
+                ))
+
+        hb_stop2 = asyncio.Event()
+        hb_task2 = asyncio.create_task(
+            _heartbeat_loop(
+                ProgressPhase.DRIVE_UPLOAD,
+                lambda: (drive_completed, drive_total),
+                hb_stop2,
+            )
+        )
+
+        stats = await drive.upload_analysis_images(
+            files=files_with_bytes,
+            file_callback=on_drive_file_event,
+        )
+
+        hb_stop2.set()
+        try:
+            await hb_task2
+        except asyncio.CancelledError:
+            pass
+
+        await complete_phase(job_id, ProgressPhase.DRIVE_UPLOAD)
+
+        # ── Phase 3: CLEANUP ─────────────────────────────────
+        await start_phase(job_id, ProgressPhase.CLEANUP)
+        await update_job(job_id, progress=0.92)
+
+        storage_paths = [entry["storage_path"] for entry in file_entries]
+
+        async def on_cleanup_progress(completed, total):
+            nonlocal last_event_ts
+            last_event_ts = time.monotonic()
+            await emit_event(job_id, ProgressEvent(
+                type=EventType.PROGRESS,
+                phase=ProgressPhase.CLEANUP,
+                current=completed, total=total,
+                message=f"🧹 Cleaning up temporary files from Supabase ({completed}/{total})",
+            ))
+            progress = 0.92 + (0.08 * (completed / total))
+            await update_job(job_id, progress=min(progress, 0.99))
+
+        deleted = await delete_from_storage_with_progress(
+            "analysis-images", storage_paths,
+            progress_callback=on_cleanup_progress,
+        )
+        if deleted:
+            logger.info("drive_upload_intermediate_files_cleaned", count=len(storage_paths))
+
+        await complete_phase(job_id, ProgressPhase.CLEANUP)
+
+        # ── Final status (cleanup is done) ───────────────────
+        job_data = await get_job(job_id)
+        summary = job_data.summary if job_data else None
+        failed_count = summary.failed if summary else 0
+        uploaded_count = summary.uploaded if summary else 0
+        skipped_count = summary.skipped if summary else 0
+
+        final_status = (
+            JobStatus.COMPLETED_WITH_ERRORS if failed_count > 0
+            else JobStatus.COMPLETED
+        )
+
+        if final_status == JobStatus.COMPLETED_WITH_ERRORS:
+            final_msg = (
+                f"⚠️ Completed with issues — "
+                f"{uploaded_count} uploaded, {skipped_count} skipped, {failed_count} failed"
+            )
+        else:
+            final_msg = f"✅ Done — {drive_total} images synced to Google Drive"
+
+        await update_job(
+            job_id, status=final_status, progress=1.0, message=final_msg,
+        )
+
+        logger.info(
+            "job_complete",
+            job_type="upload_drive_images",
+            job_id=job_id,
+            **stats,
+        )
+
+    except Exception as e:
+        # Prevent infinite retry loop: fail after 3 tries
+        job_try = ctx.get("job_try", 1) if ctx else 1
+        if job_try >= 3:
+            logger.error(
+                "job_failed_max_retries",
+                job_type="upload_drive_images",
+                job_id=job_id,
+                error=str(e),
+                tries=job_try,
+            )
+            await update_job(
+                job_id, status=JobStatus.FAILED,
+                error=f"Max retries reached: {str(e)}",
+                message=f"❌ Failed after {job_try} attempts: {str(e)}",
+            )
+            return
+
+        await update_job(
+            job_id, status=JobStatus.FAILED, error=str(e),
+            message=f"Retrying (attempt {job_try})… {str(e)}",
+        )
+        logger.error(
+            "job_retry", job_type="upload_drive_images",
+            job_id=job_id, error=str(e), next_try=job_try + 1,
+        )
+        raise Retry(defer=10)
+
+
 # Register jobs for ARQ worker discovery
 JOBS = [
     func(convert_model_job, name="convert_model"),
     func(generate_manifest_job, name="generate_manifest"),
     func(export_camtrapdp_job, name="export_camtrapdp"),
     func(download_pretrained_job, name="download_pretrained"),
+    func(upload_drive_images_job, name="upload_drive_images"),
 ]
