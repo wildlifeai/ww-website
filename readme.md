@@ -5,16 +5,16 @@
 </p>
 
 <h1 align="center">
-Wildlife Watcher Toolkit - Web Platform V2
+Wildlife Watcher Web
 </h1>
 
 <p align="center">
-  <strong>Complete toolkit for deploying, configuring, and analyzing data from Wildlife Watcher devices.</strong>
+  <strong>Complete toolkit for configuring and analyzing data from Wildlife Watcher devices.</strong>
 </p>
 
-## 🚀 Welcome to V2
+## 🚀 Welcome to the real WWW
 
-The Wildlife Watcher platform has been completely rewritten from its legacy Streamlit version into a modern, production-grade V2 architecture:
+The Wildlife Watcher Website architecture is as follows:
 
 - **Frontend**: React + TypeScript + Vite (Tailwind CSS)
 - **Backend**: FastAPI + Python 3.11+
@@ -26,6 +26,7 @@ The Wildlife Watcher platform has been completely rewritten from its legacy Stre
 - **Model Conversion**: Automate Edge Impulse C++ library conversion into Vela-optimized firmware models.
 - **Manifest Generation**: Wrap firmware configs and models into `MANIFEST.zip` packages.
 - **EXIF Image Analysis**: Drag and drop SD card folders to extract firmware EXIF data, match GPS, and route images to Google Drive.
+- **Clustering and iNaturalist Integration**: TBC.
 
 ---
 
