@@ -1,14 +1,9 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { apiClient } from '../../lib/apiClient'
 import { supabase } from '../../config/supabase'
 import { useDragAndDrop } from '../../hooks/useDragAndDrop'
 import { PipelineStatusBox, type PipelineState, type LogEntry } from './PipelineStatusBox'
-
-interface Project {
-  id: string
-  name: string
-}
 
 interface Deployment {
   id: string
