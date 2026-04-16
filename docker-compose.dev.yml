@@ -8,12 +8,3 @@ services:
     environment:
       - ALLOWED_ORIGINS=http://localhost:5173
       - LOG_LEVEL=debug
-
-  worker:
-    build:
-      target: worker
-    command: ["arq", "app.jobs.worker.WorkerSettings"]
-    volumes:
-      - ./backend/app:/app/app
-    environment:
-      - LOG_LEVEL=debug

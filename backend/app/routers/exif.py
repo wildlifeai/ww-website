@@ -300,18 +300,17 @@ async def _enqueue_drive_upload(
             }
 
         proj_id = file_context["project"]["id"] if file_context["project"] else "unknown"
-        storage_path = f"analysis/{proj_id}/{file_dep_id}/{upload.filename}"
-
+        # Buffer to local disk instead of Supabase
+        from app.services.blob_store import store_blob
+        import uuid
+        blob_id = str(uuid.uuid4())
+        
         async with sem:
-            uploaded = await upload_to_storage(
-                "analysis-images",
-                storage_path,
-                content,
-                "image/jpeg",
-            )
+            await store_blob(blob_id, content, metadata={})
+            uploaded = True
 
         return {
-            "storage_path": storage_path,
+            "blob_id": blob_id,
             "filename": upload.filename,
             "timestamp": exif_data.get("date"),
             "project": file_context["project"],
@@ -337,21 +336,9 @@ async def _enqueue_drive_upload(
     }
 
     try:
-        arq_pool = getattr(request.app.state, "arq_pool", None)
-        if arq_pool:
-            await arq_pool.enqueue_job(
-                "upload_drive_images",
-                job_id,
-                payload,
-            )
-        else:
-            # Fallback for local dev without Redis/ARQ workers
-            from app.jobs.definitions import upload_drive_images_job
-            task = asyncio.create_task(upload_drive_images_job(None, job_id, payload))
-            bg_tasks = getattr(request.app.state, "bg_tasks", set())
-            bg_tasks.add(task)
-            task.add_done_callback(bg_tasks.discard)
-            request.app.state.bg_tasks = bg_tasks
+        from app.jobs.runner import enqueue_local_job
+        from app.jobs.definitions import upload_drive_images_job
+        enqueue_local_job(upload_drive_images_job(job_id, payload))
     except Exception as exc:
         logger.error("arq_enqueue_failed", job_id=job_id, error=str(exc))
         return {

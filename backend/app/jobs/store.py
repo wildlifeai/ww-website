@@ -22,48 +22,76 @@ from typing import Optional, Dict, List
 
 import structlog
 
-from app.config import settings
 from app.schemas.job import (
     JobStatus,
     JobInfo,
     ProgressEvent,
     ProgressPhase,
-    ProgressSummary,
     EventType,
 )
-from app.services.cache import get_redis
 
 logger = structlog.get_logger()
 
-JOB_TTL = 86400  # 24 hours
-MAX_EVENTS_RETURNED = 50  # Max events returned per poll
-
-# In-memory fallback stores
+# In-memory stores (Primary fast path)
 _memory_store: Dict[str, str] = {}
 _memory_events: Dict[str, List[str]] = {}
 
-# Per-job locks to serialise summary updates (avoid lost increments
-# when multiple concurrent coroutines complete within the same job).
+# Per-job locks to serialise summary updates
 _summary_locks: Dict[str, asyncio.Lock] = {}
 
+MAX_EVENTS_RETURNED = 50
 
-async def _get_redis():
-    """Get the shared Redis connection. Returns None if unavailable."""
+
+async def _sync_to_supabase(job_id: str) -> None:
+    """Synchronize local memory state to Supabase in the background."""
+    raw_data = _memory_store.get(f"job:{job_id}")
+    if not raw_data:
+        return
+
+    mem_events = _memory_events.get(f"job:{job_id}:events", [])
+    events_json = [json.loads(e) for e in mem_events]
+    data_json = json.loads(raw_data)
+    
+    # Bundle events inside the data for storage
+    data_json["events"] = events_json
+    
+    def _run_sync():
+        try:
+            from app.services.supabase_client import create_service_client
+            client = create_service_client()
+            client.table("api_jobs").upsert({"id": job_id, "data": data_json}).execute()
+        except Exception as e:
+            logger.debug("supabase_sync_skipped", error=str(e))
+            
+    asyncio.create_task(asyncio.to_thread(_run_sync))
+
+
+async def recover_stuck_jobs() -> None:
+    """Load jobs from Supabase on startup and mark interrupted ones as failed."""
     try:
-        r = await get_redis()
-        await r.ping()
-        return r
-    except Exception:
-        return None
-
-
-# ── CRUD ─────────────────────────────────────────────────────────────
+        from app.services.supabase_client import create_service_client
+        client = create_service_client()
+        resp = client.table("api_jobs").select("id, data").eq("data->>status", "processing").execute()
+        
+        for row in resp.data:
+            job_id = row['id']
+            data = row['data']
+            data['status'] = JobStatus.FAILED.value
+            data['error'] = "Job interrupted by server restart."
+            data['message'] = "❌ Failed: Server crashed or restarted mid-job."
+            
+            # Sync back failure to DB and load to memory
+            client.table("api_jobs").update({"data": data}).eq("id", job_id).execute()
+            _memory_store[f"job:{job_id}"] = json.dumps(data)
+            logger.warning("stuck_job_recovered_and_failed", job_id=job_id)
+            
+    except Exception as e:
+        logger.debug("job_recovery_skipped", error=str(e))
 
 
 async def create_job() -> str:
-    """Create a new job entry and return its ID."""
+    """Create a new job entry locally and sync to Supabase."""
     job_id = str(uuid.uuid4())
-
     now = datetime.now(timezone.utc).isoformat()
     job_data = {
         "job_id": job_id,
@@ -76,55 +104,45 @@ async def create_job() -> str:
         "message": None,
         "current_phase": None,
         "summary": None,
-        "_next_seq": 0,  # monotonic event counter (internal)
+        "_next_seq": 0,
     }
-
-    r = await _get_redis()
-    if r:
-        await r.set(f"job:{job_id}", json.dumps(job_data), ex=JOB_TTL)
-    else:
-        logger.debug("redis_unavailable_using_memory", job_id=job_id)
-        _memory_store[f"job:{job_id}"] = json.dumps(job_data)
-
+    
+    _memory_store[f"job:{job_id}"] = json.dumps(job_data)
+    await _sync_to_supabase(job_id)
     return job_id
 
 
 async def get_job(job_id: str) -> Optional[JobInfo]:
-    """Read current job state from Redis or memory fallback.
-
-    Includes the last N events from the separate events list.
-    """
-    r = await _get_redis()
-    if r:
-        raw = await r.get(f"job:{job_id}")
-    else:
-        raw = _memory_store.get(f"job:{job_id}")
+    """Read current job state from memory."""
+    raw = _memory_store.get(f"job:{job_id}")
+    if not raw:
+        # Try loading from Supabase if not in memory
+        try:
+            from app.services.supabase_client import create_service_client
+            client = create_service_client()
+            resp = client.table("api_jobs").select("data").eq("id", job_id).execute()
+            if resp.data:
+                db_data = resp.data[0]["data"]
+                events = db_data.pop("events", [])
+                
+                # Restore to memory
+                _memory_events[f"job:{job_id}:events"] = [json.dumps(e) for e in events]
+                _memory_store[f"job:{job_id}"] = json.dumps(db_data)
+                raw = _memory_store[f"job:{job_id}"]
+        except Exception:
+            pass
 
     if not raw:
         return None
 
     data = json.loads(raw)
-
-    # Read events from separate list key
-    events: list = []
-    event_count = 0
+    
     event_key = f"job:{job_id}:events"
-
-    if r:
-        event_count = await r.llen(event_key)
-        if event_count > 0:
-            start = max(0, event_count - MAX_EVENTS_RETURNED)
-            raw_events = await r.lrange(event_key, start, -1)
-            events = [json.loads(e) for e in raw_events]
-    else:
-        mem_events = _memory_events.get(event_key, [])
-        event_count = len(mem_events)
-        events = [json.loads(e) for e in mem_events[-MAX_EVENTS_RETURNED:]]
-
+    mem_events = _memory_events.get(event_key, [])
+    events = [json.loads(e) for e in mem_events[-MAX_EVENTS_RETURNED:]]
+    
     data["events"] = events
-    data["event_count"] = event_count
-
-    # Strip internal fields before constructing the public model
+    data["event_count"] = len(mem_events)
     data.pop("_next_seq", None)
 
     return JobInfo(**data)
@@ -140,62 +158,28 @@ async def update_job(
     message: Optional[str] = None,
     current_phase: Optional[ProgressPhase] = None,
 ) -> None:
-    """Partially update a job's state in Redis or memory fallback."""
-    r = await _get_redis()
-    if r:
-        raw = await r.get(f"job:{job_id}")
-    else:
-        raw = _memory_store.get(f"job:{job_id}")
-
+    raw = _memory_store.get(f"job:{job_id}")
     if not raw:
         return
 
     data = json.loads(raw)
+    if status is not None: data["status"] = status.value
+    if progress is not None: data["progress"] = progress
+    if result_url is not None: data["result_url"] = result_url
+    if error is not None: data["error"] = error
+    if message is not None: data["message"] = message
+    if current_phase is not None: data["current_phase"] = current_phase.value
 
-    if status is not None:
-        data["status"] = status.value
-    if progress is not None:
-        data["progress"] = progress
-    if result_url is not None:
-        data["result_url"] = result_url
-    if error is not None:
-        data["error"] = error
-    if message is not None:
-        data["message"] = message
-    if current_phase is not None:
-        data["current_phase"] = current_phase.value
-
-    # Always stamp updated_at so the frontend can detect stalls accurately
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    if r:
-        await r.set(f"job:{job_id}", json.dumps(data), ex=JOB_TTL)
-    else:
-        _memory_store[f"job:{job_id}"] = json.dumps(data)
-
-
-# ── Structured Event Helpers ─────────────────────────────────────────
+    _memory_store[f"job:{job_id}"] = json.dumps(data)
+    
+    # Background sync
+    await _sync_to_supabase(job_id)
 
 
 async def emit_event(job_id: str, event: ProgressEvent) -> None:
-    """Append a structured event to the job's separate event list.
-
-    Auto-assigns a monotonic ``seq`` number from the job's internal
-    counter, making it safe for the frontend to consume events even
-    when the Redis list is trimmed.
-
-    Also mirrors the ``message`` to the main job key for lightweight
-    polling (clients that only read the job key still see the latest
-    human-readable status).
-    """
     event.job_id = job_id
-
-    # Assign monotonic seq from the job's counter
-    r = await _get_redis()
-    if r:
-        raw = await r.get(f"job:{job_id}")
-    else:
-        raw = _memory_store.get(f"job:{job_id}")
+    raw = _memory_store.get(f"job:{job_id}")
 
     if raw:
         data = json.loads(raw)
@@ -204,21 +188,13 @@ async def emit_event(job_id: str, event: ProgressEvent) -> None:
         data["_next_seq"] = seq + 1
         data["message"] = event.message
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _memory_store[f"job:{job_id}"] = json.dumps(data)
 
-        if r:
-            await r.set(f"job:{job_id}", json.dumps(data), ex=JOB_TTL)
-        else:
-            _memory_store[f"job:{job_id}"] = json.dumps(data)
-
-    # Push to separate events list
     event_json = json.dumps(event.model_dump(mode="json"), default=str)
     event_key = f"job:{job_id}:events"
-
-    if r:
-        await r.rpush(event_key, event_json)
-        await r.expire(event_key, JOB_TTL)
-    else:
-        _memory_events.setdefault(event_key, []).append(event_json)
+    _memory_events.setdefault(event_key, []).append(event_json)
+    
+    await _sync_to_supabase(job_id)
 
 
 async def update_summary(
@@ -231,52 +207,32 @@ async def update_summary(
     failed_inc: int = 0,
     started_at: Optional[datetime] = None,
 ) -> None:
-    """Atomically update the job's progress summary counters.
-
-    Uses a per-job asyncio lock to prevent lost increments when
-    multiple concurrent download/upload coroutines update simultaneously.
-    """
     lock = _summary_locks.setdefault(job_id, asyncio.Lock())
 
     async with lock:
-        r = await _get_redis()
-        if r:
-            raw = await r.get(f"job:{job_id}")
-        else:
-            raw = _memory_store.get(f"job:{job_id}")
-
+        raw = _memory_store.get(f"job:{job_id}")
         if not raw:
             return
 
         data = json.loads(raw)
         summary = data.get("summary") or {
-            "total": 0,
-            "downloaded": 0,
-            "uploaded": 0,
-            "skipped": 0,
-            "failed": 0,
-            "started_at": None,
+            "total": 0, "downloaded": 0, "uploaded": 0,
+            "skipped": 0, "failed": 0, "started_at": None,
         }
 
-        if total is not None:
-            summary["total"] = total
+        if total is not None: summary["total"] = total
         summary["downloaded"] += downloaded_inc
         summary["uploaded"] += uploaded_inc
         summary["skipped"] += skipped_inc
         summary["failed"] += failed_inc
-        if started_at is not None:
-            summary["started_at"] = started_at.isoformat()
+        if started_at is not None: summary["started_at"] = started_at.isoformat()
 
         data["summary"] = summary
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        _memory_store[f"job:{job_id}"] = json.dumps(data)
+        
+    await _sync_to_supabase(job_id)
 
-        if r:
-            await r.set(f"job:{job_id}", json.dumps(data), ex=JOB_TTL)
-        else:
-            _memory_store[f"job:{job_id}"] = json.dumps(data)
-
-
-# ── Phase Lifecycle Helpers ──────────────────────────────────────────
 
 _PHASE_START_MSG = {
     ProgressPhase.DOWNLOAD: "📥 Downloading images from Supabase...",
@@ -290,27 +246,15 @@ _PHASE_COMPLETE_MSG = {
     ProgressPhase.CLEANUP: "🧹 Temporary files cleaned up ✓",
 }
 
-
 async def start_phase(job_id: str, phase: ProgressPhase) -> None:
-    """Mark the beginning of a pipeline phase."""
     await update_job(job_id, current_phase=phase)
-    await emit_event(
-        job_id,
-        ProgressEvent(
-            type=EventType.PHASE_START,
-            phase=phase,
-            message=_PHASE_START_MSG.get(phase, f"Starting {phase.value}..."),
-        ),
-    )
-
+    await emit_event(job_id, ProgressEvent(
+        type=EventType.PHASE_START, phase=phase,
+        message=_PHASE_START_MSG.get(phase, f"Starting {phase.value}..."),
+    ))
 
 async def complete_phase(job_id: str, phase: ProgressPhase) -> None:
-    """Mark the completion of a pipeline phase."""
-    await emit_event(
-        job_id,
-        ProgressEvent(
-            type=EventType.PHASE_COMPLETE,
-            phase=phase,
-            message=_PHASE_COMPLETE_MSG.get(phase, f"{phase.value} complete"),
-        ),
-    )
+    await emit_event(job_id, ProgressEvent(
+        type=EventType.PHASE_COMPLETE, phase=phase,
+        message=_PHASE_COMPLETE_MSG.get(phase, f"{phase.value} complete"),
+    ))

@@ -61,14 +61,9 @@ async def convert_model(
         },
     )
 
-    # Enqueue via ARQ
-    arq_pool = getattr(request.app.state, "arq_pool", None)
-    if arq_pool:
-        await arq_pool.enqueue_job(
-            "convert_model",
-            job_id=job_id,
-            user_id=user.id,
-        )
+    from app.jobs.runner import enqueue_local_job
+    from app.jobs.definitions import convert_model_job
+    enqueue_local_job(convert_model_job(job_id, user.id))
 
     return ApiResponse(
         data=JobCreateResponse(job_id=job_id).model_dump(),
@@ -130,16 +125,9 @@ async def download_pretrained(
 
     job_id = await create_job()
 
-    # Enqueue via ARQ
-    arq_pool = getattr(request.app.state, "arq_pool", None)
-    if arq_pool:
-        await arq_pool.enqueue_job(
-            "download_pretrained",
-            job_id=job_id,
-            user_id=user.id,
-            sscma_uuid=body.sscma_uuid,
-            org_id=org_id,
-        )
+    from app.jobs.runner import enqueue_local_job
+    from app.jobs.definitions import download_pretrained_job
+    enqueue_local_job(download_pretrained_job(job_id, user.id, body.sscma_uuid, org_id))
 
     return ApiResponse(
         data=JobCreateResponse(job_id=job_id).model_dump(),

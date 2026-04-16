@@ -8,7 +8,7 @@ This is the frontend user interface for the Wildlife Watcher platform, built wit
 - **Model Conversion UI**: Configure Edge Impulse model optimizations and upload zip payloads directly.
 - **Manifest Generation**: Real-time download package compilation for SD card insertion.
 - **Image Analysis Toolkit**: Drag-and-drop hardware EXIF images/folders for meta-analysis, Google Drive uploading, and GPS verification.
-- **Realtime Observability**: Connects to the backend ARQ-Redis job queue to poll active job conversion/upload states.
+- **Realtime Observability**: Connects to the backend Supabase-backed asynchronous job system to poll active job conversion/upload states.
 
 ## 🚀 Setup & Installation
 

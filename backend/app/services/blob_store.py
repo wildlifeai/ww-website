@@ -8,63 +8,64 @@ the worker retrieves it by job_id, processes it, then deletes it.
 Blobs auto-expire after 1 hour as a safety net.
 """
 
-import redis.asyncio as redis
-
-from app.config import settings
+import asyncio
+import json
+import os
+import tempfile
+from pathlib import Path
 
 import structlog
 
 logger = structlog.get_logger()
 
-BLOB_TTL = 3600  # 1 hour — safety net expiry
-BLOB_PREFIX = "blob:"
-
-
-async def _get_redis() -> redis.Redis:
-    return redis.from_url(settings.REDIS_URL)
+# Dedicated directory in the system temp map
+BLOB_DIR = Path(tempfile.gettempdir()) / "ww_blobs"
+BLOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
 async def store_blob(key: str, data: bytes, metadata: dict | None = None) -> None:
-    """Store a binary blob in Redis with auto-expiry.
+    """Store a binary blob to the local temp filesystem."""
+    data_path = BLOB_DIR / f"{key}.data"
+    meta_path = BLOB_DIR / f"{key}.meta"
 
-    Args:
-        key: Unique key (typically job_id).
-        data: Raw bytes to store.
-        metadata: Optional JSON-serializable metadata stored alongside.
-    """
-    r = await _get_redis()
-    await r.set(f"{BLOB_PREFIX}{key}:data", data, ex=BLOB_TTL)
+    def _write():
+        data_path.write_bytes(data)
+        if metadata:
+            with meta_path.open("w", encoding="utf-8") as f:
+                json.dump(metadata, f)
 
-    if metadata:
-        import json
-        await r.set(f"{BLOB_PREFIX}{key}:meta", json.dumps(metadata), ex=BLOB_TTL)
-
-    await r.close()
+    await asyncio.to_thread(_write)
     logger.debug("blob_stored", key=key, size_bytes=len(data))
 
 
 async def retrieve_blob(key: str) -> tuple[bytes | None, dict | None]:
-    """Retrieve a blob and its metadata from Redis.
+    """Retrieve a blob and its metadata from the local temp filesystem."""
+    data_path = BLOB_DIR / f"{key}.data"
+    meta_path = BLOB_DIR / f"{key}.meta"
 
-    Returns:
-        Tuple of (data_bytes, metadata_dict). Either may be None.
-    """
-    r = await _get_redis()
-    data = await r.get(f"{BLOB_PREFIX}{key}:data")
-    meta_raw = await r.get(f"{BLOB_PREFIX}{key}:meta")
-    await r.close()
+    def _read():
+        data = None
+        metadata = None
+        if data_path.exists():
+            data = data_path.read_bytes()
+        if meta_path.exists():
+            with meta_path.open("r", encoding="utf-8") as f:
+                metadata = json.load(f)
+        return data, metadata
 
-    metadata = None
-    if meta_raw:
-        import json
-        metadata = json.loads(meta_raw)
-
-    return data, metadata
+    return await asyncio.to_thread(_read)
 
 
 async def delete_blob(key: str) -> None:
-    """Delete a blob and its metadata from Redis."""
-    r = await _get_redis()
-    await r.delete(f"{BLOB_PREFIX}{key}:data", f"{BLOB_PREFIX}{key}:meta")
-    await r.close()
+    """Delete a blob and its metadata from disk."""
+    data_path = BLOB_DIR / f"{key}.data"
+    meta_path = BLOB_DIR / f"{key}.meta"
+
+    def _delete():
+        if data_path.exists():
+            data_path.unlink()
+        if meta_path.exists():
+            meta_path.unlink()
+
+    await asyncio.to_thread(_delete)
     logger.debug("blob_deleted", key=key)

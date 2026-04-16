@@ -320,14 +320,14 @@ async def api_export_camtrapdp(
 
     job_id = await create_job()
 
-    arq_pool = getattr(request.app.state, "arq_pool", None)
-    if arq_pool:
-        await arq_pool.enqueue_job(
-            "export_camtrapdp",
-            job_id=job_id,
-            org_id=key["organisation_id"],
-            params=body.model_dump(),
-        )
+    from app.jobs.runner import enqueue_local_job
+    from app.jobs.definitions import export_camtrapdp_job
+    
+    enqueue_local_job(export_camtrapdp_job(
+        job_id=job_id,
+        org_id=key["organisation_id"],
+        params=body.model_dump(),
+    ))
 
     return ApiResponse(
         data=JobCreateResponse(job_id=job_id).model_dump(),

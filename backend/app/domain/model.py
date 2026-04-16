@@ -130,6 +130,26 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
         tflite_path = work_dir / "trained.tflite"
         vars_h_path = work_dir / "model-parameters" / "model_variables.h"
 
+        # Check if the user uploaded an ALREADY converted firmware package
+        # containing a .tfl file and labels.txt
+        precompiled_tfl = list(work_dir.glob("*.tfl")) + list(work_dir.glob("*.TFL"))
+        if precompiled_tfl and (work_dir / "labels.txt").exists():
+            tfl_file = precompiled_tfl[0]
+            logger.info("model_already_converted", file=tfl_file.name)
+            
+            labels = (work_dir / "labels.txt").read_text().splitlines()
+            labels = [l.strip() for l in labels if l.strip()]
+            
+            ai_model_zip_path = work_dir / "ai_model.zip"
+            # Ensure the label file name matches the firmware expectation (e.g. 1237V10.TXT)
+            label_arcname = tfl_file.stem.upper()[:8] + ".TXT"
+            
+            with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
+                zf.write(tfl_file, tfl_file.name.upper())
+                zf.write(work_dir / "labels.txt", label_arcname)
+                
+            return ai_model_zip_path.read_bytes(), labels
+
         if not tflite_path.exists():
             raise ModelDomainError(f"trained.tflite not found in ZIP")
         if not vars_h_path.exists():

@@ -44,25 +44,16 @@ async def lifespan(app: FastAPI):
         except ImportError:
             logger.warning("sentry_sdk_not_installed")
 
-    # Create ARQ Redis pool for job enqueuing
+    # Start recovery of jobs from Supabase
+    from app.jobs.store import recover_stuck_jobs
     try:
-        from arq import create_pool
-        from arq.connections import RedisSettings
-
-        app.state.arq_pool = await create_pool(
-            RedisSettings.from_dsn(settings.REDIS_URL)
-        )
-        logger.info("arq_pool_created")
+        await recover_stuck_jobs()
     except Exception as e:
-        logger.warning("arq_pool_failed", error=str(e))
-        app.state.arq_pool = None
+        logger.warning("stuck_jobs_recovery_failed", error=str(e))
 
     yield
 
     # Shutdown
-    if hasattr(app.state, "arq_pool") and app.state.arq_pool:
-        await app.state.arq_pool.close()
-    await close_redis()
     logger.info("app_shutdown")
 
 

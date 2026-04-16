@@ -315,7 +315,7 @@ export function AnalyseImages() {
                     }
                     
                     if (driveInfo.file_count > 0) {
-                        logs.push({ ts: Date.now(), level: 'success', message: `✅ Uploaded buffer to Supabase. Drive sync queued for ${driveInfo.file_count} images.` })
+                        logs.push({ ts: Date.now(), level: 'success', message: `✅ Buffered locally. Drive sync queued for ${driveInfo.file_count} images.` })
                     }
                 }
               } else if (!uploadToDrive) {

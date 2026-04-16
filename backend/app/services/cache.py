@@ -7,32 +7,15 @@ Provides a simple ``cached()`` helper for caching expensive lookups
 """
 
 import json
-from typing import Any, Callable, Awaitable, Optional
+import time
+from typing import Any, Callable, Awaitable, Dict, Tuple
 
-import redis.asyncio as redis
 import structlog
-
-from app.config import settings
 
 logger = structlog.get_logger()
 
-_redis: Optional[redis.Redis] = None
-
-
-async def get_redis() -> redis.Redis:
-    """Get or create a shared Redis connection."""
-    global _redis
-    if not _redis:
-        _redis = redis.from_url(settings.REDIS_URL)
-    return _redis
-
-
-async def close_redis() -> None:
-    """Cleanly close the Redis connection."""
-    global _redis
-    if _redis:
-        await _redis.close()
-        _redis = None
+# In-memory dictionary for TTL cache: { key: (expiry_timestamp, value) }
+_memory_cache: Dict[str, Tuple[float, Any]] = {}
 
 
 async def cached(
@@ -41,21 +24,29 @@ async def cached(
     """Cache-aside: return cached value or call fetch_fn and cache the result.
 
     Args:
-        key: Redis key.
+        key: Cache key.
         ttl: Time-to-live in seconds.
         fetch_fn: Async callable that produces the value on cache miss.
 
     Returns:
         The cached or freshly-fetched value.
     """
-    r = await get_redis()
+    now = time.monotonic()
+    
+    # Clean up expired items lazily to avoid memory leaks
+    expired_keys = [k for k, (exp, _) in _memory_cache.items() if now > exp]
+    for k in expired_keys:
+        del _memory_cache[k]
 
-    cached_val = await r.get(key)
-    if cached_val:
-        logger.debug("cache_hit", key=key)
-        return json.loads(cached_val)
+    if key in _memory_cache:
+        expiry, val = _memory_cache[key]
+        if now <= expiry:
+            logger.debug("cache_hit", key=key)
+            return val
+        else:
+            del _memory_cache[key]
 
     logger.debug("cache_miss", key=key)
     result = await fetch_fn()
-    await r.set(key, json.dumps(result), ex=ttl)
+    _memory_cache[key] = (now + ttl, result)
     return result

@@ -9,8 +9,6 @@ They delegate to domain layer classes for actual business logic.
 import time
 from datetime import datetime, timezone
 
-from arq import func, Retry
-
 from app.schemas.job import JobStatus, ProgressPhase, EventType, ProgressEvent
 from app.jobs.store import (
     update_job,
@@ -26,8 +24,8 @@ import structlog
 logger = structlog.get_logger()
 
 
-async def convert_model_job(ctx, job_id: str, user_id: str):
-    """Long-running model conversion. Executed by the worker, not the API process.
+async def convert_model_job(job_id: str, user_id: str):
+    """Long-running model conversion. Executed by passing into runner.py.
 
     Retrieves the uploaded ZIP from Redis blob store, converts via Vela,
     uploads the result to Supabase Storage, and stores a signed URL in the
@@ -105,7 +103,7 @@ async def convert_model_job(ctx, job_id: str, user_id: str):
         raise
 
 
-async def generate_manifest_job(ctx, job_id: str, params: dict):
+async def generate_manifest_job(job_id: str, params: dict):
     """Assemble MANIFEST.zip. May take 10-30s depending on downloads."""
     logger.info("job_start", job_type="generate_manifest", job_id=job_id)
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
@@ -170,7 +168,7 @@ async def generate_manifest_job(ctx, job_id: str, params: dict):
         raise
 
 
-async def export_camtrapdp_job(ctx, job_id: str, org_id: str, params: dict):
+async def export_camtrapdp_job(job_id: str, org_id: str, params: dict):
     """Export deployment data as CamtrapDP package."""
     logger.info("job_start", job_type="export_camtrapdp", job_id=job_id)
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
@@ -222,7 +220,7 @@ async def export_camtrapdp_job(ctx, job_id: str, org_id: str, params: dict):
         raise
 
 
-async def download_pretrained_job(ctx, job_id: str, user_id: str, sscma_uuid: str, org_id: str):
+async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, org_id: str):
     """Download, convert, and register an SSCMA pretrained model."""
     logger.info("job_start", job_type="download_pretrained", job_id=job_id)
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
@@ -256,7 +254,7 @@ async def download_pretrained_job(ctx, job_id: str, user_id: str, sscma_uuid: st
         )
         raise
 
-async def upload_drive_images_job(ctx, job_id: str, payload: dict):
+async def upload_drive_images_job(job_id: str, payload: dict):
     """Upload analysed images to Google Drive.
 
     Emits structured ``ProgressEvent``\s throughout so the frontend can
@@ -268,7 +266,7 @@ async def upload_drive_images_job(ctx, job_id: str, payload: dict):
 
         {
             "files": [
-                {"storage_path": "...", "filename": "...", "timestamp": "..."}
+                {"blob_id": "...", "filename": "...", "timestamp": "..."}
             ],
             "project": {"id": "...", "name": "..."} | None,
             "deployment": {"id": "...", "date": "YYYY-MM-DD"} | None
@@ -302,10 +300,7 @@ async def upload_drive_images_job(ctx, job_id: str, payload: dict):
 
     try:
         from app.services.google_drive import GoogleDriveService
-        from app.services.storage import (
-            download_from_storage,
-            delete_from_storage_with_progress,
-        )
+        from app.services.blob_store import retrieve_blob, delete_blob
 
         # Shared mutable state for heartbeat visibility
         last_event_ts = time.monotonic()
@@ -339,9 +334,8 @@ async def upload_drive_images_job(ctx, job_id: str, payload: dict):
         async def fetch(idx, entry):
             nonlocal download_completed, last_event_ts
             async with sem:
-                content = await download_from_storage(
-                    "analysis-images", entry["storage_path"], silent=True,
-                )
+                content, _ = await retrieve_blob(entry["blob_id"])
+                
                 download_completed += 1
                 progress = 0.05 + (0.35 * (download_completed / total_files))
                 await update_job(job_id, progress=min(progress, 0.40))
@@ -355,7 +349,7 @@ async def upload_drive_images_job(ctx, job_id: str, payload: dict):
                         total=total_files,
                         file_index=idx + 1,
                         filename=entry["filename"],
-                        message=f"📥 Downloaded image {download_completed}/{total_files} from Supabase ✓",
+                        message=f"📥 Loaded image {download_completed}/{total_files} from buffer ✓",
                     ))
                 else:
                     await update_summary(job_id, failed_inc=1)
@@ -494,26 +488,34 @@ async def upload_drive_images_job(ctx, job_id: str, payload: dict):
         await start_phase(job_id, ProgressPhase.CLEANUP)
         await update_job(job_id, progress=0.92)
 
-        storage_paths = [entry["storage_path"] for entry in file_entries]
+        blob_ids = [entry["blob_id"] for entry in file_entries]
 
-        async def on_cleanup_progress(completed, total):
+        async def _cleanup_blobs():
             nonlocal last_event_ts
-            last_event_ts = time.monotonic()
-            await emit_event(job_id, ProgressEvent(
-                type=EventType.PROGRESS,
-                phase=ProgressPhase.CLEANUP,
-                current=completed, total=total,
-                message=f"🧹 Cleaning up temporary files from Supabase ({completed}/{total})",
-            ))
-            progress = 0.92 + (0.08 * (completed / total))
-            await update_job(job_id, progress=min(progress, 0.99))
+            completed = 0
+            total = len(blob_ids)
+            for bid in blob_ids:
+                try:
+                    await delete_blob(bid)
+                except Exception:
+                    pass
+                completed += 1
+                
+                last_event_ts = time.monotonic()
+                if completed % max(1, total // 10) == 0 or completed == total:
+                    await emit_event(job_id, ProgressEvent(
+                        type=EventType.PROGRESS,
+                        phase=ProgressPhase.CLEANUP,
+                        current=completed, total=total,
+                        message=f"🧹 Cleaning up temporary buffers ({completed}/{total})",
+                    ))
+                    progress = 0.92 + (0.08 * (completed / total))
+                    await update_job(job_id, progress=min(progress, 0.99))
+            return completed
 
-        deleted = await delete_from_storage_with_progress(
-            "analysis-images", storage_paths,
-            progress_callback=on_cleanup_progress,
-        )
+        deleted = await _cleanup_blobs()
         if deleted:
-            logger.info("drive_upload_intermediate_files_cleaned", count=len(storage_paths))
+            logger.info("drive_upload_intermediate_files_cleaned", count=deleted)
 
         await complete_phase(job_id, ProgressPhase.CLEANUP)
 
@@ -549,39 +551,13 @@ async def upload_drive_images_job(ctx, job_id: str, payload: dict):
         )
 
     except Exception as e:
-        # Prevent infinite retry loop: fail after 3 tries
-        job_try = ctx.get("job_try", 1) if ctx else 1
-        if job_try >= 3:
-            logger.error(
-                "job_failed_max_retries",
-                job_type="upload_drive_images",
-                job_id=job_id,
-                error=str(e),
-                tries=job_try,
-            )
-            await update_job(
-                job_id, status=JobStatus.FAILED,
-                error=f"Max retries reached: {str(e)}",
-                message=f"❌ Failed after {job_try} attempts: {str(e)}",
-            )
-            return
-
         await update_job(
             job_id, status=JobStatus.FAILED, error=str(e),
-            message=f"Retrying (attempt {job_try})… {str(e)}",
+            message=f"❌ Failed to upload to Google Drive: {str(e)}",
         )
         logger.error(
-            "job_retry", job_type="upload_drive_images",
-            job_id=job_id, error=str(e), next_try=job_try + 1,
+            "job_failed", job_type="upload_drive_images",
+            job_id=job_id, error=str(e),
         )
-        raise Retry(defer=10)
-
-
-# Register jobs for ARQ worker discovery
-JOBS = [
-    func(convert_model_job, name="convert_model"),
-    func(generate_manifest_job, name="generate_manifest"),
-    func(export_camtrapdp_job, name="export_camtrapdp"),
-    func(download_pretrained_job, name="download_pretrained"),
-    func(upload_drive_images_job, name="upload_drive_images"),
-]
+        # Without ARQ, we don't auto-retry.
+        return

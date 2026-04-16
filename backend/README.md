@@ -1,6 +1,6 @@
 # Wildlife Watcher V2 Backend
 
-Production-grade FastAPI backend powering the Wildlife Watcher platform. Handles firmware manifest generation, AI model conversion, LoRaWAN webhook ingestion, and EXIF-based image analysis — all with async job processing via ARQ + Redis.
+Production-grade FastAPI backend powering the Wildlife Watcher platform. Handles firmware manifest generation, AI model conversion, LoRaWAN webhook ingestion, and EXIF-based image analysis — all with local asyncio background tasks and Supabase persistence.
 
 ## Table of Contents
 
@@ -25,7 +25,6 @@ Production-grade FastAPI backend powering the Wildlife Watcher platform. Handles
 ### Prerequisites
 
 - **Python 3.11+**
-- **Redis** (local or Docker)
 - **Docker** and **Docker Compose** (for full stack)
 - A **Supabase** project with the Wildlife Watcher schema
 
@@ -36,7 +35,7 @@ Production-grade FastAPI backend powering the Wildlife Watcher platform. Handles
 cp .env.example .env
 # Edit .env with your Supabase keys
 
-# Start all services (API + Worker + Redis)
+# Start all services
 docker compose up -d
 
 # Verify
@@ -60,9 +59,6 @@ source venv/bin/activate  # or .\venv\Scripts\activate on Windows
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 
-# Start Redis (required)
-docker run -d -p 6379:6379 redis:7-alpine
-
 # Copy .env to backend root
 cp ../.env.example .env
 # Edit with your Supabase keys
@@ -70,8 +66,6 @@ cp ../.env.example .env
 # Start the API server
 uvicorn app.main:app --reload --port 8000
 
-# In a separate terminal — start the worker
-arq app.jobs.worker.WorkerSettings
 ```
 
 ---
@@ -95,11 +89,10 @@ arq app.jobs.worker.WorkerSettings
 │  └────┬─────┘  └────┬─────┘  └──────────┘  └──────────────────┘│
 │       │              │                                           │
 │       ▼              ▼                                           │
-│  ┌──────────────────────────────┐  ┌───────────────────────────┐│
-│  │       Services Layer          │  │     Redis (Jobs + Cache) ││
-│  │  Supabase · HTTP · Storage   │  │  Job Store · Blob Store  ││
-│  │  Vela · Cache · DB Utils     │  │  Cache-aside             ││
-│  └──────────────────────────────┘  └───────────────────────────┘│
+│  ┌────────────────────────────────────────────────────────────┐│
+│  │                     Services Layer                         ││
+│  │  Supabase · HTTP · Storage · Vela · Cache · DB Utils       ││
+│  └────────────────────────────────────────────────────────────┘│
 └──────────────────────────────────────────────────────────────────┘
                │                                    │
                ▼                                    ▼
@@ -117,7 +110,7 @@ arq app.jobs.worker.WorkerSettings
 
 1. **Domain-Driven Separation** — Business logic lives in `domain/`, HTTP concerns live in `routers/`, infrastructure in `services/`. Each layer is independently testable.
 
-2. **Async-First** — Heavy operations (Vela conversion, manifest assembly, downloads) run in the ARQ worker, not the API process. The API returns a `job_id` immediately.
+2. **Async-First** — Heavy operations (Vela conversion, manifest assembly, downloads) run in an in-process asyncio background loop to conserve resources. The API returns a `job_id` immediately.
 
 3. **Observability by Default** — Every request gets a UUID (`X-Request-ID`), structured JSON logging, and optional Sentry error tracking.
 
@@ -141,7 +134,7 @@ backend/
 │   │   ├── manifest.py         # MANIFEST.zip assembly
 │   │   └── model.py            # Vela conversion + upload/register
 │   │
-│   ├── jobs/                   # Async job system (ARQ + Redis)
+│   ├── jobs/                   # Async job system (Local Loop + Supabase)
 │   │   ├── definitions.py      # Job functions (run by worker)
 │   │   ├── store.py            # Redis-backed job status read/write
 │   │   └── worker.py           # ARQ WorkerSettings
@@ -170,8 +163,8 @@ backend/
 │   │   └── model.py            # ModelUpload, ModelConvert
 │   │
 │   └── services/               # Infrastructure adapters
-│       ├── blob_store.py       # Redis temp file storage (API→Worker)
-│       ├── cache.py            # Redis cache-aside pattern
+│       ├── blob_store.py       # Local disk temp file storage
+│       ├── cache.py            # Simple thread-safe dict cache
 │       ├── db_utils.py         # Paginated Supabase queries
 │       ├── http_client.py      # httpx + tenacity retry
 │       ├── storage.py          # Supabase Storage download/upload
@@ -210,7 +203,6 @@ All configuration is managed via environment variables, validated at startup by 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
 | `ALLOWED_ORIGINS` | `https://wildlifewatcher.ai,http://localhost:5173` | CORS origins (comma-separated) |
 | `RATE_LIMIT_PER_MINUTE` | `60` | Per-IP API rate limit |
 | `SENTRY_DSN` | _(none)_ | Sentry error tracking DSN |
@@ -258,8 +250,6 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 
 # This gives you:
 # - API at http://localhost:8000 (auto-reloads on code changes)
-# - Worker (auto-reloads on code changes)
-# - Redis at localhost:6379
 # - Swagger docs at http://localhost:8000/docs
 # - ReDoc at http://localhost:8000/redoc
 ```
@@ -267,16 +257,9 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 ### Development without Docker
 
 ```bash
-# Terminal 1: Redis
-docker run -d -p 6379:6379 --name ww-redis redis:7-alpine
-
-# Terminal 2: API
 cd backend
 uvicorn app.main:app --reload --port 8000
 
-# Terminal 3: Worker
-cd backend
-arq app.jobs.worker.WorkerSettings
 ```
 
 ### Accessing the API
@@ -306,8 +289,6 @@ python -m pytest tests/test_exif_domain.py -v
 # Run with coverage
 python -m pytest tests/ --cov=app --cov-report=term-missing
 
-# Run only fast tests (no Redis required)
-python -m pytest tests/ -v -k "not needs_redis"
 ```
 
 ### Test Organisation
@@ -325,7 +306,6 @@ python -m pytest tests/ -v -k "not needs_redis"
 - Domain tests go in `tests/test_<domain>_domain.py`
 - Router integration tests go in `tests/test_routers.py`
 - Use `conftest.py` fixtures for the FastAPI test client
-- Tests requiring Redis should use `@needs_redis` decorator from `test_routers.py`
 - Mock Supabase calls using `unittest.mock.patch`
 
 ---
@@ -350,7 +330,7 @@ See [docs/api-reference.md](../docs/api-reference.md) for the full endpoint refe
 
 ## Async Job System
 
-The backend uses **ARQ** (Async Redis Queue) for long-running operations. This keeps API response times fast while processing heavy tasks in the background.
+The backend uses an **in-process Asyncio Runner** backed by **Supabase** for persistence. This allows it to run in a single container (e.g. Azure Container Apps) while safely recovering uncompleted jobs on reboot. 
 
 ### How It Works
 
@@ -360,11 +340,11 @@ Client                    API Server                 Redis                     W
   │  POST /api/models/convert│                         │                         │
   │─────────────────────────>│                         │                         │
   │                          │ 1. Validate upload      │                         │
-  │                          │ 2. Store blob in Redis  │                         │
+  │                          │ 2. Store blob in local Temp  │                         │
   │                          │────────────────────────>│                         │
   │                          │ 3. Create job record    │                         │
   │                          │────────────────────────>│                         │
-  │                          │ 4. Enqueue to ARQ       │                         │
+  │                          │ 4. Enqueue locally       │                         │
   │                          │────────────────────────>│                         │
   │  { job_id: "abc-123" }   │                         │                         │
   │<─────────────────────────│                         │                         │
@@ -424,7 +404,7 @@ const pollJob = async (jobId) => {
 
 ### Job TTL
 
-Job status records auto-expire from Redis after **24 hours**. Temporary blobs (uploaded files) expire after **1 hour**. Result files in Supabase Storage are accessible via signed URLs that expire after **15 minutes**.
+Job status records auto-expire after **24 hours**. Temporary blobs (uploaded files) expire after **1 hour**. Result files in Supabase Storage are accessible via signed URLs that expire after **15 minutes**.
 
 ---
 

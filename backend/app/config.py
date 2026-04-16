@@ -21,10 +21,6 @@ class Settings(BaseSettings):
         ..., description="Supabase service-role key (admin ops only)"
     )
 
-    # ── Redis ────────────────────────────────────────────────────────
-    REDIS_URL: str = Field(
-        "redis://localhost:6379", description="Redis connection string"
-    )
 
     # ── Security ─────────────────────────────────────────────────────
     ALLOWED_ORIGINS: str = Field(

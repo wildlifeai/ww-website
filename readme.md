@@ -18,7 +18,7 @@ The Wildlife Watcher Website architecture is as follows:
 
 - **Frontend**: React + TypeScript + Vite (Tailwind CSS)
 - **Backend**: FastAPI + Python 3.11+
-- **Async Workers**: ARQ + Redis (for heavy model conversion and Google Drive uploading)
+- **Async Workers**: Local Asyncio loop + Supabase (for heavy model conversion and Drive uploading)
 - **Realtime DB**: Supabase (PostgreSQL, Storage, Realtime, Auth)
 
 ### Platform Features
@@ -37,9 +37,9 @@ Since this is a multi-service workspace, you must run the frontend UI and the ba
 ### 1. Prerequisites
 - **Node.js 18+** & NPM
 - **Python 3.11+**
-- **Docker** (Optional, but highly recommended for Redis)
 
-### 2. Backend & Worker Setup (FastAPI + Redis)
+
+### 2. Backend Setup (FastAPI)
 
 > For full details, see the comprehensive [Backend README](backend/README.md).
 
@@ -58,18 +58,11 @@ Since this is a multi-service workspace, you must run the frontend UI and the ba
    ```
 4. Configure `.env`:
    Copy `.env.example` to `.env` and fill in your Supabase variables.
-5. Start Redis (If not already running):
-   ```bash
-   docker run -d -p 6379:6379 redis:7-alpine
-   ```
-6. Start the API Server:
+5. Start the API Server:
    ```bash
    uvicorn app.main:app --reload --port 8000
    ```
-7. Start the ARQ Background Worker (In a separate terminal):
-   ```bash
-   arq app.jobs.worker.WorkerSettings
-   ```
+
 
 ### 3. Frontend Setup (React/Vite)
 
