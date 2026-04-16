@@ -59,7 +59,8 @@ async def _sync_to_supabase(job_id: str) -> None:
         try:
             from app.services.supabase_client import create_service_client
             client = create_service_client()
-            client.table("api_jobs").upsert({"id": job_id, "data": data_json}).execute()
+            status_val = data_json.get("status", "queued")
+            client.table("api_jobs").upsert({"id": job_id, "status": status_val, "job_data": data_json}).execute()
         except Exception as e:
             logger.debug("supabase_sync_skipped", error=str(e))
             
@@ -71,17 +72,17 @@ async def recover_stuck_jobs() -> None:
     try:
         from app.services.supabase_client import create_service_client
         client = create_service_client()
-        resp = client.table("api_jobs").select("id, data").eq("data->>status", "processing").execute()
+        resp = client.table("api_jobs").select("id, job_data, status").eq("status", "processing").execute()
         
         for row in resp.data:
             job_id = row['id']
-            data = row['data']
+            data = row.get('job_data', {})
             data['status'] = JobStatus.FAILED.value
             data['error'] = "Job interrupted by server restart."
             data['message'] = "❌ Failed: Server crashed or restarted mid-job."
             
             # Sync back failure to DB and load to memory
-            client.table("api_jobs").update({"data": data}).eq("id", job_id).execute()
+            client.table("api_jobs").update({"status": data['status'], "job_data": data}).eq("id", job_id).execute()
             _memory_store[f"job:{job_id}"] = json.dumps(data)
             logger.warning("stuck_job_recovered_and_failed", job_id=job_id)
             
@@ -120,9 +121,9 @@ async def get_job(job_id: str) -> Optional[JobInfo]:
         try:
             from app.services.supabase_client import create_service_client
             client = create_service_client()
-            resp = client.table("api_jobs").select("data").eq("id", job_id).execute()
+            resp = client.table("api_jobs").select("job_data").eq("id", job_id).execute()
             if resp.data:
-                db_data = resp.data[0]["data"]
+                db_data = resp.data[0]["job_data"]
                 events = db_data.pop("events", [])
                 
                 # Restore to memory
