@@ -17,7 +17,6 @@ from app.config import settings
 from app.middleware.request_id import RequestIDMiddleware
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import limiter
-from app.services.cache import close_redis
 
 from app.routers import jobs, exif, lorawan, manifest, models, public_api, inaturalist
 
