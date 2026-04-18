@@ -38,9 +38,9 @@ V2 shifts from **"modular rewrite"** to **"production-ready platform with async 
 | 3 | **Export Data** — projects/deployments/devices → CSV | 1708–1840 | Required | No | Frontend direct |
 | 4 | **Analyze Images** — EXIF + deployment cross-ref | 1842–1950 | Required | Partially | Frontend (exifr) + Supabase query |
 | 5 | **Authentication** — login, roles, org listing | 855–1000 | — | No | Frontend (Supabase JS) |
-| 6 | **iNaturalist OAuth** (Stage 1) | planned | Required | **Yes** | Sync (OAuth exchange) |
-| 7 | **Image Clustering** (Stage 2A) | planned | Required | **Yes** | `inat_cluster_job` |
-| 8 | **iNat Upload + Poll** (Stage 2B) | planned | Required | **Yes** | `inat_upload_job` |
+| 6 | **iNaturalist OAuth** (Stage 1) | implemented | Required | **Yes** | Sync (OAuth exchange) — `/api/inat/*` |
+| 7 | **Image Clustering** (Stage 2A) | implemented | Required | **Yes** | Sync — `/api/clustering/analyze` |
+| 8 | **iNat Upload + Poll** (Stage 2B) | implemented | Required | **Yes** | Sync — `/api/inat/observations/*` |
 | 9 | **MegaDetector** (future) | future | Required | **Yes** | `megadetector_job` |
 | 10 | **🆕 LoRaWAN Webhook Ingestion** — receive uplinks from TTN/Chirpstack/Helium, parse battery/SD/model output, push to mobile app via Supabase Realtime | new | Webhook secret | **Yes** | Sync (fast insert) |
 | 11 | **🆕 Public Data API** — external camera trap platforms (Wildlife Insights, TRAPPER, EcoSecrets) query deployment data, device telemetry, CamtrapDP export | new | API key + OAuth2 scopes | **Yes** | Sync (reads) + `camtrapdp_export_job` |

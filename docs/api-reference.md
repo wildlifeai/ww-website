@@ -45,6 +45,8 @@ On error:
 - [Model Conversion](#model-conversion)
 - [EXIF Parsing](#exif-parsing)
 - [LoRaWAN Webhooks](#lorawan-webhooks)
+- [iNaturalist Integration](#inaturalist-integration)
+- [Image Clustering](#image-clustering)
 - [Error Codes](#error-codes)
 
 ---
@@ -522,6 +524,191 @@ Get the latest parsed message for a specific device.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `device_eui` | string | LoRaWAN Device EUI (16 hex chars) |
+
+---
+
+## iNaturalist Integration
+
+> Gated behind the `FF_INAT_ENABLED` feature flag. All endpoints return 404 when disabled.
+
+### `GET /api/inat/auth`
+
+Start the iNaturalist OAuth flow. Returns an authorization URL for redirecting the user.
+
+**Authentication:** Required (JWT Bearer token)
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "authorization_url": "https://www.inaturalist.org/oauth/authorize?client_id=...&state=...",
+    "state": "abc123"
+  },
+  "meta": { "request_id": "..." }
+}
+```
+
+---
+
+### `GET /api/inat/callback`
+
+Handle the OAuth redirect from iNaturalist. Exchanges the authorization code for tokens, stores them encrypted in Supabase, and redirects the user back to the frontend.
+
+**Authentication:** None (state param validates the request)
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `code` | string | Authorization code from iNaturalist |
+| `state` | string | CSRF state token (must match the one from `/auth`) |
+
+**Response:** 302 redirect to `{frontend_url}/toolkit?inat=connected`
+
+---
+
+### `GET /api/inat/status`
+
+Check if the current user is connected to iNaturalist.
+
+**Authentication:** Required (JWT Bearer token)
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "connected": true,
+    "inat_username": "wildlife_user",
+    "inat_user_id": 12345,
+    "inat_icon_url": "https://static.inaturalist.org/..."
+  },
+  "meta": { "request_id": "..." }
+}
+```
+
+---
+
+### `POST /api/inat/disconnect`
+
+Revoke stored iNaturalist tokens and disconnect the user.
+
+**Authentication:** Required (JWT Bearer token)
+
+**Response (200):**
+
+```json
+{
+  "data": { "disconnected": true },
+  "meta": { "request_id": "..." }
+}
+```
+
+---
+
+### `POST /api/inat/observations`
+
+Create an iNaturalist observation using the user's stored OAuth token.
+
+**Authentication:** Required (JWT Bearer token)
+
+**Request Body:**
+
+```json
+{
+  "species_guess": "Kiwi",
+  "latitude": -36.848,
+  "longitude": 174.763,
+  "observed_on": "2026-04-12",
+  "description": "Captured by Wildlife Watcher camera trap",
+  "geoprivacy": "obscured"
+}
+```
+
+---
+
+### `GET /api/inat/observations/{observation_id}/status`
+
+Poll identification status for a specific iNaturalist observation. Public endpoint — no auth required.
+
+---
+
+### `POST /api/inat/observations/poll`
+
+Batch poll identification status for up to 200 observation IDs.
+
+**Request Body:**
+
+```json
+{
+  "observation_ids": [123, 456, 789]
+}
+```
+
+---
+
+## Image Clustering
+
+Near-duplicate detection for camera trap images using perceptual hashing (dHash) with BK-tree indexing.
+
+### `POST /api/clustering/analyze`
+
+Cluster uploaded images by visual similarity and select representative images.
+
+**Authentication:** None
+
+**Content-Type:** `multipart/form-data`
+
+**Parameters:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `files` | binary[] | One or more image files (JPEG, PNG, WebP) |
+| `max_hamming` | int | Similarity threshold (0–20). Lower = stricter. Default 10. |
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "total_images": 100,
+    "total_clusters": 25,
+    "total_representatives": 25,
+    "clusters": [
+      {
+        "cluster_id": 0,
+        "size": 8,
+        "representative": "IMG_0042.jpg",
+        "members": [
+          {
+            "filename": "IMG_0042.jpg",
+            "sharpness": 1523.4,
+            "width": 1920,
+            "height": 1080,
+            "is_representative": true
+          }
+        ]
+      }
+    ]
+  },
+  "meta": { "request_id": "..." }
+}
+```
+
+**Limits:** Maximum 1000 images per request.
+
+---
+
+### `POST /api/clustering/analyze/csv`
+
+Same clustering logic, but returns results as a downloadable CSV file.
+
+**Content-Type:** `multipart/form-data`
+
+**Parameters:** Same as `/api/clustering/analyze`
+
+**Response:** `text/csv` file with columns: `filename`, `cluster_id`, `cluster_size`, `is_representative`, `sharpness`, `width`, `height`
 
 ---
 

@@ -129,7 +129,9 @@ backend/
 │   ├── main.py                 # App entry — CORS, lifespan, middleware
 │   │
 │   ├── domain/                 # Business logic (no HTTP, no Streamlit)
+│   │   ├── clustering.py       # BK-tree dHash clustering
 │   │   ├── exif.py             # JPEG EXIF parsing + deployment matching
+│   │   ├── inaturalist.py      # iNat observation management
 │   │   ├── lorawan.py          # LoRaWAN uplink processing pipeline
 │   │   ├── manifest.py         # MANIFEST.zip assembly
 │   │   ├── model.py            # Vela conversion + upload/register
@@ -150,7 +152,9 @@ backend/
 │   │   └── model_registry.py   # Pre-trained model download URLs
 │   │
 │   ├── routers/                # HTTP endpoints (thin — validate + delegate)
+│   │   ├── clustering.py       # POST /api/clustering/analyze
 │   │   ├── exif.py             # POST /api/exif/parse
+│   │   ├── inaturalist.py      # GET /api/inat/*
 │   │   ├── jobs.py             # GET  /api/jobs/{id}
 │   │   ├── lorawan.py          # POST /api/lorawan/webhook/*
 │   │   ├── manifest.py         # POST /api/manifest/generate

@@ -4,6 +4,8 @@ import { apiClient } from '../../lib/apiClient'
 import { supabase } from '../../config/supabase'
 import { useDragAndDrop } from '../../hooks/useDragAndDrop'
 import { PipelineStatusBox, type PipelineState, type LogEntry } from './PipelineStatusBox'
+import { INaturalistPanel } from './INaturalistPanel'
+import { ImageClustering } from './ImageClustering'
 
 interface Deployment {
   id: string
@@ -374,6 +376,9 @@ export function AnalyseImages() {
 
   return (
     <div>
+      {/* iNaturalist connection panel (auto-hides when disabled) */}
+      <INaturalistPanel />
+
       <h3 style={{ marginBottom: '0.5rem' }}>Analyse Camera Trap Images</h3>
       <p style={{ opacity: 0.7, marginBottom: '1.5rem' }}>
         Upload JPEG images or drag-and-drop an entire SD card folder from your
@@ -537,6 +542,17 @@ export function AnalyseImages() {
           </table>
         </div>
       )}
+
+      {/* ── Near-duplicate clustering ─────────────────────────── */}
+      <div
+        style={{
+          marginTop: '2.5rem',
+          paddingTop: '2rem',
+          borderTop: '1px solid var(--border)',
+        }}
+      >
+        <ImageClustering />
+      </div>
     </div>
   )
 }

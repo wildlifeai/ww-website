@@ -18,3 +18,5 @@ google-auth>=2.0                 # Service account authentication
 azure-storage-blob>=12.19.0      # Azure Blob Storage
 aiohttp>=3.9.0                   # Async transport for Azure Storage
 timezonefinder>=6.5.0            # GPS coordinates → timezone lookup
+Pillow>=10.0.0                   # Image processing for clustering (dHash, sharpness)
+numpy>=1.24                      # Numerical ops for perceptual hashing

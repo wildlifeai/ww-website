@@ -503,6 +503,7 @@ graph LR
 | `POST` | `/api/models/convert` | Yes | Convert Edge Impulse model via Vela |
 | `POST` | `/api/lorawan/webhook/ttn` | Secret | TTN v3 uplink webhook |
 | `POST` | `/api/lorawan/webhook/chirpstack` | Secret | Chirpstack v4 uplink webhook |
+| `POST` | `/api/clustering/*` | No | Image clustering and representative selection |
 | `*` | `/api/v1/*` | API Key | Public API (when `FF_PUBLIC_API_ENABLED=true`) |
 | `*` | `/api/inat/*` | Yes | iNaturalist OAuth flow (when `FF_INAT_ENABLED=true`) |
 

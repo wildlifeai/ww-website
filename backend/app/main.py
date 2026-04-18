@@ -18,7 +18,7 @@ from app.middleware.request_id import RequestIDMiddleware
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import limiter
 
-from app.routers import jobs, exif, lorawan, manifest, models, public_api, inaturalist
+from app.routers import jobs, exif, lorawan, manifest, models, public_api, inaturalist, clustering
 
 logger = structlog.get_logger()
 
@@ -86,6 +86,7 @@ app.include_router(manifest.router)
 app.include_router(models.router)
 app.include_router(public_api.router)
 app.include_router(inaturalist.router)
+app.include_router(clustering.router)
 
 
 # ── Health check ─────────────────────────────────────────────────────

@@ -87,6 +87,24 @@ async def parse_exif(
     results = []
     file_contents: List[bytes] = []
 
+    # ── 0. Enforce image limit for unauthenticated users ─────────
+    MAX_ANON_IMAGES = 50
+    user = await get_optional_user(authorization)
+    if not user and len(files) > MAX_ANON_IMAGES:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "IMAGE_LIMIT_EXCEEDED",
+                    "message": (
+                        f"Unauthenticated users can analyse up to {MAX_ANON_IMAGES} images. "
+                        f"You uploaded {len(files)}. Please log in to remove this limit."
+                    ),
+                }
+            },
+        )
+
     # ── 1. Parse EXIF from each file ─────────────────────────────
     for i, upload in enumerate(files):
         content = await upload.read()
@@ -136,10 +154,7 @@ async def parse_exif(
                 deployment_ids.add(dep_id)
 
     # ── 3. Drive upload pipeline ─────────────────────────────────
-    # Authenticate user when Drive upload is requested
-    user = None
-    if upload_to_drive:
-        user = await get_optional_user(authorization)
+    # user is already resolved from step 0 (image limit check)
 
     if not settings.GOOGLE_DRIVE_ENABLED:
         drive_upload_info = {"enabled": False, "reason": "server_disabled"}
