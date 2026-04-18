@@ -236,15 +236,15 @@ async def update_summary(
 
 
 _PHASE_START_MSG = {
-    ProgressPhase.DOWNLOAD: "📥 Downloading images from Supabase...",
+    ProgressPhase.DOWNLOAD: "📥 Downloading images from Azure Storage...",
     ProgressPhase.DRIVE_UPLOAD: "☁️ Uploading images to Google Drive...",
-    ProgressPhase.CLEANUP: "🧹 Cleaning up temporary files from Supabase...",
+    ProgressPhase.CLEANUP: "🧹 Cleaning up temporary files from Azure Storage...",
 }
 
 _PHASE_COMPLETE_MSG = {
-    ProgressPhase.DOWNLOAD: "📥 All images downloaded from Supabase ✓",
+    ProgressPhase.DOWNLOAD: "📥 All images downloaded from Azure Storage ✓",
     ProgressPhase.DRIVE_UPLOAD: "☁️ All images uploaded to Google Drive ✓",
-    ProgressPhase.CLEANUP: "🧹 Temporary files cleaned up ✓",
+    ProgressPhase.CLEANUP: "🧹 Temporary files cleaned up from Azure Storage ✓",
 }
 
 async def start_phase(job_id: str, phase: ProgressPhase) -> None:

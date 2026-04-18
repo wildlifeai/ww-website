@@ -15,3 +15,6 @@ tenacity>=9.0
 cryptography>=43.0               # Fernet encryption for iNat tokens
 google-api-python-client>=2.0    # Google Drive API
 google-auth>=2.0                 # Service account authentication
+azure-storage-blob>=12.19.0      # Azure Blob Storage
+aiohttp>=3.9.0                   # Async transport for Azure Storage
+timezonefinder>=6.5.0            # GPS coordinates → timezone lookup

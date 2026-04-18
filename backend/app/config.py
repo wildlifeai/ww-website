@@ -60,9 +60,6 @@ class Settings(BaseSettings):
         "b0000000-0000-0000-0000-000000000001",
         description="General organisation UUID from seed data",
     )
-    UPLOADER_EMAIL: str = Field("apps@wildlife.ai")
-    UPLOADER_PASSWORD: str = Field("")
-
     # ── Google Drive ──────────────────────────────────────────────────
     GOOGLE_DRIVE_ENABLED: bool = Field(
         False, description="Enable async Google Drive upload of analysed images"
@@ -79,12 +76,24 @@ class Settings(BaseSettings):
         50, description="Max file size in MB accepted for Drive upload"
     )
 
+    # ── Azure Storage (Temporary Image Buffer) ────────────────────────
+    AZURE_STORAGE_CONNECTION_STRING: str = Field(
+        "", description="Azure Storage Account connection string for blob buffering"
+    )
+    AZURE_STORAGE_CONTAINER_NAME: str = Field(
+        "wildlife-watcher-uploads", description="Default container name in Azure Blob Storage"
+    )
+
     # ── iNaturalist (Phase 6) ────────────────────────────────────────
     INAT_CLIENT_ID: str = Field("")
     INAT_CLIENT_SECRET: str = Field("")
     INAT_REDIRECT_URI: str = Field("https://wildlifewatcher.ai/inat/callback")
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {
+        "env_file": ("../.env", ".env"), 
+        "env_file_encoding": "utf-8",
+        "extra": "ignore"
+    }
 
     @property
     def cors_origins(self) -> list[str]:

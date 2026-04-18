@@ -86,6 +86,7 @@ class GoogleDriveService:
         creds = self._load_credentials()
         self._credentials = creds
         self._service = build("drive", "v3", credentials=creds, cache_discovery=False)
+        self._api_lock = asyncio.Lock()
 
     # ── Auth ─────────────────────────────────────────────────────
 
@@ -176,16 +177,16 @@ class GoogleDriveService:
 
         This is run in a thread pool because the Drive SDK is synchronous.
         """
-        # Check cache first
         if cache_key:
             cached = await self._get_cached_folder(cache_key)
             if cached:
                 return cached
 
-        folder_id = await asyncio.to_thread(self._find_folder, parent_id, name)
-        if not folder_id:
-            folder_id = await asyncio.to_thread(self._create_folder, parent_id, name)
-            logger.info("drive_folder_created", name=name, folder_id=folder_id)
+        async with self._api_lock:
+            folder_id = await asyncio.to_thread(self._find_folder, parent_id, name)
+            if not folder_id:
+                folder_id = await asyncio.to_thread(self._create_folder, parent_id, name)
+                logger.info("drive_folder_created", name=name, folder_id=folder_id)
 
         if cache_key:
             await self._set_cached_folder(cache_key, folder_id)
@@ -225,9 +226,11 @@ class GoogleDriveService:
         Raises on API errors (caller handles retries).
         """
         # Dedup check
-        exists = await asyncio.to_thread(
-            self._file_exists_by_hash, parent_id, file_hash
-        )
+        async with self._api_lock:
+            exists = await asyncio.to_thread(
+                self._file_exists_by_hash, parent_id, file_hash
+            )
+            
         if exists:
             logger.info("drive_upload_skipped_duplicate", filename=filename)
             return None
@@ -324,7 +327,8 @@ class GoogleDriveService:
                         return
 
                     # 1. Ensure project folder
-                    project_folder_name = f"{slugify(project['name'])}_{project['id'][:8]}"
+                    # Use preprocessed name if available, else fall back to slug
+                    project_folder_name = file_info.get("_project_folder") or f"{slugify(project['name'])}_{project['id'][:8]}"
                     project_folder_id = await self.ensure_folder(
                         root_folder_id,
                         project_folder_name,
@@ -340,8 +344,9 @@ class GoogleDriveService:
                             )
 
                     # 2. Ensure deployment folder
+                    # Use preprocessed name if available, else fall back to date_id
                     dep_date = deployment.get("date", "unknown-date")
-                    dep_folder_name = f"{dep_date}_{deployment['id'][:8]}"
+                    dep_folder_name = file_info.get("_deployment_folder") or f"{dep_date}_{deployment['id'][:8]}"
                     dep_folder_id = await self.ensure_folder(
                         project_folder_id,
                         dep_folder_name,
@@ -360,7 +365,8 @@ class GoogleDriveService:
                     file_bytes = file_info["file_bytes"]
                     orig_name = file_info["filename"]
                     timestamp = file_info.get("timestamp")
-                    drive_name = sanitize_filename(timestamp, orig_name)
+                    # Use preprocessed filename if available, else fall back
+                    drive_name = file_info.get("drive_filename") or sanitize_filename(timestamp, orig_name)
 
                     file_hash = compute_file_hash(
                         file_bytes, deployment["id"]

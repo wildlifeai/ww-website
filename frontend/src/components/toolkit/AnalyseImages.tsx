@@ -295,7 +295,7 @@ export function AnalyseImages() {
               
               if (driveInfo) {
                 if (driveInfo.status === 'skipped') {
-                    const reason = driveInfo.reason === 'no_files_stored' ? 'Images already exist in Supabase (duplicates)' : driveInfo.reason
+                    const reason = driveInfo.reason === 'no_files_stored' ? 'Images already exist in system (duplicates)' : driveInfo.reason
                     logs.push({ ts: Date.now(), level: 'warning', message: `⏭️ Images ${startIdx}-${endIdx} skipped: ${reason}` })
                 } else if (driveInfo.job_id) {
                     jobs.push({ 
@@ -306,12 +306,14 @@ export function AnalyseImages() {
                     })
                     
                     if (driveInfo.duplicates_skipped > 0) {
-                        logs.push({ ts: Date.now(), level: 'warning', message: `⏭️ ${driveInfo.duplicates_skipped} images in batch already exist in Supabase.` })
+                        logs.push({ ts: Date.now(), level: 'warning', message: `⏭️ ${driveInfo.duplicates_skipped} images in batch already exist in system.` })
                     }
                     
                     if (driveInfo.file_count > 0) {
                         logs.push({ ts: Date.now(), level: 'success', message: `✅ Buffered locally. Drive sync queued for ${driveInfo.file_count} images.` })
                     }
+                } else if (driveInfo.status === 'error') {
+                    logs.push({ ts: Date.now(), level: 'error', message: `❌ Azure/Drive integration failed: ${driveInfo.error || 'Unknown error'}` })
                 }
               } else if (!uploadToDrive) {
                   logs.push({ ts: Date.now(), level: 'success', message: `✅ Images ${startIdx}-${endIdx} extracted.` })

@@ -132,7 +132,8 @@ backend/
 │   │   ├── exif.py             # JPEG EXIF parsing + deployment matching
 │   │   ├── lorawan.py          # LoRaWAN uplink processing pipeline
 │   │   ├── manifest.py         # MANIFEST.zip assembly
-│   │   └── model.py            # Vela conversion + upload/register
+│   │   ├── model.py            # Vela conversion + upload/register
+│   │   └── photo_preprocessing.py  # GPS→local time, Drive folder/file naming
 │   │
 │   ├── jobs/                   # Async job system (Local Loop + Supabase)
 │   │   ├── definitions.py      # Job functions (run by worker)
@@ -163,9 +164,11 @@ backend/
 │   │   └── model.py            # ModelUpload, ModelConvert
 │   │
 │   └── services/               # Infrastructure adapters
+│       ├── azure_storage.py    # Azure Blob Storage (temp image buffer)
 │       ├── blob_store.py       # Local disk temp file storage
 │       ├── cache.py            # Simple thread-safe dict cache
 │       ├── db_utils.py         # Paginated Supabase queries
+│       ├── google_drive.py     # Google Drive upload + dedup
 │       ├── http_client.py      # httpx + tenacity retry
 │       ├── storage.py          # Supabase Storage download/upload
 │       ├── supabase_client.py  # Client factories (anon/service-role)

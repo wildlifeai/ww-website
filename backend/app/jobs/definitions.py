@@ -35,7 +35,7 @@ async def convert_model_job(job_id: str, user_id: str):
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
 
     try:
-        from app.services.blob_store import retrieve_blob, delete_blob
+        from app.services.azure_storage import retrieve_blob, delete_blob
         from app.domain.model import convert_uploaded_model
         from app.services.storage import upload_to_storage
         from app.services.supabase_client import create_service_client
@@ -96,7 +96,7 @@ async def convert_model_job(job_id: str, user_id: str):
         logger.error("job_failed", job_type="convert_model", job_id=job_id, error=str(e))
         # Clean up blob even on failure
         try:
-            from app.services.blob_store import delete_blob
+            from app.services.azure_storage import delete_blob
             await delete_blob(job_id)
         except Exception:
             pass
@@ -257,7 +257,7 @@ async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, or
 async def upload_drive_images_job(job_id: str, payload: dict):
     """Upload analysed images to Google Drive.
 
-    Emits structured ``ProgressEvent``\s throughout so the frontend can
+    Emits structured ``ProgressEvent``\\s throughout so the frontend can
     render deterministic progress (no string parsing).  Runs through
     three phases: DOWNLOAD → DRIVE_UPLOAD → CLEANUP.  Cleanup must
     finish before the job is marked complete.
@@ -300,7 +300,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
 
     try:
         from app.services.google_drive import GoogleDriveService
-        from app.services.blob_store import retrieve_blob, delete_blob
+        from app.services.azure_storage import retrieve_blob, delete_blob
 
         # Shared mutable state for heartbeat visibility
         last_event_ts = time.monotonic()
@@ -324,7 +324,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                         ))
                         last_event_ts = time.monotonic()
 
-        # ── Phase 1: DOWNLOAD from Supabase ──────────────────
+        # ── Phase 1: DOWNLOAD from Azure Storage ─────────────
         await start_phase(job_id, ProgressPhase.DOWNLOAD)
 
         files_with_bytes = []
@@ -349,7 +349,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                         total=total_files,
                         file_index=idx + 1,
                         filename=entry["filename"],
-                        message=f"📥 Loaded image {download_completed}/{total_files} from buffer ✓",
+                        message=f"📥 Loaded image {download_completed}/{total_files} from Azure Storage ✓",
                     ))
                 else:
                     await update_summary(job_id, failed_inc=1)
@@ -402,9 +402,54 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             await update_job(
                 job_id, status=JobStatus.FAILED,
                 error="No files could be downloaded from storage",
-                message="Failed: could not download any files from Supabase.",
+                message="Failed: could not download any files from Azure Storage.",
             )
             return
+
+        # ── Phase 1.5: PREPROCESS (rename files, build folder names) ──
+        try:
+            from app.domain.photo_preprocessing import preprocess_file_batch
+
+            # Group files by deployment ID
+            dep_groups: dict[str, list] = {}
+            for f in files_with_bytes:
+                dep_id = f.get("deployment", {}).get("id", "unknown")
+                dep_groups.setdefault(dep_id, []).append(f)
+
+            # Preprocess each deployment group
+            preprocessed_files = []
+            for dep_id, group in dep_groups.items():
+                deployment = group[0].get("deployment", {})
+                project = group[0].get("project", {})
+                if project and deployment:
+                    dep_folder, proj_folder, group = preprocess_file_batch(
+                        group, deployment, project
+                    )
+                    # Stamp folder names onto every file in this group
+                    for f in group:
+                        f["_deployment_folder"] = dep_folder
+                        f["_project_folder"] = proj_folder
+                preprocessed_files.extend(group)
+
+            files_with_bytes = preprocessed_files
+
+            await emit_event(job_id, ProgressEvent(
+                type=EventType.PROGRESS,
+                phase=ProgressPhase.DOWNLOAD,
+                message=f"📝 Preprocessed {len(files_with_bytes)} images (renamed & sorted)",
+            ))
+        except Exception as preprocess_err:
+            # Non-fatal: if preprocessing fails, continue with original names
+            logger.warning(
+                "photo_preprocessing_failed",
+                error=str(preprocess_err),
+                job_id=job_id,
+            )
+            await emit_event(job_id, ProgressEvent(
+                type=EventType.PROGRESS,
+                phase=ProgressPhase.DOWNLOAD,
+                message=f"⚠️ Photo preprocessing skipped: {preprocess_err}",
+            ))
 
         # ── Phase 2: DRIVE UPLOAD ────────────────────────────
         await start_phase(job_id, ProgressPhase.DRIVE_UPLOAD)
@@ -561,3 +606,12 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         )
         # Without ARQ, we don't auto-retry.
         return
+
+
+JOBS = [
+    convert_model_job,
+    generate_manifest_job,
+    export_camtrapdp_job,
+    download_pretrained_job,
+    upload_drive_images_job,
+]

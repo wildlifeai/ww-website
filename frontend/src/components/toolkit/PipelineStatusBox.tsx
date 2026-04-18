@@ -103,7 +103,7 @@ function deriveSectionTitle(state: PipelineState, phase: string): string {
   const jobPhase = activeJob?.currentPhase
 
   switch (jobPhase) {
-    case 'download':     return `📥 Downloading ${state.totalFiles} images from Supabase…`
+    case 'download':     return `📥 Downloading ${state.totalFiles} images from Azure…`
     case 'drive_upload': return `☁️ Uploading ${state.totalFiles} images to Google Drive…`
     case 'cleanup':      return `🧹 Cleaning up temporary files…`
     default:             return `🔄 Processing ${state.totalFiles} images…`
@@ -278,7 +278,7 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
           borderRadius: '4px'
         }}
       >
-        {state.logs.slice(-12).map((l, i) => {
+        {state.logs.map((l, i) => {
            let color = 'inherit'
            if (l.level === 'error') color = 'var(--error)'
            if (l.level === 'success') color = 'var(--success, #4CAF50)'

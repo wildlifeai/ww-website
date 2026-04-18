@@ -5,7 +5,7 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error(
-    '⚠️ Missing Supabase config. Copy frontend/.env.example to frontend/.env and fill in your project credentials.'
+    '⚠️ Missing Supabase config. Copy .env.example to .env in the root folder and fill in your project credentials.'
   )
 }
 

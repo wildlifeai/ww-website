@@ -21,7 +21,9 @@ from typing import List, Optional
 import asyncio
 
 import structlog
-from fastapi import APIRouter, UploadFile, File, Form, Request
+from fastapi import APIRouter, UploadFile, File, Form, Header, Request
+
+from app.dependencies import get_optional_user
 
 from app.config import settings
 from app.schemas.common import ApiResponse, ApiMeta
@@ -61,6 +63,7 @@ async def parse_exif(
     project_id: Optional[str] = Form(None),
     deployment_id: Optional[str] = Form(None),
     upload_to_drive: Optional[bool] = Form(False),
+    authorization: Optional[str] = Header(None),
 ):
     """Parse EXIF metadata from one or more uploaded JPEG files.
 
@@ -133,10 +136,17 @@ async def parse_exif(
                 deployment_ids.add(dep_id)
 
     # ── 3. Drive upload pipeline ─────────────────────────────────
+    # Authenticate user when Drive upload is requested
+    user = None
+    if upload_to_drive:
+        user = await get_optional_user(authorization)
+
     if not settings.GOOGLE_DRIVE_ENABLED:
         drive_upload_info = {"enabled": False, "reason": "server_disabled"}
     elif not upload_to_drive:
         drive_upload_info = {"enabled": False, "reason": "not_requested"}
+    elif not user:
+        drive_upload_info = {"enabled": True, "status": "error", "error": "Authentication required to upload images to Google Drive. Please log in."}
     elif not deployment_ids and not folder_prefixes:
         drive_upload_info = {"enabled": True, "status": "skipped", "reason": "no_deployment_id"}
     else:
@@ -200,7 +210,7 @@ async def _enqueue_drive_upload(
         try:
             dep_resp = (
                 client.table("deployments")
-                .select("id, deployment_start, project_id, projects(id, name)")
+                .select("id, deployment_start, deployment_end, location_name, latitude, longitude, project_id, projects(id, name)")
                 .in_("id", deployment_ids)
                 .execute()
             )
@@ -214,6 +224,11 @@ async def _enqueue_drive_upload(
                 deployment_info = {
                     "id": dep_id,
                     "date": dep_date,
+                    "deployment_start": dep_start,
+                    "deployment_end": dep_row.get("deployment_end"),
+                    "location_name": dep_row.get("location_name", ""),
+                    "latitude": dep_row.get("latitude"),
+                    "longitude": dep_row.get("longitude"),
                 }
                 project_info = None
                 proj = dep_row.get("projects")
@@ -233,7 +248,7 @@ async def _enqueue_drive_upload(
             try:
                 prefix_resp = (
                     client.table("deployments")
-                    .select("id, deployment_start, project_id, projects(id, name)")
+                    .select("id, deployment_start, deployment_end, location_name, latitude, longitude, project_id, projects(id, name)")
                     .ilike("id", f"{prefix}%")
                     .limit(1)
                     .execute()
@@ -246,7 +261,15 @@ async def _enqueue_drive_upload(
                         dep_start[:10] if dep_start
                         else datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     )
-                    deployment_info = {"id": dep_id, "date": dep_date}
+                    deployment_info = {
+                        "id": dep_id,
+                        "date": dep_date,
+                        "deployment_start": dep_start,
+                        "deployment_end": dep_row.get("deployment_end"),
+                        "location_name": dep_row.get("location_name", ""),
+                        "latitude": dep_row.get("latitude"),
+                        "longitude": dep_row.get("longitude"),
+                    }
                     project_info = None
                     proj = dep_row.get("projects")
                     if proj:
@@ -301,7 +324,7 @@ async def _enqueue_drive_upload(
 
         proj_id = file_context["project"]["id"] if file_context["project"] else "unknown"
         # Buffer to local disk instead of Supabase
-        from app.services.blob_store import store_blob
+        from app.services.azure_storage import store_blob
         import uuid
         blob_id = str(uuid.uuid4())
         
