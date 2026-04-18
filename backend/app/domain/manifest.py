@@ -2,14 +2,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Manifest generation domain — ported from app.py L721-852.
 
-Orchestrates: fetch config firmware → fetch AI model → assemble MANIFEST.zip.
+Orchestrates: fetch config firmware → fetch AI model → fetch Himax firmware → assemble MANIFEST.zip.
 Reusable by both the API handler and the async ARQ worker.
 
 The MANIFEST.zip is what gets deployed to the camera SD card. Structure:
     MANIFEST/
     ├── CONFIG.TXT          # Camera configuration
     ├── trained_vela.TFL    # AI model binary
-    └── trained_vela.TXT    # Model labels
+    ├── trained_vela.TXT    # Model labels
+    └── output.img          # Himax coprocessor firmware
 """
 
 import re
@@ -153,6 +154,80 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
                 return True
     except Exception as e:
         logger.warning("config_firmware_discovery_failed", error=str(e))
+
+    return False
+
+
+# ── Himax firmware fetching ──────────────────────────────────────────
+
+async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
+    """Fetch the latest active Himax firmware image into manifest_dir.
+
+    The firmware is stored as `output.img` in the `firmware` bucket under the
+    `himax/` prefix.  The CI pipeline (build_and_release.yml) uploads it with
+    type='himax'.
+
+    Tries DB record first, then falls back to storage bucket discovery.
+    Returns True if the firmware was successfully added.
+    """
+    # Strategy 1: DB record
+    try:
+        response = (
+            client.table("firmware")
+            .select("*")
+            .eq("type", "himax")
+            .eq("is_active", True)
+            .is_("deleted_at", "null")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+
+        if response.data:
+            himax_fw = response.data[0]
+            path = himax_fw["location_path"]
+            content = await download_from_storage("firmware", path, silent=True)
+
+            if content:
+                # Always save as output.img regardless of the versioned name in storage
+                (manifest_dir / "output.img").write_bytes(content)
+                logger.info(
+                    "himax_firmware_added",
+                    version=himax_fw.get("version", "latest"),
+                    size_bytes=len(content),
+                )
+                return True
+    except Exception as e:
+        logger.warning("himax_firmware_db_failed", error=str(e))
+
+    # Strategy 2: Fallback — list files in the himax/ folder of the firmware bucket
+    try:
+        files = client.storage.from_("firmware").list(
+            "himax", {"sortBy": {"column": "created_at", "order": "desc"}}
+        )
+        if not files:
+            files = client.storage.from_("firmware").list("himax")
+            files.sort(
+                key=lambda x: x.get("created_at", x.get("name")), reverse=True
+            )
+
+        files = [
+            f
+            for f in files
+            if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")
+        ]
+
+        if files:
+            latest = files[0]["name"]
+            content = await download_from_storage(
+                "firmware", f"himax/{latest}", silent=True
+            )
+            if content:
+                (manifest_dir / "output.img").write_bytes(content)
+                logger.info("himax_firmware_fallback", filename=latest)
+                return True
+    except Exception as e:
+        logger.warning("himax_firmware_discovery_failed", error=str(e))
 
     return False
 
@@ -387,10 +462,15 @@ async def generate_manifest(
             # Default: fetch best available from DB
             model_added = await _fetch_default_model(client, manifest_dir)
 
-        # 3. Flatten nested directories
+        # 3. Fetch Himax firmware image (output.img)
+        himax_added = await _fetch_himax_firmware(client, manifest_dir)
+        if not himax_added:
+            logger.warning("manifest_no_himax_firmware")
+
+        # 4. Flatten nested directories
         _flatten_directory(manifest_dir)
 
-        # 4. Create final MANIFEST.zip (uncompressed for SD card)
+        # 5. Create final MANIFEST.zip (uncompressed for SD card)
         files_to_zip = list(manifest_dir.glob("*"))
         if not files_to_zip:
             raise ManifestDomainError("No files found for MANIFEST — all downloads failed")
@@ -408,6 +488,7 @@ async def generate_manifest(
             files=len(files_to_zip),
             config=config_added,
             model=model_added,
+            himax=himax_added,
         )
 
         return manifest_bytes
