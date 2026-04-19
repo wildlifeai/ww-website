@@ -8,7 +8,7 @@ export function HomePage() {
   return (
     <div>
       <div style={{ textAlign: 'center', maxWidth: '800px', margin: '0 auto', padding: '0 0 3rem 0' }}>
-        <h1 style={{ fontSize: '3rem', color: 'var(--primary)', marginBottom: '1rem' }}>Monitor wildlife the right way.</h1>
+        <h1 style={{ fontSize: '3rem', color: 'var(--primary)', marginBottom: '1rem' }}>Monitor wildlife the right way!</h1>
         <p style={{ fontSize: '1.25rem', opacity: 0.8 }}>
           Analyse here the photos from your Wildlife Watchers, upload new models, visualise your data and get the devices ready to set them up in the field.
         </p>
