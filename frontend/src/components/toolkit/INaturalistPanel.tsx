@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { apiClient, API_BASE_URL } from '../../lib/apiClient'
+import { apiClient } from '../../lib/apiClient'
 
 interface INatStatus {
   connected: boolean
