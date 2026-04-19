@@ -1,0 +1,68 @@
+:root {
+  --primary: rgb(0, 110, 28);
+  --primary-light: rgb(76, 175, 80);
+  --bg-color: #ffffff;
+  --text-color: #333333;
+  --surface: #f9fafb;
+  --border: #e2e8f0;
+  --error: #ef4444;
+  --success: #10b981;
+  
+  --radius: 8px;
+  font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color: var(--text-color);
+  background-color: var(--bg-color);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: rgb(76, 175, 80); 
+    --bg-color: #121212;
+    --text-color: #f3f4f6;
+    --surface: #1e1e1e;
+    --border: #334155;
+  }
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Basic utility classes */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.btn {
+  background-color: var(--primary);
+  color: white;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.5rem 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn:hover {
+  opacity: 0.9;
+}
+
+.card {
+  background-color: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+}

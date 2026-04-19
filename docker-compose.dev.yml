@@ -1,0 +1,10 @@
+version: "3.9"
+services:
+  api:
+    build:
+      target: dev
+    volumes:
+      - ./backend/app:/app/app
+    environment:
+      - ALLOWED_ORIGINS=http://localhost:5173
+      - LOG_LEVEL=debug

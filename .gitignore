@@ -22,5 +22,24 @@ env/
 .cursorrules
 .windsurfrules
 
+# Docker
+docker-compose.override.yml
+
+# Redis
+dump.rdb
+
+# Node / Frontend
+node_modules/
+dist/
+.cache/
+
+# Backend temp
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
 # Exported data
 exports/
+
+# Google Drive
+backend/service-account.json
