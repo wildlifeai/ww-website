@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.schemas.common import ApiResponse, ApiMeta
-from app.domain.clustering import cluster_images_from_bytes
+from app.domain.clustering import cluster_images_from_bytes, build_roi_debug_bundle_zip
 
 import structlog
 
@@ -31,6 +31,9 @@ async def analyze_images(
     request: Request,
     files: List[UploadFile] = File(...),
     max_hamming: int = Form(10),
+    roi_preview: bool = Form(False),
+    roi_crop_for_hashing: bool = Form(False),
+    roi_per_frame: bool = Form(True),
 ):
     """Cluster uploaded images by visual similarity.
 
@@ -75,6 +78,9 @@ async def analyze_images(
     result = cluster_images_from_bytes(
         files=image_data,
         max_hamming=max(0, min(20, max_hamming)),
+        roi_preview_index=0 if roi_preview else None,
+        roi_crop_for_hashing=roi_crop_for_hashing,
+        roi_per_frame=roi_per_frame,
     )
 
     # Build response
@@ -96,6 +102,7 @@ async def analyze_images(
                 "width": rec.width,
                 "height": rec.height,
                 "is_representative": idx == rep_idx,
+                "roi": list(rec.roi) if rec.roi is not None else None,
             })
 
         clusters_summary.append({
@@ -110,6 +117,16 @@ async def analyze_images(
             "total_images": result.total_images,
             "total_clusters": result.total_clusters,
             "total_representatives": result.total_representatives,
+            "roi_preview": (
+                {
+                    "filename": result.roi_preview.filename,
+                    "roi": list(result.roi_preview.roi),
+                    "overlay_png_base64": result.roi_preview.overlay_png_base64,
+                    "crop_png_base64": result.roi_preview.crop_png_base64,
+                }
+                if result.roi_preview is not None
+                else None
+            ),
             "clusters": clusters_summary,
         },
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
@@ -196,4 +213,51 @@ async def analyze_images_csv(
         iter([output.getvalue()]),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=clustering.csv"},
+    )
+
+
+@router.post("/roi-debug.zip")
+async def roi_debug_zip(
+    request: Request,
+    files: List[UploadFile] = File(...),
+    max_frames: int = Form(12),
+):
+    """Generate a ROI debug bundle ZIP for feedback.
+
+    The ZIP includes ROI overlay and cropped preview PNGs plus a manifest.json.
+    This is intended to be shared back for iterative ROI tuning.
+    """
+
+    if len(files) > MAX_CLUSTERING_IMAGES:
+        return ApiResponse(
+            data=None,
+            error={
+                "code": "TOO_MANY_IMAGES",
+                "message": f"Maximum {MAX_CLUSTERING_IMAGES} images per request.",
+            },
+            meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
+        )
+
+    image_data = []
+    for upload in files:
+        content = await upload.read()
+        if content:
+            image_data.append((upload.filename or "unknown.jpg", content))
+
+    bundle = build_roi_debug_bundle_zip(
+        files=image_data,
+        max_frames=max(2, min(50, int(max_frames))),
+        roi_params={
+            "small_size": (320, 240),
+            "diff_threshold": 15,
+            "min_motion_frac": 0.001,
+            "max_motion_frac": 0.6,
+            "pad_frac": 0.15,
+        },
+    )
+
+    return StreamingResponse(
+        io.BytesIO(bundle),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=roi_debug_bundle.zip"},
     )

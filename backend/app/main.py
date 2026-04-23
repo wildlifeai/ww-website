@@ -5,7 +5,11 @@
 Wires together: CORS, lifespan (Redis connect/disconnect), middleware, and routers.
 """
 
-import structlog
+try:
+    import structlog  # type: ignore
+except ImportError:  # pragma: no cover
+    structlog = None  # type: ignore
+    import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -20,7 +24,9 @@ from app.middleware.rate_limit import limiter
 
 from app.routers import jobs, exif, lorawan, manifest, models, public_api, inaturalist, clustering
 
-logger = structlog.get_logger()
+logger = (
+    structlog.get_logger() if structlog is not None else logging.getLogger(__name__)
+)
 
 
 @asynccontextmanager

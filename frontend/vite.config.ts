@@ -7,10 +7,20 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '../', '')
 
   // Resolve each variable: .env file values → process.env (Cloudflare Pages) → fallback
-  const supabaseUrl = env.SUPABASE_URL || process.env.SUPABASE_URL
-    || env.VITE_SUPABASE_URL || process.env.VITE_SUPABASE_URL || ''
-  const supabaseAnonKey = env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY
-    || env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
+  const supabaseUrl =
+    env.SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    env.VITE_SUPABASE_URL ||
+    process.env.VITE_SUPABASE_URL ||
+
+    ''
+  const supabaseAnonKey =
+    env.SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    env.VITE_SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    ''
+
   const apiBaseUrl = env.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL
     || 'http://localhost:8000'
 
