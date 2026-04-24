@@ -59,8 +59,10 @@ def _check_enabled():
     if not settings.FF_INAT_ENABLED:
         raise HTTPException(404, detail="iNaturalist integration is not enabled")
     if not settings.INAT_CLIENT_ID:
+        # Treat missing config as a service-misconfiguration, not a server error.
         raise HTTPException(
-            500, detail="INAT_CLIENT_ID not configured"
+            status_code=503,
+            detail="iNaturalist integration is enabled but not configured (missing INAT_CLIENT_ID)",
         )
 
 

@@ -22,6 +22,7 @@ import secrets
 import time
 import json
 from typing import Optional, Dict, Any, Tuple
+from urllib.parse import urlencode
 from cryptography.fernet import Fernet
 
 import httpx
@@ -111,7 +112,8 @@ def build_authorization_url(state: str, code_challenge: str) -> str:
         "state": state,
     }
 
-    query = "&".join(f"{k}={v}" for k, v in params.items())
+    # Use proper URL encoding so redirect_uri/state are safely encoded.
+    query = urlencode(params)
     return f"{INAT_AUTH_URL}?{query}"
 
 
@@ -235,12 +237,22 @@ async def get_user_token(user_id: str) -> Optional[Dict[str, Any]]:
     """
     client = create_service_client()
 
-    response = (
-        client.table("inat_tokens")
-        .select("encrypted_token")
-        .eq("user_id", user_id)
-        .execute()
-    )
+    try:
+        response = (
+            client.table("inat_tokens")
+            .select("encrypted_token")
+            .eq("user_id", user_id)
+            .execute()
+        )
+    except Exception as e:
+        # Local/dev environments may not have the iNat tables migrated yet.
+        # PostgREST raises an APIError with code PGRST205 when the table isn't
+        # present in the schema cache.
+        msg = str(e)
+        if "PGRST205" in msg or "inat_tokens" in msg:
+            logger.warning("inat_tokens_table_missing", user_id=user_id)
+            return None
+        raise
 
     if not response.data:
         return None

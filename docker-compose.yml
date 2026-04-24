@@ -13,10 +13,14 @@ services:
       - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-https://wildlifewatcher.ai,http://localhost:5173}
+      - FF_INAT_ENABLED=${FF_INAT_ENABLED:-false}
+      - INAT_CLIENT_ID=${INAT_CLIENT_ID:-}
+      - INAT_CLIENT_SECRET=${INAT_CLIENT_SECRET:-}
+      - INAT_REDIRECT_URI=${INAT_REDIRECT_URI:-}
       - SENTRY_DSN=${SENTRY_DSN:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" ]
       interval: 30s
       timeout: 5s
       retries: 3

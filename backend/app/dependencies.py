@@ -21,7 +21,11 @@ async def get_current_user(authorization: str = Header(...)):
 
     token = authorization.replace("Bearer ", "")
     client = create_anon_client()
-    user_response = client.auth.get_user(token)
+    try:
+        user_response = client.auth.get_user(token)
+    except Exception:
+        # Supabase client raises on invalid/malformed/expired JWTs.
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     if not user_response or not user_response.user:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
