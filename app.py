@@ -720,8 +720,8 @@ def flatten_directory(directory: Path):
 
 def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]:
     """
-    Create a complete MANIFEST.zip package containing the latest config firmware
-    and the latest default AI model.
+    Create a complete MANIFEST.zip package containing the latest config firmware,
+    the latest default AI model, and the latest Himax firmware image (output.img).
     The package is structured for SD card deployment on a camera device.
     
     This function uses a Privileged Client (Service Account) to ensure it has
@@ -822,10 +822,57 @@ def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]
                     zip_ref.extractall(manifest_dir)
                 st.success(f"✅ Added AI model: {ai_model.get('name', 'latest')}")
         
-        # 3. Flatten the directory structure
+        # 3. Fetch and download latest Himax firmware image (output.img)
+        himax_found = False
+        try:
+            himax_response = supabase.table('firmware')\
+                .select('*')\
+                .eq('type', 'himax')\
+                .eq('is_active', True)\
+                .is_('deleted_at', 'null')\
+                .order('created_at', desc=True)\
+                .limit(1)\
+                .execute()
+            
+            if himax_response.data:
+                himax_fw = himax_response.data[0]
+                himax_path = himax_fw['location_path']
+                himax_dest = temp_dir / "himax_firmware"
+                if download_from_storage(supabase, 'firmware', himax_path, himax_dest, silent=True):
+                    # Always save as output.img in the manifest
+                    shutil.copy2(himax_dest, manifest_dir / "output.img")
+                    st.success(f"✅ Added Himax firmware: {himax_fw.get('version', 'latest')}")
+                    himax_found = True
+        except Exception as e:
+            print(f"Himax firmware DB lookup failed: {e}")
+
+        if not himax_found:
+            # Fallback: discover from storage bucket
+            try:
+                files = supabase.storage.from_('firmware').list('himax', {'sortBy': {'column': 'created_at', 'order': 'desc'}})
+                if not files:
+                    files = supabase.storage.from_('firmware').list('himax')
+                    files.sort(key=lambda x: x.get('created_at', x.get('name')), reverse=True)
+
+                files = [f for f in files if f['name'] != '.emptyFolderPlaceholder' and not f['name'].endswith('/')]
+
+                if files:
+                    latest_himax = files[0]['name']
+                    himax_dest = temp_dir / "himax_fallback"
+                    if download_from_storage(supabase, 'firmware', f"himax/{latest_himax}", himax_dest, silent=True):
+                        shutil.copy2(himax_dest, manifest_dir / "output.img")
+                        st.success(f"✅ Recovered Himax firmware: {latest_himax}")
+                        himax_found = True
+            except Exception as e:
+                print(f"Himax firmware discovery failed: {e}")
+
+        if not himax_found:
+            st.warning("⚠️ No Himax firmware found — MANIFEST will not include output.img")
+
+        # 4. Flatten the directory structure
         flatten_directory(manifest_dir)
         
-        # 4. Create final MANIFEST.zip (uncompressed)
+        # 5. Create final MANIFEST.zip (uncompressed)
         final_zip_path = temp_dir / "MANIFEST_final.zip"
         files_to_zip = list(manifest_dir.glob('*'))
         if not files_to_zip:
@@ -1548,6 +1595,46 @@ if mode == "⬇️ Download Firmware/Models":
                             if model_source != "None":
                                 st.warning(f"No model file found to rename to {target_model_filename}")
 
+                    # --- C2. Himax Firmware Image ---
+                    # Fetch latest output.img from Supabase (same bucket, type='himax')
+                    himax_added = False
+                    try:
+                        himax_resp = target_client.table('firmware')\
+                            .select('*')\
+                            .eq('type', 'himax')\
+                            .eq('is_active', True)\
+                            .is_('deleted_at', 'null')\
+                            .order('created_at', desc=True)\
+                            .limit(1)\
+                            .execute()
+                        
+                        if himax_resp.data:
+                            himax_fw = himax_resp.data[0]
+                            himax_temp = base_dir / "himax_temp"
+                            if download_from_storage(target_client, 'firmware', himax_fw['location_path'], himax_temp, silent=True):
+                                shutil.copy2(himax_temp, manifest_dir / "output.img")
+                                st.write(f"✅ Added Himax firmware: {himax_fw.get('version', 'latest')}")
+                                himax_added = True
+                    except Exception as e:
+                        st.warning(f"Himax firmware lookup failed: {e}")
+
+                    if not himax_added:
+                        # Fallback: discover from storage
+                        try:
+                            hx_files = target_client.storage.from_('firmware').list('himax', {'sortBy': {'column': 'created_at', 'order': 'desc'}})
+                            hx_files = [f for f in (hx_files or []) if f['name'] != '.emptyFolderPlaceholder' and not f['name'].endswith('/')]
+                            if hx_files:
+                                hx_temp = base_dir / "himax_fallback"
+                                if download_from_storage(target_client, 'firmware', f"himax/{hx_files[0]['name']}", hx_temp, silent=True):
+                                    shutil.copy2(hx_temp, manifest_dir / "output.img")
+                                    st.write(f"✅ Recovered Himax firmware: {hx_files[0]['name']}")
+                                    himax_added = True
+                        except Exception as e:
+                            print(f"Himax discovery fallback failed: {e}")
+                    
+                    if not himax_added:
+                        st.warning("⚠️ No Himax firmware found — MANIFEST will not include output.img")
+
                     # --- D. Final Packaging ---
                     final_zip_path = base_dir / "MANIFEST_final.zip"
                     with zipfile.ZipFile(final_zip_path, 'w', zipfile.ZIP_STORED) as zf:
@@ -1751,7 +1838,7 @@ elif mode == "📊 Export Data":
 
                         # Deployments
                         deployment_cols = [
-                            "id", "name", "project_id", "device_id", "device_preparation_id",
+                            "id", "name", "project_id", "device_id", "device_preparation_id_deprecated",
                             "deployment_start", "deployment_end", "deployment_status_id",
                             "setup_by", "ended_by",
                             "location_name", "location_description",
@@ -1901,10 +1988,10 @@ elif mode == "🔍 Analyze Images":
                               # Fetch all deployments matching by ID or preparation ID in bulk
                               dep_ids_to_fetch = list(set(deps))
                               deps_by_id_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').in_('id', dep_ids_to_fetch).execute()
-                              deps_by_prep_id_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').in_('device_preparation_id', dep_ids_to_fetch).execute()
+                              deps_by_prep_id_resp = supabase.table('deployments').select('*, projects(name), devices(name, bluetooth_id)').in_('device_preparation_id_deprecated', dep_ids_to_fetch).execute()
 
                               deps_by_id = {d['id']: d for d in deps_by_id_resp.data} if deps_by_id_resp.data else {}
-                              deps_by_prep_id = {d['device_preparation_id']: d for d in deps_by_prep_id_resp.data} if deps_by_prep_id_resp.data else {}
+                              deps_by_prep_id = {d['device_preparation_id_deprecated']: d for d in deps_by_prep_id_resp.data} if deps_by_prep_id_resp.data else {}
 
                               def render_deployment_details(d_match, match_type, dep_id):
                                   proj_name = (d_match.get('projects') or {}).get('name', 'Unknown')
@@ -1926,7 +2013,7 @@ elif mode == "🔍 Analyze Images":
                                       if is_id_match:
                                           st.caption(f"Matched by: Deployment ID = {dep_id}")
                                       else:
-                                          st.caption(f"Matched by: device_preparation_id = {dep_id} → Deployment ID = {d_match.get('id')}")
+                                          st.caption(f"Matched by: device_preparation_id_deprecated = {dep_id} → Deployment ID = {d_match.get('id')}")
 
                               for dep_id in dep_ids_to_fetch:
                                   d = None
