@@ -1,6 +1,11 @@
 name: Deploy Backend to Azure Container App
 
 on:
+  push:
+    branches:
+      - dev
+      - feat/v2-migration
+      - main
   workflow_dispatch:
     inputs:
       tag:
