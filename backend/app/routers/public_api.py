@@ -6,37 +6,37 @@ Authentication via X-API-Key header (organisation-scoped).
 Gated behind FF_PUBLIC_API_ENABLED feature flag.
 """
 
-from fastapi import APIRouter, HTTPException, Header, Request, Depends, Query
-from typing import Optional, List
-
-from app.config import settings
-from app.schemas.common import ApiResponse, ApiMeta
-from app.schemas.public_api import (
-    ApiKeyCreate,
-    ApiKeyResponse,
-    ApiKeyInfo,
-    CamtrapDPExportRequest,
-)
-from app.schemas.job import JobCreateResponse
-from app.services.api_key import (
-    validate_api_key,
-    create_api_key_record,
-    revoke_api_key,
-    list_api_keys,
-    ApiKeyError,
-)
-from app.domain.public_api import (
-    list_deployments,
-    get_deployment,
-    list_devices,
-    get_telemetry,
-    list_observations,
-    PublicApiError,
-)
-from app.dependencies import get_current_user
-from app.jobs.store import create_job
+from typing import Optional
 
 import structlog
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+
+from app.config import settings
+from app.dependencies import get_current_user
+from app.domain.public_api import (
+    PublicApiError,
+    get_deployment,
+    get_telemetry,
+    list_deployments,
+    list_devices,
+    list_observations,
+)
+from app.jobs.store import create_job
+from app.schemas.common import ApiMeta, ApiResponse
+from app.schemas.job import JobCreateResponse
+from app.schemas.public_api import (
+    ApiKeyCreate,
+    ApiKeyInfo,
+    ApiKeyResponse,
+    CamtrapDPExportRequest,
+)
+from app.services.api_key import (
+    ApiKeyError,
+    create_api_key_record,
+    list_api_keys,
+    revoke_api_key,
+    validate_api_key,
+)
 
 logger = structlog.get_logger()
 
@@ -320,9 +320,9 @@ async def api_export_camtrapdp(
 
     job_id = await create_job()
 
-    from app.jobs.runner import enqueue_local_job
     from app.jobs.definitions import export_camtrapdp_job
-    
+    from app.jobs.runner import enqueue_local_job
+
     enqueue_local_job(export_camtrapdp_job(
         job_id=job_id,
         org_id=key["organisation_id"],

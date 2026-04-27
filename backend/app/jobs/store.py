@@ -18,16 +18,16 @@ import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
 
 import structlog
 
 from app.schemas.job import (
-    JobStatus,
+    EventType,
     JobInfo,
+    JobStatus,
     ProgressEvent,
     ProgressPhase,
-    EventType,
 )
 
 logger = structlog.get_logger()
@@ -51,10 +51,10 @@ async def _sync_to_supabase(job_id: str) -> None:
     mem_events = _memory_events.get(f"job:{job_id}:events", [])
     events_json = [json.loads(e) for e in mem_events]
     data_json = json.loads(raw_data)
-    
+
     # Bundle events inside the data for storage
     data_json["events"] = events_json
-    
+
     def _run_sync():
         try:
             from app.services.supabase_client import create_service_client
@@ -63,7 +63,7 @@ async def _sync_to_supabase(job_id: str) -> None:
             client.table("api_jobs").upsert({"id": job_id, "status": status_val, "job_data": data_json}).execute()
         except Exception as e:
             logger.debug("supabase_sync_skipped", error=str(e))
-            
+
     asyncio.create_task(asyncio.to_thread(_run_sync))
 
 
@@ -73,19 +73,19 @@ async def recover_stuck_jobs() -> None:
         from app.services.supabase_client import create_service_client
         client = create_service_client()
         resp = client.table("api_jobs").select("id, job_data, status").eq("status", "processing").execute()
-        
+
         for row in resp.data:
             job_id = row['id']
             data = row.get('job_data', {})
             data['status'] = JobStatus.FAILED.value
             data['error'] = "Job interrupted by server restart."
             data['message'] = "❌ Failed: Server crashed or restarted mid-job."
-            
+
             # Sync back failure to DB and load to memory
             client.table("api_jobs").update({"status": data['status'], "job_data": data}).eq("id", job_id).execute()
             _memory_store[f"job:{job_id}"] = json.dumps(data)
             logger.warning("stuck_job_recovered_and_failed", job_id=job_id)
-            
+
     except Exception as e:
         logger.debug("job_recovery_skipped", error=str(e))
 
@@ -107,7 +107,7 @@ async def create_job() -> str:
         "summary": None,
         "_next_seq": 0,
     }
-    
+
     _memory_store[f"job:{job_id}"] = json.dumps(job_data)
     await _sync_to_supabase(job_id)
     return job_id
@@ -125,7 +125,7 @@ async def get_job(job_id: str) -> Optional[JobInfo]:
             if resp.data:
                 db_data = resp.data[0]["job_data"]
                 events = db_data.pop("events", [])
-                
+
                 # Restore to memory
                 _memory_events[f"job:{job_id}:events"] = [json.dumps(e) for e in events]
                 _memory_store[f"job:{job_id}"] = json.dumps(db_data)
@@ -137,11 +137,11 @@ async def get_job(job_id: str) -> Optional[JobInfo]:
         return None
 
     data = json.loads(raw)
-    
+
     event_key = f"job:{job_id}:events"
     mem_events = _memory_events.get(event_key, [])
     events = [json.loads(e) for e in mem_events[-MAX_EVENTS_RETURNED:]]
-    
+
     data["events"] = events
     data["event_count"] = len(mem_events)
     data.pop("_next_seq", None)
@@ -164,16 +164,22 @@ async def update_job(
         return
 
     data = json.loads(raw)
-    if status is not None: data["status"] = status.value
-    if progress is not None: data["progress"] = progress
-    if result_url is not None: data["result_url"] = result_url
-    if error is not None: data["error"] = error
-    if message is not None: data["message"] = message
-    if current_phase is not None: data["current_phase"] = current_phase.value
+    if status is not None:
+        data["status"] = status.value
+    if progress is not None:
+        data["progress"] = progress
+    if result_url is not None:
+        data["result_url"] = result_url
+    if error is not None:
+        data["error"] = error
+    if message is not None:
+        data["message"] = message
+    if current_phase is not None:
+        data["current_phase"] = current_phase.value
 
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     _memory_store[f"job:{job_id}"] = json.dumps(data)
-    
+
     # Background sync
     await _sync_to_supabase(job_id)
 
@@ -194,7 +200,7 @@ async def emit_event(job_id: str, event: ProgressEvent) -> None:
     event_json = json.dumps(event.model_dump(mode="json"), default=str)
     event_key = f"job:{job_id}:events"
     _memory_events.setdefault(event_key, []).append(event_json)
-    
+
     await _sync_to_supabase(job_id)
 
 
@@ -221,17 +227,19 @@ async def update_summary(
             "skipped": 0, "failed": 0, "started_at": None,
         }
 
-        if total is not None: summary["total"] = total
+        if total is not None:
+            summary["total"] = total
         summary["downloaded"] += downloaded_inc
         summary["uploaded"] += uploaded_inc
         summary["skipped"] += skipped_inc
         summary["failed"] += failed_inc
-        if started_at is not None: summary["started_at"] = started_at.isoformat()
+        if started_at is not None:
+            summary["started_at"] = started_at.isoformat()
 
         data["summary"] = summary
         data["updated_at"] = datetime.now(timezone.utc).isoformat()
         _memory_store[f"job:{job_id}"] = json.dumps(data)
-        
+
     await _sync_to_supabase(job_id)
 
 

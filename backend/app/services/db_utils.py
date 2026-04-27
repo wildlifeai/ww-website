@@ -5,7 +5,7 @@
 Direct port of db_utils.py fetch_all_rows() for backend use.
 """
 
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 import structlog
 

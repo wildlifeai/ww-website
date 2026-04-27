@@ -6,9 +6,10 @@ All environment variables are declared here with sensible defaults.
 Validated at startup — the app refuses to boot if required vars are missing.
 """
 
-from pydantic_settings import BaseSettings
-from pydantic import Field
 from typing import Optional
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -19,6 +20,11 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = Field(..., description="Supabase anonymous/public key")
     SUPABASE_SERVICE_ROLE_KEY: str = Field(
         ..., description="Supabase service-role key (admin ops only)"
+    )
+
+    # ── Redis (future — not yet required) ────────────────────────────
+    REDIS_URL: str = Field(
+        "", description="Redis connection URL (empty = in-memory fallback)"
     )
 
 
@@ -90,7 +96,7 @@ class Settings(BaseSettings):
     INAT_REDIRECT_URI: str = Field("https://wildlifewatcher.ai/inat/callback")
 
     model_config = {
-        "env_file": ("../.env", ".env"), 
+        "env_file": ("../.env", ".env"),
         "env_file_encoding": "utf-8",
         "extra": "ignore"
     }

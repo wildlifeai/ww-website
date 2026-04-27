@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the model domain — parsing, label extraction, filename generation."""
 
-import zipfile
 import tempfile
 from pathlib import Path
 
-from app.domain.model import (
-    _parse_model_zip_name,
-    _extract_labels_from_header,
-    _build_firmware_filename,
-    ModelDomainError,
-)
 import pytest
+
+from app.domain.model import (
+    ModelDomainError,
+    _build_firmware_filename,
+    _extract_labels_from_header,
+    _parse_model_zip_name,
+)
 
 
 class TestParseModelZipName:

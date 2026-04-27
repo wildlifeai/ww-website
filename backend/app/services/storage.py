@@ -6,14 +6,13 @@ Handles download/upload to Supabase Storage buckets with the same
 two-step fallback strategy as the Streamlit app (SDK → public URL).
 """
 
-from pathlib import Path
 from typing import Optional
 
-from app.config import settings
-from app.services.supabase_client import create_service_client
-from app.services.http_client import download_url_content, DownloadError
-
 import structlog
+
+from app.config import settings
+from app.services.http_client import DownloadError, download_url_content
+from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 

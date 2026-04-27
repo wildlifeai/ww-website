@@ -19,12 +19,11 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable, Awaitable
+from typing import Any, Callable, Dict, List, Optional
 
 import structlog
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaInMemoryUpload
 
 from app.config import settings
 
@@ -116,6 +115,8 @@ class GoogleDriveService:
     @staticmethod
     async def _get_cached_folder(cache_key: str) -> Optional[str]:
         """Try to read a folder ID from Redis. Returns None on miss / error."""
+        if not settings.REDIS_URL:
+            return None
         try:
             import redis.asyncio as aioredis
 
@@ -129,6 +130,8 @@ class GoogleDriveService:
     @staticmethod
     async def _set_cached_folder(cache_key: str, folder_id: str) -> None:
         """Store a folder ID in Redis with 24h TTL."""
+        if not settings.REDIS_URL:
+            return
         try:
             import redis.asyncio as aioredis
 
@@ -230,15 +233,16 @@ class GoogleDriveService:
             exists = await asyncio.to_thread(
                 self._file_exists_by_hash, parent_id, file_hash
             )
-            
+
         if exists:
             logger.info("drive_upload_skipped_duplicate", filename=filename)
             return None
 
         def _do_upload() -> str:
-            import requests
             import json
+
             import google.auth.transport.requests
+            import requests
 
             # Ensure credentials are fresh to get a valid token
             req = google.auth.transport.requests.Request()

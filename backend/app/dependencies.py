@@ -5,8 +5,9 @@
 All request-scoped dependencies live here so routers stay thin.
 """
 
-from fastapi import Depends, HTTPException, Header, Request
 from typing import Optional
+
+from fastapi import Header, HTTPException
 
 from app.services.supabase_client import create_anon_client, create_service_client
 

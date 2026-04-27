@@ -16,38 +16,37 @@ Observations:
   POST /api/inat/observations/poll       → batch poll multiple observations
 """
 
-from fastapi import APIRouter, HTTPException, Request, Depends, Query
+import secrets
+
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.config import settings
-from app.schemas.common import ApiResponse, ApiMeta
+from app.dependencies import get_current_user
+from app.domain.inaturalist import (
+    INatDomainError,
+    batch_poll_observations,
+    create_observation,
+    get_inat_user_profile,
+    get_observation_status,
+)
+from app.schemas.common import ApiMeta, ApiResponse
 from app.schemas.inaturalist import (
-    INatCallbackParams,
+    INatBatchPollRequest,
     INatConnectionStatus,
     INatCreateObservation,
     INatObservationStatus,
-    INatBatchPollRequest,
 )
-from app.dependencies import get_current_user
 from app.services.inat_oauth import (
-    generate_pkce_pair,
+    INatOAuthError,
     build_authorization_url,
     exchange_code_for_token,
-    store_user_token,
+    generate_pkce_pair,
     get_user_token,
     revoke_user_token,
-    INatOAuthError,
+    store_user_token,
 )
-from app.domain.inaturalist import (
-    get_inat_user_profile,
-    create_observation,
-    get_observation_status,
-    batch_poll_observations,
-    INatDomainError,
-)
-
-import secrets
-import structlog
 
 logger = structlog.get_logger()
 

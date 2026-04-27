@@ -1,210 +1,119 @@
 # Deployment Guide
 
-How to deploy the Wildlife Watcher V2 backend to production.
+How to deploy the Wildlife Watcher V2 platform (backend + frontend) to production.
 
 ## Table of Contents
 
-- [Deployment Options](#deployment-options)
-- [Option 1: Render (Recommended)](#option-1-render-recommended)
-- [Option 2: Docker on Any VPS](#option-2-docker-on-any-vps)
-- [Option 3: Manual Process Manager](#option-3-manual-process-manager)
+- [Environments](#environments)
+- [Backend Deployment (Azure Container Apps)](#backend-deployment-azure-container-apps)
+- [Frontend Deployment (Cloudflare Pages)](#frontend-deployment-cloudflare-pages)
 - [Environment Variables](#environment-variables)
 - [Supabase Setup](#supabase-setup)
-- [DNS and Reverse Proxy](#dns-and-reverse-proxy)
+- [CI/CD Pipeline](#cicd-pipeline)
 - [Monitoring](#monitoring)
 - [Scaling](#scaling)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Deployment Options
+## Environments
 
-| Option | Best For | Cost | Complexity |
-|--------|----------|------|------------|
-| **Render Blueprint** | Production — zero-config deploy | ~$21/mo (3 Starter services) | ⭐ Low |
-| **Docker on VPS** | Self-hosted, full control | VPS cost + Redis | ⭐⭐ Medium |
-| **Manual** | Development, testing | Free | ⭐⭐⭐ High |
+| Component | Dev | Staging (current "prod") |
+|-----------|-----|--------------------------|
+| **Supabase** | `qegeovogqxiouqbrxmnh` (Dev_Wildlife_Watcher) | `nuhwmubvygxyddkycmpa` (Stag_Wildlife_Watcher) |
+| **Azure Container App** | `ww-backend-dev` (WW-Website RG) | `ww-backend` (WW-Website RG) |
+| **Azure Blob Container** | `wildlife-watcher-uploads-dev` | `wildlife-watcher-uploads` |
+| **Frontend** | Cloudflare Pages preview deploys (per branch) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
+| **Google Drive** | Dev subfolder under root folder | Root folder `1jIWV3OjSEnBK4Z64syHd2ugoRuXdVrK5` |
 
----
-
-## Option 1: Render (Recommended)
-
-The repository includes a `render.yaml` Blueprint that provisions all three services in one click.
-
-### Steps
-
-1. **Push the branch to GitHub**
-
-   ```bash
-   git push origin feat/v2-migration
-   ```
-
-2. **Connect on Render**
-
-   - Go to [Render Dashboard](https://dashboard.render.com) → **New** → **Blueprint**
-   - Select the `wildlifeai/ww-website` repository
-   - Select the `feat/v2-migration` branch
-   - Render auto-detects `render.yaml` and shows 3 services:
-     - `wildlife-watcher-api` (Web Service)
-     - `wildlife-watcher-worker` (Background Worker)
-     - `wildlife-watcher-redis` (Redis)
-
-3. **Configure environment variables**
-
-   Render will prompt for variables marked `sync: false`:
-
-   | Variable | Where to Find |
-   |----------|--------------|
-   | `SUPABASE_URL` | Supabase Dashboard → Settings → API → Project URL |
-   | `SUPABASE_ANON_KEY` | Supabase Dashboard → Settings → API → `anon` `public` |
-   | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Dashboard → Settings → API → `service_role` |
-   | `GENERAL_ORG_ID` | Your organisation UUID from the `organisations` table |
-   | `SENTRY_DSN` | Sentry project DSN (optional) |
-
-   `REDIS_URL` and `LORAWAN_WEBHOOK_SECRET` are auto-provisioned.
-
-4. **Deploy**
-
-   Click **Apply** — Render builds all services in parallel.
-
-5. **Verify**
-
-   ```bash
-   curl https://wildlife-watcher-api.onrender.com/health
-   # → {"status": "ok"}
-   ```
-
-### Custom Domain
-
-1. Go to the `wildlife-watcher-api` service → **Settings** → **Custom Domains**
-2. Add `api.wildlifewatcher.ai`
-3. Set up DNS: `CNAME api.wildlifewatcher.ai → wildlife-watcher-api.onrender.com`
-4. Update `ALLOWED_ORIGINS` to include your frontend domain
+> **Seed data**: The dev Supabase project includes 17 test users (password: `test123`), 4 organisations, 5 projects, 9 devices, and 11 deployments. See `ww-backend/supabase/seeds/USER-CREDENTIALS-REFERENCE.md` for login details and `ww-backend/supabase/CLOUD_SEEDING.md` for the seeding workflow.
 
 ---
 
-## Option 2: Docker on Any VPS
+## Backend Deployment (Azure Container Apps)
 
-### Prerequisites
+The backend runs as a single containerised FastAPI application on **Azure Container Apps** (Consumption plan), deployed via **Azure Container Registry (ACR)**.
 
-- Ubuntu 22.04+ (or any Docker-compatible OS)
-- Docker Engine 24+ and Docker Compose v2
-- At least 1 GB RAM, 10 GB disk
+### Architecture
 
-### Steps
-
-1. **Clone and configure**
-
-   ```bash
-   git clone https://github.com/wildlifeai/ww-website.git
-   cd ww-website
-   cp .env.example .env
-   # Edit .env with your Supabase keys
-   ```
-
-2. **Build and start**
-
-   ```bash
-   docker compose up -d --build
-   ```
-
-3. **Verify**
-
-   ```bash
-   # Health check
-   curl http://localhost:8000/health
-
-   # View logs
-   docker compose logs -f api worker
-
-   # Check Redis
-   docker compose exec redis redis-cli ping
-   ```
-
-4. **Set up a reverse proxy** (see [DNS and Reverse Proxy](#dns-and-reverse-proxy))
-
-### Updating
-
-```bash
-git pull origin feat/v2-migration
-docker compose up -d --build
+```
+GitHub Actions (CI/CD)
+  │
+  ├── Build Docker image (backend/Dockerfile)
+  ├── Push to Azure Container Registry (ACR)
+  └── Update Azure Container App
+        │
+        ▼
+Azure Container App ("ww-backend" or "ww-backend-dev")
+  ├── FastAPI API Server (port 8000)
+  ├── In-process async job runner (asyncio tasks)
+  └── Supabase sync for job persistence (api_jobs table)
 ```
 
-### Resource Requirements
+> **Note**: The target architecture adds Redis + ARQ Worker as separate containers. Currently, jobs run in-process with in-memory state synced to Supabase. See [docs/v2-architecture-plan.md](./v2-architecture-plan.md) for the full Redis+ARQ target.
 
-| Service | CPU | RAM | Disk |
-|---------|-----|-----|------|
-| API | 0.5 vCPU | 256 MB | — |
-| Worker | 1 vCPU | 512 MB | 1 GB (temp files) |
-| Redis | 0.25 vCPU | 128 MB | 100 MB |
+### Manual Deployment
+
+```bash
+# 1. Build the Docker image
+docker build -t <ACR_LOGIN_SERVER>/ww-backend:latest -f backend/Dockerfile backend/
+
+# 2. Push to ACR
+docker push <ACR_LOGIN_SERVER>/ww-backend:latest
+
+# 3. Update the Container App
+az containerapp update \
+  --name ww-backend \
+  --resource-group WW-Website \
+  --image <ACR_LOGIN_SERVER>/ww-backend:latest
+```
+
+### Verify Deployment
+
+```bash
+# Get the FQDN
+FQDN=$(az containerapp show \
+  --name ww-backend \
+  --resource-group WW-Website \
+  --query "properties.configuration.ingress.fqdn" -o tsv)
+
+# Health check
+curl "https://${FQDN}/health"
+# → {"status": "ok"}
+```
 
 ---
 
-## Option 3: Manual Process Manager
+## Frontend Deployment (Cloudflare Pages)
 
-For development servers or testing.
+The frontend is a static React+Vite app deployed to **Cloudflare Pages** with automatic preview deployments per branch.
 
-```bash
-# Install dependencies
-cd backend
-pip install -r requirements.txt
+### Setup (One-Time)
 
-# Start Redis
-docker run -d -p 6379:6379 --name ww-redis redis:7-alpine
+1. Go to [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Pages** → **Create a project** → **Connect to Git**
+2. Select the `wildlifeai/ww-website` repository
+3. Configure build settings:
 
-# Start API (production mode)
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+   | Setting | Value |
+   |---------|-------|
+   | **Build command** | `cd frontend && npm install && npm run build` |
+   | **Build output directory** | `frontend/dist` |
+   | **Root directory** | `/` (repository root) |
+   | **Node.js version** | `18` |
 
-# Start Worker (in a separate terminal or via systemd)
-arq app.jobs.worker.WorkerSettings
-```
+4. Set environment variables (in Cloudflare Pages settings):
 
-### systemd Service Files
+   | Variable | Value |
+   |----------|-------|
+   | `SUPABASE_URL` | `https://nuhwmubvygxyddkycmpa.supabase.co` |
+   | `SUPABASE_ANON_KEY` | _(from Supabase Dashboard)_ |
+   | `VITE_API_BASE_URL` | `https://ww-backend.salmonsand-b067677e.australiasoutheast.azurecontainerapps.io` |
 
-**`/etc/systemd/system/ww-api.service`:**
+5. Assign custom domain: `wildlifewatcher.ai` (DNS is already on Cloudflare)
 
-```ini
-[Unit]
-Description=Wildlife Watcher API
-After=network.target redis.service
+### Preview Deployments
 
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/ww-website/backend
-EnvironmentFile=/opt/ww-website/.env
-ExecStart=/opt/ww-website/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-**`/etc/systemd/system/ww-worker.service`:**
-
-```ini
-[Unit]
-Description=Wildlife Watcher ARQ Worker
-After=network.target redis.service
-
-[Service]
-Type=simple
-User=www-data
-WorkingDirectory=/opt/ww-website/backend
-EnvironmentFile=/opt/ww-website/.env
-ExecStart=/opt/ww-website/backend/venv/bin/arq app.jobs.worker.WorkerSettings
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable ww-api ww-worker
-sudo systemctl start ww-api ww-worker
-```
+Every push to a non-production branch creates a preview deployment at `https://<branch>.<project>.pages.dev`. This is automatic — no configuration needed.
 
 ---
 
@@ -220,6 +129,26 @@ See the [backend README](../backend/README.md#configuration) for the complete va
 - [ ] `SENTRY_DSN` is set for error tracking
 - [ ] `LOG_LEVEL` is `info` (not `debug`)
 - [ ] `RATE_LIMIT_PER_MINUTE` is appropriate for your traffic
+- [ ] `AZURE_STORAGE_CONNECTION_STRING` is set for image buffering
+- [ ] `GOOGLE_DRIVE_ENABLED` is set to `true` if Drive uploads are needed
+
+### Azure Container App Environment Variables
+
+Set environment variables on the Container App via Azure CLI:
+
+```bash
+az containerapp update \
+  --name ww-backend \
+  --resource-group WW-Website \
+  --set-env-vars \
+    SUPABASE_URL=<value> \
+    SUPABASE_ANON_KEY=<value> \
+    SUPABASE_SERVICE_ROLE_KEY=secretref:supabase-service-key \
+    ALLOWED_ORIGINS=https://wildlifewatcher.ai \
+    LOG_LEVEL=info
+```
+
+> **Tip:** Use `secretref:` prefix for sensitive values. Create secrets first with `az containerapp secret set`.
 
 ---
 
@@ -231,24 +160,26 @@ The backend expects these Supabase resources:
 
 | Bucket | Purpose | Public |
 |--------|---------|--------|
-| `firmware` | Config firmware, manifest results | No |
-| `ai-models` | AI model ZIPs | No |
+| `firmware` | Config firmware, manifest results | Yes (mobile app downloads) |
+| `ai-models` | AI model ZIPs | No (signed URLs) |
 
 Create them in Supabase Dashboard → Storage → New Bucket.
 
 ### Database Tables
 
-The backend reads/writes these tables (created by the mobile app's migration schema):
+The backend reads/writes these tables (schema managed by `ww-backend` repo):
 
 | Table | Used By | Access |
 |-------|---------|--------|
 | `devices` | LoRaWAN domain (device lookup by EUI) | RLS + service-role |
 | `deployments` | LoRaWAN domain (active deployment match) | RLS + service-role |
 | `ai_models` | Model domain (register/update) | RLS + service-role |
+| `ai_model_families` | Model domain (family→firmware ID mapping) | RLS + service-role |
 | `firmware` | Manifest domain (config firmware lookup) | RLS + service-role |
 | `user_roles` | Dependencies (permission checks) | RLS + service-role |
 | `lorawan_messages` | LoRaWAN domain (raw message store) | service-role only |
 | `lorawan_parsed_messages` | LoRaWAN domain (parsed data store) | service-role only |
+| `api_jobs` | Job system (status persistence + recovery) | service-role only |
 
 ### RPC Functions
 
@@ -265,49 +196,30 @@ Enable Realtime on `lorawan_parsed_messages` so the mobile app receives live upd
 
 ---
 
-## DNS and Reverse Proxy
+## CI/CD Pipeline
 
-### Nginx Configuration
+### Backend: GitHub Actions → ACR → Azure Container App
 
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name api.wildlifewatcher.ai;
+The workflow `.github/workflows/deploy-backend.yml` triggers on pushes to `dev` and `main`:
 
-    ssl_certificate /etc/letsencrypt/live/api.wildlifewatcher.ai/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/api.wildlifewatcher.ai/privkey.pem;
+| Branch | Target Container App | Image Tag |
+|--------|---------------------|-----------|
+| `dev` | `ww-backend-dev` | `dev-latest` + `<sha>` |
+| `main` | `ww-backend` | `latest` + `<sha>` |
 
-    # Proxy to FastAPI
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+### Required GitHub Secrets
 
-        # Pass through request ID
-        proxy_set_header X-Request-ID $request_id;
-
-        # WebSocket support (for future use)
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        # Increase timeouts for file uploads
-        proxy_read_timeout 120;
-        client_max_body_size 50M;
-    }
-}
-```
-
-### Cloudflare
-
-If using Cloudflare as reverse proxy:
-
-1. Add A record for `api.wildlifewatcher.ai` → your VPS IP
-2. Enable **Proxied** (orange cloud)
-3. SSL/TLS → Full (strict)
-4. Under **Rules** → increase the upload limit to 100 MB for `/api/models/convert`
+| Secret | Description |
+|--------|-------------|
+| `ACR_LOGIN_SERVER` | Azure Container Registry login server |
+| `ACR_USERNAME` | ACR admin username |
+| `ACR_PASSWORD` | ACR admin password |
+| `AZURE_CREDENTIALS` | Azure service principal JSON (for `az login`) |
+| `SUPABASE_URL` | Supabase project URL (for model deployment) |
+| `SUPABASE_ANON_KEY` | Supabase anon key (for model deployment) |
+| `GENERAL_ORG_ID` | `b0000000-0000-0000-0000-000000000001` |
+| `UPLOADER_EMAIL` | `apps@wildlife.ai` |
+| `UPLOADER_PASSWORD` | Apps Manager password |
 
 ---
 
@@ -319,10 +231,10 @@ The API exposes `/health` for automated monitoring:
 
 ```bash
 # Simple check
-curl -f http://localhost:8000/health || echo "API is down"
+curl -f https://<FQDN>/health || echo "API is down"
 
 # Uptime monitoring services (UptimeRobot, Better Uptime, etc.)
-# URL: https://api.wildlifewatcher.ai/health
+# URL: https://<FQDN>/health
 # Interval: 60 seconds
 # Expected: 200 OK
 ```
@@ -342,11 +254,22 @@ All logs are JSON-formatted for easy ingestion into log aggregators:
 }
 ```
 
-Supported log aggregators:
-- **AWS CloudWatch** (via Docker log driver)
-- **Datadog** (via structured JSON)
-- **Grafana Loki** (via Promtail)
-- **Render Logs** (built-in on Render)
+### Azure Container App Logs
+
+```bash
+# View recent logs
+az containerapp logs show \
+  --name ww-backend \
+  --resource-group WW-Website \
+  --type console \
+  --follow
+
+# View system logs (crashes, restarts)
+az containerapp logs show \
+  --name ww-backend \
+  --resource-group WW-Website \
+  --type system
+```
 
 ### Sentry
 
@@ -361,49 +284,42 @@ This automatically captures:
 - Performance traces (10% sample rate)
 - Request context (URL, method, headers)
 
-### Redis Monitoring
-
-```bash
-# Check Redis connectivity
-docker compose exec redis redis-cli ping
-
-# View memory usage
-docker compose exec redis redis-cli info memory
-
-# List active jobs
-docker compose exec redis redis-cli keys "arq:*"
-
-# Check job count
-docker compose exec redis redis-cli keys "job:*" | wc -l
-```
-
 ---
 
 ## Scaling
 
-### Horizontal Scaling
+### Azure Container Apps
 
-| Component | Strategy |
-|-----------|----------|
-| **API** | Add more workers (`--workers 4`) or more containers |
-| **Worker** | Run multiple worker containers (ARQ auto-distributes) |
-| **Redis** | For >1000 jobs/min, consider Redis Cluster or higher-memory plan |
-
-### Render Scaling
-
-```yaml
-# In render.yaml, change plan to scale
-services:
-  - type: web
-    name: wildlife-watcher-api
-    plan: standard  # or professional
-```
-
-### Docker Compose Scaling
+| Setting | Dev | Staging/Prod |
+|---------|-----|--------------|
+| `min-replicas` | 0 (scale to zero) | 1 |
+| `max-replicas` | 1 | 3 |
+| CPU | 0.25 vCPU | 0.5 vCPU |
+| Memory | 0.5 Gi | 1 Gi |
 
 ```bash
-# Scale workers
-docker compose up -d --scale worker=3
+# Scale staging
+az containerapp update \
+  --name ww-backend \
+  --resource-group WW-Website \
+  --min-replicas 1 \
+  --max-replicas 3 \
+  --cpu 0.5 \
+  --memory 1.0Gi
+```
+
+### Future: Redis + ARQ Worker
+
+When Redis+ARQ is implemented, the worker will run as a separate Container App:
+
+```bash
+az containerapp create \
+  --name ww-worker \
+  --resource-group WW-Website \
+  --image <ACR>/ww-backend:latest \
+  --command "arq" "app.jobs.worker.WorkerSettings" \
+  --min-replicas 1 \
+  --max-replicas 3
 ```
 
 ---
@@ -418,32 +334,30 @@ Missing required environment variables. Check that `SUPABASE_URL`, `SUPABASE_ANO
 
 ```bash
 # Verify env vars are loaded
-docker compose exec api env | grep SUPABASE
+az containerapp show \
+  --name ww-backend \
+  --resource-group WW-Website \
+  --query "properties.template.containers[0].env"
 ```
 
 **Jobs stuck in `queued` status**
 
-The worker is not running or can't connect to Redis.
+Jobs run in-process as asyncio background tasks. If the container restarts mid-job, the job store's `recover_stuck_jobs()` function marks interrupted jobs as `failed` on next boot. Check container restart logs:
 
 ```bash
-# Check worker logs
-docker compose logs worker
-
-# Verify Redis connectivity
-docker compose exec worker python -c "import redis; r=redis.from_url('redis://redis:6379'); print(r.ping())"
+az containerapp logs show \
+  --name ww-backend \
+  --resource-group WW-Website \
+  --type system
 ```
 
 **Model conversion fails: "Vela command not found"**
 
-The `ethos-u-vela` package needs to be installed in the worker container. Verify it's in `requirements.txt` and the Docker image was rebuilt.
-
-```bash
-docker compose exec worker vela --version
-```
+The `ethos-u-vela` package needs to be installed in the container. Verify it's in `requirements.txt` and the Docker image was rebuilt.
 
 **Rate limiting is too aggressive**
 
-Increase the limit:
+Increase the limit via environment variable:
 
 ```
 RATE_LIMIT_PER_MINUTE=120
@@ -454,14 +368,9 @@ RATE_LIMIT_PER_MINUTE=120
 Add your frontend origin to `ALLOWED_ORIGINS`:
 
 ```
-ALLOWED_ORIGINS=https://your-app.com,http://localhost:5173
+ALLOWED_ORIGINS=https://wildlifewatcher.ai,http://localhost:5173
 ```
 
 **LoRaWAN webhooks returning 401**
 
 Webhook secret mismatch. Verify the secret matches between your network server and `LORAWAN_TTN_WEBHOOK_SECRET` / `LORAWAN_CHIRPSTACK_WEBHOOK_SECRET`.
-
-```bash
-# Check configured secret
-docker compose exec api python -c "from app.config import settings; print(settings.LORAWAN_TTN_WEBHOOK_SECRET[:4] + '...')"
-```

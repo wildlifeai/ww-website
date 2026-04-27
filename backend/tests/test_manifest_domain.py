@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the manifest domain — helpers and hex array extraction."""
 
-from app.domain.manifest import _extract_hex_array, _flatten_directory, ManifestDomainError
-import pytest
 import tempfile
 from pathlib import Path
+
+import pytest
+
+from app.domain.manifest import ManifestDomainError, _extract_hex_array, _flatten_directory
 
 
 class TestExtractHexArray:

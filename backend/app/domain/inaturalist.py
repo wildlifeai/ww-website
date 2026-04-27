@@ -10,15 +10,15 @@ Uses the iNaturalist API v1 (api.inaturalist.org) to:
 All operations require a valid iNat access token (obtained via OAuth).
 """
 
+from typing import Any, Dict, List, Optional
+
 import httpx
 import structlog
-from typing import Optional, List, Dict, Any
 
 from app.services.inat_oauth import (
-    get_user_token,
-    get_api_jwt,
-    INatOAuthError,
     INAT_API_BASE,
+    get_api_jwt,
+    get_user_token,
 )
 
 logger = structlog.get_logger()

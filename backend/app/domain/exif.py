@@ -6,10 +6,10 @@ Browser-side (exifr) handles most parsing; this is the server-side
 fallback for custom EXIF tags produced by the camera firmware.
 """
 
-import struct
 import io
 import re
-from typing import Dict, Any, List, Optional
+import struct
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -76,7 +76,7 @@ def _format_value(value: bytes, type_id: int):
             except Exception:
                 pass
             return value.hex()
-        
+
         # Fallback for any unhandled byte types: Convert to hex string to prevent JSON serialization crashes
         return value.hex()
     return value

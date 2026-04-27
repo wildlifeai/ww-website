@@ -6,11 +6,11 @@ Replaces the local temp folder blob store to allow
 distributed buffering across Container Apps.
 """
 
-import asyncio
 from typing import Optional
 
 import structlog
 from azure.storage.blob.aio import BlobServiceClient
+
 from app.config import settings
 
 logger = structlog.get_logger()
@@ -26,10 +26,10 @@ async def store_blob(key: str, data: bytes, metadata: dict | None = None) -> Non
     client = await get_blob_service_client()
     if not client:
         logger.error("azure_storage_not_configured_for_store")
-        # Fallback to saving absolutely nothing, or raise error. 
+        # Fallback to saving absolutely nothing, or raise error.
         # Continuing allows failure to bubble up properly.
         raise Exception("Azure Storage is not configured.")
-        
+
     async with client:
         try:
             container_client = client.get_container_client(settings.AZURE_STORAGE_CONTAINER_NAME)
@@ -55,7 +55,7 @@ async def retrieve_blob(key: str) -> tuple[bytes | None, dict | None]:
     if not client:
         logger.error("azure_storage_not_configured_for_retrieve")
         return None, None
-        
+
     async with client:
         try:
             blob_client = client.get_blob_client(
@@ -64,7 +64,7 @@ async def retrieve_blob(key: str) -> tuple[bytes | None, dict | None]:
             )
             download_stream = await blob_client.download_blob()
             data = await download_stream.readall()
-            
+
             # Retrieve metadata
             blob_properties = await blob_client.get_blob_properties()
             metadata = blob_properties.metadata
@@ -78,7 +78,7 @@ async def delete_blob(key: str) -> None:
     client = await get_blob_service_client()
     if not client:
         return
-        
+
     async with client:
         try:
             blob_client = client.get_blob_client(

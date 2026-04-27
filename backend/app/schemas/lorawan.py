@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """LoRaWAN webhook payload schemas for TTN, Chirpstack, and generic uplinks."""
 
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
 from datetime import datetime
+from typing import Any, Dict, List, Optional
 
+from pydantic import BaseModel, Field
 
 # ── TTN v3 ────────────────────────────────────────────────────────────
 

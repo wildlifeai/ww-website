@@ -56,7 +56,7 @@ export function AnalyseImages() {
     uploadedFiles: 0,
     jobs: [],
     logs: [],
-    lastUpdateTs: Date.now()
+    lastUpdateTs: 0
   })
   
   const [deployments, setDeployments] = useState<Deployment[]>([])
@@ -121,7 +121,7 @@ export function AnalyseImages() {
                 // events from this poll (consumed below, not stored in state)
                 _events: j.events ?? [],
               } as typeof job & { _events: Array<{ seq: number; type: string; phase: string; timestamp: string; message: string }> }
-            } catch (err) {
+            } catch {
               return job
             }
           })

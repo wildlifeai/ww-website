@@ -3,6 +3,7 @@
 """Inject a unique X-Request-ID into every request/response for traceability."""
 
 import uuid
+
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response

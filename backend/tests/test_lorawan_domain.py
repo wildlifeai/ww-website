@@ -4,10 +4,11 @@
 
 import base64
 import json
+
 import pytest
 
-from app.schemas.lorawan import TTNUplink, ChirpstackUplink, ParsedMessage
 from app.domain.lorawan import LoRaWANDomain
+from app.schemas.lorawan import ChirpstackUplink, ParsedMessage, TTNUplink
 
 
 class TestWWPayloadParsing:

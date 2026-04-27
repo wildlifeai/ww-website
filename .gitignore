@@ -42,4 +42,4 @@ dist/
 exports/
 
 # Google Drive
-backend/service-account.json
+service-account.json

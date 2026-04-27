@@ -9,9 +9,9 @@ Key format: ww_live_<32 hex chars>
 Storage: bcrypt hash in Supabase `api_keys` table.
 """
 
-import secrets
 import hashlib
-from typing import Optional, List, Dict, Any
+import secrets
+from typing import Any, Dict, List, Optional
 
 import structlog
 

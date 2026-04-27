@@ -8,7 +8,8 @@ Three flavours:
 - service: service-role key, bypasses RLS (admin ops only)
 """
 
-from supabase import create_client, Client
+from supabase import Client, create_client
+
 from app.config import settings
 
 

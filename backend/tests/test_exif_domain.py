@@ -3,8 +3,8 @@
 """Unit tests for the EXIF domain — parse_exif_from_bytes and match_deployment."""
 
 import struct
-import io
-from app.domain.exif import parse_exif_from_bytes, match_deployment, _extract_deployment_id
+
+from app.domain.exif import _extract_deployment_id, match_deployment, parse_exif_from_bytes
 
 
 def _make_minimal_jpeg_with_exif(exif_data: bytes = b"") -> bytes:

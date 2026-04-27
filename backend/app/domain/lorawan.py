@@ -8,14 +8,14 @@ Supabase Realtime auto-broadcasts inserts to the mobile app.
 """
 
 import base64
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 import structlog
 
 from app.schemas.lorawan import (
-    TTNUplink,
     ChirpstackUplink,
     ParsedMessage,
+    TTNUplink,
 )
 from app.services.supabase_client import create_service_client
 

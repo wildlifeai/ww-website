@@ -8,8 +8,9 @@ or:
   { "error": { "code": "...", "message": "...", "retryable": bool }, "meta": { ... } }
 """
 
-from pydantic import BaseModel, Field
 from typing import Any, Optional
+
+from pydantic import BaseModel, Field
 
 
 class ApiError(BaseModel):

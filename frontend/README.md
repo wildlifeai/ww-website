@@ -29,18 +29,20 @@ This is the frontend user interface for the Wildlife Watcher platform, built wit
 
 ### 2. Environment Variables
 
-Create a file named `.env.local` in the `frontend/` root directory and add your backend references:
+The frontend reads environment variables from the **root `.env` file** (one level up from `frontend/`). This is configured via `envDir: '../'` in `vite.config.ts`. **Do not create a `frontend/.env.local` file.**
+
+The root `.env` must contain:
 
 ```env
-# Supabase Configuration
-VITE_SUPABASE_URL=https://<your-project>.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1Ni...
+# Supabase Configuration (shared with backend)
+SUPABASE_URL=https://<your-project>.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1Ni...
 
-# Backend API Configuration
-VITE_API_URL=http://localhost:8000
+# Frontend-specific (Vite injects at build time)
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
-> **Note**: In production (e.g. Cloudflare Pages or Vercel), ensure `VITE_API_URL` points to your deployed FastAPI HTTPS domain.
+> **Note**: `vite.config.ts` maps `SUPABASE_URL` → `import.meta.env.VITE_SUPABASE_URL` and `SUPABASE_ANON_KEY` → `import.meta.env.VITE_SUPABASE_ANON_KEY` automatically. On Cloudflare Pages, set `VITE_API_BASE_URL` to your deployed Azure Container App FQDN.
 
 ### 3. Run the Development Server
 
@@ -58,7 +60,7 @@ Visit `http://localhost:5173` in your browser. The page will hot-reload as you m
   - `toolkit/` - Main interface modules (e.g., `AnalyseImages.tsx`, `UploadModel.tsx`, `BuildManifest.tsx`).
 - `src/config/` - External configuration definitions (e.g. `supabase.ts`).
 - `src/lib/` - Utility libraries.
-  - `apiClient.ts` - Axios wrapper providing standardized error-handling and REST connectivity to the FastAPI Python backend.
+  - `apiClient.ts` - Fetch wrapper providing standardized error-handling and REST connectivity to the FastAPI Python backend.
 
 ## 🛠️ Build for Production
 

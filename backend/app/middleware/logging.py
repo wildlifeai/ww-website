@@ -7,6 +7,7 @@ Uses structlog for machine-parseable JSON output.
 """
 
 import time
+
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
@@ -27,17 +28,23 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
         except Exception as e:
-            logger.exception("unhandled_error", error=str(e))
+            try:
+                logger.exception("unhandled_error", error=str(e))
+            except Exception:
+                pass  # Never let logging kill the server
             raise
 
         duration = time.monotonic() - start
-        logger.info(
-            "request_completed",
-            request_id=request_id,
-            method=request.method,
-            path=request.url.path,
-            status=response.status_code,
-            duration_ms=round(duration * 1000, 2),
-            user_id=getattr(request.state, "user_id", None),
-        )
+        try:
+            logger.info(
+                "request_completed",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                status=response.status_code,
+                duration_ms=round(duration * 1000, 2),
+                user_id=getattr(request.state, "user_id", None),
+            )
+        except Exception:
+            pass  # Never let logging kill the server
         return response

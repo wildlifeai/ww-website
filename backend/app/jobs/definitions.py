@@ -6,39 +6,92 @@ Each function here is executed by the worker process, not the API server.
 They delegate to domain layer classes for actual business logic.
 """
 
+import hashlib
 import time
 from datetime import datetime, timezone
 
-from app.schemas.job import JobStatus, ProgressPhase, EventType, ProgressEvent
-from app.jobs.store import (
-    update_job,
-    emit_event,
-    update_summary,
-    start_phase,
-    complete_phase,
-    get_job,
-)
-
 import structlog
+
+from app.jobs.store import (
+    complete_phase,
+    emit_event,
+    get_job,
+    start_phase,
+    update_job,
+    update_summary,
+)
+from app.schemas.job import EventType, JobStatus, ProgressEvent, ProgressPhase
 
 logger = structlog.get_logger()
 
 
-async def convert_model_job(job_id: str, user_id: str):
+
+
+async def convert_model_job(job_id: str, user_id: str, model_id: str):
     """Long-running model conversion. Executed by passing into runner.py.
 
-    Retrieves the uploaded ZIP from Redis blob store, converts via Vela,
-    uploads the result to Supabase Storage, and stores a signed URL in the
-    job result for the frontend to download.
+    Retrieves the uploaded file from Redis blob store, normalizes/converts it
+    to a .TFL binary, uploads to Supabase Storage, and updates the ai_models
+    record to 'validated' (or 'failed' on error).
+
+    Idempotency: If the model is already 'validated' or 'deployed', the job
+    exits immediately. This handles ARQ retries and worker restarts safely.
     """
-    logger.info("job_start", job_type="convert_model", job_id=job_id)
+    log_ctx = {"job_type": "convert_model", "job_id": job_id, "model_id": model_id}
+    logger.info("convert_job_start", **log_ctx)
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
 
+    from app.services.supabase_client import create_service_client
+    client = create_service_client()
+
+    def update_model_status(status: str, error_message: str = None, **kwargs):
+        payload = {"status": status, **kwargs}
+        if error_message:
+            payload["error_message"] = error_message
+        # Append to processing_log
+        from datetime import datetime, timezone
+        log_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": status,
+            "job_id": job_id,
+        }
+        if error_message:
+            log_entry["error"] = error_message
+        try:
+            existing = client.table("ai_models").select("processing_log").eq("id", model_id).execute()
+            current_log = existing.data[0].get("processing_log") or [] if existing.data else []
+            current_log.append(log_entry)
+            payload["processing_log"] = current_log
+        except Exception:
+            payload["processing_log"] = [log_entry]
+        client.table("ai_models").update(payload).eq("id", model_id).execute()
+
     try:
-        from app.services.azure_storage import retrieve_blob, delete_blob
+        # ── Idempotency guard ────────────────────────────────────
+        model_check = client.table("ai_models").select("status").eq("id", model_id).execute()
+        if model_check.data and model_check.data[0]["status"] in ("validated", "deployed"):
+            logger.info("convert_job_skipped_already_complete", **log_ctx)
+            await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0)
+            return
+
+        # ── Transition to 'validating' ───────────────────────────
+        update_model_status("validating")
+        logger.info("convert_job_validating", **log_ctx)
+
         from app.domain.model import convert_uploaded_model
-        from app.services.storage import upload_to_storage
-        from app.services.supabase_client import create_service_client
+        from app.services.azure_storage import delete_blob, retrieve_blob
+
+        # Fetch model row to get org_id, family_id, version
+        model_res = client.table("ai_models").select("*, ai_model_families(firmware_model_id)").eq("id", model_id).execute()
+        if not model_res.data:
+            raise RuntimeError(f"Model record {model_id} not found")
+
+        model_row = model_res.data[0]
+        org_id = model_row.get("organisation_id")
+        version_num = model_row.get("version", "1.0.0")
+        family = model_row.get("ai_model_families") or {}
+        firmware_id = family.get("firmware_model_id", "UNKNOWN")
+        log_ctx.update({"org_id": org_id, "family_id": model_row.get("model_family_id"), "version": version_num, "firmware_id": firmware_id})
 
         # 1. Retrieve uploaded file from Redis
         file_content, metadata = await retrieve_blob(job_id)
@@ -47,53 +100,80 @@ async def convert_model_job(job_id: str, user_id: str):
 
         filename = metadata.get("filename", "model.zip") if metadata else "model.zip"
         await update_job(job_id, progress=0.2)
+        logger.info("convert_job_blob_retrieved", blob_size=len(file_content), **log_ctx)
 
-        # 2. Convert through Vela
+        # 2. Convert through Vela / Normalize to .TFL
+        start_time = time.time()
         model_bytes, labels = await convert_uploaded_model(file_content, filename)
+        conversion_ms = int((time.time() - start_time) * 1000)
         await update_job(job_id, progress=0.7)
+        logger.info("convert_job_conversion_complete", duration_ms=conversion_ms, output_bytes=len(model_bytes), labels=labels, **log_ctx)
 
-        # 3. Upload result to temp storage
-        result_path = f"temp/conversions/{job_id}/ai_model.zip"
-        uploaded = await upload_to_storage(
-            "ai-models", result_path, model_bytes, "application/zip"
+        import io
+        import zipfile
+
+        file_hash = ""
+        # Hash the .TFL inside the zip (this is what the mobile app transfers)
+        with zipfile.ZipFile(io.BytesIO(model_bytes), "r") as zf:
+            for name in zf.namelist():
+                if name.upper().endswith(".TFL"):
+                    tfl_content = zf.read(name)
+                    file_hash = hashlib.sha256(tfl_content).hexdigest()
+                    break
+
+        if not file_hash:
+            # Fallback to hashing the zip itself if no TFL found inside
+            file_hash = hashlib.sha256(model_bytes).hexdigest()
+
+        # 3. Upload result to structured storage path
+        # ai-models/{org_id}/{firmware_model_id}/{version_number}/ai_model.zip
+        result_path = f"{org_id}/{firmware_id}/{version_num}/ai_model.zip"
+
+        client.storage.from_("ai-models").upload(
+            path=result_path,
+            file=model_bytes,
+            file_options={"content-type": "application/zip", "upsert": True},
+        )
+        logger.info("convert_job_upload_complete", storage_path=result_path, **log_ctx)
+
+        # 4. Post-upload storage verification — readback and hash compare
+        try:
+            readback = client.storage.from_("ai-models").download(result_path)
+            readback_hash = hashlib.sha256(readback).hexdigest()
+            upload_hash = hashlib.sha256(model_bytes).hexdigest()
+            if readback_hash != upload_hash:
+                raise RuntimeError(f"Storage verification failed: readback {readback_hash} != upload {upload_hash}")
+            logger.info("convert_job_storage_verified", file_hash=file_hash, **log_ctx)
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"Storage verification readback error: {e}")
+
+        # 5. Update the ai_models row to 'validated'
+        update_model_status(
+            status="validated",
+            file_hash=file_hash,
+            storage_path=result_path,
+            file_size_bytes=len(model_bytes),
+            detection_capabilities=labels,
+            file_type="model"
         )
 
-        if uploaded:
-            # Generate a signed download URL (15 min expiry)
-            client = create_service_client()
-            try:
-                signed = client.storage.from_("ai-models").create_signed_url(
-                    result_path, expires_in=900
-                )
-                result_url = signed.get("signedURL", result_path)
-            except Exception:
-                result_url = result_path
+        await update_job(
+            job_id,
+            status=JobStatus.COMPLETED,
+            progress=1.0,
+        )
 
-            await update_job(
-                job_id,
-                status=JobStatus.COMPLETED,
-                progress=1.0,
-                result_url=result_url,
-            )
-        else:
-            await update_job(
-                job_id, status=JobStatus.FAILED, error="Failed to upload conversion result"
-            )
-
-        # 4. Clean up blob from Redis
+        # 6. Clean up blob from Redis
         await delete_blob(job_id)
 
-        logger.info(
-            "job_complete",
-            job_type="convert_model",
-            job_id=job_id,
-            size_bytes=len(model_bytes),
-            labels=labels,
-        )
+        logger.info("convert_job_complete", file_hash=file_hash, **log_ctx)
 
     except Exception as e:
+        update_model_status("failed", error_message=str(e))
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
-        logger.error("job_failed", job_type="convert_model", job_id=job_id, error=str(e))
+        logger.error("convert_job_failed", error=str(e), **log_ctx)
         # Clean up blob even on failure
         try:
             from app.services.azure_storage import delete_blob
@@ -220,7 +300,7 @@ async def export_camtrapdp_job(job_id: str, org_id: str, params: dict):
         raise
 
 
-async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, org_id: str):
+async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, org_id: str, custom_name: str = "", custom_desc: str = ""):
     """Download, convert, and register an SSCMA pretrained model."""
     logger.info("job_start", job_type="download_pretrained", job_id=job_id)
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
@@ -233,12 +313,15 @@ async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, or
         model_bytes, labels, metadata = await convert_pretrained_model(sscma_uuid)
         await update_job(job_id, progress=0.6)
 
+        final_name = custom_name if custom_name else metadata.get("name", "Unknown SSCMA Model")
+        final_desc = custom_desc if custom_desc else metadata.get("description", "Imported from Seeed Studio Model Zoo")
+
         # 2. Upload to storage and register in DB
         db_model = await upload_and_register(
             model_bytes=model_bytes,
-            model_name=metadata.get("name", "Unknown SSCMA Model"),
+            model_name=final_name,
             model_version=metadata.get("version", "1.0.0"),
-            description=metadata.get("description", "Imported from Seeed Studio Model Zoo"),
+            description=final_desc,
             labels=labels,
             org_id=org_id,
             user_id=user_id,
@@ -251,6 +334,40 @@ async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, or
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
         logger.error(
             "job_failed", job_type="download_pretrained", job_id=job_id, error=str(e)
+        )
+        raise
+
+async def download_github_pretrained_job(job_id: str, user_id: str, org_id: str, architecture: str, resolution: str, custom_desc: str = ""):
+    """Download, package, and register a GitHub pretrained model."""
+    logger.info("job_start", job_type="download_github_pretrained", job_id=job_id)
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
+
+    try:
+        from app.domain.model import convert_github_pretrained_model, upload_and_register
+
+        model_bytes, labels, metadata = await convert_github_pretrained_model(architecture, resolution)
+        await update_job(job_id, progress=0.6)
+
+        final_name = metadata.get("name", f"{architecture} ({resolution})")
+        final_desc = custom_desc if custom_desc else metadata.get("description", "Imported from GitHub Model Zoo")
+
+        db_model = await upload_and_register(
+            model_bytes=model_bytes,
+            model_name=final_name,
+            model_version=metadata.get("version", "1.0.0"),
+            description=final_desc,
+            labels=labels,
+            org_id=org_id,
+            user_id=user_id,
+        )
+
+        await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0)
+        logger.info("job_complete", job_type="download_github_pretrained", job_id=job_id, model_id=db_model["id"])
+
+    except Exception as e:
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+        logger.error(
+            "job_failed", job_type="download_github_pretrained", job_id=job_id, error=str(e)
         )
         raise
 
@@ -299,8 +416,8 @@ async def upload_drive_images_job(job_id: str, payload: dict):
     ))
 
     try:
+        from app.services.azure_storage import delete_blob, retrieve_blob
         from app.services.google_drive import GoogleDriveService
-        from app.services.azure_storage import retrieve_blob, delete_blob
 
         # Shared mutable state for heartbeat visibility
         last_event_ts = time.monotonic()
@@ -335,7 +452,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             nonlocal download_completed, last_event_ts
             async with sem:
                 content, _ = await retrieve_blob(entry["blob_id"])
-                
+
                 download_completed += 1
                 progress = 0.05 + (0.35 * (download_completed / total_files))
                 await update_job(job_id, progress=min(progress, 0.40))
@@ -545,7 +662,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                 except Exception:
                     pass
                 completed += 1
-                
+
                 last_event_ts = time.monotonic()
                 if completed % max(1, total // 10) == 0 or completed == total:
                     await emit_event(job_id, ProgressEvent(
@@ -613,5 +730,6 @@ JOBS = [
     generate_manifest_job,
     export_camtrapdp_job,
     download_pretrained_job,
+    download_github_pretrained_job,
     upload_drive_images_job,
 ]

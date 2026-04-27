@@ -7,7 +7,6 @@ Wraps the ethos-u-vela CLI for converting TFLite models to Ethos-U55 format.
 
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import structlog
 

@@ -14,21 +14,20 @@ The MANIFEST.zip is what gets deployed to the camera SD card. Structure:
 """
 
 import re
-import json
 import shutil
-import zipfile
 import tempfile
+import zipfile
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional
 
 import structlog
 
 from app.config import settings
-from app.registries.model_registry import MODEL_REGISTRY, get_model_config
 from app.registries.camera_configs import CAMERA_CONFIGS
-from app.services.supabase_client import create_service_client
+from app.registries.model_registry import MODEL_REGISTRY, get_model_config
+from app.services.http_client import DownloadError, download_url_content
 from app.services.storage import download_from_storage
-from app.services.http_client import download_url_content, DownloadError
+from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 
@@ -414,20 +413,22 @@ async def generate_manifest(
         if model_source == "github" and model_type and resolution:
             # Reusing the github fetcher, but renaming the output files
             model_added = await _fetch_github_model(model_type, resolution, manifest_dir)
-            
+
             # The github fetcher hardcodes 'trained_vela', rename if needed
             if model_added and tfl_name != "trained_vela.TFL":
                 default_tfl = manifest_dir / "trained_vela.TFL"
                 default_txt = manifest_dir / "trained_vela.TXT"
-                if default_tfl.exists(): default_tfl.rename(manifest_dir / tfl_name)
-                if default_txt.exists(): default_txt.rename(manifest_dir / txt_name)
+                if default_tfl.exists():
+                    default_tfl.rename(manifest_dir / tfl_name)
+                if default_txt.exists():
+                    default_txt.rename(manifest_dir / txt_name)
 
         elif model_source == "organisation" and org_model_id:
             # Fetch specific org model by ID
             try:
                 response = (
                     client.table("ai_models")
-                    .select("storage_path, name")
+                    .select("storage_path, name, version, ai_model_families(firmware_model_id)")
                     .eq("id", org_model_id)
                     .execute()
                 )
@@ -441,15 +442,25 @@ async def generate_manifest(
                         with zipfile.ZipFile(io.BytesIO(content)) as zf:
                             zf.extractall(manifest_dir)
                         model_added = True
-                        
-                        # Apply custom names if needed
-                        if tfl_name != "trained_vela.TFL":
-                            for f in manifest_dir.glob("*.TFL"):
-                                f.rename(manifest_dir / tfl_name)
-                            for f in manifest_dir.glob("*.TXT"):
-                                f.rename(manifest_dir / txt_name)
-                                
-                        logger.info("org_model_added", name=model.get("name"))
+
+                        # Dynamically get firmware_model_id and version safely
+                        family = model.get("ai_model_families")
+                        firmware_id = family.get("firmware_model_id") if family else "UNKNOWN"
+                        version_str = model.get("version", "1")
+                        version = version_str.split(".")[0] if "." in version_str else version_str
+
+                        dynamic_tfl_name = f"{firmware_id}V{version}.TFL"
+                        dynamic_txt_name = f"{firmware_id}V{version}.TXT"
+
+                        # Apply custom names (case-insensitive search)
+                        for ext in ("*.TFL", "*.tfl"):
+                            for f in manifest_dir.glob(ext):
+                                f.rename(manifest_dir / dynamic_tfl_name)
+                        for ext in ("*.TXT", "*.txt"):
+                            for f in manifest_dir.glob(ext):
+                                f.rename(manifest_dir / dynamic_txt_name)
+
+                        logger.info("org_model_added", name=model.get("name"), tfl_name=dynamic_tfl_name)
             except Exception as e:
                 logger.error("org_model_failed", error=str(e))
         elif model_source == "sscma" and sscma_model_id:

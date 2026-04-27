@@ -10,14 +10,12 @@ import csv
 import io
 from typing import List
 
-from fastapi import APIRouter, File, Form, UploadFile, Request
+import structlog
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
-from app.config import settings
-from app.schemas.common import ApiResponse, ApiMeta
 from app.domain.clustering import cluster_images_from_bytes
-
-import structlog
+from app.schemas.common import ApiMeta, ApiResponse
 
 logger = structlog.get_logger()
 

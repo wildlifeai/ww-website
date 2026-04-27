@@ -153,7 +153,7 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
   const logContainerRef = useRef<HTMLDivElement>(null)
   const prevLogCountRef = useRef(0)
   const [elapsed, setElapsed] = useState(0)
-  const startTsRef = useRef(Date.now())
+  const startTsRef = useRef(0)
 
   // Elapsed timer — ticks every second while pipeline is active
   useEffect(() => {
@@ -166,6 +166,7 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
     }, 1000)
 
     return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, state.logs.length > 0 ? state.logs[0].ts : 0])
 
   // Auto-scroll log container when new logs arrive

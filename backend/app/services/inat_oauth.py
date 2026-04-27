@@ -16,16 +16,16 @@ Endpoints:
   - API Base:      https://api.inaturalist.org/v1
 """
 
-import hashlib
 import base64
+import hashlib
+import json
 import secrets
 import time
-import json
-from typing import Optional, Dict, Any, Tuple
-from cryptography.fernet import Fernet
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 import structlog
+from cryptography.fernet import Fernet
 
 from app.config import settings
 from app.services.supabase_client import create_service_client
@@ -271,12 +271,7 @@ async def revoke_user_token(user_id: str) -> bool:
     """Delete stored iNat token (disconnect)."""
     client = create_service_client()
 
-    response = (
-        client.table("inat_tokens")
-        .delete()
-        .eq("user_id", user_id)
-        .execute()
-    )
+    client.table("inat_tokens").delete().eq("user_id", user_id).execute()
 
     logger.info("inat_token_revoked", user_id=user_id)
     return True

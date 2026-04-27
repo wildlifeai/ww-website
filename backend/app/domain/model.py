@@ -11,15 +11,15 @@ Reusable by both the API handler (sync for small ops) and the ARQ worker.
 import os
 import re
 import shutil
-import zipfile
 import tempfile
+import zipfile
 from pathlib import Path
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Any, Dict, List, Tuple
 
 import structlog
 
-from app.services.vela import run_vela_conversion, VelaConversionError
 from app.services.supabase_client import create_service_client
+from app.services.vela import VelaConversionError, run_vela_conversion
 
 logger = structlog.get_logger()
 
@@ -136,24 +136,24 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
         if precompiled_tfl and (work_dir / "labels.txt").exists():
             tfl_file = precompiled_tfl[0]
             logger.info("model_already_converted", file=tfl_file.name)
-            
+
             labels = (work_dir / "labels.txt").read_text().splitlines()
-            labels = [l.strip() for l in labels if l.strip()]
-            
+            labels = [lbl.strip() for lbl in labels if lbl.strip()]
+
             ai_model_zip_path = work_dir / "ai_model.zip"
             # Ensure the label file name matches the firmware expectation (e.g. 1237V10.TXT)
             label_arcname = tfl_file.stem.upper()[:8] + ".TXT"
-            
+
             with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
                 zf.write(tfl_file, tfl_file.name.upper())
                 zf.write(work_dir / "labels.txt", label_arcname)
-                
+
             return ai_model_zip_path.read_bytes(), labels
 
         if not tflite_path.exists():
-            raise ModelDomainError(f"trained.tflite not found in ZIP")
+            raise ModelDomainError("trained.tflite not found in ZIP")
         if not vars_h_path.exists():
-            raise ModelDomainError(f"model_variables.h not found in ZIP")
+            raise ModelDomainError("model_variables.h not found in ZIP")
 
         logger.info("model_extracted", model=container_name)
 
@@ -261,7 +261,8 @@ async def upload_and_register(
             "modified_by": user_id,
             "storage_path": storage_path,
             "file_size_bytes": len(model_bytes),
-            "file_type": "manifest",
+            "file_type": "model",
+            "status": "validated",
             "detection_capabilities": labels,
         }
 
@@ -304,8 +305,8 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], D
     Returns:
         Tuple of (ai_model_zip_bytes, labels_list, model_metadata).
     """
-    from app.services.sscma import get_sscma_model
     from app.services.http_client import download_url_content
+    from app.services.sscma import get_sscma_model
 
     try:
         model_info = await get_sscma_model(sscma_uuid)
@@ -373,7 +374,7 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], D
         labels_txt_path.write_text("\n".join(labels))
 
         ai_model_zip_path = work_dir / "ai_model.zip"
-        
+
         with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
             zf.write(vela_final_path, "MOD00001.TFL")
             zf.write(labels_txt_path, "MOD00001.TXT")
@@ -382,12 +383,86 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], D
             raise ModelDomainError("Failed to create ai_model.zip")
 
         result_bytes = ai_model_zip_path.read_bytes()
-        
+
         # Prepare metadata for uploading script
         metadata = {
             "name": model_info.get("name"),
             "version": model_info.get("version"),
             "description": model_info.get("description"),
+            "labels": labels
+        }
+
+        return result_bytes, labels, metadata
+
+async def convert_github_pretrained_model(architecture: str, resolution: str) -> Tuple[bytes, List[str], Dict[str, Any]]:
+    """Download, convert, and package a pretrained GitHub model.
+
+    Args:
+        architecture: e.g. "Person Detection"
+        resolution: e.g. "96x96"
+
+    Returns:
+        Tuple of (ai_model_zip_bytes, labels_list, model_metadata).
+    """
+    from app.registries.model_registry import get_model_config
+    from app.services.http_client import download_url_content
+
+    config = get_model_config(architecture, resolution)
+    url = config["url"]
+    file_type = config["type"]
+    labels = config.get("labels", ["unknown"])
+
+    logger.info("github_downloading", architecture=architecture, url=url)
+
+    try:
+        model_bytes = await download_url_content(url)
+    except Exception as e:
+        raise ModelDomainError(f"Failed to download GitHub model: {e}")
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        work_dir = Path(temp_dir)
+
+        if file_type == "cc_array":
+            logger.info("github_parsing_cc_array")
+            c_content = model_bytes.decode('utf-8')
+            pattern = r'const\s+unsigned\s+char\s+\w+\[\]\s*=\s*\{([^}]+)\}'
+            match = re.search(pattern, c_content, re.DOTALL)
+
+            if not match:
+                raise ModelDomainError("Could not find byte array in C file")
+
+            array_content = match.group(1)
+            hex_values = re.findall(r'0x([0-9a-fA-F]{2})', array_content)
+
+            if not hex_values:
+                raise ModelDomainError("No hex values found in C array")
+
+            binary_data = bytes([int(h, 16) for h in hex_values])
+            vela_final_path = work_dir / "MOD00001.tfl"
+            vela_final_path.write_bytes(binary_data)
+        else:
+            # .tflite
+            vela_final_path = work_dir / "MOD00001.tfl"
+            vela_final_path.write_bytes(model_bytes)
+
+        labels_txt_path = work_dir / "labels.txt"
+        labels_txt_path.write_text("\n".join(labels))
+
+        ai_model_zip_path = work_dir / "ai_model.zip"
+
+        with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
+            zf.write(vela_final_path, "MOD00001.TFL")
+            zf.write(labels_txt_path, "MOD00001.TXT")
+
+        if not ai_model_zip_path.exists():
+            raise ModelDomainError("Failed to create ai_model.zip")
+
+        result_bytes = ai_model_zip_path.read_bytes()
+
+        metadata = {
+            "name": f"{architecture} ({resolution})",
+            "version": "1.0.0",
+            "description": "Pre-trained model from Wildlife Watcher Zoo",
             "labels": labels
         }
 

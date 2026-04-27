@@ -10,10 +10,11 @@ deterministically (no string parsing) with support for:
 - Aggregate progress summaries for progress bars and ETA
 """
 
-from pydantic import BaseModel, Field
-from typing import Optional
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, Field
 
 
 class JobStatus(str, Enum):

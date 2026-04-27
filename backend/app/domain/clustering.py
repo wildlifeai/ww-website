@@ -12,7 +12,7 @@ Ported from dev-inat-api:cluster_utils.py and adapted for the V2 pipeline
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 

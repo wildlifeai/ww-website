@@ -6,7 +6,7 @@ Fetches and caches the official Seeed Studio Model Assistant catalog.
 """
 
 import json
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 from app.services.cache import cached
 from app.services.http_client import download_url_content
@@ -16,7 +16,7 @@ SSCMA_URL = "https://raw.githubusercontent.com/Seeed-Studio/sscma-model-zoo/main
 
 async def get_sscma_catalog() -> List[Dict[str, Any]]:
     """Return cached SSCMA model zoo catalog (1 hour TTL)."""
-    
+
     async def fetch_catalog():
         content = await download_url_content(SSCMA_URL)
         data = json.loads(content)
