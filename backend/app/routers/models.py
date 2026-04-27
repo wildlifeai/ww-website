@@ -73,9 +73,22 @@ async def convert_model(
     org_id = resolve_managed_org(organisation_id, manager_roles)
 
     job_id = await create_job()
+    import asyncio
+
+    # Resolve or create AI Model Family
+    family_query = client.table("ai_model_families").select("id").eq("organisation_id", org_id).eq("name", model_name)
+    family_res = await asyncio.to_thread(family_query.execute)
+
+    if family_res.data:
+        model_family_id = family_res.data[0]["id"]
+    else:
+        family_insert = client.table("ai_model_families").insert({"organisation_id": org_id, "name": model_name}).select("id")
+        insert_res = await asyncio.to_thread(family_insert.execute)
+        model_family_id = insert_res.data[0]["id"]
 
     # Get existing models with this name to determine version
-    existing_res = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name).execute()
+    existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
+    existing_res = await asyncio.to_thread(existing_query.execute)
     existing_versions = [
         int(r["version"].split(".")[0])
         for r in existing_res.data
@@ -88,11 +101,12 @@ async def convert_model(
     temp_storage_path = f"temp/{org_id}/{model_name.replace(' ', '_')}_{version_string}_{job_id}"
 
     # Insert ai_models row
-    model_row = (
+    model_insert = (
         client.table("ai_models")
         .insert(
             {
                 "organisation_id": org_id,
+                "model_family_id": model_family_id,
                 "version": version_string,
                 "name": model_name,
                 "description": description,
@@ -102,8 +116,8 @@ async def convert_model(
                 "file_type": "uploading",
             }
         )
-        .execute()
     )
+    model_row = await asyncio.to_thread(model_insert.execute)
     model_id = model_row.data[0]["id"]
 
     await store_blob(

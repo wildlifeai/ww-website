@@ -66,7 +66,7 @@ async def get_privileged_client():
 async def get_manager_roles(user=Depends(get_current_user)):
     """Return all roles where the user is an organisation_manager."""
     client = supabase_client.create_service_client()
-    roles = (
+    query = (
         client.table("user_roles")
         .select("scope_id, role")
         .eq("user_id", user.id)
@@ -74,6 +74,7 @@ async def get_manager_roles(user=Depends(get_current_user)):
         .eq("role", "organisation_manager")
         .eq("is_active", True)
         .is_("deleted_at", "null")
-        .execute()
     )
+    import asyncio
+    roles = await asyncio.to_thread(query.execute)
     return roles.data or []

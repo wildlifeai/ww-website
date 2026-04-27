@@ -131,7 +131,10 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         # ai-models/{org_id}/{firmware_model_id}/{version_number}/ai_model.zip
         result_path = f"{org_id}/{firmware_id}/{version_num}/ai_model.zip"
 
-        client.storage.from_("ai-models").upload(
+        # Offload blocking upload to thread
+        import asyncio
+        await asyncio.to_thread(
+            client.storage.from_("ai-models").upload,
             path=result_path,
             file=model_bytes,
             file_options={"content-type": "application/zip", "upsert": True},

@@ -436,23 +436,14 @@ async def generate_manifest(
                         dynamic_tfl_name = f"{firmware_id}V{version}.TFL"
                         dynamic_txt_name = f"{firmware_id}V{version}.TXT"
 
-                        # Apply custom names (case-insensitive search)
-                        tfl_renamed = False
-                        for ext in ("*.TFL", "*.tfl"):
-                            for f in manifest_dir.glob(ext):
+                        for f in manifest_dir.iterdir():
+                            if f.is_file() and f.suffix.upper() == ".TFL":
                                 f.rename(manifest_dir / dynamic_tfl_name)
-                                tfl_renamed = True
-                                break
-                            if tfl_renamed:
                                 break
 
-                        txt_renamed = False
-                        for ext in ("*.TXT", "*.txt"):
-                            for f in manifest_dir.glob(ext):
+                        for f in manifest_dir.iterdir():
+                            if f.is_file() and f.suffix.upper() == ".TXT":
                                 f.rename(manifest_dir / dynamic_txt_name)
-                                txt_renamed = True
-                                break
-                            if txt_renamed:
                                 break
 
                         logger.info("org_model_added", name=model.get("name"), tfl_name=dynamic_tfl_name)
