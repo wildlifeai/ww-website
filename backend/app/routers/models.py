@@ -10,8 +10,9 @@ POST /api/models/pretrained → download + package GitHub model (async)
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
+import uuid
 
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_manager_roles
 from app.jobs.store import create_job
 from app.schemas.common import ApiMeta, ApiResponse
 from app.schemas.job import JobCreateResponse
@@ -27,6 +28,15 @@ ALLOWED_MIME_TYPES = {
     "text/x-c", # For .cc
     "text/plain"
 }
+
+def resolve_managed_org(requested_org_id: str | None, manager_roles: list) -> str:
+    if not manager_roles:
+        raise HTTPException(403, detail="Only organisation managers can perform this action.")
+    if requested_org_id:
+        if not any(r["scope_id"] == requested_org_id for r in manager_roles):
+            raise HTTPException(403, detail="You are not a manager of the selected organisation.")
+        return requested_org_id
+    return manager_roles[0]["scope_id"]
 
 @router.post("/convert")
 async def convert_model(
@@ -57,31 +67,8 @@ async def convert_model(
     from app.services.supabase_client import create_service_client
     client = create_service_client()
 
-    # Get org_id for the user (scope_type='organisation' with org-level roles)
-    roles = (
-        client.table("user_roles")
-        .select("scope_id, role")
-        .eq("user_id", user.id)
-        .eq("scope_type", "organisation")
-        .eq("is_active", True)
-        .is_("deleted_at", "null")
-        .execute()
-    )
-    if not roles.data:
-        raise HTTPException(403, detail="User must belong to an organisation")
-
-    manager_roles = [r for r in roles.data if r.get("role") == "organisation_manager"]
-    if not manager_roles:
-        raise HTTPException(403, detail="Only organisation managers can upload models.")
-
-    # Use frontend-supplied org_id if provided, otherwise pick first
-    if organisation_id:
-        valid = any(r["scope_id"] == organisation_id for r in manager_roles)
-        if not valid:
-            raise HTTPException(403, detail="You are not a manager of the selected organisation.")
-        org_id = organisation_id
-    else:
-        org_id = manager_roles[0]["scope_id"]
+    manager_roles = await get_manager_roles(user)
+    org_id = resolve_managed_org(organisation_id, manager_roles)
 
     job_id = await create_job()
 
@@ -93,7 +80,7 @@ async def convert_model(
         if r.get("version") and "." in r["version"] and r["version"].split(".")[0].isdigit()
     ]
     next_ver = max(existing_versions) + 1 if existing_versions else 1
-    version_string = f"{next_ver}.0.0"
+    version_string = f"{next_ver}.0.0-{uuid.uuid4().hex[:6]}"
 
     # We need a unique storage_path. We will update it after upload in the worker, but for now use a placeholder.
     temp_storage_path = f"temp/{org_id}/{model_name.replace(' ', '_')}_{version_string}_{job_id}"
@@ -164,27 +151,18 @@ async def get_managed_orgs(
     logger = structlog.get_logger()
     client = create_service_client()
 
-    roles = (
-        client.table("user_roles")
-        .select("scope_id, role")
-        .eq("user_id", user.id)
-        .eq("scope_type", "organisation")
-        .eq("role", "organisation_manager")
-        .eq("is_active", True)
-        .is_("deleted_at", "null")
-        .execute()
-    )
+    manager_roles = await get_manager_roles(user)
+    
+    logger.info("managed_orgs_query", email=user.email, user_id=user.id, roles_count=len(manager_roles))
 
-    logger.info("managed_orgs_query", email=user.email, user_id=user.id, roles_count=len(roles.data) if roles.data else 0)
-
-    if not roles.data:
+    if not manager_roles:
         return ApiResponse(
             data=[],
             meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
         )
 
     # Fetch org names
-    org_ids = [r["scope_id"] for r in roles.data]
+    org_ids = [r["scope_id"] for r in manager_roles]
     orgs = client.table("organisations").select("id, name").in_("id", org_ids).execute()
 
     return ApiResponse(
@@ -224,33 +202,8 @@ async def download_pretrained(
     from app.services.supabase_client import create_service_client
     client = create_service_client()
 
-    # Must be organisation_manager
-    roles = (
-        client.table("user_roles")
-        .select("scope_id, role")
-        .eq("user_id", user.id)
-        .eq("scope_type", "organisation")
-        .eq("is_active", True)
-        .is_("deleted_at", "null")
-        .execute()
-    )
-
-    if not roles.data:
-        raise HTTPException(403, detail="User must belong to an organisation")
-
-    manager_roles = [r for r in roles.data if r.get("role") == "organisation_manager"]
-    if not manager_roles:
-        raise HTTPException(403, detail="Only organisation managers can import pre-trained models.")
-
-    # Use frontend-supplied org_id if provided, otherwise pick first managed org
-    if body.organisation_id:
-        # Verify user actually manages this org
-        valid = any(r["scope_id"] == body.organisation_id for r in manager_roles)
-        if not valid:
-            raise HTTPException(403, detail="You are not a manager of the selected organisation.")
-        org_id = body.organisation_id
-    else:
-        org_id = manager_roles[0]["scope_id"]
+    manager_roles = await get_manager_roles(user)
+    org_id = resolve_managed_org(body.organisation_id, manager_roles)
 
     if body.source_type == "pretrained":
         if not body.architecture or not body.resolution:

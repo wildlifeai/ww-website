@@ -425,7 +425,8 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
         if file_type == "cc_array":
             logger.info("github_parsing_cc_array")
             c_content = model_bytes.decode('utf-8')
-            pattern = r'const\s+unsigned\s+char\s+\w+\[\]\s*=\s*\{([^}]+)\}'
+            # Look for unsigned char array assignment, ignoring modifiers like const/static/alignas
+            pattern = r'unsigned\s+char\s+\w+(?:\[.*?\])?\s*=\s*\{([^}]+)\}'
             match = re.search(pattern, c_content, re.DOTALL)
 
             if not match:
@@ -437,7 +438,7 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
             if not hex_values:
                 raise ModelDomainError("No hex values found in C array")
 
-            binary_data = bytes([int(h, 16) for h in hex_values])
+            binary_data = bytes.fromhex("".join(hex_values))
             vela_final_path = work_dir / "MOD00001.tfl"
             vela_final_path.write_bytes(binary_data)
         else:

@@ -61,3 +61,19 @@ async def get_user_client(authorization: str = Header(...)):
 async def get_privileged_client():
     """Service-role Supabase client for admin operations. Use sparingly."""
     return create_service_client()
+
+
+async def get_manager_roles(user=Depends(get_current_user)):
+    """Return all roles where the user is an organisation_manager."""
+    client = create_service_client()
+    roles = (
+        client.table("user_roles")
+        .select("scope_id, role")
+        .eq("user_id", user.id)
+        .eq("scope_type", "organisation")
+        .eq("role", "organisation_manager")
+        .eq("is_active", True)
+        .is_("deleted_at", "null")
+        .execute()
+    )
+    return roles.data or []
