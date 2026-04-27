@@ -108,9 +108,9 @@ class TestConvertEndpointRoles:
         """organisation_member cannot create a new model family."""
         mock_sb_client = MagicMock()
 
-        # user_roles returns organisation_member (not manager)
+        # user_roles returns empty list for organisation_manager query
         roles_result = MagicMock()
-        roles_result.data = [{"organisation_id": "org-1", "role": "organisation_member"}]
+        roles_result.data = []
 
         # ai_model_families lookup returns empty (family doesn't exist)
         family_result = MagicMock()
@@ -156,7 +156,7 @@ class TestConvertResponseContract:
         mock_sb_client = MagicMock()
 
         roles_result = MagicMock()
-        roles_result.data = [{"organisation_id": "org-1", "role": "organisation_manager"}]
+        roles_result.data = [{"scope_id": "org-1", "role": "organisation_manager"}]
 
         family_result = MagicMock()
         family_result.data = [{"id": "fam-1"}]
