@@ -54,9 +54,7 @@ async def receive_chirpstack_webhook(
     x_webhook_secret: str = Header("", alias="X-Webhook-Secret"),
 ):
     """Receive a Chirpstack v4 uplink webhook."""
-    _validate_webhook_secret(
-        x_webhook_secret, settings.LORAWAN_CHIRPSTACK_WEBHOOK_SECRET or settings.LORAWAN_WEBHOOK_SECRET
-    )
+    _validate_webhook_secret(x_webhook_secret, settings.LORAWAN_CHIRPSTACK_WEBHOOK_SECRET or settings.LORAWAN_WEBHOOK_SECRET)
 
     parsed = await _domain.process_chirpstack_uplink(payload)
 

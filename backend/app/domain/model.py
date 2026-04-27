@@ -32,6 +32,7 @@ class ModelDomainError(Exception):
 
 # ── Helpers (ported from app.py) ─────────────────────────────────────
 
+
 def _parse_model_zip_name(zip_path: str) -> Tuple[str, str]:
     """Parse '<modelname>-custom-<version>.zip' → (modelname, version)."""
     name = os.path.basename(zip_path)
@@ -59,7 +60,7 @@ def _extract_labels_from_header(vars_h_path: Path) -> List[str]:
         content = f.read()
 
     match = re.search(
-        r'const char\*\s*ei_classifier_inferencing_categories.*?=\s*\{(.*?)\};',
+        r"const char\*\s*ei_classifier_inferencing_categories.*?=\s*\{(.*?)\};",
         content,
         re.DOTALL,
     )
@@ -268,9 +269,7 @@ async def upload_and_register(
 
         if existing.data:
             model_id = existing.data[0]["id"]
-            response = (
-                client.table("ai_models").update(model_data).eq("id", model_id).execute()
-            )
+            response = client.table("ai_models").update(model_data).eq("id", model_id).execute()
             logger.info("model_updated", model_id=model_id)
         else:
             response = client.table("ai_models").insert(model_data).execute()
@@ -295,6 +294,7 @@ async def upload_and_register(
                 error=str(rollback_e),
             )
         raise ModelDomainError(f"Database registration failed: {e}") from e
+
 
 async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], Dict[str, Any]]:
     """Download, convert, and package a pretrained SSCMA model.
@@ -389,10 +389,11 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], D
             "name": model_info.get("name"),
             "version": model_info.get("version"),
             "description": model_info.get("description"),
-            "labels": labels
+            "labels": labels,
         }
 
         return result_bytes, labels, metadata
+
 
 async def convert_github_pretrained_model(architecture: str, resolution: str) -> Tuple[bytes, List[str], Dict[str, Any]]:
     """Download, convert, and package a pretrained GitHub model.
@@ -424,16 +425,16 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
 
         if file_type == "cc_array":
             logger.info("github_parsing_cc_array")
-            c_content = model_bytes.decode('utf-8')
+            c_content = model_bytes.decode("utf-8")
             # Look for unsigned char array assignment, ignoring modifiers like const/static/alignas
-            pattern = r'unsigned\s+char\s+\w+(?:\[.*?\])?\s*=\s*\{([^}]+)\}'
+            pattern = r"unsigned\s+char\s+\w+(?:\[.*?\])?\s*=\s*\{([^}]+)\}"
             match = re.search(pattern, c_content, re.DOTALL)
 
             if not match:
                 raise ModelDomainError("Could not find byte array in C file")
 
             array_content = match.group(1)
-            hex_values = re.findall(r'0x([0-9a-fA-F]{2})', array_content)
+            hex_values = re.findall(r"0x([0-9a-fA-F]{2})", array_content)
 
             if not hex_values:
                 raise ModelDomainError("No hex values found in C array")
@@ -464,7 +465,7 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
             "name": f"{architecture} ({resolution})",
             "version": "1.0.0",
             "description": "Pre-trained model from Wildlife Watcher Zoo",
-            "labels": labels
+            "labels": labels,
         }
 
         return result_bytes, labels, metadata

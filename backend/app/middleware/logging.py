@@ -19,9 +19,7 @@ logger = structlog.get_logger()
 class LoggingMiddleware(BaseHTTPMiddleware):
     """Log every HTTP request/response as a structured JSON event."""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         request_id = getattr(request.state, "request_id", "unknown")
         start = time.monotonic()
 

@@ -34,7 +34,7 @@ router = APIRouter(prefix="/api/exif", tags=["exif"])
 
 # Regex to extract the 8-char deployment prefix from the SD card folder path
 # e.g.  MEDIA/655BC4E5/IMAGES.000/file.JPG  →  655BC4E5
-_FOLDER_DEP_RE = re.compile(r'MEDIA[/\\]([A-Fa-f0-9]{8})[/\\]', re.IGNORECASE)
+_FOLDER_DEP_RE = re.compile(r"MEDIA[/\\]([A-Fa-f0-9]{8})[/\\]", re.IGNORECASE)
 
 
 def _hex_filename_to_timestamp(filename: str) -> Optional[str]:
@@ -43,13 +43,13 @@ def _hex_filename_to_timestamp(filename: str) -> Optional[str]:
     The firmware encodes timestamps as ``(unix_seconds << 4) + sub_second``
     in an 8-character hex string.  Shifting right by 4 recovers the second.
     """
-    stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
     try:
         value = int(stem, 16)
         seconds = value >> 4
         if seconds < 946684800:  # before year 2000 — probably not a real timestamp
             return None
-        return datetime.fromtimestamp(seconds, tz=timezone.utc).strftime('%Y:%m:%d %H:%M:%S')
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).strftime("%Y:%m:%d %H:%M:%S")
     except (ValueError, OSError):
         return None
 
@@ -91,6 +91,7 @@ async def parse_exif(
     user = await get_optional_user(authorization)
     if not user and len(files) > MAX_ANON_IMAGES:
         from fastapi.responses import JSONResponse
+
         return JSONResponse(
             status_code=403,
             content={
@@ -191,9 +192,7 @@ async def parse_exif(
             "images": results,
             "drive_upload": drive_upload_info,
         },
-        meta=ApiMeta(
-            request_id=getattr(request.state, "request_id", None) if request else None
-        ),
+        meta=ApiMeta(request_id=getattr(request.state, "request_id", None) if request else None),
     )
 
 
@@ -230,10 +229,7 @@ async def _enqueue_drive_upload(
             for dep_row in dep_resp.data:
                 dep_id = dep_row["id"]
                 dep_start = dep_row.get("deployment_start")
-                dep_date = (
-                    dep_start[:10] if dep_start
-                    else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                )
+                dep_date = dep_start[:10] if dep_start else datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 deployment_info = {
                     "id": dep_id,
                     "date": dep_date,
@@ -270,10 +266,7 @@ async def _enqueue_drive_upload(
                     dep_row = prefix_resp.data[0]
                     dep_id = dep_row["id"]
                     dep_start = dep_row.get("deployment_start")
-                    dep_date = (
-                        dep_start[:10] if dep_start
-                        else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                    )
+                    dep_date = dep_start[:10] if dep_start else datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     deployment_info = {
                         "id": dep_id,
                         "date": dep_date,
@@ -339,6 +332,7 @@ async def _enqueue_drive_upload(
         import uuid
 
         from app.services.azure_storage import store_blob
+
         blob_id = str(uuid.uuid4())
 
         async with sem:
@@ -374,6 +368,7 @@ async def _enqueue_drive_upload(
     try:
         from app.jobs.definitions import upload_drive_images_job
         from app.jobs.runner import enqueue_local_job
+
         enqueue_local_job(upload_drive_images_job(job_id, payload))
     except Exception as exc:
         logger.error("arq_enqueue_failed", job_id=job_id, error=str(exc))

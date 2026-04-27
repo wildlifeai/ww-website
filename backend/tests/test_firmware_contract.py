@@ -10,7 +10,6 @@ These tests enforce that invariant.
 """
 
 
-
 def generate_firmware_filename(firmware_model_id: int, version: int) -> str:
     """Generate the 8.3-compliant firmware filename.
 

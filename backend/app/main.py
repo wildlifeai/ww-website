@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI):
 
     # Start recovery of jobs from Supabase
     from app.jobs.store import recover_stuck_jobs
+
     try:
         await recover_stuck_jobs()
     except Exception as e:

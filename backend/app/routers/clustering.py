@@ -88,20 +88,24 @@ async def analyze_images(
         members = []
         for idx in member_idxs:
             rec = result.records[idx]
-            members.append({
-                "filename": rec.filename,
-                "sharpness": round(rec.sharpness, 2),
-                "width": rec.width,
-                "height": rec.height,
-                "is_representative": idx == rep_idx,
-            })
+            members.append(
+                {
+                    "filename": rec.filename,
+                    "sharpness": round(rec.sharpness, 2),
+                    "width": rec.width,
+                    "height": rec.height,
+                    "is_representative": idx == rep_idx,
+                }
+            )
 
-        clusters_summary.append({
-            "cluster_id": root_to_cid[root],
-            "size": len(member_idxs),
-            "representative": rep_filename,
-            "members": members,
-        })
+        clusters_summary.append(
+            {
+                "cluster_id": root_to_cid[root],
+                "size": len(member_idxs),
+                "representative": rep_filename,
+                "members": members,
+            }
+        )
 
     return ApiResponse(
         data={
@@ -169,8 +173,13 @@ async def analyze_images_csv(
     writer = csv.DictWriter(
         output,
         fieldnames=[
-            "filename", "cluster_id", "cluster_size",
-            "is_representative", "sharpness", "width", "height",
+            "filename",
+            "cluster_id",
+            "cluster_size",
+            "is_representative",
+            "sharpness",
+            "width",
+            "height",
         ],
     )
     writer.writeheader()
@@ -179,15 +188,17 @@ async def analyze_images_csv(
         root = idx_to_root.get(idx)
         if root is None:
             continue
-        writer.writerow({
-            "filename": rec.filename,
-            "cluster_id": root_to_cid[root],
-            "cluster_size": len(result.clusters[root]),
-            "is_representative": 1 if result.representatives.get(root) == idx else 0,
-            "sharpness": f"{rec.sharpness:.4f}",
-            "width": rec.width,
-            "height": rec.height,
-        })
+        writer.writerow(
+            {
+                "filename": rec.filename,
+                "cluster_id": root_to_cid[root],
+                "cluster_size": len(result.clusters[root]),
+                "is_representative": 1 if result.representatives.get(root) == idx else 0,
+                "sharpness": f"{rec.sharpness:.4f}",
+                "width": rec.width,
+                "height": rec.height,
+            }
+        )
 
     output.seek(0)
     return StreamingResponse(

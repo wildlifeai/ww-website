@@ -45,6 +45,7 @@ router = APIRouter(prefix="/api/v1", tags=["public-api"])
 
 # ── Auth dependency ──────────────────────────────────────────────────
 
+
 async def require_api_key(
     x_api_key: str = Header(..., alias="X-API-Key"),
     required_scope: Optional[str] = None,
@@ -62,12 +63,15 @@ async def require_api_key(
 
 async def require_scope(scope: str):
     """Create a dependency that requires a specific scope."""
+
     async def _check(x_api_key: str = Header(..., alias="X-API-Key")):
         return await require_api_key(x_api_key, required_scope=scope)
+
     return _check
 
 
 # ── API Key Management (JWT auth, not API key auth) ──────────────────
+
 
 @router.post("/api-keys")
 async def create_key(
@@ -89,13 +93,7 @@ async def create_key(
         from app.services.supabase_client import create_service_client
 
         client = create_service_client()
-        roles = (
-            client.table("user_roles")
-            .select("organisation_id, role")
-            .eq("user_id", user.id)
-            .in_("role", ["admin", "owner"])
-            .execute()
-        )
+        roles = client.table("user_roles").select("organisation_id, role").eq("user_id", user.id).in_("role", ["admin", "owner"]).execute()
 
         if not roles.data:
             raise HTTPException(403, detail="Only organisation admins can create API keys")
@@ -139,13 +137,7 @@ async def list_keys(
     from app.services.supabase_client import create_service_client
 
     client = create_service_client()
-    roles = (
-        client.table("user_roles")
-        .select("organisation_id")
-        .eq("user_id", user.id)
-        .in_("role", ["admin", "owner"])
-        .execute()
-    )
+    roles = client.table("user_roles").select("organisation_id").eq("user_id", user.id).in_("role", ["admin", "owner"]).execute()
 
     if not roles.data:
         raise HTTPException(403, detail="Only organisation admins can view API keys")
@@ -172,13 +164,7 @@ async def revoke_key(
     from app.services.supabase_client import create_service_client
 
     client = create_service_client()
-    roles = (
-        client.table("user_roles")
-        .select("organisation_id")
-        .eq("user_id", user.id)
-        .in_("role", ["admin", "owner"])
-        .execute()
-    )
+    roles = client.table("user_roles").select("organisation_id").eq("user_id", user.id).in_("role", ["admin", "owner"]).execute()
 
     if not roles.data:
         raise HTTPException(403, detail="Only organisation admins can revoke API keys")
@@ -196,6 +182,7 @@ async def revoke_key(
 
 
 # ── Data Endpoints (API key auth) ────────────────────────────────────
+
 
 @router.get("/deployments")
 async def api_list_deployments(
@@ -274,9 +261,7 @@ async def api_device_telemetry(
     key = await require_api_key(x_api_key, required_scope="telemetry:read")
 
     try:
-        data = await get_telemetry(
-            key["organisation_id"], device_eui, date_from, date_to, limit
-        )
+        data = await get_telemetry(key["organisation_id"], device_eui, date_from, date_to, limit)
     except PublicApiError as e:
         raise HTTPException(404, detail=str(e))
 
@@ -296,9 +281,7 @@ async def api_list_observations(
 ):
     """List AI detection observations."""
     key = await require_api_key(x_api_key, required_scope="observations:read")
-    records, total = await list_observations(
-        key["organisation_id"], deployment_id, limit, offset
-    )
+    records, total = await list_observations(key["organisation_id"], deployment_id, limit, offset)
 
     return ApiResponse(
         data=records,
@@ -323,11 +306,13 @@ async def api_export_camtrapdp(
     from app.jobs.definitions import export_camtrapdp_job
     from app.jobs.runner import enqueue_local_job
 
-    enqueue_local_job(export_camtrapdp_job(
-        job_id=job_id,
-        org_id=key["organisation_id"],
-        params=body.model_dump(),
-    ))
+    enqueue_local_job(
+        export_camtrapdp_job(
+            job_id=job_id,
+            org_id=key["organisation_id"],
+            params=body.model_dump(),
+        )
+    )
 
     return ApiResponse(
         data=JobCreateResponse(job_id=job_id).model_dump(),

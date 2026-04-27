@@ -58,6 +58,7 @@ async def _sync_to_supabase(job_id: str) -> None:
     def _run_sync():
         try:
             from app.services.supabase_client import create_service_client
+
             client = create_service_client()
             status_val = data_json.get("status", "queued")
             client.table("api_jobs").upsert({"id": job_id, "status": status_val, "job_data": data_json}).execute()
@@ -71,18 +72,19 @@ async def recover_stuck_jobs() -> None:
     """Load jobs from Supabase on startup and mark interrupted ones as failed."""
     try:
         from app.services.supabase_client import create_service_client
+
         client = create_service_client()
         resp = client.table("api_jobs").select("id, job_data, status").eq("status", "processing").execute()
 
         for row in resp.data:
-            job_id = row['id']
-            data = row.get('job_data', {})
-            data['status'] = JobStatus.FAILED.value
-            data['error'] = "Job interrupted by server restart."
-            data['message'] = "❌ Failed: Server crashed or restarted mid-job."
+            job_id = row["id"]
+            data = row.get("job_data", {})
+            data["status"] = JobStatus.FAILED.value
+            data["error"] = "Job interrupted by server restart."
+            data["message"] = "❌ Failed: Server crashed or restarted mid-job."
 
             # Sync back failure to DB and load to memory
-            client.table("api_jobs").update({"status": data['status'], "job_data": data}).eq("id", job_id).execute()
+            client.table("api_jobs").update({"status": data["status"], "job_data": data}).eq("id", job_id).execute()
             _memory_store[f"job:{job_id}"] = json.dumps(data)
             logger.warning("stuck_job_recovered_and_failed", job_id=job_id)
 
@@ -120,6 +122,7 @@ async def get_job(job_id: str) -> Optional[JobInfo]:
         # Try loading from Supabase if not in memory
         try:
             from app.services.supabase_client import create_service_client
+
             client = create_service_client()
             resp = client.table("api_jobs").select("job_data").eq("id", job_id).execute()
             if resp.data:
@@ -223,8 +226,12 @@ async def update_summary(
 
         data = json.loads(raw)
         summary = data.get("summary") or {
-            "total": 0, "downloaded": 0, "uploaded": 0,
-            "skipped": 0, "failed": 0, "started_at": None,
+            "total": 0,
+            "downloaded": 0,
+            "uploaded": 0,
+            "skipped": 0,
+            "failed": 0,
+            "started_at": None,
         }
 
         if total is not None:
@@ -255,15 +262,25 @@ _PHASE_COMPLETE_MSG = {
     ProgressPhase.CLEANUP: "🧹 Temporary files cleaned up from Azure Storage ✓",
 }
 
+
 async def start_phase(job_id: str, phase: ProgressPhase) -> None:
     await update_job(job_id, current_phase=phase)
-    await emit_event(job_id, ProgressEvent(
-        type=EventType.PHASE_START, phase=phase,
-        message=_PHASE_START_MSG.get(phase, f"Starting {phase.value}..."),
-    ))
+    await emit_event(
+        job_id,
+        ProgressEvent(
+            type=EventType.PHASE_START,
+            phase=phase,
+            message=_PHASE_START_MSG.get(phase, f"Starting {phase.value}..."),
+        ),
+    )
+
 
 async def complete_phase(job_id: str, phase: ProgressPhase) -> None:
-    await emit_event(job_id, ProgressEvent(
-        type=EventType.PHASE_COMPLETE, phase=phase,
-        message=_PHASE_COMPLETE_MSG.get(phase, f"{phase.value} complete"),
-    ))
+    await emit_event(
+        job_id,
+        ProgressEvent(
+            type=EventType.PHASE_COMPLETE,
+            phase=phase,
+            message=_PHASE_COMPLETE_MSG.get(phase, f"{phase.value} complete"),
+        ),
+    )

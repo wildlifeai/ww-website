@@ -101,6 +101,7 @@ class TestTokenEncryption:
 class TestTokenExpiry:
     def test_fresh_token_not_expired(self):
         import time
+
         token = {
             "obtained_at": int(time.time()),
             "expires_in": 86400,
@@ -116,6 +117,7 @@ class TestTokenExpiry:
 
     def test_buffer_window(self):
         import time
+
         # Token that expires in exactly 200 seconds
         token = {
             "obtained_at": int(time.time()),

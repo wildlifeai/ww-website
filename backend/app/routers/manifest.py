@@ -28,6 +28,7 @@ async def generate_manifest(
 
     from app.jobs.definitions import generate_manifest_job
     from app.jobs.runner import enqueue_local_job
+
     enqueue_local_job(generate_manifest_job(job_id, body.model_dump()))
 
     return ApiResponse(

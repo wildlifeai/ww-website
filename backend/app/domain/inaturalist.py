@@ -26,10 +26,12 @@ logger = structlog.get_logger()
 
 class INatDomainError(Exception):
     """Raised on iNaturalist API operation failures."""
+
     pass
 
 
 # ── User profile ─────────────────────────────────────────────────────
+
 
 async def get_inat_user_profile(user_id: str) -> Dict[str, Any]:
     """Fetch the iNat profile for the connected user.
@@ -63,6 +65,7 @@ async def get_inat_user_profile(user_id: str) -> Dict[str, Any]:
 
 
 # ── Observation creation ─────────────────────────────────────────────
+
 
 async def create_observation(
     user_id: str,
@@ -174,6 +177,7 @@ async def upload_observation_photo(
 
 # ── Observation polling ──────────────────────────────────────────────
 
+
 async def get_observation_status(
     observation_id: int,
 ) -> Dict[str, Any]:
@@ -246,13 +250,15 @@ async def batch_poll_observations(
     results = []
 
     for obs in data.get("results", []):
-        results.append({
-            "id": obs.get("id"),
-            "quality_grade": obs.get("quality_grade"),
-            "community_taxon": obs.get("community_taxon", {}).get("name") if obs.get("community_taxon") else None,
-            "species_guess": obs.get("species_guess"),
-            "identifications_count": obs.get("identifications_count", 0),
-            "uri": obs.get("uri"),
-        })
+        results.append(
+            {
+                "id": obs.get("id"),
+                "quality_grade": obs.get("quality_grade"),
+                "community_taxon": obs.get("community_taxon", {}).get("name") if obs.get("community_taxon") else None,
+                "species_guess": obs.get("species_guess"),
+                "identifications_count": obs.get("identifications_count", 0),
+                "uri": obs.get("uri"),
+            }
+        )
 
     return results

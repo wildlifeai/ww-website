@@ -19,6 +19,7 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379")
 def client():
     """FastAPI test client."""
     from app.main import app
+
     return TestClient(app)
 
 

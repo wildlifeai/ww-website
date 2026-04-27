@@ -8,9 +8,10 @@ GET  /api/models/sscma/catalog → cached SSCMA model list (sync)
 POST /api/models/pretrained → download + package GitHub model (async)
 """
 
+import uuid
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-import uuid
 
 from app.dependencies import get_current_user, get_manager_roles
 from app.jobs.store import create_job
@@ -24,10 +25,11 @@ MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
 ALLOWED_MIME_TYPES = {
     "application/zip",
     "application/x-zip-compressed",
-    "application/octet-stream", # For raw .tflite or .cc
-    "text/x-c", # For .cc
-    "text/plain"
+    "application/octet-stream",  # For raw .tflite or .cc
+    "text/x-c",  # For .cc
+    "text/plain",
 }
+
 
 def resolve_managed_org(requested_org_id: str | None, manager_roles: list) -> str:
     if not manager_roles:
@@ -37,6 +39,7 @@ def resolve_managed_org(requested_org_id: str | None, manager_roles: list) -> st
             raise HTTPException(403, detail="You are not a manager of the selected organisation.")
         return requested_org_id
     return manager_roles[0]["scope_id"]
+
 
 @router.post("/convert")
 async def convert_model(
@@ -55,16 +58,15 @@ async def convert_model(
     4. Inserts an ai_models row
     5. Stores the file in blob store and enqueues the worker job
     """
-    if file.content_type not in ALLOWED_MIME_TYPES and not file.filename.endswith(('.zip', '.tflite', '.cc')):
+    if file.content_type not in ALLOWED_MIME_TYPES and not file.filename.endswith((".zip", ".tflite", ".cc")):
         raise HTTPException(400, detail=f"Invalid file type: {file.content_type}")
 
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            413, detail=f"File exceeds {MAX_UPLOAD_SIZE // 1024 // 1024}MB limit"
-        )
+        raise HTTPException(413, detail=f"File exceeds {MAX_UPLOAD_SIZE // 1024 // 1024}MB limit")
 
     from app.services.supabase_client import create_service_client
+
     client = create_service_client()
 
     manager_roles = await get_manager_roles(user)
@@ -86,16 +88,22 @@ async def convert_model(
     temp_storage_path = f"temp/{org_id}/{model_name.replace(' ', '_')}_{version_string}_{job_id}"
 
     # Insert ai_models row
-    model_row = client.table("ai_models").insert({
-        "organisation_id": org_id,
-        "version": version_string,
-        "name": model_name,
-        "description": description,
-        "uploaded_by": user.id,
-        "modified_by": user.id,
-        "storage_path": temp_storage_path,
-        "file_type": "uploading"
-    }).execute()
+    model_row = (
+        client.table("ai_models")
+        .insert(
+            {
+                "organisation_id": org_id,
+                "version": version_string,
+                "name": model_name,
+                "description": description,
+                "uploaded_by": user.id,
+                "modified_by": user.id,
+                "storage_path": temp_storage_path,
+                "file_type": "uploading",
+            }
+        )
+        .execute()
+    )
     model_id = model_row.data[0]["id"]
 
     await store_blob(
@@ -110,6 +118,7 @@ async def convert_model(
 
     from app.jobs.definitions import convert_model_job
     from app.jobs.runner import enqueue_local_job
+
     enqueue_local_job(convert_model_job(job_id, user.id, model_id))
 
     return ApiResponse(
@@ -126,17 +135,14 @@ async def convert_model(
     )
 
 
-
-
-
 class PretrainedModelRequest(BaseModel):
-    source_type: str = "sscma" # "sscma" or "pretrained"
-    sscma_uuid: str = "" # Used if source_type == "sscma"
-    architecture: str = "" # Used if source_type == "pretrained"
-    resolution: str = "" # Used if source_type == "pretrained"
-    model_name: str = "" # Custom name if provided
-    description: str = "" # Custom description if provided
-    organisation_id: str = "" # Frontend-selected org
+    source_type: str = "sscma"  # "sscma" or "pretrained"
+    sscma_uuid: str = ""  # Used if source_type == "sscma"
+    architecture: str = ""  # Used if source_type == "pretrained"
+    resolution: str = ""  # Used if source_type == "pretrained"
+    model_name: str = ""  # Custom name if provided
+    description: str = ""  # Custom description if provided
+    organisation_id: str = ""  # Frontend-selected org
 
 
 @router.get("/managed-orgs")
@@ -148,11 +154,12 @@ async def get_managed_orgs(
     import structlog
 
     from app.services.supabase_client import create_service_client
+
     logger = structlog.get_logger()
     client = create_service_client()
 
     manager_roles = await get_manager_roles(user)
-    
+
     logger.info("managed_orgs_query", email=user.email, user_id=user.id, roles_count=len(manager_roles))
 
     if not manager_roles:
@@ -170,6 +177,7 @@ async def get_managed_orgs(
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
     )
 
+
 @router.get("/sscma/catalog")
 async def sscma_catalog(request: Request):
     """Return cached SSCMA model zoo catalog.
@@ -182,6 +190,7 @@ async def sscma_catalog(request: Request):
         models = await get_sscma_catalog()
     except Exception as e:
         import structlog
+
         structlog.get_logger().error("sscma_catalog_failed", error=str(e))
         models = []
 
@@ -199,9 +208,6 @@ async def download_pretrained(
 ):
     """Download, package, and register a pre-trained model (SSCMA or built-in)."""
 
-    from app.services.supabase_client import create_service_client
-    client = create_service_client()
-
     manager_roles = await get_manager_roles(user)
     org_id = resolve_managed_org(body.organisation_id, manager_roles)
 
@@ -213,15 +219,12 @@ async def download_pretrained(
 
         from app.jobs.definitions import download_github_pretrained_job
         from app.jobs.runner import enqueue_local_job
-        enqueue_local_job(download_github_pretrained_job(
-            job_id, user.id, org_id, body.architecture, body.resolution, body.description
-        ))
+
+        enqueue_local_job(download_github_pretrained_job(job_id, user.id, org_id, body.architecture, body.resolution, body.description))
 
         return ApiResponse(
             data=JobCreateResponse(job_id=job_id).model_dump(),
-            meta=ApiMeta(
-                request_id=getattr(request.state, "request_id", None) if request else None
-            ),
+            meta=ApiMeta(request_id=getattr(request.state, "request_id", None) if request else None),
         )
     else:
         # SSCMA model
@@ -232,13 +235,10 @@ async def download_pretrained(
 
         from app.jobs.definitions import download_pretrained_job
         from app.jobs.runner import enqueue_local_job
-        enqueue_local_job(download_pretrained_job(
-            job_id, user.id, body.sscma_uuid, org_id, body.model_name, body.description
-        ))
+
+        enqueue_local_job(download_pretrained_job(job_id, user.id, body.sscma_uuid, org_id, body.model_name, body.description))
 
         return ApiResponse(
             data=JobCreateResponse(job_id=job_id).model_dump(),
-            meta=ApiMeta(
-                request_id=getattr(request.state, "request_id", None) if request else None
-            ),
+            meta=ApiMeta(request_id=getattr(request.state, "request_id", None) if request else None),
         )

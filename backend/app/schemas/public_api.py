@@ -12,16 +12,13 @@ from pydantic import BaseModel, Field
 
 # ── API Key Management ───────────────────────────────────────────────
 
+
 class ApiKeyCreate(BaseModel):
     """Request to create a new API key."""
 
     name: str = Field(..., description="Human-readable key name", max_length=100)
-    scopes: List[str] = Field(
-        ..., description="Permission scopes (e.g. 'deployments:read')"
-    )
-    expires_at: Optional[str] = Field(
-        None, description="ISO timestamp — key expires after this time"
-    )
+    scopes: List[str] = Field(..., description="Permission scopes (e.g. 'deployments:read')")
+    expires_at: Optional[str] = Field(None, description="ISO timestamp — key expires after this time")
 
 
 class ApiKeyResponse(BaseModel):
@@ -50,6 +47,7 @@ class ApiKeyInfo(BaseModel):
 
 # ── Deployment ───────────────────────────────────────────────────────
 
+
 class DeploymentOut(BaseModel):
     """Deployment record for external consumption."""
 
@@ -73,6 +71,7 @@ class DeploymentOut(BaseModel):
 
 # ── Device ───────────────────────────────────────────────────────────
 
+
 class DeviceOut(BaseModel):
     """Device record for external consumption."""
 
@@ -87,6 +86,7 @@ class DeviceOut(BaseModel):
 
 # ── Telemetry ────────────────────────────────────────────────────────
 
+
 class TelemetryPoint(BaseModel):
     """A single telemetry data point from LoRaWAN."""
 
@@ -97,6 +97,7 @@ class TelemetryPoint(BaseModel):
 
 
 # ── Observations (AI detections) ─────────────────────────────────────
+
 
 class ObservationOut(BaseModel):
     """An AI detection observation from LoRaWAN model output."""
@@ -112,21 +113,19 @@ class ObservationOut(BaseModel):
 
 # ── CamtrapDP Export ─────────────────────────────────────────────────
 
+
 class CamtrapDPExportRequest(BaseModel):
     """Request to generate a CamtrapDP data package."""
 
     project_id: Optional[str] = Field(None, description="Filter by project")
-    deployment_ids: Optional[List[str]] = Field(
-        None, description="Specific deployments to include"
-    )
+    deployment_ids: Optional[List[str]] = Field(None, description="Specific deployments to include")
     date_from: Optional[str] = Field(None, description="Start date (ISO)")
     date_to: Optional[str] = Field(None, description="End date (ISO)")
-    include_observations: bool = Field(
-        True, description="Include AI detection observations"
-    )
+    include_observations: bool = Field(True, description="Include AI detection observations")
 
 
 # ── Query Parameters ─────────────────────────────────────────────────
+
 
 class PaginationParams(BaseModel):
     """Standard pagination parameters."""

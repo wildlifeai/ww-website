@@ -39,6 +39,7 @@ TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8}
 
 # ── Low-level EXIF parsing ───────────────────────────────────────────
 
+
 def _format_value(value: bytes, type_id: int):
     """Convert raw EXIF bytes to a Python-friendly value."""
     if isinstance(value, bytes):
@@ -83,8 +84,12 @@ def _format_value(value: bytes, type_id: int):
 
 
 def _parse_ifd(
-    fp, base_offset: int, ifd_offset: int, endian: str,
-    parsed_data: Dict[str, Any], check_next_ifd: bool = True,
+    fp,
+    base_offset: int,
+    ifd_offset: int,
+    endian: str,
+    parsed_data: Dict[str, Any],
+    check_next_ifd: bool = True,
 ) -> None:
     """Parse a single IFD (Image File Directory) block."""
     try:
@@ -139,6 +144,7 @@ def _parse_ifd(
 
 
 # ── Public API ───────────────────────────────────────────────────────
+
 
 def parse_exif_from_bytes(jpeg_bytes: bytes) -> Dict[str, Any]:
     """Parse EXIF metadata from raw JPEG bytes.

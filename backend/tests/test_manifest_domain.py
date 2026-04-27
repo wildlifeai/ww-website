@@ -13,19 +13,19 @@ from app.domain.manifest import ManifestDomainError, _extract_hex_array, _flatte
 class TestExtractHexArray:
     def test_valid_c_array(self):
         """Standard C array should be parsed to bytes."""
-        c_code = '''
+        c_code = """
         const unsigned char model_data[] = { 0x00, 0x01, 0xFF, 0xAB };
-        '''
+        """
         result = _extract_hex_array(c_code)
         assert result == bytes([0x00, 0x01, 0xFF, 0xAB])
 
     def test_multiline_array(self):
-        c_code = '''
+        c_code = """
         const unsigned char model_data[] = {
             0x00, 0x01,
             0x02, 0x03
         };
-        '''
+        """
         result = _extract_hex_array(c_code)
         assert result == bytes([0x00, 0x01, 0x02, 0x03])
 

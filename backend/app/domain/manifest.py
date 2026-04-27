@@ -40,6 +40,7 @@ class ManifestDomainError(Exception):
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+
 def _flatten_directory(directory: Path) -> None:
     """Move all files from subdirectories into the root and remove subdirs.
 
@@ -77,6 +78,7 @@ def _extract_hex_array(c_content: str) -> bytes:
 
 # ── Config firmware fetching ─────────────────────────────────────────
 
+
 async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
     """Fetch and extract the latest config firmware into manifest_dir.
 
@@ -105,6 +107,7 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
                 if path.lower().endswith(".zip"):
                     # Extract ZIP contents into manifest dir
                     import io
+
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
                 else:
@@ -121,30 +124,21 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
 
     # Fallback: list files in the firmware/config bucket folder
     try:
-        files = client.storage.from_("firmware").list(
-            "config", {"sortBy": {"column": "created_at", "order": "desc"}}
-        )
+        files = client.storage.from_("firmware").list("config", {"sortBy": {"column": "created_at", "order": "desc"}})
         if not files:
             files = client.storage.from_("firmware").list("config")
-            files.sort(
-                key=lambda x: x.get("created_at", x.get("name")), reverse=True
-            )
+            files.sort(key=lambda x: x.get("created_at", x.get("name")), reverse=True)
 
         # Filter out placeholders
-        files = [
-            f
-            for f in files
-            if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")
-        ]
+        files = [f for f in files if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")]
 
         if files:
             latest = files[0]["name"]
-            content = await download_from_storage(
-                "firmware", f"config/{latest}", silent=True
-            )
+            content = await download_from_storage("firmware", f"config/{latest}", silent=True)
             if content:
                 if latest.lower().endswith(".zip"):
                     import io
+
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
                 else:
@@ -158,6 +152,7 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
 
 
 # ── Himax firmware fetching ──────────────────────────────────────────
+
 
 async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
     """Fetch the latest active Himax firmware image into manifest_dir.
@@ -201,26 +196,16 @@ async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
 
     # Strategy 2: Fallback — list files in the himax/ folder of the firmware bucket
     try:
-        files = client.storage.from_("firmware").list(
-            "himax", {"sortBy": {"column": "created_at", "order": "desc"}}
-        )
+        files = client.storage.from_("firmware").list("himax", {"sortBy": {"column": "created_at", "order": "desc"}})
         if not files:
             files = client.storage.from_("firmware").list("himax")
-            files.sort(
-                key=lambda x: x.get("created_at", x.get("name")), reverse=True
-            )
+            files.sort(key=lambda x: x.get("created_at", x.get("name")), reverse=True)
 
-        files = [
-            f
-            for f in files
-            if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")
-        ]
+        files = [f for f in files if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")]
 
         if files:
             latest = files[0]["name"]
-            content = await download_from_storage(
-                "firmware", f"himax/{latest}", silent=True
-            )
+            content = await download_from_storage("firmware", f"himax/{latest}", silent=True)
             if content:
                 (manifest_dir / "output.img").write_bytes(content)
                 logger.info("himax_firmware_fallback", filename=latest)
@@ -232,6 +217,7 @@ async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
 
 
 # ── AI model fetching ────────────────────────────────────────────────
+
 
 async def _fetch_default_model(client, manifest_dir: Path) -> bool:
     """Fetch and extract the default AI model into manifest_dir.
@@ -260,6 +246,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
 
                 if content:
                     import io
+
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
                     logger.info("ai_model_added", name=model.get("name", "default"))
@@ -275,9 +262,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
         if subdirs:
             for sd in subdirs:
                 model_name = sd["name"]
-                files = client.storage.from_("ai-models").list(
-                    f"{org_folder}/{model_name}"
-                )
+                files = client.storage.from_("ai-models").list(f"{org_folder}/{model_name}")
                 for f in files:
                     if f["name"] == "ai_model.zip":
                         content = await download_from_storage(
@@ -287,6 +272,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
                         )
                         if content:
                             import io
+
                             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                                 zf.extractall(manifest_dir)
                             logger.info("ai_model_fallback", name=model_name)
@@ -297,9 +283,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
     return False
 
 
-async def _fetch_github_model(
-    model_type: str, resolution: str, manifest_dir: Path
-) -> bool:
+async def _fetch_github_model(model_type: str, resolution: str, manifest_dir: Path) -> bool:
     """Download and package a pre-trained model from GitHub into manifest_dir.
 
     Returns True on success.
@@ -341,6 +325,7 @@ async def _fetch_github_model(
 
 
 # ── Main entry point ─────────────────────────────────────────────────
+
 
 async def generate_manifest(
     model_source: str = "default",
@@ -434,11 +419,10 @@ async def generate_manifest(
                 )
                 if response.data:
                     model = response.data[0]
-                    content = await download_from_storage(
-                        "ai-models", model["storage_path"]
-                    )
+                    content = await download_from_storage("ai-models", model["storage_path"])
                     if content:
                         import io
+
                         with zipfile.ZipFile(io.BytesIO(content)) as zf:
                             zf.extractall(manifest_dir)
                         model_added = True

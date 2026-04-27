@@ -15,11 +15,13 @@ from app.config import settings
 
 logger = structlog.get_logger()
 
+
 async def get_blob_service_client() -> Optional[BlobServiceClient]:
     """Get the async blob service client if configured."""
     if not settings.AZURE_STORAGE_CONNECTION_STRING:
         return None
     return BlobServiceClient.from_connection_string(settings.AZURE_STORAGE_CONNECTION_STRING)
+
 
 async def store_blob(key: str, data: bytes, metadata: dict | None = None) -> None:
     """Store a binary blob (in-memory bytes) to Azure Blob Storage."""
@@ -36,10 +38,7 @@ async def store_blob(key: str, data: bytes, metadata: dict | None = None) -> Non
             if not await container_client.exists():
                 await container_client.create_container()
 
-            blob_client = client.get_blob_client(
-                container=settings.AZURE_STORAGE_CONTAINER_NAME,
-                blob=key
-            )
+            blob_client = client.get_blob_client(container=settings.AZURE_STORAGE_CONTAINER_NAME, blob=key)
             # Use metadata dictionary if provided; Azure metadata string values must be strings.
             # Azure Blob metadata keys cannot contain underscores so we strip them if present.
             clean_metadata = {k.replace("_", ""): str(v) for k, v in metadata.items()} if metadata else None
@@ -48,6 +47,7 @@ async def store_blob(key: str, data: bytes, metadata: dict | None = None) -> Non
         except Exception as e:
             logger.error("azure_blob_upload_failed", key=key, error=str(e))
             raise
+
 
 async def retrieve_blob(key: str) -> tuple[bytes | None, dict | None]:
     """Retrieve a blob and its metadata from Azure Blob Storage."""
@@ -58,10 +58,7 @@ async def retrieve_blob(key: str) -> tuple[bytes | None, dict | None]:
 
     async with client:
         try:
-            blob_client = client.get_blob_client(
-                container=settings.AZURE_STORAGE_CONTAINER_NAME,
-                blob=key
-            )
+            blob_client = client.get_blob_client(container=settings.AZURE_STORAGE_CONTAINER_NAME, blob=key)
             download_stream = await blob_client.download_blob()
             data = await download_stream.readall()
 
@@ -73,6 +70,7 @@ async def retrieve_blob(key: str) -> tuple[bytes | None, dict | None]:
             logger.warning("azure_blob_download_failed", key=key, error=str(e))
             return None, None
 
+
 async def delete_blob(key: str) -> None:
     """Delete a blob from Azure Blob Storage."""
     client = await get_blob_service_client()
@@ -81,10 +79,7 @@ async def delete_blob(key: str) -> None:
 
     async with client:
         try:
-            blob_client = client.get_blob_client(
-                container=settings.AZURE_STORAGE_CONTAINER_NAME,
-                blob=key
-            )
+            blob_client = client.get_blob_client(container=settings.AZURE_STORAGE_CONTAINER_NAME, blob=key)
             await blob_client.delete_blob()
             logger.debug("azure_blob_deleted", key=key)
         except Exception as e:

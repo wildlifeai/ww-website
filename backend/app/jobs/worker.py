@@ -15,7 +15,6 @@ try:
     from app.config import settings
     from app.jobs.definitions import JOBS
 
-
     class WorkerSettings:
         """ARQ worker configuration."""
 

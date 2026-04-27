@@ -25,8 +25,6 @@ from app.schemas.job import EventType, JobStatus, ProgressEvent, ProgressPhase
 logger = structlog.get_logger()
 
 
-
-
 async def convert_model_job(job_id: str, user_id: str, model_id: str):
     """Long-running model conversion. Executed by passing into runner.py.
 
@@ -42,6 +40,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
 
     from app.services.supabase_client import create_service_client
+
     client = create_service_client()
 
     def update_model_status(status: str, error_message: str = None, **kwargs):
@@ -50,6 +49,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
             payload["error_message"] = error_message
         # Append to processing_log
         from datetime import datetime, timezone
+
         log_entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": status,
@@ -57,7 +57,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         }
         if error_message:
             log_entry["error"] = error_message
-        
+
         # TODO(schema): Use a JSONB append RPC to prevent race conditions on processing_log
         try:
             existing = client.table("ai_models").select("processing_log").eq("id", model_id).execute()
@@ -148,7 +148,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
             storage_path=result_path,
             file_size_bytes=len(model_bytes),
             detection_capabilities=labels,
-            file_type="model"
+            file_type="model",
         )
 
         await update_job(
@@ -172,6 +172,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         # Clean up blob even on failure
         try:
             from app.services.azure_storage import delete_blob
+
             await delete_blob(job_id)
         except Exception:
             pass
@@ -201,15 +202,14 @@ async def generate_manifest_job(job_id: str, params: dict):
 
         # Upload result to temp storage for download
         result_path = f"temp/manifests/{job_id}/MANIFEST.zip"
-        uploaded = await upload_to_storage(
-            "firmware", result_path, manifest_bytes, "application/zip"
-        )
+        uploaded = await upload_to_storage("firmware", result_path, manifest_bytes, "application/zip")
 
         if uploaded:
             client = create_service_client()
             try:
                 signed = client.storage.from_("firmware").create_signed_url(
-                    result_path, expires_in=900  # 15 minutes
+                    result_path,
+                    expires_in=900,  # 15 minutes
                 )
                 result_url = signed.get("signedURL", "")
             except Exception:
@@ -237,9 +237,7 @@ async def generate_manifest_job(job_id: str, params: dict):
 
     except Exception as e:
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
-        logger.error(
-            "job_failed", job_type="generate_manifest", job_id=job_id, error=str(e)
-        )
+        logger.error("job_failed", job_type="generate_manifest", job_id=job_id, error=str(e))
         raise
 
 
@@ -265,27 +263,27 @@ async def export_camtrapdp_job(job_id: str, org_id: str, params: dict):
         await update_job(job_id, progress=0.8)
 
         result_path = f"temp/exports/{job_id}/camtrap-dp.zip"
-        uploaded = await upload_to_storage(
-            "firmware", result_path, package_bytes, "application/zip"
-        )
+        uploaded = await upload_to_storage("firmware", result_path, package_bytes, "application/zip")
 
         if uploaded:
             client = create_service_client()
             try:
                 signed = client.storage.from_("firmware").create_signed_url(
-                    result_path, expires_in=3600  # 1 hour for exports
+                    result_path,
+                    expires_in=3600,  # 1 hour for exports
                 )
                 result_url = signed.get("signedURL", result_path)
             except Exception:
                 result_url = result_path
 
             await update_job(
-                job_id, status=JobStatus.COMPLETED, progress=1.0, result_url=result_url,
+                job_id,
+                status=JobStatus.COMPLETED,
+                progress=1.0,
+                result_url=result_url,
             )
         else:
-            await update_job(
-                job_id, status=JobStatus.FAILED, error="Failed to upload export"
-            )
+            await update_job(job_id, status=JobStatus.FAILED, error="Failed to upload export")
 
         logger.info("job_complete", job_type="export_camtrapdp", job_id=job_id)
 
@@ -327,10 +325,9 @@ async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, or
 
     except Exception as e:
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
-        logger.error(
-            "job_failed", job_type="download_pretrained", job_id=job_id, error=str(e)
-        )
+        logger.error("job_failed", job_type="download_pretrained", job_id=job_id, error=str(e))
         raise
+
 
 async def download_github_pretrained_job(job_id: str, user_id: str, org_id: str, architecture: str, resolution: str, custom_desc: str = ""):
     """Download, package, and register a GitHub pretrained model."""
@@ -361,10 +358,9 @@ async def download_github_pretrained_job(job_id: str, user_id: str, org_id: str,
 
     except Exception as e:
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
-        logger.error(
-            "job_failed", job_type="download_github_pretrained", job_id=job_id, error=str(e)
-        )
+        logger.error("job_failed", job_type="download_github_pretrained", job_id=job_id, error=str(e))
         raise
+
 
 async def upload_drive_images_job(job_id: str, payload: dict):
     """Upload analysed images to Google Drive.
@@ -393,22 +389,28 @@ async def upload_drive_images_job(job_id: str, payload: dict):
 
     if not file_entries:
         await update_job(
-            job_id, status=JobStatus.COMPLETED, progress=1.0,
+            job_id,
+            status=JobStatus.COMPLETED,
+            progress=1.0,
             message="No files to process.",
         )
         return
 
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.05)
     await update_summary(
-        job_id, total=total_files,
+        job_id,
+        total=total_files,
         started_at=datetime.now(timezone.utc),
     )
-    await emit_event(job_id, ProgressEvent(
-        type=EventType.JOB_STARTED,
-        phase=ProgressPhase.DOWNLOAD,
-        total=total_files,
-        message=f"🚀 Starting pipeline for {total_files} images",
-    ))
+    await emit_event(
+        job_id,
+        ProgressEvent(
+            type=EventType.JOB_STARTED,
+            phase=ProgressPhase.DOWNLOAD,
+            total=total_files,
+            message=f"🚀 Starting pipeline for {total_files} images",
+        ),
+    )
 
     try:
         from app.services.azure_storage import delete_blob, retrieve_blob
@@ -428,12 +430,16 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                     nonlocal last_event_ts
                     if time.monotonic() - last_event_ts >= 10:
                         c, t = get_progress()
-                        await emit_event(job_id, ProgressEvent(
-                            type=EventType.HEARTBEAT,
-                            phase=phase,
-                            current=c, total=t,
-                            message=f"Still working… ({c}/{t})",
-                        ))
+                        await emit_event(
+                            job_id,
+                            ProgressEvent(
+                                type=EventType.HEARTBEAT,
+                                phase=phase,
+                                current=c,
+                                total=t,
+                                message=f"Still working… ({c}/{t})",
+                            ),
+                        )
                         last_event_ts = time.monotonic()
 
         # ── Phase 1: DOWNLOAD from Azure Storage ─────────────
@@ -454,26 +460,32 @@ async def upload_drive_images_job(job_id: str, payload: dict):
 
                 if content:
                     await update_summary(job_id, downloaded_inc=1)
-                    await emit_event(job_id, ProgressEvent(
-                        type=EventType.FILE_SUCCESS,
-                        phase=ProgressPhase.DOWNLOAD,
-                        current=download_completed,
-                        total=total_files,
-                        file_index=idx + 1,
-                        filename=entry["filename"],
-                        message=f"📥 Loaded image {download_completed}/{total_files} from Azure Storage ✓",
-                    ))
+                    await emit_event(
+                        job_id,
+                        ProgressEvent(
+                            type=EventType.FILE_SUCCESS,
+                            phase=ProgressPhase.DOWNLOAD,
+                            current=download_completed,
+                            total=total_files,
+                            file_index=idx + 1,
+                            filename=entry["filename"],
+                            message=f"📥 Loaded image {download_completed}/{total_files} from Azure Storage ✓",
+                        ),
+                    )
                 else:
                     await update_summary(job_id, failed_inc=1)
-                    await emit_event(job_id, ProgressEvent(
-                        type=EventType.FILE_FAILURE,
-                        phase=ProgressPhase.DOWNLOAD,
-                        current=download_completed,
-                        total=total_files,
-                        file_index=idx + 1,
-                        filename=entry["filename"],
-                        message=f"⚠️ Image {download_completed}/{total_files} ({entry['filename']}) failed to download",
-                    ))
+                    await emit_event(
+                        job_id,
+                        ProgressEvent(
+                            type=EventType.FILE_FAILURE,
+                            phase=ProgressPhase.DOWNLOAD,
+                            current=download_completed,
+                            total=total_files,
+                            file_index=idx + 1,
+                            filename=entry["filename"],
+                            message=f"⚠️ Image {download_completed}/{total_files} ({entry['filename']}) failed to download",
+                        ),
+                    )
 
                 last_event_ts = time.monotonic()
                 return entry, content
@@ -487,9 +499,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             )
         )
 
-        results = await asyncio.gather(
-            *[fetch(i, e) for i, e in enumerate(file_entries)]
-        )
+        results = await asyncio.gather(*[fetch(i, e) for i, e in enumerate(file_entries)])
 
         hb_stop.set()
         try:
@@ -499,20 +509,23 @@ async def upload_drive_images_job(job_id: str, payload: dict):
 
         for entry, content in results:
             if content:
-                files_with_bytes.append({
-                    "file_bytes": content,
-                    "filename": entry["filename"],
-                    "timestamp": entry.get("timestamp"),
-                    "project": entry.get("project"),
-                    "deployment": entry.get("deployment"),
-                })
+                files_with_bytes.append(
+                    {
+                        "file_bytes": content,
+                        "filename": entry["filename"],
+                        "timestamp": entry.get("timestamp"),
+                        "project": entry.get("project"),
+                        "deployment": entry.get("deployment"),
+                    }
+                )
 
         await complete_phase(job_id, ProgressPhase.DOWNLOAD)
 
         if not files_with_bytes:
             logger.warning("drive_upload_no_files_downloaded", job_id=job_id)
             await update_job(
-                job_id, status=JobStatus.FAILED,
+                job_id,
+                status=JobStatus.FAILED,
                 error="No files could be downloaded from storage",
                 message="Failed: could not download any files from Azure Storage.",
             )
@@ -534,9 +547,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                 deployment = group[0].get("deployment", {})
                 project = group[0].get("project", {})
                 if project and deployment:
-                    dep_folder, proj_folder, group = preprocess_file_batch(
-                        group, deployment, project
-                    )
+                    dep_folder, proj_folder, group = preprocess_file_batch(group, deployment, project)
                     # Stamp folder names onto every file in this group
                     for f in group:
                         f["_deployment_folder"] = dep_folder
@@ -545,11 +556,14 @@ async def upload_drive_images_job(job_id: str, payload: dict):
 
             files_with_bytes = preprocessed_files
 
-            await emit_event(job_id, ProgressEvent(
-                type=EventType.PROGRESS,
-                phase=ProgressPhase.DOWNLOAD,
-                message=f"📝 Preprocessed {len(files_with_bytes)} images (renamed & sorted)",
-            ))
+            await emit_event(
+                job_id,
+                ProgressEvent(
+                    type=EventType.PROGRESS,
+                    phase=ProgressPhase.DOWNLOAD,
+                    message=f"📝 Preprocessed {len(files_with_bytes)} images (renamed & sorted)",
+                ),
+            )
         except Exception as preprocess_err:
             # Non-fatal: if preprocessing fails, continue with original names
             logger.warning(
@@ -557,11 +571,14 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                 error=str(preprocess_err),
                 job_id=job_id,
             )
-            await emit_event(job_id, ProgressEvent(
-                type=EventType.PROGRESS,
-                phase=ProgressPhase.DOWNLOAD,
-                message=f"⚠️ Photo preprocessing skipped: {preprocess_err}",
-            ))
+            await emit_event(
+                job_id,
+                ProgressEvent(
+                    type=EventType.PROGRESS,
+                    phase=ProgressPhase.DOWNLOAD,
+                    message=f"⚠️ Photo preprocessing skipped: {preprocess_err}",
+                ),
+            )
 
         # ── Phase 2: DRIVE UPLOAD ────────────────────────────
         await start_phase(job_id, ProgressPhase.DRIVE_UPLOAD)
@@ -572,52 +589,72 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         last_event_ts = time.monotonic()
 
         async def on_drive_file_event(
-            action, *, filename="", folder_name="",
-            index=0, total=0, error="",
+            action,
+            *,
+            filename="",
+            folder_name="",
+            index=0,
+            total=0,
+            error="",
         ):
             nonlocal drive_completed, last_event_ts
             last_event_ts = time.monotonic()
 
             if action == "folder_created":
-                await emit_event(job_id, ProgressEvent(
-                    type=EventType.FOLDER_CREATED,
-                    phase=ProgressPhase.DRIVE_UPLOAD,
-                    message=f"📁 Created folder \"{folder_name}\" in Google Drive",
-                ))
+                await emit_event(
+                    job_id,
+                    ProgressEvent(
+                        type=EventType.FOLDER_CREATED,
+                        phase=ProgressPhase.DRIVE_UPLOAD,
+                        message=f'📁 Created folder "{folder_name}" in Google Drive',
+                    ),
+                )
             elif action == "uploaded":
                 drive_completed = index
                 await update_summary(job_id, uploaded_inc=1)
                 progress = 0.40 + (0.50 * (index / total))
                 await update_job(job_id, progress=min(progress, 0.90))
-                await emit_event(job_id, ProgressEvent(
-                    type=EventType.FILE_SUCCESS,
-                    phase=ProgressPhase.DRIVE_UPLOAD,
-                    current=index, total=total,
-                    filename=filename,
-                    message=f"☁️ Uploaded {filename} ({index}/{total}) ✓",
-                ))
+                await emit_event(
+                    job_id,
+                    ProgressEvent(
+                        type=EventType.FILE_SUCCESS,
+                        phase=ProgressPhase.DRIVE_UPLOAD,
+                        current=index,
+                        total=total,
+                        filename=filename,
+                        message=f"☁️ Uploaded {filename} ({index}/{total}) ✓",
+                    ),
+                )
             elif action == "skipped":
                 drive_completed = index
                 await update_summary(job_id, skipped_inc=1)
                 progress = 0.40 + (0.50 * (index / total))
                 await update_job(job_id, progress=min(progress, 0.90))
-                await emit_event(job_id, ProgressEvent(
-                    type=EventType.FILE_SKIP,
-                    phase=ProgressPhase.DRIVE_UPLOAD,
-                    current=index, total=total,
-                    filename=filename,
-                    message=f"⏭️ {filename} ({index}/{total}) already exists (skipped)",
-                ))
+                await emit_event(
+                    job_id,
+                    ProgressEvent(
+                        type=EventType.FILE_SKIP,
+                        phase=ProgressPhase.DRIVE_UPLOAD,
+                        current=index,
+                        total=total,
+                        filename=filename,
+                        message=f"⏭️ {filename} ({index}/{total}) already exists (skipped)",
+                    ),
+                )
             elif action == "failed":
                 drive_completed = index
                 await update_summary(job_id, failed_inc=1)
-                await emit_event(job_id, ProgressEvent(
-                    type=EventType.FILE_FAILURE,
-                    phase=ProgressPhase.DRIVE_UPLOAD,
-                    current=index, total=total,
-                    filename=filename,
-                    message=f"⚠️ Failed to upload {filename} ({index}/{total}): {error}",
-                ))
+                await emit_event(
+                    job_id,
+                    ProgressEvent(
+                        type=EventType.FILE_FAILURE,
+                        phase=ProgressPhase.DRIVE_UPLOAD,
+                        current=index,
+                        total=total,
+                        filename=filename,
+                        message=f"⚠️ Failed to upload {filename} ({index}/{total}): {error}",
+                    ),
+                )
 
         hb_stop2 = asyncio.Event()
         hb_task2 = asyncio.create_task(
@@ -660,12 +697,16 @@ async def upload_drive_images_job(job_id: str, payload: dict):
 
                 last_event_ts = time.monotonic()
                 if completed % max(1, total // 10) == 0 or completed == total:
-                    await emit_event(job_id, ProgressEvent(
-                        type=EventType.PROGRESS,
-                        phase=ProgressPhase.CLEANUP,
-                        current=completed, total=total,
-                        message=f"🧹 Cleaning up temporary buffers ({completed}/{total})",
-                    ))
+                    await emit_event(
+                        job_id,
+                        ProgressEvent(
+                            type=EventType.PROGRESS,
+                            phase=ProgressPhase.CLEANUP,
+                            current=completed,
+                            total=total,
+                            message=f"🧹 Cleaning up temporary buffers ({completed}/{total})",
+                        ),
+                    )
                     progress = 0.92 + (0.08 * (completed / total))
                     await update_job(job_id, progress=min(progress, 0.99))
             return completed
@@ -683,21 +724,18 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         uploaded_count = summary.uploaded if summary else 0
         skipped_count = summary.skipped if summary else 0
 
-        final_status = (
-            JobStatus.COMPLETED_WITH_ERRORS if failed_count > 0
-            else JobStatus.COMPLETED
-        )
+        final_status = JobStatus.COMPLETED_WITH_ERRORS if failed_count > 0 else JobStatus.COMPLETED
 
         if final_status == JobStatus.COMPLETED_WITH_ERRORS:
-            final_msg = (
-                f"⚠️ Completed with issues — "
-                f"{uploaded_count} uploaded, {skipped_count} skipped, {failed_count} failed"
-            )
+            final_msg = f"⚠️ Completed with issues — {uploaded_count} uploaded, {skipped_count} skipped, {failed_count} failed"
         else:
             final_msg = f"✅ Done — {drive_total} images synced to Google Drive"
 
         await update_job(
-            job_id, status=final_status, progress=1.0, message=final_msg,
+            job_id,
+            status=final_status,
+            progress=1.0,
+            message=final_msg,
         )
 
         logger.info(
@@ -709,12 +747,16 @@ async def upload_drive_images_job(job_id: str, payload: dict):
 
     except Exception as e:
         await update_job(
-            job_id, status=JobStatus.FAILED, error=str(e),
+            job_id,
+            status=JobStatus.FAILED,
+            error=str(e),
             message=f"❌ Failed to upload to Google Drive: {str(e)}",
         )
         logger.error(
-            "job_failed", job_type="upload_drive_images",
-            job_id=job_id, error=str(e),
+            "job_failed",
+            job_type="upload_drive_images",
+            job_id=job_id,
+            error=str(e),
         )
         # Without ARQ, we don't auto-retry.
         return

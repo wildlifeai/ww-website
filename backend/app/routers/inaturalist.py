@@ -58,9 +58,7 @@ def _check_enabled():
     if not settings.FF_INAT_ENABLED:
         raise HTTPException(404, detail="iNaturalist integration is not enabled")
     if not settings.INAT_CLIENT_ID:
-        raise HTTPException(
-            500, detail="INAT_CLIENT_ID not configured"
-        )
+        raise HTTPException(500, detail="INAT_CLIENT_ID not configured")
 
 
 # ── In-memory PKCE state (per-session, short-lived) ─────────────────
@@ -69,6 +67,7 @@ _pending_oauth: dict = {}  # state -> {code_verifier, user_id}
 
 
 # ── OAuth Flow ───────────────────────────────────────────────────────
+
 
 @router.get("/auth")
 async def inat_auth(
@@ -181,6 +180,7 @@ async def inat_disconnect(
 
 
 # ── Observations ─────────────────────────────────────────────────────
+
 
 @router.post("/observations")
 async def create_inat_observation(

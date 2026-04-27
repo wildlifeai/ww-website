@@ -50,6 +50,4 @@ class INatObservationStatus(BaseModel):
 class INatBatchPollRequest(BaseModel):
     """Request to poll multiple observation IDs."""
 
-    observation_ids: List[int] = Field(
-        ..., max_length=200, description="Up to 200 observation IDs"
-    )
+    observation_ids: List[int] = Field(..., max_length=200, description="Up to 200 observation IDs")

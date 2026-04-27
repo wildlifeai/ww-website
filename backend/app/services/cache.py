@@ -17,9 +17,7 @@ logger = structlog.get_logger()
 _memory_cache: Dict[str, Tuple[float, Any]] = {}
 
 
-async def cached(
-    key: str, ttl: int, fetch_fn: Callable[[], Awaitable[Any]]
-) -> Any:
+async def cached(key: str, ttl: int, fetch_fn: Callable[[], Awaitable[Any]]) -> Any:
     """Cache-aside: return cached value or call fetch_fn and cache the result.
 
     Args:

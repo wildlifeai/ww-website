@@ -11,6 +11,7 @@ import pytest
 _redis_available = False
 try:
     import redis as _redis_sync
+
     _r = _redis_sync.Redis.from_url("redis://localhost:6379")
     _r.ping()
     _redis_available = True
@@ -18,9 +19,7 @@ try:
 except Exception:
     pass
 
-needs_redis = pytest.mark.skipif(
-    not _redis_available, reason="Redis not available"
-)
+needs_redis = pytest.mark.skipif(not _redis_available, reason="Redis not available")
 
 
 def test_health_check(client):

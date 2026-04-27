@@ -25,6 +25,7 @@ import pytest
 # Helper to create a minimal zip containing a .TFL
 # ────────────────────────────────────────────────────────────
 
+
 def make_test_model_zip(tfl_content: bytes = b"\x00\x01\x02\x03", filename: str = "1V1.TFL") -> bytes:
     """Create a minimal zip containing a .TFL file for testing."""
     buf = io.BytesIO()
@@ -42,6 +43,7 @@ def make_test_tflite() -> bytes:
 # ────────────────────────────────────────────────────────────
 # Fixtures
 # ────────────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def auth_client():
@@ -63,8 +65,8 @@ def auth_client():
 # POST /api/models/convert — input validation
 # ────────────────────────────────────────────────────────────
 
-class TestConvertEndpointValidation:
 
+class TestConvertEndpointValidation:
     def test_rejects_invalid_file_type(self, auth_client):
         """Files with invalid MIME type AND extension should be rejected."""
         response = auth_client.post(
@@ -99,8 +101,8 @@ class TestConvertEndpointValidation:
 # POST /api/models/convert — role checks
 # ────────────────────────────────────────────────────────────
 
-class TestConvertEndpointRoles:
 
+class TestConvertEndpointRoles:
     @patch("app.services.supabase_client.create_service_client")
     def test_rejects_non_manager_creating_family(self, mock_sb, auth_client):
         """organisation_member cannot create a new model family."""
@@ -141,15 +143,13 @@ class TestConvertEndpointRoles:
 # POST /api/models/convert — response contract
 # ────────────────────────────────────────────────────────────
 
-class TestConvertResponseContract:
 
+class TestConvertResponseContract:
     @patch("app.services.supabase_client.create_service_client")
     @patch("app.jobs.store.create_job", new_callable=AsyncMock)
     @patch("app.services.blob_store.store_blob", new_callable=AsyncMock)
     @patch("app.jobs.runner.enqueue_local_job")
-    def test_response_includes_model_id_and_poll_url(
-        self, mock_enqueue, mock_store, mock_create_job, mock_sb, auth_client
-    ):
+    def test_response_includes_model_id_and_poll_url(self, mock_enqueue, mock_store, mock_create_job, mock_sb, auth_client):
         """POST /convert should return model_id, job_id, status, poll_url."""
         mock_create_job.return_value = "test-job-123"
 
@@ -207,8 +207,8 @@ class TestConvertResponseContract:
 # convert_model_job — idempotency
 # ────────────────────────────────────────────────────────────
 
-class TestConvertModelJobIdempotency:
 
+class TestConvertModelJobIdempotency:
     @pytest.mark.asyncio
     @patch("app.jobs.definitions.update_job", new_callable=AsyncMock)
     @patch("app.services.supabase_client.create_service_client")
@@ -226,14 +226,12 @@ class TestConvertModelJobIdempotency:
         mock_sb.return_value = mock_client
 
         from app.jobs.definitions import convert_model_job
+
         await convert_model_job("job-1", "user-1", "model-1")
 
         # Should have called update_job with COMPLETED (idempotency exit)
         mock_update_job.assert_called()
-        completed_calls = [
-            c for c in mock_update_job.call_args_list
-            if c.kwargs.get("progress") == 1.0
-        ]
+        completed_calls = [c for c in mock_update_job.call_args_list if c.kwargs.get("progress") == 1.0]
         assert len(completed_calls) >= 1, "Expected at least one COMPLETED update_job call"
 
 
@@ -241,11 +239,11 @@ class TestConvertModelJobIdempotency:
 # convert_model_job — SHA-256 computation
 # ────────────────────────────────────────────────────────────
 
-class TestConvertModelJobHash:
 
+class TestConvertModelJobHash:
     def test_sha256_of_tfl_in_zip(self):
         """The hash should be computed from the .TFL inside the zip, not the zip itself."""
-        tfl_content = b"\xDE\xAD\xBE\xEF" * 100
+        tfl_content = b"\xde\xad\xbe\xef" * 100
         expected_hash = hashlib.sha256(tfl_content).hexdigest()
         model_zip = make_test_model_zip(tfl_content, "42V3.TFL")
 
@@ -258,16 +256,15 @@ class TestConvertModelJobHash:
                     break
 
         assert computed_hash == expected_hash
-        assert computed_hash != hashlib.sha256(model_zip).hexdigest(), \
-            "Hash should be of TFL content, not the zip wrapper"
+        assert computed_hash != hashlib.sha256(model_zip).hexdigest(), "Hash should be of TFL content, not the zip wrapper"
 
 
 # ────────────────────────────────────────────────────────────
 # Storage path format
 # ────────────────────────────────────────────────────────────
 
-class TestStoragePathFormat:
 
+class TestStoragePathFormat:
     def test_structured_path_format(self):
         """Storage path must follow {org_id}/{firmware_id}/{version}/ai_model.zip."""
         org_id = "b0000000-0000-0000-0000-000000000001"

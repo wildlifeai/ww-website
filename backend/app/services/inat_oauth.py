@@ -42,10 +42,12 @@ INAT_API_BASE = "https://api.inaturalist.org/v1"
 
 class INatOAuthError(Exception):
     """Raised on OAuth flow failures."""
+
     pass
 
 
 # ── Encryption helpers ───────────────────────────────────────────────
+
 
 def _get_fernet() -> Fernet:
     """Derive a Fernet key from INAT_CLIENT_SECRET.
@@ -55,9 +57,7 @@ def _get_fernet() -> Fernet:
     rotate the secret, existing stored tokens become unreadable.
     """
     # Derive a 32-byte key from the client secret via SHA-256
-    key_material = hashlib.sha256(
-        settings.INAT_CLIENT_SECRET.encode()
-    ).digest()
+    key_material = hashlib.sha256(settings.INAT_CLIENT_SECRET.encode()).digest()
     fernet_key = base64.urlsafe_b64encode(key_material)
     return Fernet(fernet_key)
 
@@ -78,6 +78,7 @@ def decrypt_token(encrypted: str) -> Dict[str, Any]:
 
 # ── PKCE helpers ─────────────────────────────────────────────────────
 
+
 def generate_pkce_pair() -> Tuple[str, str]:
     """Generate a PKCE code_verifier and code_challenge (S256).
 
@@ -91,6 +92,7 @@ def generate_pkce_pair() -> Tuple[str, str]:
 
 
 # ── OAuth flow ───────────────────────────────────────────────────────
+
 
 def build_authorization_url(state: str, code_challenge: str) -> str:
     """Build the iNaturalist OAuth authorization URL.
@@ -205,6 +207,7 @@ def is_token_expired(token_data: Dict[str, Any], buffer_seconds: int = 300) -> b
 
 # ── Token persistence (Supabase) ─────────────────────────────────────
 
+
 async def store_user_token(user_id: str, token_data: Dict[str, Any]) -> None:
     """Store encrypted iNat token in Supabase for a user.
 
@@ -235,12 +238,7 @@ async def get_user_token(user_id: str) -> Optional[Dict[str, Any]]:
     """
     client = create_service_client()
 
-    response = (
-        client.table("inat_tokens")
-        .select("encrypted_token")
-        .eq("user_id", user_id)
-        .execute()
-    )
+    response = client.table("inat_tokens").select("encrypted_token").eq("user_id", user_id).execute()
 
     if not response.data:
         return None
@@ -278,6 +276,7 @@ async def revoke_user_token(user_id: str) -> bool:
 
 
 # ── API JWT helper ────────────────────────────────────────────────────
+
 
 async def get_api_jwt(access_token: str) -> str:
     """Exchange an iNat OAuth access token for a short-lived API JWT.
