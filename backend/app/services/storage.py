@@ -59,9 +59,16 @@ async def upload_to_storage(bucket: str, path: str, content: bytes, content_type
 
     Returns True on success, False on failure.
     """
+    import asyncio
+
     client = create_service_client()
     try:
-        client.storage.from_(bucket).upload(path, content, file_options={"content-type": content_type})
+        await asyncio.to_thread(
+            client.storage.from_(bucket).upload,
+            path,
+            content,
+            file_options={"content-type": content_type},
+        )
         return True
     except Exception as e:
         logger.error("storage_upload_failed", bucket=bucket, path=path, error=str(e))

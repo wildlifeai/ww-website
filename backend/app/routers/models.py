@@ -107,20 +107,26 @@ async def convert_model(
     temp_storage_path = f"temp/{org_id}/{model_name.replace(' ', '_')}_{version_string}_{job_id}"
 
     # Insert ai_models row
-    model_insert = client.table("ai_models").insert(
-        {
-            "organisation_id": org_id,
-            "model_family_id": model_family_id,
-            "version": version_string,
-            "name": model_name,
-            "description": description,
-            "uploaded_by": user.id,
-            "modified_by": user.id,
-            "storage_path": temp_storage_path,
-            "file_type": "uploading",
-        }
+    model_insert = (
+        client.table("ai_models")
+        .insert(
+            {
+                "organisation_id": org_id,
+                "model_family_id": model_family_id,
+                "version": version_string,
+                "name": model_name,
+                "description": description,
+                "uploaded_by": user.id,
+                "modified_by": user.id,
+                "storage_path": temp_storage_path,
+                "file_type": "uploading",
+            }
+        )
+        .select("id")
     )
     model_row = await asyncio.to_thread(model_insert.execute)
+    if not model_row.data:
+        raise HTTPException(500, detail="Failed to create AI model record")
     model_id = model_row.data[0]["id"]
 
     await store_blob(
@@ -186,8 +192,11 @@ async def get_managed_orgs(
         )
 
     # Fetch org names
+    import asyncio
+
     org_ids = [r["scope_id"] for r in manager_roles]
-    orgs = client.table("organisations").select("id, name").in_("id", org_ids).execute()
+    orgs_query = client.table("organisations").select("id, name").in_("id", org_ids)
+    orgs = await asyncio.to_thread(orgs_query.execute)
 
     return ApiResponse(
         data=orgs.data or [],

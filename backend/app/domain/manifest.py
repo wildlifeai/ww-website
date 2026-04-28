@@ -432,7 +432,9 @@ async def generate_manifest(
 
                         # Dynamically get firmware_model_id and version safely
                         family = model.get("ai_model_families")
-                        firmware_id = family.get("firmware_model_id") if family else "UNKNOWN"
+                        firmware_id = family.get("firmware_model_id") if family else None
+                        if not firmware_id:
+                            raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
                         version_str = model.get("version", "1")
                         version = version_str.split(".")[0] if "." in version_str else version_str
 

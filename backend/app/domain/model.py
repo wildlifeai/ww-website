@@ -133,9 +133,7 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
 
         # Check if the user uploaded an ALREADY converted firmware package
         # containing a .tfl file and labels.txt
-        precompiled_tfl = (
-            list(work_dir.glob("*.tfl")) + list(work_dir.glob("*.TFL")) + list(work_dir.glob("*.tflite")) + list(work_dir.glob("*.TFLITE"))
-        )
+        precompiled_tfl = list(work_dir.glob("*.tfl")) + list(work_dir.glob("*.TFL"))
         if precompiled_tfl and (work_dir / "labels.txt").exists():
             tfl_file = precompiled_tfl[0]
             logger.info("model_already_converted", file=tfl_file.name)
@@ -144,11 +142,13 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
             labels = [lbl.strip() for lbl in labels if lbl.strip()]
 
             ai_model_zip_path = work_dir / "ai_model.zip"
-            # Ensure the label file name matches the firmware expectation (e.g. 1237V10.TXT)
-            label_arcname = tfl_file.stem.upper()[:8] + ".TXT"
+            # Ensure both files share the same 8.3-compliant stem
+            model_stem = tfl_file.stem.upper()[:8]
+            tfl_arcname = model_stem + ".TFL"
+            label_arcname = model_stem + ".TXT"
 
             with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
-                zf.write(tfl_file, tfl_file.name.upper())
+                zf.write(tfl_file, tfl_arcname)
                 zf.write(work_dir / "labels.txt", label_arcname)
 
             return ai_model_zip_path.read_bytes(), labels
@@ -446,8 +446,18 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
             vela_final_path.write_bytes(binary_data)
         else:
             # .tflite
+            raw_tflite_path = work_dir / "raw.tflite"
+            raw_tflite_path.write_bytes(model_bytes)
+
+            try:
+                vela_output = await run_vela_conversion(raw_tflite_path, work_dir)
+            except Exception as e:
+                raise ModelDomainError(f"Vela compilation failed: {e}") from e
+
             vela_final_path = work_dir / "MOD00001.tfl"
-            vela_final_path.write_bytes(model_bytes)
+            if vela_final_path.exists():
+                vela_final_path.unlink()
+            _safe_move(vela_output, vela_final_path)
 
         labels_txt_path = work_dir / "labels.txt"
         labels_txt_path.write_text("\n".join(labels))
