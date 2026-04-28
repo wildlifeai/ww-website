@@ -43,7 +43,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
 
     client = create_service_client()
 
-    def update_model_status(status: str, error_message: str = None, **kwargs):
+    async def update_model_status(status: str, error_message: str = None, **kwargs):
         payload = {"status": status, **kwargs}
         if error_message:
             payload["error_message"] = error_message
@@ -58,33 +58,40 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         if error_message:
             log_entry["error"] = error_message
 
+        import asyncio
+
         # TODO(schema): Use a JSONB append RPC to prevent race conditions on processing_log
         try:
-            existing = client.table("ai_models").select("processing_log").eq("id", model_id).execute()
+            existing_query = client.table("ai_models").select("processing_log").eq("id", model_id)
+            existing = await asyncio.to_thread(existing_query.execute)
             current_log = existing.data[0].get("processing_log") or [] if existing.data else []
             current_log.append(log_entry)
             payload["processing_log"] = current_log
         except Exception:
             payload["processing_log"] = [log_entry]
-        client.table("ai_models").update(payload).eq("id", model_id).execute()
+        update_query = client.table("ai_models").update(payload).eq("id", model_id)
+        await asyncio.to_thread(update_query.execute)
 
     try:
+        import asyncio
         # ── Idempotency guard ────────────────────────────────────
-        model_check = client.table("ai_models").select("status").eq("id", model_id).execute()
+        check_query = client.table("ai_models").select("status").eq("id", model_id)
+        model_check = await asyncio.to_thread(check_query.execute)
         if model_check.data and model_check.data[0]["status"] in ("validated", "deployed"):
             logger.info("convert_job_skipped_already_complete", **log_ctx)
             await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0)
             return
 
         # ── Transition to 'validating' ───────────────────────────
-        update_model_status("validating")
+        await update_model_status("validating")
         logger.info("convert_job_validating", **log_ctx)
 
         from app.domain.model import convert_uploaded_model
         from app.services.azure_storage import delete_blob, retrieve_blob
 
         # Fetch model row to get org_id, family_id, version
-        model_res = client.table("ai_models").select("*, ai_model_families(firmware_model_id)").eq("id", model_id).execute()
+        res_query = client.table("ai_models").select("*, ai_model_families(firmware_model_id)").eq("id", model_id)
+        model_res = await asyncio.to_thread(res_query.execute)
         if not model_res.data:
             raise RuntimeError(f"Model record {model_id} not found")
 
@@ -146,7 +153,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         logger.info("convert_job_storage_verified", file_hash=file_hash, **log_ctx)
 
         # 5. Update the ai_models row to 'validated'
-        update_model_status(
+        await update_model_status(
             status="validated",
             file_hash=file_hash,
             storage_path=result_path,
@@ -168,7 +175,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
 
     except Exception as e:
         try:
-            update_model_status("failed", error_message=str(e))
+            await update_model_status("failed", error_message=str(e))
         except Exception as status_err:
             logger.warning("failed_to_update_model_status_on_error", error=str(status_err))
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
