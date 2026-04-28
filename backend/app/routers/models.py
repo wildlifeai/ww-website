@@ -86,6 +86,8 @@ async def convert_model(
     else:
         family_insert = client.table("ai_model_families").insert({"organisation_id": org_id, "name": model_name}).select("id")
         insert_res = await asyncio.to_thread(family_insert.execute)
+        if not insert_res.data:
+            raise HTTPException(500, detail="Failed to create AI model family")
         model_family_id = insert_res.data[0]["id"]
 
     # Get existing models with this name to determine version

@@ -374,8 +374,11 @@ async def generate_manifest(
     tfl_name = "trained_vela.TFL"
     txt_name = "trained_vela.TXT"
     if model_id is not None and model_version is not None:
-        tfl_name = f"{model_id}V{model_version}.TFL"
-        txt_name = f"{model_id}V{model_version}.TXT"
+        name_stem = f"{model_id}V{model_version}"
+        if len(name_stem) > 8:
+            name_stem = name_stem[:8]
+        tfl_name = f"{name_stem}.TFL"
+        txt_name = f"{name_stem}.TXT"
 
     try:
         # 1. Fetch config firmware
@@ -433,8 +436,12 @@ async def generate_manifest(
                         version_str = model.get("version", "1")
                         version = version_str.split(".")[0] if "." in version_str else version_str
 
-                        dynamic_tfl_name = f"{firmware_id}V{version}.TFL"
-                        dynamic_txt_name = f"{firmware_id}V{version}.TXT"
+                        name_stem = f"{firmware_id}V{version}"
+                        if len(name_stem) > 8:
+                            name_stem = name_stem[:8]
+
+                        dynamic_tfl_name = f"{name_stem}.TFL"
+                        dynamic_txt_name = f"{name_stem}.TXT"
 
                         for f in manifest_dir.iterdir():
                             if f.is_file() and f.suffix.upper() == ".TFL":
