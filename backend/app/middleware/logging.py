@@ -28,8 +28,10 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         except Exception as e:
             try:
                 logger.exception("unhandled_error", error=str(e))
-            except Exception:
-                pass  # Never let logging kill the server
+            except Exception as log_err:
+                import sys
+
+                print(f"Logging middleware failed to log error: {log_err}", file=sys.stderr)
             raise
 
         duration = time.monotonic() - start
@@ -43,6 +45,8 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 duration_ms=round(duration * 1000, 2),
                 user_id=getattr(request.state, "user_id", None),
             )
-        except Exception:
-            pass  # Never let logging kill the server
+        except Exception as e:
+            import sys
+
+            print(f"Logging middleware failed to log response: {e}", file=sys.stderr)
         return response
