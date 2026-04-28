@@ -74,6 +74,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
 
     try:
         import asyncio
+
         # ── Idempotency guard ────────────────────────────────────
         check_query = client.table("ai_models").select("status").eq("id", model_id)
         model_check = await asyncio.to_thread(check_query.execute)
