@@ -38,6 +38,8 @@ def resolve_managed_org(requested_org_id: str | None, manager_roles: list) -> st
         if not any(r["scope_id"] == requested_org_id for r in manager_roles):
             raise HTTPException(403, detail="You are not a manager of the selected organisation.")
         return requested_org_id
+    if len(manager_roles) > 1:
+        raise HTTPException(400, detail="You manage multiple organisations. Please explicitly provide organisation_id.")
     return manager_roles[0]["scope_id"]
 
 
