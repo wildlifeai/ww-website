@@ -101,21 +101,18 @@ async def convert_model(
     temp_storage_path = f"temp/{org_id}/{model_name.replace(' ', '_')}_{version_string}_{job_id}"
 
     # Insert ai_models row
-    model_insert = (
-        client.table("ai_models")
-        .insert(
-            {
-                "organisation_id": org_id,
-                "model_family_id": model_family_id,
-                "version": version_string,
-                "name": model_name,
-                "description": description,
-                "uploaded_by": user.id,
-                "modified_by": user.id,
-                "storage_path": temp_storage_path,
-                "file_type": "uploading",
-            }
-        )
+    model_insert = client.table("ai_models").insert(
+        {
+            "organisation_id": org_id,
+            "model_family_id": model_family_id,
+            "version": version_string,
+            "name": model_name,
+            "description": description,
+            "uploaded_by": user.id,
+            "modified_by": user.id,
+            "storage_path": temp_storage_path,
+            "file_type": "uploading",
+        }
     )
     model_row = await asyncio.to_thread(model_insert.execute)
     model_id = model_row.data[0]["id"]

@@ -133,6 +133,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
 
         # Offload blocking upload to thread
         import asyncio
+
         await asyncio.to_thread(
             client.storage.from_("ai-models").upload,
             path=result_path,

@@ -76,5 +76,6 @@ async def get_manager_roles(user=Depends(get_current_user)):
         .is_("deleted_at", "null")
     )
     import asyncio
+
     roles = await asyncio.to_thread(query.execute)
     return roles.data or []
