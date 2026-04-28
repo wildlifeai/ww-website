@@ -6,10 +6,10 @@ Browser-side (exifr) handles most parsing; this is the server-side
 fallback for custom EXIF tags produced by the camera firmware.
 """
 
-import struct
 import io
 import re
-from typing import Dict, Any, List, Optional
+import struct
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -38,6 +38,7 @@ TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8}
 
 
 # ── Low-level EXIF parsing ───────────────────────────────────────────
+
 
 def _format_value(value: bytes, type_id: int):
     """Convert raw EXIF bytes to a Python-friendly value."""
@@ -76,15 +77,19 @@ def _format_value(value: bytes, type_id: int):
             except Exception:
                 pass
             return value.hex()
-        
+
         # Fallback for any unhandled byte types: Convert to hex string to prevent JSON serialization crashes
         return value.hex()
     return value
 
 
 def _parse_ifd(
-    fp, base_offset: int, ifd_offset: int, endian: str,
-    parsed_data: Dict[str, Any], check_next_ifd: bool = True,
+    fp,
+    base_offset: int,
+    ifd_offset: int,
+    endian: str,
+    parsed_data: Dict[str, Any],
+    check_next_ifd: bool = True,
 ) -> None:
     """Parse a single IFD (Image File Directory) block."""
     try:
@@ -139,6 +144,7 @@ def _parse_ifd(
 
 
 # ── Public API ───────────────────────────────────────────────────────
+
 
 def parse_exif_from_bytes(jpeg_bytes: bytes) -> Dict[str, Any]:
     """Parse EXIF metadata from raw JPEG bytes.

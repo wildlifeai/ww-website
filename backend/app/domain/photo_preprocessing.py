@@ -37,6 +37,7 @@ def _get_timezone_finder():
     global _tf
     if _tf is None:
         from timezonefinder import TimezoneFinder
+
         _tf = TimezoneFinder()
     return _tf
 
@@ -257,6 +258,7 @@ def preprocess_file_batch(
     )
 
     from app.services.google_drive import slugify
+
     proj_name = project.get("name", "unknown")
     proj_id = project.get("id", "00000000")
     project_folder = f"{slugify(proj_name)}_{proj_id[:8]}"

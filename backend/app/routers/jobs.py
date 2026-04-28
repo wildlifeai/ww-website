@@ -8,8 +8,8 @@ GET /api/jobs/{id}/result → download or signed URL (when completed)
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.schemas.common import ApiResponse, ApiMeta
 from app.jobs.store import get_job
+from app.schemas.common import ApiMeta, ApiResponse
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 

@@ -34,14 +34,20 @@ async function request(path: string, options: RequestInit = {}) {
   let body
   try {
     body = await response.json()
-  } catch (e) {
+  } catch {
     // Some responses (like ZIP downloads) might not be JSON
     return response.blob()
   }
 
   if (!response.ok) {
+    // Try ApiResponse envelope format first, then FastAPI HTTPException format
     const error = body?.error || { code: 'UNKNOWN', message: 'Request failed' }
-    throw new ApiError(error.code, error.message, error.retryable)
+    const detail = body?.detail
+    let message = error.message
+    if (detail) {
+      message = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join('; ') : JSON.stringify(detail)
+    }
+    throw new ApiError(error.code || `HTTP_${response.status}`, message, error.retryable)
   }
 
   return body

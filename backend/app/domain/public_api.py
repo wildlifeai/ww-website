@@ -14,10 +14,8 @@ import csv
 import io
 import json
 import zipfile
-import tempfile
-from pathlib import Path
-from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -33,6 +31,7 @@ class PublicApiError(Exception):
 
 
 # ── Scoped data queries ─────────────────────────────────────────────
+
 
 async def list_deployments(
     org_id: str,
@@ -140,21 +139,13 @@ async def get_telemetry(
     client = create_service_client()
 
     # Verify device belongs to org
-    device_check = (
-        client.table("devices")
-        .select("id")
-        .eq("lorawan_device_eui", device_eui)
-        .eq("organisation_id", org_id)
-        .execute()
-    )
+    device_check = client.table("devices").select("id").eq("lorawan_device_eui", device_eui).eq("organisation_id", org_id).execute()
 
     if not device_check.data:
         raise PublicApiError(f"Device {device_eui} not found in organisation")
 
     query = (
-        client.table("lorawan_parsed_messages")
-        .select("battery_level, sd_card_used_capacity, model_output, received_at")
-        .eq("device_eui", device_eui)
+        client.table("lorawan_parsed_messages").select("battery_level, sd_card_used_capacity, model_output, received_at").eq("device_eui", device_eui)
     )
 
     if date_from:
@@ -199,18 +190,20 @@ async def list_observations(
     response = query.order("received_at", desc=True).range(offset, offset + limit - 1).execute()
 
     observations = []
-    for row in (response.data or []):
+    for row in response.data or []:
         model_out = row.get("model_output", {})
         if isinstance(model_out, dict):
-            observations.append({
-                "id": row["id"],
-                "device_eui": row.get("device_eui"),
-                "deployment_id": row.get("deployment_id"),
-                "detection_class": model_out.get("detection") or model_out.get("class"),
-                "confidence": model_out.get("confidence"),
-                "timestamp": row.get("received_at"),
-                "raw_output": model_out,
-            })
+            observations.append(
+                {
+                    "id": row["id"],
+                    "device_eui": row.get("device_eui"),
+                    "deployment_id": row.get("deployment_id"),
+                    "detection_class": model_out.get("detection") or model_out.get("class"),
+                    "confidence": model_out.get("confidence"),
+                    "timestamp": row.get("received_at"),
+                    "raw_output": model_out,
+                }
+            )
 
     return observations, response.count or 0
 
@@ -243,10 +236,7 @@ async def generate_camtrapdp_package(
 
     # 1. Fetch deployments
     dep_query = (
-        client.table("deployments")
-        .select("*, projects(name), devices(name, bluetooth_id)")
-        .eq("organisation_id", org_id)
-        .is_("deleted_at", "null")
+        client.table("deployments").select("*, projects(name), devices(name, bluetooth_id)").eq("organisation_id", org_id).is_("deleted_at", "null")
     )
     if project_id:
         dep_query = dep_query.eq("project_id", project_id)
@@ -262,11 +252,7 @@ async def generate_camtrapdp_package(
     dep_id_list = [d["id"] for d in deployments]
 
     # 2. Fetch LoRaWAN messages for these deployments
-    msg_query = (
-        client.table("lorawan_parsed_messages")
-        .select("*")
-        .in_("deployment_id", dep_id_list)
-    )
+    msg_query = client.table("lorawan_parsed_messages").select("*").in_("deployment_id", dep_id_list)
     if date_from:
         msg_query = msg_query.gte("received_at", date_from)
     if date_to:
@@ -334,19 +320,21 @@ def _build_deployments_csv(deployments: List[Dict[str, Any]]) -> str:
 
     for dep in deployments:
         project = dep.get("projects", {}) or {}
-        writer.writerow([
-            dep.get("id", ""),
-            dep.get("location_name") or project.get("name", ""),
-            dep.get("latitude", ""),
-            dep.get("longitude", ""),
-            dep.get("deployment_start", ""),
-            dep.get("deployment_end", ""),
-            dep.get("camera_model", "Wildlife Watcher"),
-            dep.get("camera_height", ""),
-            dep.get("capture_method", "motionDetection"),
-            dep.get("feature_type", ""),
-            dep.get("habitat", ""),
-        ])
+        writer.writerow(
+            [
+                dep.get("id", ""),
+                dep.get("location_name") or project.get("name", ""),
+                dep.get("latitude", ""),
+                dep.get("longitude", ""),
+                dep.get("deployment_start", ""),
+                dep.get("deployment_end", ""),
+                dep.get("camera_model", "Wildlife Watcher"),
+                dep.get("camera_height", ""),
+                dep.get("capture_method", "motionDetection"),
+                dep.get("feature_type", ""),
+                dep.get("habitat", ""),
+            ]
+        )
 
     return output.getvalue()
 
@@ -367,14 +355,16 @@ def _build_media_csv(messages: List[Dict[str, Any]]) -> str:
     writer.writerow(headers)
 
     for msg in messages:
-        writer.writerow([
-            msg.get("id", ""),
-            msg.get("deployment_id", ""),
-            "sensor",
-            msg.get("received_at", ""),
-            "",  # No file path for LoRaWAN events
-            "application/json",
-        ])
+        writer.writerow(
+            [
+                msg.get("id", ""),
+                msg.get("deployment_id", ""),
+                "sensor",
+                msg.get("received_at", ""),
+                "",  # No file path for LoRaWAN events
+                "application/json",
+            ]
+        )
 
     return output.getvalue()
 
@@ -417,21 +407,23 @@ def _build_observations_csv(messages: List[Dict[str, Any]]) -> str:
             detection_class = det.get("detection") or det.get("class") or "unknown"
             confidence = det.get("confidence", "")
 
-            writer.writerow([
-                f"obs-{obs_index:06d}",
-                msg.get("deployment_id", ""),
-                msg.get("id", ""),
-                msg.get("id", ""),
-                msg.get("received_at", ""),
-                msg.get("received_at", ""),
-                "animal" if detection_class not in ("person", "vehicle") else "human",
-                detection_class,
-                det.get("count", 1),
-                "",  # lifeStage
-                "machineLearning",
-                "Wildlife Watcher AI",
-                confidence,
-            ])
+            writer.writerow(
+                [
+                    f"obs-{obs_index:06d}",
+                    msg.get("deployment_id", ""),
+                    msg.get("id", ""),
+                    msg.get("id", ""),
+                    msg.get("received_at", ""),
+                    msg.get("received_at", ""),
+                    "animal" if detection_class not in ("person", "vehicle") else "human",
+                    detection_class,
+                    det.get("count", 1),
+                    "",  # lifeStage
+                    "machineLearning",
+                    "Wildlife Watcher AI",
+                    confidence,
+                ]
+            )
 
     return output.getvalue()
 

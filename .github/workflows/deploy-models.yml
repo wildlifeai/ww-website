@@ -8,11 +8,17 @@ on:
       - 'scripts/deploy_models.py'
       - 'scripts/convert_github_model.py'
       - '.github/workflows/deploy-models.yml'
-  workflow_dispatch: # Allows manual trigger
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Target environment (dev or staging)'
+        required: false
+        default: 'staging'
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.target || 'staging' }}
 
     steps:
       - name: Checkout Repository

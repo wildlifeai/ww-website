@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - dev
-      - feat/v2-migration
       - main
   workflow_dispatch:
     inputs:
@@ -12,14 +11,34 @@ on:
         description: 'Docker image tag (default: latest)'
         required: false
         default: 'latest'
+      target:
+        description: 'Target environment (dev or staging)'
+        required: false
+        default: 'auto'
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
+    # Determine environment for secret scoping
+    environment: ${{ (github.event.inputs.target == 'dev' || (github.event.inputs.target != 'staging' && github.ref_name == 'dev')) && 'dev' || 'staging' }}
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Determine target
+        id: target
+        run: |
+          if [[ "${{ (github.event.inputs.target == 'dev' || (github.event.inputs.target != 'staging' && github.ref_name == 'dev')) && 'dev' || 'staging' }}" == "dev" ]]; then
+            echo "app_name=ww-backend-dev" >> $GITHUB_OUTPUT
+            echo "image_tag=dev-${{ github.event.inputs.tag || 'latest' }}" >> $GITHUB_OUTPUT
+            echo "env=dev" >> $GITHUB_OUTPUT
+          else
+            echo "app_name=ww-backend" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ github.event.inputs.tag || 'latest' }}" >> $GITHUB_OUTPUT
+            echo "env=staging" >> $GITHUB_OUTPUT
+          fi
 
       - name: Log in to Azure Container Registry
         uses: azure/docker-login@v2
@@ -31,14 +50,14 @@ jobs:
       - name: Build Docker image
         run: |
           docker build \
-            -t ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ github.event.inputs.tag }} \
+            -t ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ steps.target.outputs.image_tag }} \
             -t ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ github.sha }} \
             -f backend/Dockerfile \
             backend/
 
       - name: Push to Azure Container Registry
         run: |
-          docker push ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ github.event.inputs.tag }}
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ steps.target.outputs.image_tag }}
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ github.sha }}
 
       - name: Log in to Azure CLI
@@ -48,21 +67,22 @@ jobs:
 
       - name: Deploy to Azure Container App
         run: |
+          echo "Deploying to ${{ steps.target.outputs.app_name }} (${{ steps.target.outputs.env }})"
           az containerapp update \
-            --name ww-backend \
+            --name ${{ steps.target.outputs.app_name }} \
             --resource-group WW-Website \
-            --image ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ github.event.inputs.tag }}
+            --image ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ steps.target.outputs.image_tag }}
 
       - name: Verify deployment
         run: |
           FQDN=$(az containerapp show \
-            --name ww-backend \
+            --name ${{ steps.target.outputs.app_name }} \
             --resource-group WW-Website \
             --query "properties.configuration.ingress.fqdn" -o tsv)
-          echo "Waiting for container cold start..."
+          echo "Waiting for container startup..."
           sleep 30
           STATUS=$(curl -s --max-time 60 "https://${FQDN}/health" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','unknown'))" 2>/dev/null || echo "unreachable")
-          echo "Health check: ${STATUS}"
+          echo "Health check (${{ steps.target.outputs.env }}): ${STATUS}"
           if [ "$STATUS" != "ok" ]; then
-            echo "::warning::Health check returned '${STATUS}' — container may still be starting up"
+            echo "::warning::Health check returned '${STATUS}' — container may still be starting"
           fi

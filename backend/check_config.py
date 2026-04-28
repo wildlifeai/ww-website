@@ -1,4 +1,5 @@
 from app.config import settings
+
 print("GOOGLE_DRIVE_ENABLED:", settings.GOOGLE_DRIVE_ENABLED)
 print("GOOGLE_DRIVE_FOLDER_ID:", settings.GOOGLE_DRIVE_FOLDER_ID)
 print("GOOGLE_SERVICE_ACCOUNT_JSON:", settings.GOOGLE_SERVICE_ACCOUNT_JSON[:40] if settings.GOOGLE_SERVICE_ACCOUNT_JSON else "EMPTY")

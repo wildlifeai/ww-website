@@ -7,8 +7,9 @@ background tasks and maintains strong references to prevent garbage collection.
 """
 
 import asyncio
+from typing import Any, Coroutine, Set
+
 import structlog
-from typing import Coroutine, Any, Set
 
 logger = structlog.get_logger()
 
@@ -18,7 +19,7 @@ _background_tasks: Set[asyncio.Task] = set()
 
 def enqueue_local_job(coro: Coroutine[Any, Any, Any]) -> None:
     """Run an async job in the background within the current event loop.
-    
+
     Args:
         coro: The coroutine to execute.
     """
@@ -30,7 +31,7 @@ def enqueue_local_job(coro: Coroutine[Any, Any, Any]) -> None:
 
     task = loop.create_task(coro)
     _background_tasks.add(task)
-    
+
     def _on_completion(t: asyncio.Task):
         _background_tasks.discard(t)
         try:

@@ -2,10 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for iNaturalist OAuth service and domain logic."""
 
-import pytest
-import hashlib
 import base64
-import json
+import hashlib
 import os
 
 # Ensure iNat config vars exist for import
@@ -13,19 +11,19 @@ os.environ.setdefault("INAT_CLIENT_ID", "test_client_id")
 os.environ.setdefault("INAT_CLIENT_SECRET", "test_client_secret_for_encryption_key_derivation")
 os.environ.setdefault("INAT_REDIRECT_URI", "http://localhost:8000/api/inat/callback")
 
-from app.services.inat_oauth import (
-    generate_pkce_pair,
-    build_authorization_url,
-    encrypt_token,
-    decrypt_token,
-    is_token_expired,
-    INAT_AUTH_URL,
-)
 from app.schemas.inaturalist import (
+    INatBatchPollRequest,
     INatCallbackParams,
     INatConnectionStatus,
     INatCreateObservation,
-    INatBatchPollRequest,
+)
+from app.services.inat_oauth import (
+    INAT_AUTH_URL,
+    build_authorization_url,
+    decrypt_token,
+    encrypt_token,
+    generate_pkce_pair,
+    is_token_expired,
 )
 
 
@@ -103,6 +101,7 @@ class TestTokenEncryption:
 class TestTokenExpiry:
     def test_fresh_token_not_expired(self):
         import time
+
         token = {
             "obtained_at": int(time.time()),
             "expires_in": 86400,
@@ -118,6 +117,7 @@ class TestTokenExpiry:
 
     def test_buffer_window(self):
         import time
+
         # Token that expires in exactly 200 seconds
         token = {
             "obtained_at": int(time.time()),

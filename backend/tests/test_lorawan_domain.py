@@ -4,10 +4,11 @@
 
 import base64
 import json
+
 import pytest
 
-from app.schemas.lorawan import TTNUplink, ChirpstackUplink, ParsedMessage
 from app.domain.lorawan import LoRaWANDomain
+from app.schemas.lorawan import ChirpstackUplink, ParsedMessage, TTNUplink
 
 
 class TestWWPayloadParsing:
@@ -124,7 +125,7 @@ class TestChirpstackUplinkSchema:
     def test_minimal_chirpstack_payload(self):
         payload = {
             "deviceInfo": {"devEui": "AABBCCDD11223344"},
-            "data": base64.b64encode(b"\xFF").decode(),
+            "data": base64.b64encode(b"\xff").decode(),
         }
         uplink = ChirpstackUplink(**payload)
         assert uplink.data is not None
@@ -154,16 +155,19 @@ class TestLoRaWANWebhookSecretValidation:
 
     def test_valid_secret_passes(self):
         from app.routers.lorawan import _validate_webhook_secret
+
         # Should not raise
         _validate_webhook_secret("my-secret", "my-secret")
 
     def test_invalid_secret_raises(self):
         from app.routers.lorawan import _validate_webhook_secret
+
         with pytest.raises(Exception):  # HTTPException
             _validate_webhook_secret("wrong", "correct")
 
     def test_empty_expected_allows_all(self):
         from app.routers.lorawan import _validate_webhook_secret
+
         # No secret configured — dev mode, should not raise
         _validate_webhook_secret("anything", "")
         _validate_webhook_secret("", "")

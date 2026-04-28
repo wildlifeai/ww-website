@@ -3,6 +3,7 @@
 """Inject a unique X-Request-ID into every request/response for traceability."""
 
 import uuid
+
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
@@ -17,9 +18,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     - Available for downstream logging / error tracking
     """
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Accept client-supplied ID or generate a fresh one
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         request.state.request_id = request_id

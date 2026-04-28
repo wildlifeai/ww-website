@@ -8,49 +8,127 @@ GET  /api/models/sscma/catalog → cached SSCMA model list (sync)
 POST /api/models/pretrained → download + package GitHub model (async)
 """
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
+import uuid
 
-from app.schemas.common import ApiResponse, ApiMeta
-from app.schemas.job import JobCreateResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from pydantic import BaseModel
+
+from app.dependencies import get_current_user, get_manager_roles
 from app.jobs.store import create_job
-from app.dependencies import get_current_user
+from app.schemas.common import ApiMeta, ApiResponse
+from app.schemas.job import JobCreateResponse
 from app.services.blob_store import store_blob
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50 MB
-ALLOWED_MIME_TYPES = {"application/zip", "application/x-zip-compressed"}
+ALLOWED_MIME_TYPES = {
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/octet-stream",  # For raw .tflite or .cc
+    "text/x-c",  # For .cc
+    "text/plain",
+}
+
+
+def resolve_managed_org(requested_org_id: str | None, manager_roles: list) -> str:
+    if not manager_roles:
+        raise HTTPException(403, detail="Only organisation managers can perform this action.")
+    if requested_org_id:
+        if not any(r["scope_id"] == requested_org_id for r in manager_roles):
+            raise HTTPException(403, detail="You are not a manager of the selected organisation.")
+        return requested_org_id
+    if len(manager_roles) > 1:
+        raise HTTPException(400, detail="You manage multiple organisations. Please explicitly provide organisation_id.")
+    return manager_roles[0]["scope_id"]
 
 
 @router.post("/convert")
 async def convert_model(
     file: UploadFile = File(...),
+    model_name: str = Form(...),
+    description: str = Form(""),
+    organisation_id: str = Form(""),
     request: Request = None,
     user=Depends(get_current_user),
 ):
-    """Upload a ZIP and enqueue Vela conversion job.
+    """Upload a model and enqueue conversion/registration job.
 
-    The uploaded file is stored in Redis as a temp blob so the ARQ worker
-    can retrieve it without shared filesystem access.
+    1. Validates input
+    2. Determines user's organisation via user_roles.scope_id
+    3. Auto-versions the model by name within the org
+    4. Inserts an ai_models row
+    5. Stores the file in blob store and enqueues the worker job
     """
-    # Validate MIME type
-    if file.content_type not in ALLOWED_MIME_TYPES:
+    if file.content_type not in ALLOWED_MIME_TYPES and not file.filename.endswith((".zip", ".tflite", ".cc")):
         raise HTTPException(400, detail=f"Invalid file type: {file.content_type}")
 
-    # Read and validate size
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE:
-        raise HTTPException(
-            413, detail=f"File exceeds {MAX_UPLOAD_SIZE // 1024 // 1024}MB limit"
-        )
+        raise HTTPException(413, detail=f"File exceeds {MAX_UPLOAD_SIZE // 1024 // 1024}MB limit")
 
-    # ZIP magic bytes check
-    if not content[:4] == b"PK\x03\x04":
-        raise HTTPException(400, detail="File is not a valid ZIP archive")
+    from app.services.supabase_client import create_service_client
+
+    client = create_service_client()
+
+    manager_roles = await get_manager_roles(user)
+    org_id = resolve_managed_org(organisation_id, manager_roles)
 
     job_id = await create_job()
+    import asyncio
 
-    # Store the uploaded file in Redis for the worker to retrieve
+    # Resolve or create AI Model Family
+    family_query = client.table("ai_model_families").select("id").eq("organisation_id", org_id).eq("name", model_name)
+    family_res = await asyncio.to_thread(family_query.execute)
+
+    if family_res.data:
+        model_family_id = family_res.data[0]["id"]
+    else:
+        family_insert = client.table("ai_model_families").insert({"organisation_id": org_id, "name": model_name}).select("id")
+        insert_res = await asyncio.to_thread(family_insert.execute)
+        if not insert_res.data:
+            raise HTTPException(500, detail="Failed to create AI model family")
+        model_family_id = insert_res.data[0]["id"]
+
+    # Get existing models with this name to determine version
+    existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
+    existing_res = await asyncio.to_thread(existing_query.execute)
+    existing_versions = []
+    for r in existing_res.data:
+        v = r.get("version")
+        if v:
+            parts = v.split(".")
+            if parts[0].isdigit():
+                existing_versions.append(int(parts[0]))
+    next_ver = max(existing_versions) + 1 if existing_versions else 1
+    version_string = f"{next_ver}.0.0-{uuid.uuid4().hex[:6]}"
+
+    # We need a unique storage_path. We will update it after upload in the worker, but for now use a placeholder.
+    temp_storage_path = f"temp/{org_id}/{model_name.replace(' ', '_')}_{version_string}_{job_id}"
+
+    # Insert ai_models row
+    model_insert = (
+        client.table("ai_models")
+        .insert(
+            {
+                "organisation_id": org_id,
+                "model_family_id": model_family_id,
+                "version": version_string,
+                "name": model_name,
+                "description": description,
+                "uploaded_by": user.id,
+                "modified_by": user.id,
+                "storage_path": temp_storage_path,
+                "file_type": "uploading",
+            }
+        )
+        .select("id")
+    )
+    model_row = await asyncio.to_thread(model_insert.execute)
+    if not model_row.data:
+        raise HTTPException(500, detail="Failed to create AI model record")
+    model_id = model_row.data[0]["id"]
+
     await store_blob(
         job_id,
         content,
@@ -61,22 +139,70 @@ async def convert_model(
         },
     )
 
-    from app.jobs.runner import enqueue_local_job
     from app.jobs.definitions import convert_model_job
-    enqueue_local_job(convert_model_job(job_id, user.id))
+    from app.jobs.runner import enqueue_local_job
+
+    enqueue_local_job(convert_model_job(job_id, user.id, model_id))
 
     return ApiResponse(
-        data=JobCreateResponse(job_id=job_id).model_dump(),
+        data={
+            "job_id": job_id,
+            "model_id": model_id,
+            "status": "uploading",
+            "poll_url": f"/api/jobs/{job_id}",
+        },
         meta=ApiMeta(
-            request_id=getattr(request.state, "request_id", None) if request else None
+            request_id=getattr(request.state, "request_id", None) if request else None,
+            message="Model upload started. Poll the job URL for progress.",
         ),
     )
 
 
-from pydantic import BaseModel
-
 class PretrainedModelRequest(BaseModel):
-    sscma_uuid: str
+    source_type: str = "sscma"  # "sscma" or "pretrained"
+    sscma_uuid: str = ""  # Used if source_type == "sscma"
+    architecture: str = ""  # Used if source_type == "pretrained"
+    resolution: str = ""  # Used if source_type == "pretrained"
+    model_name: str = ""  # Custom name if provided
+    description: str = ""  # Custom description if provided
+    organisation_id: str = ""  # Frontend-selected org
+
+
+@router.get("/managed-orgs")
+async def get_managed_orgs(
+    request: Request,
+    user=Depends(get_current_user),
+):
+    """Return organisations where the current user is an organisation_manager."""
+    import structlog
+
+    from app.services.supabase_client import create_service_client
+
+    logger = structlog.get_logger()
+    client = create_service_client()
+
+    manager_roles = await get_manager_roles(user)
+
+    logger.info("managed_orgs_query", email=user.email, user_id=user.id, roles_count=len(manager_roles))
+
+    if not manager_roles:
+        return ApiResponse(
+            data=[],
+            meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
+        )
+
+    # Fetch org names
+    import asyncio
+
+    org_ids = [r["scope_id"] for r in manager_roles]
+    orgs_query = client.table("organisations").select("id, name").in_("id", org_ids)
+    orgs = await asyncio.to_thread(orgs_query.execute)
+
+    return ApiResponse(
+        data=orgs.data or [],
+        meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
+    )
+
 
 @router.get("/sscma/catalog")
 async def sscma_catalog(request: Request):
@@ -88,7 +214,10 @@ async def sscma_catalog(request: Request):
 
     try:
         models = await get_sscma_catalog()
-    except Exception:
+    except Exception as e:
+        import structlog
+
+        structlog.get_logger().error("sscma_catalog_failed", error=str(e))
         models = []
 
     return ApiResponse(
@@ -103,35 +232,39 @@ async def download_pretrained(
     request: Request,
     user=Depends(get_current_user),
 ):
-    """Download, package, and register an SSCMA pre-trained model via async job."""
-    
-    # We must retrieve the org ID the user is operating in.
-    # For now, we query the first org admin/owner.
-    from app.services.supabase_client import create_service_client
-    
-    client = create_service_client()
-    roles = (
-        client.table("user_roles")
-        .select("organisation_id")
-        .eq("user_id", user.id)
-        .in_("role", ["admin", "owner", "member"])
-        .execute()
-    )
+    """Download, package, and register a pre-trained model (SSCMA or built-in)."""
 
-    if not roles.data:
-        raise HTTPException(403, detail="User must belong to an organisation")
+    manager_roles = await get_manager_roles(user)
+    org_id = resolve_managed_org(body.organisation_id, manager_roles)
 
-    org_id = roles.data[0]["organisation_id"]
+    if body.source_type == "pretrained":
+        if not body.architecture or not body.resolution:
+            raise HTTPException(400, detail="Architecture and resolution are required for GitHub pre-trained models.")
 
-    job_id = await create_job()
+        job_id = await create_job()
 
-    from app.jobs.runner import enqueue_local_job
-    from app.jobs.definitions import download_pretrained_job
-    enqueue_local_job(download_pretrained_job(job_id, user.id, body.sscma_uuid, org_id))
+        from app.jobs.definitions import download_github_pretrained_job
+        from app.jobs.runner import enqueue_local_job
 
-    return ApiResponse(
-        data=JobCreateResponse(job_id=job_id).model_dump(),
-        meta=ApiMeta(
-            request_id=getattr(request.state, "request_id", None) if request else None
-        ),
-    )
+        enqueue_local_job(download_github_pretrained_job(job_id, user.id, org_id, body.architecture, body.resolution, body.description))
+
+        return ApiResponse(
+            data=JobCreateResponse(job_id=job_id).model_dump(),
+            meta=ApiMeta(request_id=getattr(request.state, "request_id", None) if request else None),
+        )
+    else:
+        # SSCMA model
+        if not body.sscma_uuid:
+            raise HTTPException(400, detail="sscma_uuid is required for SenseCap models.")
+
+        job_id = await create_job()
+
+        from app.jobs.definitions import download_pretrained_job
+        from app.jobs.runner import enqueue_local_job
+
+        enqueue_local_job(download_pretrained_job(job_id, user.id, body.sscma_uuid, org_id, body.model_name, body.description))
+
+        return ApiResponse(
+            data=JobCreateResponse(job_id=job_id).model_dump(),
+            meta=ApiMeta(request_id=getattr(request.state, "request_id", None) if request else None),
+        )

@@ -2,19 +2,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the API key service and Public Data API domain."""
 
-import pytest
 import hashlib
 
-from app.services.api_key import (
-    generate_api_key,
-    KEY_PREFIX,
-    VALID_SCOPES,
-)
 from app.domain.public_api import (
+    _build_datapackage_descriptor,
     _build_deployments_csv,
     _build_media_csv,
     _build_observations_csv,
-    _build_datapackage_descriptor,
+)
+from app.services.api_key import (
+    KEY_PREFIX,
+    VALID_SCOPES,
+    generate_api_key,
 )
 
 

@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Pydantic schemas for iNaturalist integration."""
 
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
 
 
 class INatCallbackParams(BaseModel):
@@ -49,6 +50,4 @@ class INatObservationStatus(BaseModel):
 class INatBatchPollRequest(BaseModel):
     """Request to poll multiple observation IDs."""
 
-    observation_ids: List[int] = Field(
-        ..., max_length=200, description="Up to 200 observation IDs"
-    )
+    observation_ids: List[int] = Field(..., max_length=200, description="Up to 200 observation IDs")

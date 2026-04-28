@@ -66,6 +66,7 @@ export function GenerateManifest() {
     if (modelSource === 'Pre-trained Model') {
       const availableRes = PRETRAINED_MODELS[ptArchitecture]?.resolutions || []
       if (!availableRes.includes(ptResolution) && availableRes.length > 0) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPtResolution(availableRes[0])
       }
     }
@@ -81,7 +82,7 @@ export function GenerateManifest() {
         try {
           const shape = model.network?.input?.shape || []
           if (shape.length >= 2) return `${shape[0]}x${shape[1]}`
-        } catch (e) {}
+        } catch { /* ignore */ }
       }
     }
     
@@ -229,56 +230,65 @@ export function GenerateManifest() {
             )}
 
             {/* Model Versioning Moved Inside Conditional */}
-            <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.5rem', paddingTop: '1.5rem' }}>
-              <h4 style={{ marginBottom: '0.5rem' }}>🔢 Model Versioning</h4>
-              <p style={{ fontSize: '0.8125rem', opacity: 0.8, marginBottom: '1rem' }}>
-                Define the Model ID and Version matching your model. The firmware will use these to load the correct file.
-              </p>
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-                    Model ID (OP 14)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={modelId}
-                    onChange={(e) => setModelId(Number(e.target.value) || 1)}
-                    style={{
-                      width: '100%',
-                      padding: '0.5rem',
-                      borderRadius: 'var(--radius)',
-                      border: '1px solid var(--border)',
-                      backgroundColor: 'transparent',
-                      color: 'var(--text-color)',
-                    }}
-                  />
+            {modelSource !== 'My Organization Models' ? (
+              <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.5rem', paddingTop: '1.5rem' }}>
+                <h4 style={{ marginBottom: '0.5rem' }}>🔢 Model Versioning</h4>
+                <p style={{ fontSize: '0.8125rem', opacity: 0.8, marginBottom: '1rem' }}>
+                  Define the Model ID and Version matching your model. The firmware will use these to load the correct file.
+                </p>
+                <div style={{ display: 'flex', gap: '1rem' }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
+                      Model ID (OP 14)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={modelId}
+                      onChange={(e) => setModelId(Number(e.target.value) || 1)}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem',
+                        borderRadius: 'var(--radius)',
+                        border: '1px solid var(--border)',
+                        backgroundColor: 'transparent',
+                        color: 'var(--text-color)',
+                      }}
+                    />
+                  </div>
+                  
+                  <div style={{ flex: 1 }}>
+                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
+                      Version (OP 15)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={modelVersion}
+                      onChange={(e) => setModelVersion(Number(e.target.value) || 1)}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem',
+                        borderRadius: 'var(--radius)',
+                        border: '1px solid var(--border)',
+                        backgroundColor: 'transparent',
+                        color: 'var(--text-color)',
+                      }}
+                    />
+                  </div>
                 </div>
-                
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-                    Version (OP 15)
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={modelVersion}
-                    onChange={(e) => setModelVersion(Number(e.target.value) || 1)}
-                    style={{
-                      width: '100%',
-                      padding: '0.5rem',
-                      borderRadius: 'var(--radius)',
-                      border: '1px solid var(--border)',
-                      backgroundColor: 'transparent',
-                      color: 'var(--text-color)',
-                    }}
-                  />
-                </div>
+                <p style={{ fontSize: '0.8125rem', opacity: 0.7, marginTop: '1rem' }}>
+                  Target Filename: <code>{modelId}V{modelVersion}.TFL</code>
+                </p>
               </div>
-              <p style={{ fontSize: '0.8125rem', opacity: 0.7, marginTop: '1rem' }}>
-                Target Filename: <code>{modelId}V{modelVersion}.TFL</code>
-              </p>
-            </div>
+            ) : (
+              <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.5rem', paddingTop: '1.5rem' }}>
+                <h4 style={{ marginBottom: '0.5rem' }}>🔢 Automatic Model Versioning</h4>
+                <p style={{ fontSize: '0.8125rem', opacity: 0.8 }}>
+                  Organization models are automatically versioned by the backend. The manifest will use the model's assigned firmware ID and version number automatically.
+                </p>
+              </div>
+            )}
 
           </div>
         )}

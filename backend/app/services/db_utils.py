@@ -5,16 +5,14 @@
 Direct port of db_utils.py fetch_all_rows() for backend use.
 """
 
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 import structlog
 
 logger = structlog.get_logger()
 
 
-def fetch_all_rows(
-    client, table: str, select: str = "*", page_size: int = 1000
-) -> List[Dict[str, Any]]:
+def fetch_all_rows(client, table: str, select: str = "*", page_size: int = 1000) -> List[Dict[str, Any]]:
     """Fetch all rows from a Supabase table using pagination.
 
     Args:
@@ -30,12 +28,7 @@ def fetch_all_rows(
     offset = 0
 
     while True:
-        response = (
-            client.table(table)
-            .select(select)
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
+        response = client.table(table).select(select).range(offset, offset + page_size - 1).execute()
 
         if not response.data:
             break

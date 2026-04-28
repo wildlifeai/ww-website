@@ -104,6 +104,11 @@ uvicorn app.main:app --reload --port 8000
                                    │  generate_manifest_job        │
                                    │  upload_drive_images          │
                                    └───────────────────────────────┘
+
+> **Note:** The diagram shows the target architecture with a separate ARQ Worker.
+> Currently, jobs run **in-process** as asyncio background tasks (see `jobs/runner.py`)
+> with state persisted to the Supabase `api_jobs` table. Redis + ARQ is the
+> migration target — see [docs/v2-architecture-plan.md](../docs/v2-architecture-plan.md).
 ```
 
 ### Design Principles
@@ -137,10 +142,11 @@ backend/
 │   │   ├── model.py            # Vela conversion + upload/register
 │   │   └── photo_preprocessing.py  # GPS→local time, Drive folder/file naming
 │   │
-│   ├── jobs/                   # Async job system (Local Loop + Supabase)
-│   │   ├── definitions.py      # Job functions (run by worker)
-│   │   ├── store.py            # Redis-backed job status read/write
-│   │   └── worker.py           # ARQ WorkerSettings
+│   ├── jobs/                   # Async job system (in-memory + Supabase sync)
+│   │   ├── definitions.py      # Job functions (heavy async tasks)
+│   │   ├── runner.py           # In-process asyncio background runner
+│   │   ├── store.py            # In-memory job store with Supabase persistence
+│   │   └── worker.py           # ARQ WorkerSettings (target architecture)
 │   │
 │   ├── middleware/             # Cross-cutting concerns
 │   │   ├── logging.py          # Structured JSON request logging
@@ -170,7 +176,7 @@ backend/
 │   └── services/               # Infrastructure adapters
 │       ├── azure_storage.py    # Azure Blob Storage (temp image buffer)
 │       ├── blob_store.py       # Local disk temp file storage
-│       ├── cache.py            # Simple thread-safe dict cache
+│       ├── cache.py            # In-memory TTL cache (Redis target)
 │       ├── db_utils.py         # Paginated Supabase queries
 │       ├── google_drive.py     # Google Drive upload + dedup
 │       ├── http_client.py      # httpx + tenacity retry
@@ -180,13 +186,17 @@ backend/
 │
 ├── tests/
 │   ├── conftest.py             # Fixtures + env stubs
-│   ├── test_exif_domain.py     # 14 tests
-│   ├── test_lorawan_domain.py  # 16 tests
-│   ├── test_manifest_domain.py # 7 tests
-│   ├── test_model_domain.py    # 9 tests
-│   └── test_routers.py         # 5 tests
+│   ├── test_exif_domain.py     # EXIF parsing + deployment matching
+│   ├── test_firmware_contract.py # Firmware contract validation
+│   ├── test_inaturalist.py     # iNaturalist integration
+│   ├── test_lorawan_domain.py  # Payload parsing, schema, webhooks
+│   ├── test_manifest_domain.py # C hex arrays, directory flattening
+│   ├── test_model_domain.py    # ZIP parsing, labels, 8.3 filenames
+│   ├── test_public_api.py      # Public API endpoint tests
+│   ├── test_routers.py         # Health check, OpenAPI, smoke tests
+│   └── test_upload_pipeline.py # Upload pipeline integration
 │
-├── Dockerfile                  # Multi-stage (base/dev/worker)
+├── Dockerfile                  # Multi-stage (base/dev)
 ├── pyproject.toml              # ruff + pytest config
 ├── requirements.txt            # Production dependencies
 └── requirements-dev.txt        # Test/dev dependencies
@@ -337,7 +347,9 @@ See [docs/api-reference.md](../docs/api-reference.md) for the full endpoint refe
 
 ## Async Job System
 
-The backend uses an **in-process Asyncio Runner** backed by **Supabase** for persistence. This allows it to run in a single container (e.g. Azure Container Apps) while safely recovering uncompleted jobs on reboot. 
+The backend uses an **in-process asyncio runner** backed by **Supabase** for persistence. This allows it to run in a single container (Azure Container Apps) while safely recovering uncompleted jobs on reboot.
+
+> **Target architecture**: Redis + ARQ with a separate worker container. See [docs/v2-architecture-plan.md](../docs/v2-architecture-plan.md). The current in-memory approach will be replaced when Redis is provisioned.
 
 ### How It Works
 
@@ -535,8 +547,8 @@ Services are infrastructure adapters — they talk to external systems.
 | `http_client` | `http_client.py` | Async HTTP with automatic retries (3 attempts, exponential backoff) |
 | `storage` | `storage.py` | Supabase Storage upload/download with SDK→public URL fallback |
 | `vela` | `vela.py` | Ethos-U Vela CLI subprocess wrapper |
-| `cache` | `cache.py` | Redis cache-aside pattern with configurable TTL |
-| `blob_store` | `blob_store.py` | Temp file storage in Redis (API → Worker transfer) |
+| `cache` | `cache.py` | In-memory TTL cache (Redis migration planned) |
+| `blob_store` | `blob_store.py` | Local disk temp file storage |
 | `db_utils` | `db_utils.py` | Paginated Supabase table queries |
 
 ### Cache Pattern
@@ -603,7 +615,7 @@ mypy app/
 ### Adding a New Async Job
 
 1. Define the job function in `jobs/definitions.py`
-2. Register it in the `JOBS` list at the bottom of the same file
-3. Create the job from the router: `job_id = await create_job()`
-4. Enqueue via: `await request.app.state.arq_pool.enqueue_job("job_name", ...)`
-5. The worker picks it up automatically — no restart needed (in dev mode with volume mounts)
+2. Create the job from the router: `job_id = await store.create_job()`
+3. Enqueue via the local runner: `enqueue_local_job(your_async_function(job_id, ...))`
+4. The job runs in-process as an asyncio background task
+5. The frontend polls `GET /api/jobs/{id}` every 2 seconds via the `useJob` hook

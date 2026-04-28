@@ -9,13 +9,13 @@ GET  /api/lorawan/messages             — List messages (auth required)
 GET  /api/lorawan/messages/{device_eui}/latest — Latest parsed message
 """
 
-from fastapi import APIRouter, HTTPException, Header, Request, Depends
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 
 from app.config import settings
-from app.schemas.common import ApiResponse, ApiMeta
-from app.schemas.lorawan import TTNUplink, ChirpstackUplink
-from app.domain.lorawan import LoRaWANDomain
 from app.dependencies import get_current_user
+from app.domain.lorawan import LoRaWANDomain
+from app.schemas.common import ApiMeta, ApiResponse
+from app.schemas.lorawan import ChirpstackUplink, TTNUplink
 
 router = APIRouter(prefix="/api/lorawan", tags=["lorawan"])
 _domain = LoRaWANDomain()
@@ -54,9 +54,7 @@ async def receive_chirpstack_webhook(
     x_webhook_secret: str = Header("", alias="X-Webhook-Secret"),
 ):
     """Receive a Chirpstack v4 uplink webhook."""
-    _validate_webhook_secret(
-        x_webhook_secret, settings.LORAWAN_CHIRPSTACK_WEBHOOK_SECRET or settings.LORAWAN_WEBHOOK_SECRET
-    )
+    _validate_webhook_secret(x_webhook_secret, settings.LORAWAN_CHIRPSTACK_WEBHOOK_SECRET or settings.LORAWAN_WEBHOOK_SECRET)
 
     parsed = await _domain.process_chirpstack_uplink(payload)
 
