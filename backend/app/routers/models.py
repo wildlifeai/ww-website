@@ -89,11 +89,13 @@ async def convert_model(
     # Get existing models with this name to determine version
     existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
     existing_res = await asyncio.to_thread(existing_query.execute)
-    existing_versions = [
-        int(r["version"].split(".")[0])
-        for r in existing_res.data
-        if r.get("version") and "." in r["version"] and r["version"].split(".")[0].isdigit()
-    ]
+    existing_versions = []
+    for r in existing_res.data:
+        v = r.get("version")
+        if v:
+            parts = v.split(".")
+            if parts[0].isdigit():
+                existing_versions.append(int(parts[0]))
     next_ver = max(existing_versions) + 1 if existing_versions else 1
     version_string = f"{next_ver}.0.0-{uuid.uuid4().hex[:6]}"
 

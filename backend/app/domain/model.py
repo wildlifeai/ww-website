@@ -133,7 +133,9 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
 
         # Check if the user uploaded an ALREADY converted firmware package
         # containing a .tfl file and labels.txt
-        precompiled_tfl = list(work_dir.glob("*.tfl")) + list(work_dir.glob("*.TFL"))
+        precompiled_tfl = (
+            list(work_dir.glob("*.tfl")) + list(work_dir.glob("*.TFL")) + list(work_dir.glob("*.tflite")) + list(work_dir.glob("*.TFLITE"))
+        )
         if precompiled_tfl and (work_dir / "labels.txt").exists():
             tfl_file = precompiled_tfl[0]
             logger.info("model_already_converted", file=tfl_file.name)
