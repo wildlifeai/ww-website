@@ -613,7 +613,7 @@ def fetch_latest_default_model(supabase: Client) -> Optional[Dict]:
     Fetch the default AI model.
     Prioritizes the 'Person Detector' model, otherwise falls back to the latest 
     available model from the General organization.
-    Returns dict with storage_path and metadata, or None if not found.
+    Returns dict with model_path, labels_path and metadata, or None if not found.
     """
     try:
         # FIX: Use the passed client, do not call get_supabase()
@@ -815,12 +815,20 @@ def create_manifest_package(default_client: Optional[Client]) -> Optional[bytes]
             except:
                 pass
         else:
-            model_zip_path = temp_dir / "ai_model_db.zip"
-            path = ai_model['storage_path']
-            if download_from_storage(supabase, 'ai-models', path, model_zip_path, silent=True):
-                with zipfile.ZipFile(model_zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(manifest_dir)
+            model_tfl_path = temp_dir / "ai_model_db.tfl"
+            labels_txt_path = temp_dir / "ai_model_db.txt"
+            m_path = ai_model['model_path']
+            l_path = ai_model['labels_path']
+            
+            model_success = download_from_storage(supabase, 'ai-models', m_path, model_tfl_path, silent=True)
+            labels_success = download_from_storage(supabase, 'ai-models', l_path, labels_txt_path, silent=True)
+            
+            if model_success:
+                shutil.copy2(model_tfl_path, manifest_dir / "model.TFL")
                 st.success(f"✅ Added AI model: {ai_model.get('name', 'latest')}")
+            if labels_success:
+                shutil.copy2(labels_txt_path, manifest_dir / "model.TXT")
+                st.success(f"✅ Added AI model labels: {ai_model.get('name', 'latest')}")
         
         # 3. Fetch and download latest Himax firmware image (output.img)
         himax_found = False
@@ -1057,32 +1065,63 @@ def upload_model_to_storage(
     model_name: str,
     version: str,
     org_id: str
-) -> str:
+) -> Tuple[str, str]:
     """
-    Upload ai_model.zip to Supabase Storage.
-    Storage path: <org_id>/<model_name>-custom-<version>/ai_model.zip
-    Returns: storage_path
+    Extract model from zip, generate labels.txt, and upload both to Supabase Storage.
+    Returns: (model_path, labels_path)
     """
+    import zipfile
+    import io
+
     # Sanitize model_name and version to prevent path traversal
     safe_model_name = os.path.basename(model_name)
     safe_version = os.path.basename(version)
     
-    # Generate storage path following the naming convention
-    # New format: {org_id}/{model_name}-custom-{version}/ai_model.zip
-    storage_path = f"{org_id}/{safe_model_name}-custom-{safe_version}/ai_model.zip"
+    # Generate storage paths
+    # We use a custom directory for this uploaded model
+    model_path = f"{org_id}/{safe_model_name}-custom-{safe_version}/model.TFL"
+    labels_path = f"{org_id}/{safe_model_name}-custom-{safe_version}/labels.TXT"
     
+    # 1. Extract .tflite or .tfl from the uploaded ZIP
+    model_binary = None
     try:
-        # Upload to ai-models bucket
-        response = supabase.storage.from_('ai-models').upload(
-            path=storage_path,
-            file=manifest_bytes,
+        with zipfile.ZipFile(io.BytesIO(manifest_bytes), 'r') as z:
+            for filename in z.namelist():
+                if filename.lower().endswith('.tfl') or filename.lower().endswith('.tflite'):
+                    model_binary = z.read(filename)
+                    break
+    except zipfile.BadZipFile:
+        # Maybe it's just the binary directly?
+        model_binary = manifest_bytes
+
+    if not model_binary:
+        raise Exception("Could not find a .tflite or .tfl file inside the uploaded model.")
+
+    # 2. Generate labels.txt
+    labels_content = b"no person\nperson\n"
+
+    try:
+        # Upload model to ai-models bucket
+        supabase.storage.from_('ai-models').upload(
+            path=model_path,
+            file=model_binary,
             file_options={
-                "content-type": "application/zip",
-                "upsert": "true"  # Allow overwriting existing versions
+                "content-type": "application/octet-stream",
+                "upsert": "true"
             }
         )
         
-        return storage_path
+        # Upload labels to ai-models bucket
+        supabase.storage.from_('ai-models').upload(
+            path=labels_path,
+            file=labels_content,
+            file_options={
+                "content-type": "text/plain",
+                "upsert": "true"
+            }
+        )
+        
+        return model_path, labels_path
         
     except Exception as e:
         raise Exception(f"Storage upload failed: {str(e)}")
@@ -1095,7 +1134,8 @@ def register_model_in_db(
     description: str,
     org_id: str,
     user_id: str,
-    storage_path: str,
+    model_path: str,
+    labels_path: str,
     file_size_bytes: int,
     detection_capabilities: List[str]
 ) -> Dict:
@@ -1121,9 +1161,10 @@ def register_model_in_db(
             "organisation_id": org_id,
             "uploaded_by": user_id,
             "modified_by": user_id,
-            "storage_path": storage_path,
+            "model_path": model_path,
+            "labels_path": labels_path,
             "file_size_bytes": file_size_bytes,
-            "file_type": "manifest",
+            "file_type": "tflite",
             "detection_capabilities": detection_capabilities
         }
         
@@ -1150,11 +1191,11 @@ def register_model_in_db(
     except Exception as e:
         # Rollback: delete from storage
         try:
-            supabase.storage.from_('ai-models').remove([storage_path])
+            supabase.storage.from_('ai-models').remove([model_path, labels_path])
         except Exception as rollback_e:
             # Log critical rollback failure
-            st.error(f"⚠️ CRITICAL: Failed to rollback storage file {storage_path}. Error: {rollback_e}")
-            st.warning(f"⚠️ Manual cleanup required: Please remove '{storage_path}' from the 'ai-models' bucket in Supabase.")
+            st.error(f"⚠️ CRITICAL: Failed to rollback storage files {model_path}, {labels_path}. Error: {rollback_e}")
+            st.warning(f"⚠️ Manual cleanup required: Please remove '{model_path}' and '{labels_path}' from the 'ai-models' bucket in Supabase.")
 
         # Re-raise with context
         raise Exception(f"Database registration failed: {str(e)}") from e
@@ -1184,14 +1225,14 @@ def upload_and_register_model(
     # 2. Upload to storage
     with st.spinner("📤 Uploading to storage..."):
         try:
-            storage_path = upload_model_to_storage(
+            model_path, labels_path = upload_model_to_storage(
                 supabase=supabase,
                 manifest_bytes=manifest_bytes,
                 model_name=model_name,
                 version=model_version,
                 org_id=org_id
             )
-            st.success(f"✅ Uploaded to storage: `{storage_path}`")
+            st.success(f"✅ Uploaded to storage: `{model_path}` and `{labels_path}`")
         except Exception as e:
             st.error(f"❌ {str(e)}")
             return False
@@ -1206,7 +1247,8 @@ def upload_and_register_model(
                 description=description,
                 org_id=org_id,
                 user_id=user.id,
-                storage_path=storage_path,
+                model_path=model_path,
+                labels_path=labels_path,
                 file_size_bytes=len(manifest_bytes),
                 detection_capabilities=labels
             )
@@ -1397,7 +1439,7 @@ if mode == "⬇️ Download Firmware/Models":
                  sel_org = st.selectbox("Organization", orgs, format_func=lambda x: x['name'])
                  # Fetch models
                  try:
-                     models_resp = supabase.table('ai_models').select('name, version, storage_path, description, id').eq('organisation_id', sel_org['id']).is_('deleted_at', 'null').execute()
+                     models_resp = supabase.table('ai_models').select('name, version, model_path, labels_path, description, id').eq('organisation_id', sel_org['id']).is_('deleted_at', 'null').execute()
                      if models_resp.data:
                          model_opts = {f"{m['name']} v{m['version']}": m for m in models_resp.data}
                          sel_model_key = st.selectbox("Select Model", list(model_opts.keys()))
@@ -1522,9 +1564,18 @@ if mode == "⬇️ Download Firmware/Models":
                              model_zip_bytes, _ = process_sscma_model(selected_sscma_entry)
                          
                     elif model_source == "My Organization Models" and is_logged_in and selected_model_data:
-                         mz_path = base_dir / "model_temp.zip"
-                         if download_from_storage(supabase, 'ai-models', selected_model_data['storage_path'], mz_path, silent=False):
-                                model_zip_bytes = mz_path.read_bytes()
+                         m_path = base_dir / "model_temp.TFL"
+                         l_path = base_dir / "labels_temp.TXT"
+                         model_success = download_from_storage(supabase, 'ai-models', selected_model_data['model_path'], m_path, silent=False)
+                         labels_success = download_from_storage(supabase, 'ai-models', selected_model_data['labels_path'], l_path, silent=False)
+                         
+                         if model_success:
+                             shutil.copy2(m_path, manifest_dir / "model.TFL")
+                         if labels_success:
+                             shutil.copy2(l_path, manifest_dir / "model.TXT")
+                         
+                         # Skip zip extraction logic since it's already extracted directly
+                         model_zip_bytes = None
                     
                     if model_zip_bytes:
                         # Extract model zip into MANIFEST
