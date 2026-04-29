@@ -571,7 +571,7 @@ def run_conversion(uploaded_file):
             model_bytes = f.read()
 
         st.success("ai_model.zip created successfully!")
-        return model_bytes
+        return model_bytes, labels
 
 
 
@@ -1064,7 +1064,8 @@ def upload_model_to_storage(
     manifest_bytes: bytes,
     model_name: str,
     version: str,
-    org_id: str
+    org_id: str,
+    labels: List[str]
 ) -> Tuple[str, str]:
     """
     Extract model from zip, generate labels.txt, and upload both to Supabase Storage.
@@ -1098,7 +1099,7 @@ def upload_model_to_storage(
         raise Exception("Could not find a .tflite or .tfl file inside the uploaded model.")
 
     # 2. Generate labels.txt
-    labels_content = b"no person\nperson\n"
+    labels_content = "\n".join(labels).encode('utf-8') + b"\n"
 
     try:
         # Upload model to ai-models bucket
@@ -1230,7 +1231,8 @@ def upload_and_register_model(
                 manifest_bytes=manifest_bytes,
                 model_name=model_name,
                 version=model_version,
-                org_id=org_id
+                org_id=org_id,
+                labels=labels
             )
             st.success(f"✅ Uploaded to storage: `{model_path}` and `{labels_path}`")
         except Exception as e:
@@ -1570,9 +1572,9 @@ if mode == "⬇️ Download Firmware/Models":
                          labels_success = download_from_storage(supabase, 'ai-models', selected_model_data['labels_path'], l_path, silent=False)
                          
                          if model_success:
-                             shutil.copy2(m_path, manifest_dir / "model.TFL")
+                             shutil.copy2(m_path, manifest_dir / target_model_filename)
                          if labels_success:
-                             shutil.copy2(l_path, manifest_dir / "model.TXT")
+                             shutil.copy2(l_path, manifest_dir / target_model_filename.replace(".TFL", ".TXT"))
                          
                          # Skip zip extraction logic since it's already extracted directly
                          model_zip_bytes = None
