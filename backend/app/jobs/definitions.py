@@ -110,40 +110,39 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
 
         # 2. Convert through Vela / Normalize to .TFL
         start_time = time.time()
-        model_bytes, labels = await convert_uploaded_model(file_content, filename)
+        tfl_bytes, txt_bytes, labels = await convert_uploaded_model(file_content, filename)
         conversion_ms = int((time.time() - start_time) * 1000)
         await update_job(job_id, progress=0.7)
-        logger.info("convert_job_conversion_complete", duration_ms=conversion_ms, output_bytes=len(model_bytes), labels=labels, **log_ctx)
+        logger.info(
+            "convert_job_conversion_complete",
+            duration_ms=conversion_ms,
+            tfl_bytes=len(tfl_bytes),
+            txt_bytes=len(txt_bytes),
+            labels=labels,
+            **log_ctx,
+        )
 
-        import io
-        import zipfile
-
-        file_hash = ""
-        # Hash the .TFL inside the zip (this is what the mobile app transfers)
-        with zipfile.ZipFile(io.BytesIO(model_bytes), "r") as zf:
-            for name in zf.namelist():
-                if name.upper().endswith(".TFL"):
-                    tfl_content = zf.read(name)
-                    file_hash = hashlib.sha256(tfl_content).hexdigest()
-                    break
-
-        if not file_hash:
-            # Fallback to hashing the zip itself if no TFL found inside
-            file_hash = hashlib.sha256(model_bytes).hexdigest()
+        # Hash the .TFL (this is what the mobile app transfers)
+        file_hash = hashlib.sha256(tfl_bytes).hexdigest()
 
         # 3. Upload result to structured storage path
-        # ai-models/{org_id}/{firmware_model_id}/{version_number}/ai_model.zip
-        result_path = f"{org_id}/{firmware_id}/{version_num}/ai_model.zip"
+        result_path_tfl = f"{org_id}/{firmware_id}/{version_num}/model.tfl"
+        result_path_txt = f"{org_id}/{firmware_id}/{version_num}/labels.txt"
 
         # Offload blocking upload to thread
-
         await asyncio.to_thread(
             client.storage.from_("ai-models").upload,
-            path=result_path,
-            file=model_bytes,
-            file_options={"content-type": "application/zip", "upsert": True},
+            path=result_path_tfl,
+            file=tfl_bytes,
+            file_options={"content-type": "application/octet-stream", "upsert": True},
         )
-        logger.info("convert_job_upload_complete", storage_path=result_path, **log_ctx)
+        await asyncio.to_thread(
+            client.storage.from_("ai-models").upload,
+            path=result_path_txt,
+            file=txt_bytes,
+            file_options={"content-type": "text/plain", "upsert": True},
+        )
+        logger.info("convert_job_upload_complete", path_tfl=result_path_tfl, path_txt=result_path_txt, **log_ctx)
 
         # 4. Storage upload is verified by Supabase SDK not raising an exception
         logger.info("convert_job_storage_verified", file_hash=file_hash, **log_ctx)
@@ -152,9 +151,9 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         await update_model_status(
             status="validated",
             file_hash=file_hash,
-            model_path=result_path,
-            labels_path=result_path,
-            file_size_bytes=len(model_bytes),
+            model_path=result_path_tfl,
+            labels_path=result_path_txt,
+            file_size_bytes=len(tfl_bytes) + len(txt_bytes),
             detection_capabilities=labels,
             file_type="model",
         )
@@ -321,7 +320,7 @@ async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, or
 
         # 1. Download, optionally compile with Vela, package labels
         # Could take 30-60s if Vela is invoked
-        model_bytes, labels, metadata = await convert_pretrained_model(sscma_uuid)
+        tfl_bytes, txt_bytes, labels, metadata = await convert_pretrained_model(sscma_uuid)
         await update_job(job_id, progress=0.6)
 
         final_name = custom_name if custom_name else metadata.get("name", "Unknown SSCMA Model")
@@ -329,7 +328,8 @@ async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, or
 
         # 2. Upload to storage and register in DB
         db_model = await upload_and_register(
-            model_bytes=model_bytes,
+            tfl_bytes=tfl_bytes,
+            txt_bytes=txt_bytes,
             model_name=final_name,
             model_version=metadata.get("version", "1.0.0"),
             description=final_desc,
@@ -355,20 +355,22 @@ async def download_github_pretrained_job(job_id: str, user_id: str, org_id: str,
     try:
         from app.domain.model import convert_github_pretrained_model, upload_and_register
 
-        model_bytes, labels, metadata = await convert_github_pretrained_model(architecture, resolution)
+        tfl_bytes, txt_bytes, labels, metadata = await convert_github_pretrained_model(architecture, resolution)
         await update_job(job_id, progress=0.6)
 
         final_name = metadata.get("name", f"{architecture} ({resolution})")
         final_desc = custom_desc if custom_desc else metadata.get("description", "Imported from GitHub Model Zoo")
 
         db_model = await upload_and_register(
-            model_bytes=model_bytes,
+            tfl_bytes=tfl_bytes,
+            txt_bytes=txt_bytes,
             model_name=final_name,
             model_version=metadata.get("version", "1.0.0"),
             description=final_desc,
             labels=labels,
             org_id=org_id,
             user_id=user_id,
+            firmware_model_id=metadata.get("firmware_model_id"),
         )
 
         await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0)

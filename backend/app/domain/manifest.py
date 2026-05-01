@@ -515,23 +515,14 @@ async def generate_manifest(
                 await _report(f"Downloading model {proj_tfl}…")
                 m_content = await download_from_storage("ai-models", model_info["model_path"])
                 if m_content:
-                    if model_info["model_path"].lower().endswith(".zip"):
-                        with zipfile.ZipFile(io.BytesIO(m_content)) as zf:
-                            for name in zf.namelist():
-                                if name.upper().endswith(".TFL"):
-                                    (manifest_dir / proj_tfl).write_bytes(zf.read(name))
-                                    model_added = True
-                                elif name.upper().endswith(".TXT"):
-                                    (manifest_dir / proj_txt).write_bytes(zf.read(name))
-                    else:
-                        (manifest_dir / proj_tfl).write_bytes(m_content)
-                        model_added = True
+                    (manifest_dir / proj_tfl).write_bytes(m_content)
+                    model_added = True
 
-                        # Download labels
-                        await _report(f"Downloading labels {proj_txt}…")
-                        l_content = await download_from_storage("ai-models", model_info["labels_path"])
-                        if l_content:
-                            (manifest_dir / proj_txt).write_bytes(l_content)
+                    # Download labels
+                    await _report(f"Downloading labels {proj_txt}…")
+                    l_content = await download_from_storage("ai-models", model_info["labels_path"])
+                    if l_content:
+                        (manifest_dir / proj_txt).write_bytes(l_content)
 
                 # Inject OP 14/15 into CONFIG.TXT
                 await _report("Injecting model parameters into CONFIG.TXT…")
@@ -601,35 +592,30 @@ async def generate_manifest(
                     )
                     if response.data:
                         model = response.data[0]
-                        # For ZIP models, model_path contains both
-                        content = await download_from_storage("ai-models", model["model_path"])
-                        if content:
-                            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                                zf.extractall(manifest_dir)
+                        family = model.get("ai_model_families")
+                        firmware_id = family.get("firmware_model_id") if family else None
+                        if not firmware_id:
+                            raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
+                        version_str = model.get("version", "1")
+                        version = version_str.split(".")[0] if "." in version_str else version_str
+
+                        name_stem = f"{firmware_id}V{version}"
+                        if len(name_stem) > 8:
+                            name_stem = name_stem[:8]
+
+                        dyn_tfl = f"{name_stem}.TFL"
+                        dyn_txt = f"{name_stem}.TXT"
+
+                        # Download model binary
+                        m_content = await download_from_storage("ai-models", model["model_path"])
+                        if m_content:
+                            (manifest_dir / dyn_tfl).write_bytes(m_content)
                             model_added = True
 
-                            family = model.get("ai_model_families")
-                            firmware_id = family.get("firmware_model_id") if family else None
-                            if not firmware_id:
-                                raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
-                            version_str = model.get("version", "1")
-                            version = version_str.split(".")[0] if "." in version_str else version_str
-
-                            name_stem = f"{firmware_id}V{version}"
-                            if len(name_stem) > 8:
-                                name_stem = name_stem[:8]
-
-                            dyn_tfl = f"{name_stem}.TFL"
-                            dyn_txt = f"{name_stem}.TXT"
-
-                            for f in manifest_dir.iterdir():
-                                if f.is_file() and f.suffix.upper() == ".TFL":
-                                    f.rename(manifest_dir / dyn_tfl)
-                                    break
-                            for f in manifest_dir.iterdir():
-                                if f.is_file() and f.suffix.upper() == ".TXT":
-                                    f.rename(manifest_dir / dyn_txt)
-                                    break
+                        # Download labels
+                        l_content = await download_from_storage("ai-models", model["labels_path"])
+                        if l_content:
+                            (manifest_dir / dyn_txt).write_bytes(l_content)
 
                             logger.info(
                                 "org_model_added",
