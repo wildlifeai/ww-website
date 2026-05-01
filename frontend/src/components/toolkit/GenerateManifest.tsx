@@ -5,111 +5,118 @@ import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { JobProgress } from '../common'
 
-const PRETRAINED_MODELS: Record<string, { resolutions: string[] }> = {
-  "Person Detection": { resolutions: ["96x96"] },
-  "YOLOv8 Object Detection": { resolutions: ["192x192"] },
-  "YOLOv11 Object Detection": { resolutions: ["192x192", "224x224"] },
-  "YOLOv8 Pose Estimation": { resolutions: ["256x256"] }
-}
-
 export function GenerateManifest() {
   const { user } = useAuth()
-  
-  const [modelSource, setModelSource] = useState('Pre-trained Model')
-  
-  // Pre-trained state
-  const [ptArchitecture, setPtArchitecture] = useState('Person Detection')
-  const [ptResolution, setPtResolution] = useState('96x96')
-  
-  // SenseCap state
-  const [sscmaModelId, setSscmaModelId] = useState<string>('')
-  
-  // Org state
-  const [orgModelId, setOrgModelId] = useState<string>('')
 
-  // Config parameters
-  const [modelId, setModelId] = useState<number>(1)
-  const [modelVersion, setModelVersion] = useState<number>(1)
   const [jobId, setJobId] = useState<string | null>(null)
 
-  // Fetch SenseCap Models
-  const { data: sscmaModels, isLoading: isLoadingSscma } = useQuery({
-    queryKey: ['sscmaModels'],
+  // Project-based state
+  const [selectedOrgId, setSelectedOrgId] = useState<string>('')
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('')
+  const [githubBranch, setGithubBranch] = useState<string>('main')
+
+  // Fetch GitHub branches
+  const { data: branches } = useQuery({
+    queryKey: ['manifestBranches'],
     queryFn: async () => {
-      const res = await fetch('https://raw.githubusercontent.com/Seeed-Studio/sscma-model-zoo/main/models.json')
-      const json = await res.json()
-      return json.models || []
+      const res = await apiClient.get('/api/manifest/branches')
+      return (res as any).data || ['main']
     },
-    enabled: modelSource === 'SenseCap Models'
   })
 
-  // Fetch Organization Models
-  const { data: orgModels, isLoading: isLoadingOrg } = useQuery({
-    queryKey: ['orgModels', user?.id],
+  // Fetch user's organisations
+  const { data: userOrgs } = useQuery({
+    queryKey: ['userOrgs', user?.id],
     queryFn: async () => {
-      // First get user's orgs
-      // Simplified: just get all ai_models where user's org matches.
-      // In a full implementation, you'd fetch orgs first, then models.
-      // For now, we fetch 'ai_models' where deleted_at is null
-      const { data, error } = await supabase
-        .from('ai_models')
-        .select('*')
+      const { data: roles, error: rolesErr } = await supabase
+        .from('user_roles')
+        .select('scope_id')
+        .eq('user_id', user!.id)
+        .eq('scope_type', 'organisation')
+        .eq('is_active', true)
         .is('deleted_at', null)
+      if (rolesErr) throw rolesErr
+      if (!roles?.length) return []
+
+      const orgIds = [...new Set(roles.map(r => r.scope_id))]
+      const { data: orgs, error: orgsErr } = await supabase
+        .from('organisations')
+        .select('id, name')
+        .in('id', orgIds)
+      if (orgsErr) throw orgsErr
+      return (orgs || []).sort((a, b) => a.name.localeCompare(b.name))
+    },
+    enabled: !!user
+  })
+
+  // Fetch projects for selected org
+  const { data: projects, isLoading: isLoadingProjects } = useQuery({
+    queryKey: ['orgProjects', selectedOrgId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('id, name, model_id, ai_models(id, name, version, model_family_id, version_number, ai_model_families(firmware_model_id))')
+        .eq('organisation_id', selectedOrgId)
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .order('name')
       if (error) throw error
       return data || []
     },
-    enabled: modelSource === 'My Organization Models' && !!user
+    enabled: !!selectedOrgId
   })
 
-  // Automatically update resolution based on architecture
+  // Auto-select first org
   useEffect(() => {
-    if (modelSource === 'Pre-trained Model') {
-      const availableRes = PRETRAINED_MODELS[ptArchitecture]?.resolutions || []
-      if (!availableRes.includes(ptResolution) && availableRes.length > 0) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setPtResolution(availableRes[0])
-      }
+    if (userOrgs?.length && !selectedOrgId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedOrgId(userOrgs[0].id)
     }
-  }, [ptArchitecture, modelSource, ptResolution])
+  }, [userOrgs, selectedOrgId])
 
-  // Figure out the active resolution based on the selections
-  const computedResolution = useMemo(() => {
-    if (modelSource === 'Pre-trained Model') return ptResolution
-    
-    if (modelSource === 'SenseCap Models' && sscmaModelId && sscmaModels) {
-      const model = (sscmaModels as any[]).find(m => m.uuid === sscmaModelId || m.name === sscmaModelId)
-      if (model) {
-        try {
-          const shape = model.network?.input?.shape || []
-          if (shape.length >= 2) return `${shape[0]}x${shape[1]}`
-        } catch { /* ignore */ }
-      }
+  // Auto-select first project
+  useEffect(() => {
+    if (projects?.length && !selectedProjectId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedProjectId(projects[0].id)
+    } else if (projects && !projects.length) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedProjectId('')
     }
-    
-    // For org models, whatever the model implies, we usually store it or return default
-    return "Unknown"
-  }, [modelSource, ptResolution, sscmaModelId, sscmaModels])
+  }, [projects, selectedProjectId])
+
+  // Resolve model info from selected project
+  const projectModelInfo = useMemo(() => {
+    if (!projects || !selectedProjectId) return null
+    const project = projects.find((p: any) => p.id === selectedProjectId) as any
+    if (!project) return null
+    if (!project.model_id || !project.ai_models) return { hasModel: false }
+
+    const model = project.ai_models
+    const family = model.ai_model_families
+    const fwId = family?.firmware_model_id
+    const verNum = model.version_number
+
+    if (!fwId || !verNum) return { hasModel: true, incomplete: true, name: model.name }
+
+    return {
+      hasModel: true,
+      incomplete: false,
+      name: model.name,
+      version: model.version,
+      firmwareModelId: fwId,
+      versionNumber: verNum,
+      filename: `${fwId}V${verNum}.TFL`,
+    }
+  }, [projects, selectedProjectId])
 
   const generateMutation = useMutation({
     mutationFn: () => {
-      // Build final payload
-      let finalModelName = 'None'
-      
-      if (modelSource === 'Pre-trained Model') {
-        finalModelName = `${ptArchitecture} (${ptResolution})`
-      } else if (modelSource === 'SenseCap Models') {
-        finalModelName = sscmaModelId
-      } else if (modelSource === 'My Organization Models') {
-        const found = orgModels?.find((m: any) => m.id === orgModelId)
-        finalModelName = found ? `${found.name} v${found.version}` : 'Unknown'
-      }
-
       return apiClient.post('/api/manifest/generate', {
-        model_source: modelSource,
-        model_name: finalModelName,
-        model_id: modelId,
-        model_version: modelVersion,
-        resolution: computedResolution,
+        model_source: 'My Project',
+        model_name: projectModelInfo?.name || 'None',
+        project_id: selectedProjectId,
+        github_branch: githubBranch,
       })
     },
     onSuccess: (response: any) => {
@@ -118,180 +125,143 @@ export function GenerateManifest() {
   })
 
   const formIsValid = () => {
-    if (modelSource === 'SenseCap Models' && !sscmaModelId) return false
-    if (modelSource === 'My Organization Models' && (!orgModels || orgModels.length === 0 || !orgModelId)) return false
+    if (!selectedProjectId) return false
+    if (projectModelInfo?.incomplete) return false
     return true
+  }
+
+  const selectStyle = {
+    width: '100%',
+    padding: '0.5rem',
+    borderRadius: 'var(--radius)',
+    border: '1px solid var(--border)',
+    backgroundColor: 'var(--surface)',
+    color: 'var(--text-color)',
+  }
+
+  const labelStyle = {
+    display: 'block' as const,
+    fontSize: '0.8125rem',
+    fontWeight: 500,
+    marginBottom: '0.25rem',
   }
 
   return (
     <div>
       <h3 style={{ marginBottom: '0.5rem' }}>Generate Firmware Manifest</h3>
-      <p style={{ opacity: 0.7, marginBottom: '1.5rem' }}>
-        Build a <code>MANIFEST.zip</code> containing firmware binaries, model files,
-        and configuration for your Wildlife Watcher device.
+      <p style={{ opacity: 0.7, marginBottom: '1.5rem', lineHeight: 1.5 }}>
+        Generate a MANIFEST.zip with everything your device needs.
+        Download it, unzip, copy the <code>MANIFEST</code> folder to an SD card, and insert it
+        into your Wildlife Watcher. The mobile app will detect the files are already present
+        and skip the slow BLE transfer.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem', maxWidth: '600px' }}>
-        
-        {/* Model Source */}
-        <div>
-          <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-            AI Model Source
-          </label>
-          <select
-            value={modelSource}
-            onChange={(e) => setModelSource(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '0.5rem',
-              borderRadius: 'var(--radius)',
-              border: '1px solid var(--border)',
-              backgroundColor: 'var(--surface)',
-              color: 'var(--text-color)',
-            }}
-          >
-            <option value="Pre-trained Model">Pre-trained Model</option>
-            <option value="SenseCap Models">SenseCap Models</option>
-            <option value="My Organization Models">My Organization Models</option>
-            <option value="No Model">No Model</option>
-          </select>
-        </div>
 
-        {/* Dynamic Model Sub-selection */}
-        {modelSource !== 'No Model' && (
-          <div style={{ padding: '1rem', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-            
-            {modelSource === 'Pre-trained Model' && (
-              <div style={{ display: 'flex', gap: '1rem' }}>
-                <div style={{ flex: 2 }}>
-                  <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>Model Architecture</label>
-                  <select
-                    value={ptArchitecture}
-                    onChange={(e) => setPtArchitecture(e.target.value)}
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
-                  >
-                    {Object.keys(PRETRAINED_MODELS).map(k => <option key={k} value={k}>{k}</option>)}
-                  </select>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>Resolution</label>
-                  <select
-                    value={ptResolution}
-                    onChange={(e) => setPtResolution(e.target.value)}
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
-                  >
-                    {PRETRAINED_MODELS[ptArchitecture]?.resolutions.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </div>
-              </div>
-            )}
+        <div style={{ padding: '1rem', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
-            {modelSource === 'SenseCap Models' && (
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>SenseCap Zoo Model</label>
-                {isLoadingSscma ? (
-                  <div style={{ padding: '0.5rem', opacity: 0.6 }}>Loading models…</div>
-                ) : (
-                  <select
-                    value={sscmaModelId}
-                    onChange={(e) => setSscmaModelId(e.target.value)}
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
-                  >
-                    <option value="">Select a SenseCap Model…</option>
-                    {(sscmaModels as any[])?.map(m => (
-                      <option key={m.uuid || m.name} value={m.name}>{m.name}</option>
-                    ))}
-                  </select>
-                )}
-                {computedResolution !== "Unknown" && <p style={{ fontSize: '0.75rem', opacity: 0.8, marginTop: '0.5rem' }}>Resolution: {computedResolution}</p>}
-              </div>
-            )}
-
-            {modelSource === 'My Organization Models' && (
-              <div>
-                <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>Organization Model</label>
-                {isLoadingOrg ? (
-                  <div style={{ padding: '0.5rem', opacity: 0.6 }}>Loading models…</div>
-                ) : orgModels && orgModels.length > 0 ? (
-                  <select
-                    value={orgModelId}
-                    onChange={(e) => setOrgModelId(e.target.value)}
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}
-                  >
-                    <option value="">Select an Org Model…</option>
-                    {orgModels?.map((m: any) => (
-                      <option key={m.id} value={m.id}>{m.name} (v{m.version})</option>
-                    ))}
-                  </select>
-                ) : (
-                  <div style={{ padding: '0.5rem', color: 'var(--error)' }}>No models found or access denied.</div>
-                )}
-              </div>
-            )}
-
-            {/* Model Versioning Moved Inside Conditional */}
-            {modelSource !== 'My Organization Models' ? (
-              <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.5rem', paddingTop: '1.5rem' }}>
-                <h4 style={{ marginBottom: '0.5rem' }}>🔢 Model Versioning</h4>
-                <p style={{ fontSize: '0.8125rem', opacity: 0.8, marginBottom: '1rem' }}>
-                  Define the Model ID and Version matching your model. The firmware will use these to load the correct file.
-                </p>
-                <div style={{ display: 'flex', gap: '1rem' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-                      Model ID (OP 14)
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={modelId}
-                      onChange={(e) => setModelId(Number(e.target.value) || 1)}
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem',
-                        borderRadius: 'var(--radius)',
-                        border: '1px solid var(--border)',
-                        backgroundColor: 'transparent',
-                        color: 'var(--text-color)',
-                      }}
-                    />
-                  </div>
-                  
-                  <div style={{ flex: 1 }}>
-                    <label style={{ display: 'block', fontSize: '0.8125rem', fontWeight: 500, marginBottom: '0.25rem' }}>
-                      Version (OP 15)
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      value={modelVersion}
-                      onChange={(e) => setModelVersion(Number(e.target.value) || 1)}
-                      style={{
-                        width: '100%',
-                        padding: '0.5rem',
-                        borderRadius: 'var(--radius)',
-                        border: '1px solid var(--border)',
-                        backgroundColor: 'transparent',
-                        color: 'var(--text-color)',
-                      }}
-                    />
-                  </div>
-                </div>
-                <p style={{ fontSize: '0.8125rem', opacity: 0.7, marginTop: '1rem' }}>
-                  Target Filename: <code>{modelId}V{modelVersion}.TFL</code>
-                </p>
+            {!user ? (
+              <div style={{ padding: '0.5rem', color: 'var(--warning, #f59e0b)' }}>
+                Please log in to access your projects.
               </div>
             ) : (
-              <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.5rem', paddingTop: '1.5rem' }}>
-                <h4 style={{ marginBottom: '0.5rem' }}>🔢 Automatic Model Versioning</h4>
-                <p style={{ fontSize: '0.8125rem', opacity: 0.8 }}>
-                  Organization models are automatically versioned by the backend. The manifest will use the model's assigned firmware ID and version number automatically.
-                </p>
-              </div>
-            )}
+              <>
+                {/* Branch selector */}
+                <div>
+                  <label style={labelStyle}>Firmware Branch</label>
+                  <select
+                    value={githubBranch}
+                    onChange={(e) => setGithubBranch(e.target.value)}
+                    style={selectStyle}
+                  >
+                    {(branches || ['main']).map((b: string) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
+                  <p style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: '0.25rem' }}>
+                    Branch of the Grove Vision AI firmware repo for CONFIG.TXT, output.img, etc.
+                  </p>
+                </div>
 
+                {/* Org selector */}
+                <div>
+                  <label style={labelStyle}>Organisation</label>
+                  {userOrgs && userOrgs.length > 0 ? (
+                    <select
+                      value={selectedOrgId}
+                      onChange={(e) => { setSelectedOrgId(e.target.value); setSelectedProjectId('') }}
+                      style={selectStyle}
+                    >
+                      {userOrgs.map((org: any) => (
+                        <option key={org.id} value={org.id}>{org.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div style={{ padding: '0.5rem', opacity: 0.6 }}>No organisations found.</div>
+                  )}
+                </div>
+
+                {/* Project selector */}
+                {selectedOrgId && (
+                  <div>
+                    <label style={labelStyle}>Project</label>
+                    {isLoadingProjects ? (
+                      <div style={{ padding: '0.5rem', opacity: 0.6 }}>Loading projects…</div>
+                    ) : projects && projects.length > 0 ? (
+                      <select
+                        value={selectedProjectId}
+                        onChange={(e) => setSelectedProjectId(e.target.value)}
+                        style={selectStyle}
+                      >
+                        {projects.map((p: any) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div style={{ padding: '0.5rem', color: 'var(--error)' }}>
+                        No projects found for this organisation.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Model info (read-only) */}
+                {projectModelInfo && (
+                  <div style={{
+                    borderTop: '1px solid var(--border)',
+                    paddingTop: '1rem',
+                    marginTop: '0.5rem',
+                  }}>
+                    {projectModelInfo.hasModel ? (
+                      projectModelInfo.incomplete ? (
+                        <div style={{ color: 'var(--warning, #f59e0b)' }}>
+                          ⚠️ Model <strong>{projectModelInfo.name}</strong> is missing firmware IDs.
+                          Please ensure it has a model family and version number assigned.
+                        </div>
+                      ) : (
+                        <div>
+                          <h4 style={{ marginBottom: '0.5rem' }}>✅ Model Info</h4>
+                          <div style={{ fontSize: '0.8125rem', display: 'grid', gap: '0.25rem' }}>
+                            <div><strong>Model:</strong> {projectModelInfo.name} v{projectModelInfo.version}</div>
+                            <div><strong>Firmware ID (OP 14):</strong> <code>{projectModelInfo.firmwareModelId}</code></div>
+                            <div><strong>Version (OP 15):</strong> <code>{projectModelInfo.versionNumber}</code></div>
+                            <div><strong>Filename:</strong> <code>{projectModelInfo.filename}</code></div>
+                          </div>
+                        </div>
+                      )
+                    ) : (
+                      <div style={{ fontSize: '0.8125rem', opacity: 0.8 }}>
+                        ℹ️ No AI model assigned to this project. The MANIFEST will be generated
+                        <strong> without model files</strong>. To assign a model, use the mobile app.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       <div style={{ marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border)' }}>
