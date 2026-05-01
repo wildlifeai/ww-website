@@ -516,8 +516,6 @@ async def generate_manifest(
                 m_content = await download_from_storage("ai-models", model_info["model_path"])
                 if m_content:
                     if model_info["model_path"].lower().endswith(".zip"):
-                        import zipfile
-                        import io
                         with zipfile.ZipFile(io.BytesIO(m_content)) as zf:
                             for name in zf.namelist():
                                 if name.upper().endswith(".TFL"):
