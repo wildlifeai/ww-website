@@ -76,9 +76,7 @@ class TestConvertEndpointValidation:
         )
         assert response.status_code == 400
 
-    @patch("app.services.supabase_client.create_service_client")
-    @patch("app.routers.models.create_service_client")
-    def test_rejects_oversized_file(self, mock_sb_models, mock_sb_global, auth_client):
+    def test_rejects_oversized_file(self, auth_client):
         """Files over 50MB should be rejected with 413."""
         big_content = b"\x00" * (50 * 1024 * 1024 + 1)
         response = auth_client.post(
