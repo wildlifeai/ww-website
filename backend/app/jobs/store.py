@@ -30,6 +30,7 @@ from app.schemas.job import (
     ProgressEvent,
     ProgressPhase,
 )
+from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 
