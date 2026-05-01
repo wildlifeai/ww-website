@@ -201,16 +201,25 @@ async def generate_manifest_job(job_id: str, params: dict):
         from app.services.storage import upload_to_storage
         from app.services.supabase_client import create_service_client
 
+        async def _on_progress(msg: str) -> None:
+            await update_job(job_id, message=msg)
+
         manifest_bytes = await generate_manifest(
             model_source=params.get("model_source", "default"),
             model_type=params.get("model_type"),
+            model_name=params.get("model_name"),
+            model_id=params.get("model_id"),
+            model_version=params.get("model_version"),
             resolution=params.get("resolution"),
             sscma_model_id=params.get("sscma_model_id"),
             org_model_id=params.get("org_model_id"),
             camera_type=params.get("camera_type", "Raspberry Pi"),
+            project_id=params.get("project_id"),
+            github_branch=params.get("github_branch", "main"),
+            on_progress=_on_progress,
         )
 
-        await update_job(job_id, progress=0.8)
+        await update_job(job_id, progress=0.8, message="Uploading MANIFEST.zip…")
 
         # Upload result to temp storage for download
         result_path = f"temp/manifests/{job_id}/MANIFEST.zip"
@@ -232,6 +241,7 @@ async def generate_manifest_job(job_id: str, params: dict):
                 status=JobStatus.COMPLETED,
                 progress=1.0,
                 result_url=result_url,
+                message="✅ MANIFEST.zip ready for download",
             )
         else:
             await update_job(

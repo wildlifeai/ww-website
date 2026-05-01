@@ -37,7 +37,7 @@ export function JobProgress({ jobId }: { jobId: string | null }) {
   return (
     <div className="card" style={{ marginTop: '1rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-        <span style={{ textTransform: 'capitalize' }}>{job.status}</span>
+        <span>{job.message || job.status}</span>
         <span>{Math.round(job.progress * 100)}%</span>
       </div>
       <div style={{ 
