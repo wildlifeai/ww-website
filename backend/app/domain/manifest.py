@@ -33,8 +33,6 @@ from app.services.http_client import DownloadError, download_url_content
 from app.services.storage import download_from_storage
 from app.services.supabase_client import create_service_client
 
-logger = structlog.get_logger()
-
 DEFAULT_FIRMWARE_BRANCHES = ["main", "dev", "firmware_updates", "live_video", "ledflash2"]
 
 GROVE_VISION_REPO = "wildlifeai/Seeed_Grove_Vision_AI_Module_V2"
@@ -517,14 +515,25 @@ async def generate_manifest(
                 await _report(f"Downloading model {proj_tfl}…")
                 m_content = await download_from_storage("ai-models", model_info["model_path"])
                 if m_content:
-                    (manifest_dir / proj_tfl).write_bytes(m_content)
-                    model_added = True
+                    if model_info["model_path"].lower().endswith(".zip"):
+                        import zipfile
+                        import io
+                        with zipfile.ZipFile(io.BytesIO(m_content)) as zf:
+                            for name in zf.namelist():
+                                if name.upper().endswith(".TFL"):
+                                    (manifest_dir / proj_tfl).write_bytes(zf.read(name))
+                                    model_added = True
+                                elif name.upper().endswith(".TXT"):
+                                    (manifest_dir / proj_txt).write_bytes(zf.read(name))
+                    else:
+                        (manifest_dir / proj_tfl).write_bytes(m_content)
+                        model_added = True
 
-                # Download labels
-                await _report(f"Downloading labels {proj_txt}…")
-                l_content = await download_from_storage("ai-models", model_info["labels_path"])
-                if l_content:
-                    (manifest_dir / proj_txt).write_bytes(l_content)
+                        # Download labels
+                        await _report(f"Downloading labels {proj_txt}…")
+                        l_content = await download_from_storage("ai-models", model_info["labels_path"])
+                        if l_content:
+                            (manifest_dir / proj_txt).write_bytes(l_content)
 
                 # Inject OP 14/15 into CONFIG.TXT
                 await _report("Injecting model parameters into CONFIG.TXT…")
