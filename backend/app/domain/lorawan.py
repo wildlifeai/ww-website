@@ -8,6 +8,7 @@ Supabase Realtime auto-broadcasts inserts to the mobile app.
 """
 
 import base64
+import json
 from typing import Any, Dict, Optional
 
 import structlog
@@ -140,8 +141,6 @@ class LoRaWANDomain:
 
         if len(raw_bytes) > 2:
             try:
-                import json
-
                 model_output = json.loads(raw_bytes[2:].decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):
                 model_output = {"raw_hex": raw_bytes[2:].hex()}

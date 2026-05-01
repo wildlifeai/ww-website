@@ -10,6 +10,13 @@ When Google Drive upload is enabled, images are also persisted to Supabase
 Storage and an async ARQ job is enqueued to copy them to Drive.
 
 Supports folder uploads: if the frontend sends a ``paths`` form field with
+from app.jobs.runner import enqueue_local_job
+from app.jobs.definitions import upload_drive_images_job
+from app.services.azure_storage import store_blob
+import uuid
+from app.services.supabase_client import create_service_client
+from app.jobs.store import create_job
+from fastapi.responses import JSONResponse
 relative paths (e.g. ``MEDIA/655BC4E5/IMAGES.000/9DB650A0.JPG``), the router
 extracts the 8-character deployment-ID prefix from the folder hierarchy and
 matches it against Supabase deployments.
@@ -90,8 +97,6 @@ async def parse_exif(
     MAX_ANON_IMAGES = 50
     user = await get_optional_user(authorization)
     if not user and len(files) > MAX_ANON_IMAGES:
-        from fastapi.responses import JSONResponse
-
         return JSONResponse(
             status_code=403,
             content={
@@ -209,8 +214,6 @@ async def _enqueue_drive_upload(
 
     Returns a dict describing the enqueued job for the API response.
     """
-    from app.jobs.store import create_job
-    from app.services.supabase_client import create_service_client
 
     client = create_service_client()
     context_map = {}
@@ -329,9 +332,6 @@ async def _enqueue_drive_upload(
             }
 
         # Buffer to local disk instead of Supabase
-        import uuid
-
-        from app.services.azure_storage import store_blob
 
         blob_id = str(uuid.uuid4())
 
@@ -366,9 +366,6 @@ async def _enqueue_drive_upload(
     }
 
     try:
-        from app.jobs.definitions import upload_drive_images_job
-        from app.jobs.runner import enqueue_local_job
-
         enqueue_local_job(upload_drive_images_job(job_id, payload))
     except Exception as exc:
         logger.error("arq_enqueue_failed", job_id=job_id, error=str(exc))

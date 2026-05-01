@@ -6,6 +6,7 @@ Each function here is executed by the worker process, not the API server.
 They delegate to domain layer classes for actual business logic.
 """
 
+import asyncio
 import hashlib
 import time
 from datetime import datetime, timezone
@@ -48,7 +49,6 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         if error_message:
             payload["error_message"] = error_message
         # Append to processing_log
-        from datetime import datetime, timezone
 
         log_entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -57,8 +57,6 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         }
         if error_message:
             log_entry["error"] = error_message
-
-        import asyncio
 
         # TODO(schema): Use a JSONB append RPC to prevent race conditions on processing_log
         try:
@@ -73,8 +71,6 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         await asyncio.to_thread(update_query.execute)
 
     try:
-        import asyncio
-
         # ── Idempotency guard ────────────────────────────────────
         check_query = client.table("ai_models").select("status").eq("id", model_id)
         model_check = await asyncio.to_thread(check_query.execute)
@@ -140,7 +136,6 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         result_path = f"{org_id}/{firmware_id}/{version_num}/ai_model.zip"
 
         # Offload blocking upload to thread
-        import asyncio
 
         await asyncio.to_thread(
             client.storage.from_("ai-models").upload,

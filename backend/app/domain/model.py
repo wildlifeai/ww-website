@@ -18,6 +18,8 @@ from typing import Any, Dict, List, Tuple
 
 import structlog
 
+from app.registries.model_registry import get_model_config
+from app.services.http_client import download_url_content
 from app.services.supabase_client import create_service_client
 from app.services.vela import VelaConversionError, run_vela_conversion
 
@@ -307,7 +309,6 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], D
     Returns:
         Tuple of (ai_model_zip_bytes, labels_list, model_metadata).
     """
-    from app.services.http_client import download_url_content
     from app.services.sscma import get_sscma_model
 
     try:
@@ -407,8 +408,6 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
     Returns:
         Tuple of (ai_model_zip_bytes, labels_list, model_metadata).
     """
-    from app.registries.model_registry import get_model_config
-    from app.services.http_client import download_url_content
 
     config = get_model_config(architecture, resolution)
     url = config["url"]

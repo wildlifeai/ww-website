@@ -8,6 +8,9 @@ GET  /api/manifest/branches → list available firmware branches
 
 from fastapi import APIRouter, Request
 
+from app.domain.manifest import fetch_github_branches
+from app.jobs.definitions import generate_manifest_job
+from app.jobs.runner import enqueue_local_job
 from app.jobs.store import create_job
 from app.schemas.common import ApiMeta, ApiResponse
 from app.schemas.job import JobCreateResponse
@@ -27,9 +30,6 @@ async def generate_manifest(
     """
     job_id = await create_job()
 
-    from app.jobs.definitions import generate_manifest_job
-    from app.jobs.runner import enqueue_local_job
-
     enqueue_local_job(generate_manifest_job(job_id, body.model_dump()))
 
     return ApiResponse(
@@ -44,7 +44,6 @@ async def get_firmware_branches(request: Request):
 
     Proxied through the backend to avoid CORS issues on the frontend.
     """
-    from app.domain.manifest import fetch_github_branches
 
     branches = await fetch_github_branches()
 

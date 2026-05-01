@@ -10,6 +10,7 @@ The MANIFEST.zip is what gets deployed to the camera SD card. Structure:
     ├── CONFIG.TXT          # Camera configuration
     ├── trained_vela.TFL    # AI model binary
     ├── trained_vela.TXT    # Model labels
+import io
     └── output.img          # Himax coprocessor firmware
 """
 
@@ -117,7 +118,6 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
             if content:
                 if path.lower().endswith(".zip"):
                     # Extract ZIP contents into manifest dir
-                    import io
 
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
@@ -148,8 +148,6 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
             content = await download_from_storage("firmware", f"config/{latest}", silent=True)
             if content:
                 if latest.lower().endswith(".zip"):
-                    import io
-
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
                 else:
@@ -256,8 +254,6 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
                 content = await download_from_storage("ai-models", path, silent=True)
 
                 if content:
-                    import io
-
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
                     logger.info("ai_model_added", name=model.get("name", "default"))
@@ -282,8 +278,6 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
                             silent=True,
                         )
                         if content:
-                            import io
-
                             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                                 zf.extractall(manifest_dir)
                             logger.info("ai_model_fallback", name=model_name)
@@ -598,8 +592,6 @@ async def generate_manifest(
                         model = response.data[0]
                         content = await download_from_storage("ai-models", model["storage_path"])
                         if content:
-                            import io
-
                             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                                 zf.extractall(manifest_dir)
                             model_added = True

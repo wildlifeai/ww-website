@@ -6,6 +6,7 @@ Logs every request with timing, status, path, method and user_id (if auth'd).
 Uses structlog for machine-parseable JSON output.
 """
 
+import sys
 import time
 
 import structlog
@@ -29,8 +30,6 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             try:
                 logger.exception("unhandled_error", error=str(e))
             except Exception as log_err:
-                import sys
-
                 print(f"Logging middleware failed to log error: {log_err}", file=sys.stderr)
             raise
 
@@ -46,7 +45,5 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 user_id=getattr(request.state, "user_id", None),
             )
         except Exception as e:
-            import sys
-
             print(f"Logging middleware failed to log response: {e}", file=sys.stderr)
         return response
