@@ -379,10 +379,7 @@ async def _resolve_project_model(client, project_id: str) -> dict:
     query = (
         client.table("projects")
         .select(
-            "model_id, "
-            "ai_models(id, name, version, model_path, labels_path, "
-            "model_family_id, version_number, "
-            "ai_model_families(firmware_model_id))"
+            "model_id, ai_models(id, name, version, model_path, labels_path, model_family_id, version_number, ai_model_families(firmware_model_id))"
         )
         .eq("id", project_id)
     )
@@ -401,9 +398,7 @@ async def _resolve_project_model(client, project_id: str) -> dict:
     version_number = model.get("version_number")
 
     if not fw_model_id or not version_number:
-        raise ManifestDomainError(
-            f"Model {model.get('name')} is missing firmware_model_id or version_number"
-        )
+        raise ManifestDomainError(f"Model {model.get('name')} is missing firmware_model_id or version_number")
 
     return {
         "has_model": True,
@@ -522,18 +517,14 @@ async def generate_manifest(
 
                 # Download model binary
                 await _report(f"Downloading model {proj_tfl}…")
-                m_content = await download_from_storage(
-                    "ai-models", model_info["model_path"]
-                )
+                m_content = await download_from_storage("ai-models", model_info["model_path"])
                 if m_content:
                     (manifest_dir / proj_tfl).write_bytes(m_content)
                     model_added = True
 
                 # Download labels
                 await _report(f"Downloading labels {proj_txt}…")
-                l_content = await download_from_storage(
-                    "ai-models", model_info["labels_path"]
-                )
+                l_content = await download_from_storage("ai-models", model_info["labels_path"])
                 if l_content:
                     (manifest_dir / proj_txt).write_bytes(l_content)
 
@@ -542,14 +533,7 @@ async def generate_manifest(
                 config_path = manifest_dir / "CONFIG.TXT"
                 if config_path.exists():
                     lines = config_path.read_text().splitlines()
-                    lines = [
-                        ln
-                        for ln in lines
-                        if not (
-                            ln.strip().startswith("14 ")
-                            or ln.strip().startswith("15 ")
-                        )
-                    ]
+                    lines = [ln for ln in lines if not (ln.strip().startswith("14 ") or ln.strip().startswith("15 "))]
                     lines.append(f"14 {fw_id}")
                     lines.append(f"15 {ver}")
 
@@ -593,9 +577,7 @@ async def generate_manifest(
             model_added = False
 
             if model_source == "github" and model_type and resolution:
-                model_added = await _fetch_github_model(
-                    model_type, resolution, manifest_dir
-                )
+                model_added = await _fetch_github_model(model_type, resolution, manifest_dir)
                 if model_added and tfl_name != "trained_vela.TFL":
                     default_tfl = manifest_dir / "trained_vela.TFL"
                     default_txt = manifest_dir / "trained_vela.TXT"
@@ -608,18 +590,13 @@ async def generate_manifest(
                 try:
                     response = (
                         client.table("ai_models")
-                        .select(
-                            "storage_path, name, version, "
-                            "ai_model_families(firmware_model_id)"
-                        )
+                        .select("storage_path, name, version, ai_model_families(firmware_model_id)")
                         .eq("id", org_model_id)
                         .execute()
                     )
                     if response.data:
                         model = response.data[0]
-                        content = await download_from_storage(
-                            "ai-models", model["storage_path"]
-                        )
+                        content = await download_from_storage("ai-models", model["storage_path"])
                         if content:
                             import io
 
@@ -628,20 +605,11 @@ async def generate_manifest(
                             model_added = True
 
                             family = model.get("ai_model_families")
-                            firmware_id = (
-                                family.get("firmware_model_id") if family else None
-                            )
+                            firmware_id = family.get("firmware_model_id") if family else None
                             if not firmware_id:
-                                raise ManifestDomainError(
-                                    f"Model family for {org_model_id} "
-                                    "is missing a firmware_model_id"
-                                )
+                                raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
                             version_str = model.get("version", "1")
-                            version = (
-                                version_str.split(".")[0]
-                                if "." in version_str
-                                else version_str
-                            )
+                            version = version_str.split(".")[0] if "." in version_str else version_str
 
                             name_stem = f"{firmware_id}V{version}"
                             if len(name_stem) > 8:

@@ -12,10 +12,7 @@ class ManifestRequest(BaseModel):
 
     model_source: str = Field(
         "default",
-        description=(
-            "'My Project' | 'Pre-trained Model' | 'SenseCap Models' "
-            "| 'My Organization Models' | 'No Model'"
-        ),
+        description=("'My Project' | 'Pre-trained Model' | 'SenseCap Models' | 'My Organization Models' | 'No Model'"),
     )
     model_name: Optional[str] = Field(None, description="Human-readable model name")
     model_id: Optional[int] = Field(None, description="Firmware OP14 model ID")
