@@ -98,6 +98,60 @@ def _build_firmware_filename(vars_h_path: Path) -> str:
     return "MOD00001.tfl"
 
 
+def resolve_or_create_model_family(
+    client,
+    org_id: str,
+    model_name: str,
+    firmware_model_id: int = None,
+) -> Tuple[str, int]:
+    """Resolve an existing AI model family or create a new one.
+
+    Args:
+        client: Supabase service client.
+        org_id: Organisation UUID.
+        model_name: Display name used to look up the family.
+        firmware_model_id: Optional firmware ID to set/update on the family.
+
+    Returns:
+        Tuple of (model_family_id, firmware_model_id).
+        firmware_model_id falls back to 9999 if not resolvable.
+
+    Raises:
+        ModelDomainError: If the insert fails.
+    """
+    family_res = (
+        client.table("ai_model_families")
+        .select("id, firmware_model_id")
+        .eq("organisation_id", org_id)
+        .eq("name", model_name)
+        .execute()
+    )
+
+    if family_res.data:
+        family_id = family_res.data[0]["id"]
+        db_fw_id = family_res.data[0].get("firmware_model_id")
+        if firmware_model_id is not None and db_fw_id is None:
+            client.table("ai_model_families").update(
+                {"firmware_model_id": firmware_model_id}
+            ).eq("id", family_id).execute()
+            db_fw_id = firmware_model_id
+    else:
+        fam_data: Dict[str, Any] = {"organisation_id": org_id, "name": model_name}
+        if firmware_model_id is not None:
+            fam_data["firmware_model_id"] = firmware_model_id
+
+        family_insert = client.table("ai_model_families").insert(fam_data).execute()
+        if not family_insert.data:
+            raise ModelDomainError("Failed to create AI model family")
+        family_id = family_insert.data[0]["id"]
+        db_fw_id = family_insert.data[0].get("firmware_model_id")
+
+    if not db_fw_id:
+        db_fw_id = 9999
+
+    return family_id, db_fw_id
+
+
 # ── Core domain operations ───────────────────────────────────────────
 
 
@@ -114,8 +168,9 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
     Raises:
         ModelDomainError: If any step fails.
     """
-    model_name, model_version = _parse_model_zip_name(filename)
-    container_name = f"{model_name}-custom-{model_version}"
+    # Derive a temp directory name from the filename (only used for local temp work)
+    base = os.path.splitext(os.path.basename(filename))[0] or "model"
+    container_name = base.replace(" ", "_")
 
     with tempfile.TemporaryDirectory() as temp_dir:
         base_path = Path(temp_dir)
@@ -217,28 +272,9 @@ async def upload_and_register(
 
     # 1. Resolve or create AI Model Family
     try:
-        family_res = client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", org_id).eq("name", model_name).execute()
-
-        if family_res.data:
-            model_family_id = family_res.data[0]["id"]
-            db_firmware_id = family_res.data[0].get("firmware_model_id")
-            if firmware_model_id is not None and db_firmware_id is None:
-                client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", model_family_id).execute()
-                db_firmware_id = firmware_model_id
-        else:
-            fam_data = {"organisation_id": org_id, "name": model_name}
-            if firmware_model_id is not None:
-                fam_data["firmware_model_id"] = firmware_model_id
-
-            family_insert = client.table("ai_model_families").insert(fam_data).execute()
-            if not family_insert.data:
-                raise ModelDomainError("Failed to create AI model family")
-            model_family_id = family_insert.data[0]["id"]
-            db_firmware_id = family_insert.data[0].get("firmware_model_id")
-
-        if not db_firmware_id:
-            # Fallback if the database doesn't auto-generate one and none was provided
-            db_firmware_id = 9999
+        model_family_id, db_firmware_id = resolve_or_create_model_family(
+            client, org_id, model_name, firmware_model_id
+        )
 
         # 2. Build 8.3 filenames
         safe_name = os.path.basename(model_name)

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 from pydantic import BaseModel
 
 from app.dependencies import get_current_user, get_manager_roles
+from app.domain.model import resolve_or_create_model_family
 from app.jobs.definitions import convert_model_job, download_github_pretrained_job, download_pretrained_job
 from app.jobs.runner import enqueue_local_job
 from app.jobs.store import create_job
@@ -80,18 +81,10 @@ async def convert_model(
 
     job_id = await create_job()
 
-    # Resolve or create AI Model Family
-    family_query = client.table("ai_model_families").select("id").eq("organisation_id", org_id).eq("name", model_name)
-    family_res = await asyncio.to_thread(family_query.execute)
-
-    if family_res.data:
-        model_family_id = family_res.data[0]["id"]
-    else:
-        family_insert = client.table("ai_model_families").insert({"organisation_id": org_id, "name": model_name})
-        insert_res = await asyncio.to_thread(family_insert.execute)
-        if not insert_res.data:
-            raise HTTPException(500, detail="Failed to create AI model family")
-        model_family_id = insert_res.data[0]["id"]
+    # Resolve or create AI Model Family (shared domain helper)
+    model_family_id, _ = resolve_or_create_model_family(
+        client, org_id, model_name
+    )
 
     # Get existing models with this name to determine version
     existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
@@ -106,10 +99,7 @@ async def convert_model(
     next_ver = max(existing_versions) + 1 if existing_versions else 1
     version_string = f"{next_ver}.0.0-{uuid.uuid4().hex[:6]}"
 
-    # We need a unique storage_path. We will update it after upload in the worker, but for now use a placeholder.
-    temp_storage_path = f"temp/{org_id}/{model_name.replace(' ', '_')}_{version_string}_{job_id}"
-
-    # Insert ai_models row
+    # Insert ai_models row (paths updated by worker after conversion)
     model_insert = (
         client.table("ai_models")
         .insert(
@@ -121,8 +111,6 @@ async def convert_model(
                 "description": description,
                 "uploaded_by": user.id,
                 "modified_by": user.id,
-                "model_path": temp_storage_path,
-                "labels_path": temp_storage_path,
                 "file_type": "uploading",
             }
         )
@@ -219,6 +207,29 @@ async def sscma_catalog(request: Request):
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
     )
 
+
+@router.get("/pretrained/catalog")
+async def pretrained_catalog(request: Request):
+    """Return the built-in pretrained model registry.
+
+    Allows the frontend to dynamically render the architecture/resolution
+    dropdowns without hardcoding the model list.
+    """
+    from app.registries.model_registry import MODEL_REGISTRY
+
+    catalog = []
+    for arch_name, arch_data in MODEL_REGISTRY.items():
+        catalog.append({
+            "architecture": arch_name,
+            "firmware_model_id": arch_data.get("firmware_model_id"),
+            "resolutions": list(arch_data.get("resolutions", {}).keys()),
+            "labels": arch_data.get("labels", []),
+        })
+
+    return ApiResponse(
+        data=catalog,
+        meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
+    )
 
 @router.post("/pretrained")
 async def download_pretrained(

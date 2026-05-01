@@ -3,11 +3,11 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { apiClient } from '../../lib/apiClient'
 import { JobProgress } from '../common'
 
-const PRETRAINED_MODELS: Record<string, { resolutions: string[] }> = {
-  "Person Detection": { resolutions: ["96x96"] },
-  "YOLOv8 Object Detection": { resolutions: ["192x192"] },
-  "YOLOv11 Object Detection": { resolutions: ["192x192", "224x224"] },
-  "YOLOv8 Pose Estimation": { resolutions: ["256x256"] }
+interface PretrainedModel {
+  architecture: string
+  firmware_model_id: number | null
+  resolutions: string[]
+  labels: string[]
 }
 
 export function UploadModel() {
@@ -16,8 +16,8 @@ export function UploadModel() {
   const [selectedOrgId, setSelectedOrgId] = useState('')
 
   // Pre-trained state
-  const [ptArchitecture, setPtArchitecture] = useState('Person Detection')
-  const [ptResolution, setPtResolution] = useState('96x96')
+  const [ptArchitecture, setPtArchitecture] = useState('')
+  const [ptResolution, setPtResolution] = useState('')
 
   const [file, setFile] = useState<File | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
@@ -44,16 +44,36 @@ export function UploadModel() {
     }
   }, [managedOrgs, selectedOrgId])
 
-  // Automatically update resolution based on architecture
+  // Fetch pretrained model catalog from backend
+  const { data: pretrainedModels } = useQuery({
+    queryKey: ['pretrainedCatalog'],
+    queryFn: async () => {
+      const res = await apiClient.get('/api/models/pretrained/catalog')
+      return (res.data || []) as PretrainedModel[]
+    },
+    enabled: modelSource === 'Pre-trained Model'
+  })
+
+  // Auto-select first architecture/resolution when catalog loads
   useEffect(() => {
-    if (modelSource === 'Pre-trained Model') {
-      const availableRes = PRETRAINED_MODELS[ptArchitecture]?.resolutions || []
+    if (modelSource === 'Pre-trained Model' && pretrainedModels?.length) {
+      if (!ptArchitecture || !pretrainedModels.find(m => m.architecture === ptArchitecture)) {
+        setPtArchitecture(pretrainedModels[0].architecture)
+        setPtResolution(pretrainedModels[0].resolutions[0] || '')
+      }
+    }
+  }, [modelSource, pretrainedModels, ptArchitecture])
+
+  // Update resolution when architecture changes
+  useEffect(() => {
+    if (modelSource === 'Pre-trained Model' && pretrainedModels) {
+      const model = pretrainedModels.find(m => m.architecture === ptArchitecture)
+      const availableRes = model?.resolutions || []
       if (!availableRes.includes(ptResolution) && availableRes.length > 0) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPtResolution(availableRes[0])
       }
     }
-  }, [ptArchitecture, modelSource, ptResolution])
+  }, [ptArchitecture, modelSource, pretrainedModels, ptResolution])
 
   // Fetch SenseCap Models
   interface SscmaModel {
@@ -269,7 +289,7 @@ export function UploadModel() {
                 onChange={(e) => setPtArchitecture(e.target.value)}
                 style={{ width: '100%', padding: '0.75rem', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'transparent', color: 'var(--text-color)' }}
               >
-                {Object.keys(PRETRAINED_MODELS).map(k => <option key={k} value={k}>{k}</option>)}
+                {Object.keys(pretrainedModels ? Object.fromEntries(pretrainedModels.map(m => [m.architecture, m])) : {}).map(k => <option key={k} value={k}>{k}</option>)}
               </select>
             </div>
             <div style={{ flex: 1 }}>
@@ -279,7 +299,7 @@ export function UploadModel() {
                 onChange={(e) => setPtResolution(e.target.value)}
                 style={{ width: '100%', padding: '0.75rem', borderRadius: '4px', border: '1px solid var(--border)', backgroundColor: 'transparent', color: 'var(--text-color)' }}
               >
-                {PRETRAINED_MODELS[ptArchitecture]?.resolutions.map(r => <option key={r} value={r}>{r}</option>)}
+                {(pretrainedModels?.find(m => m.architecture === ptArchitecture)?.resolutions || []).map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
           </div>
