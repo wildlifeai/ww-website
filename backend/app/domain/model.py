@@ -215,15 +215,45 @@ async def upload_and_register(
     """
     client = create_service_client()
 
-    # Sanitize to prevent path traversal
-    safe_name = os.path.basename(model_name)
-    safe_version = os.path.basename(model_version)
-    base_storage_path = f"{org_id}/{safe_name}-custom-{safe_version}"
-    storage_path_tfl = f"{base_storage_path}/model.tfl"
-    storage_path_txt = f"{base_storage_path}/labels.txt"
-
-    # 1. Upload to storage
+    # 1. Resolve or create AI Model Family
     try:
+        family_res = client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", org_id).eq("name", model_name).execute()
+
+        if family_res.data:
+            model_family_id = family_res.data[0]["id"]
+            db_firmware_id = family_res.data[0].get("firmware_model_id")
+            if firmware_model_id is not None and db_firmware_id is None:
+                client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", model_family_id).execute()
+                db_firmware_id = firmware_model_id
+        else:
+            fam_data = {"organisation_id": org_id, "name": model_name}
+            if firmware_model_id is not None:
+                fam_data["firmware_model_id"] = firmware_model_id
+
+            family_insert = client.table("ai_model_families").insert(fam_data).execute()
+            if not family_insert.data:
+                raise ModelDomainError("Failed to create AI model family")
+            model_family_id = family_insert.data[0]["id"]
+            db_firmware_id = family_insert.data[0].get("firmware_model_id")
+
+        if not db_firmware_id:
+            # Fallback if the database doesn't auto-generate one and none was provided
+            db_firmware_id = 9999
+
+        # 2. Build 8.3 filenames
+        safe_name = os.path.basename(model_name)
+        safe_version = os.path.basename(model_version)
+        version_num = safe_version.split(".")[0] if "." in safe_version else safe_version
+
+        name_stem = f"{db_firmware_id}V{version_num}"
+        if len(name_stem) > 8:
+            name_stem = name_stem[:8]
+
+        base_storage_path = f"{org_id}/{safe_name}-custom-{safe_version}"
+        storage_path_tfl = f"{base_storage_path}/{name_stem}.TFL"
+        storage_path_txt = f"{base_storage_path}/{name_stem}.TXT"
+
+        # 3. Upload to storage
         client.storage.from_("ai-models").upload(
             path=storage_path_tfl,
             file=tfl_bytes,
@@ -235,28 +265,8 @@ async def upload_and_register(
             file_options={"content-type": "text/plain", "upsert": "true"},
         )
         logger.info("model_uploaded", path_tfl=storage_path_tfl, path_txt=storage_path_txt)
-    except Exception as e:
-        raise ModelDomainError(f"Storage upload failed: {e}") from e
 
-    # 2. Register in database (upsert by org_id + name + version)
-    try:
-        # Resolve or create AI Model Family
-        family_res = client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", org_id).eq("name", model_name).execute()
-
-        if family_res.data:
-            model_family_id = family_res.data[0]["id"]
-            if firmware_model_id is not None and family_res.data[0].get("firmware_model_id") is None:
-                client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", model_family_id).execute()
-        else:
-            fam_data = {"organisation_id": org_id, "name": model_name}
-            if firmware_model_id is not None:
-                fam_data["firmware_model_id"] = firmware_model_id
-
-            family_insert = client.table("ai_model_families").insert(fam_data).execute()
-            if not family_insert.data:
-                raise ModelDomainError("Failed to create AI model family")
-            model_family_id = family_insert.data[0]["id"]
-
+        # 4. Register in database (upsert by org_id + name + version)
         existing = (
             client.table("ai_models")
             .select("id")

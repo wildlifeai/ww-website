@@ -125,9 +125,14 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         # Hash the .TFL (this is what the mobile app transfers)
         file_hash = hashlib.sha256(tfl_bytes).hexdigest()
 
-        # 3. Upload result to structured storage path
-        result_path_tfl = f"{org_id}/{firmware_id}/{version_num}/model.tfl"
-        result_path_txt = f"{org_id}/{firmware_id}/{version_num}/labels.txt"
+        # 3. Build 8.3 filenames
+        name_stem = f"{firmware_id}V{version_num}"
+        if len(name_stem) > 8:
+            name_stem = name_stem[:8]
+
+        # 4. Upload result to structured storage path
+        result_path_tfl = f"{org_id}/{firmware_id}/{version_num}/{name_stem}.TFL"
+        result_path_txt = f"{org_id}/{firmware_id}/{version_num}/{name_stem}.TXT"
 
         # Offload blocking upload to thread
         await asyncio.to_thread(
