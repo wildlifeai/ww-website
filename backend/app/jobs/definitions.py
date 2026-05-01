@@ -369,6 +369,7 @@ async def download_github_pretrained_job(job_id: str, user_id: str, org_id: str,
             labels=labels,
             org_id=org_id,
             user_id=user_id,
+            firmware_model_id=metadata.get("firmware_model_id"),
         )
 
         await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0)

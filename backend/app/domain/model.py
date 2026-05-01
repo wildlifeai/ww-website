@@ -209,6 +209,7 @@ async def upload_and_register(
     labels: List[str],
     org_id: str,
     user_id: str,
+    firmware_model_id: int = None,
 ) -> Dict[str, Any]:
     """Upload ai_model.zip to Supabase Storage and register in DB.
 
@@ -247,6 +248,23 @@ async def upload_and_register(
 
     # 2. Register in database (upsert by org_id + name + version)
     try:
+        # Resolve or create AI Model Family
+        family_res = client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", org_id).eq("name", model_name).execute()
+
+        if family_res.data:
+            model_family_id = family_res.data[0]["id"]
+            if firmware_model_id is not None and family_res.data[0].get("firmware_model_id") is None:
+                client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", model_family_id).execute()
+        else:
+            fam_data = {"organisation_id": org_id, "name": model_name}
+            if firmware_model_id is not None:
+                fam_data["firmware_model_id"] = firmware_model_id
+
+            family_insert = client.table("ai_model_families").insert(fam_data).select("id").execute()
+            if not family_insert.data:
+                raise ModelDomainError("Failed to create AI model family")
+            model_family_id = family_insert.data[0]["id"]
+
         existing = (
             client.table("ai_models")
             .select("id")
@@ -262,6 +280,7 @@ async def upload_and_register(
             "version": model_version,
             "description": description,
             "organisation_id": org_id,
+            "model_family_id": model_family_id,
             "uploaded_by": user_id,
             "modified_by": user_id,
             "model_path": storage_path,
@@ -414,6 +433,7 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
     url = config["url"]
     file_type = config["type"]
     labels = config.get("labels", ["unknown"])
+    firmware_model_id = config.get("firmware_model_id")
 
     logger.info("github_downloading", architecture=architecture, url=url)
 
@@ -478,6 +498,7 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
             "version": "1.0.0",
             "description": "Pre-trained model from Wildlife Watcher Zoo",
             "labels": labels,
+            "firmware_model_id": firmware_model_id,
         }
 
         return result_bytes, labels, metadata
