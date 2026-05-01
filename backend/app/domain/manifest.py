@@ -33,6 +33,10 @@ from app.services.http_client import DownloadError, download_url_content
 from app.services.storage import download_from_storage
 from app.services.supabase_client import create_service_client
 
+logger = structlog.get_logger()
+
+DEFAULT_FIRMWARE_BRANCHES = ["main", "dev", "firmware_updates", "live_video", "ledflash2"]
+
 GROVE_VISION_REPO = "wildlifeai/Seeed_Grove_Vision_AI_Module_V2"
 MANIFEST_BASE = "EPII_CM55M_APP_S/app/ww_projects/ww500_md/MANIFEST"
 OUTPUT_IMG_PATH = "we2_image_gen_local_dpd/output_case1_sec_wlcsp/output.img"
@@ -250,7 +254,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
 
             if response.data:
                 model = response.data[0]
-                path = model["storage_path"]
+                path = model["model_path"]
                 content = await download_from_storage("ai-models", path, silent=True)
 
                 if content:
@@ -414,7 +418,7 @@ async def fetch_github_branches() -> list[str]:
         return [b["name"] for b in data]
     except Exception as exc:
         logger.warning("github_branches_failed", error=str(exc))
-        return ["main"]
+        return DEFAULT_FIRMWARE_BRANCHES
 
 
 # ── Main entry point ─────────────────────────────────────────────────
@@ -584,13 +588,14 @@ async def generate_manifest(
                 try:
                     response = (
                         client.table("ai_models")
-                        .select("storage_path, name, version, ai_model_families(firmware_model_id)")
+                        .select("model_path, labels_path, name, version, ai_model_families(firmware_model_id)")
                         .eq("id", org_model_id)
                         .execute()
                     )
                     if response.data:
                         model = response.data[0]
-                        content = await download_from_storage("ai-models", model["storage_path"])
+                        # For ZIP models, model_path contains both
+                        content = await download_from_storage("ai-models", model["model_path"])
                         if content:
                             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                                 zf.extractall(manifest_dir)

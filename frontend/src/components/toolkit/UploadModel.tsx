@@ -194,19 +194,9 @@ export function UploadModel() {
       </p>
 
       {/* Organisation Selector */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Organisation</label>
-        {managedOrgs.length === 1 ? (
-          <div style={{
-            padding: '0.75rem',
-            borderRadius: '4px',
-            border: '1px solid var(--border)',
-            backgroundColor: 'var(--surface)',
-            opacity: 0.8
-          }}>
-            {managedOrgs[0].name}
-          </div>
-        ) : (
+      {managedOrgs.length > 1 && (
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Organisation</label>
           <select
             value={selectedOrgId}
             onChange={(e) => setSelectedOrgId(e.target.value)}
@@ -223,8 +213,8 @@ export function UploadModel() {
               <option key={org.id} value={org.id}>{org.name}</option>
             ))}
           </select>
-        )}
-      </div>
+        </div>
+      )}
 
       <div style={{ marginBottom: '1.5rem' }}>
         <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Model Source</label>
