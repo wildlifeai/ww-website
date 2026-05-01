@@ -278,11 +278,13 @@ curl -o MANIFEST.zip "https://xxx.supabase.co/storage/v1/..."
 
 ## Model Conversion
 
+> See [AI Model Pipeline](./ai-model-pipeline.md) for full architecture documentation.
+
 ### `POST /api/models/convert`
 
-Upload an Edge Impulse ZIP and convert through Vela for Ethos-U55 deployment. This is an **async** operation.
+Upload and convert a model file for Ethos-U55 deployment. This is an **async** operation — returns a `job_id` for polling.
 
-**Authentication:** Required (JWT Bearer token)
+**Authentication:** Required (JWT Bearer token). User must have `organisation_manager` role.
 
 **Content-Type:** `multipart/form-data`
 
@@ -290,14 +292,10 @@ Upload an Edge Impulse ZIP and convert through Vela for Ethos-U55 deployment. Th
 
 | Field | Type | Max Size | Description |
 |-------|------|----------|-------------|
-| `file` | binary | 50 MB | ZIP file from Edge Impulse export |
-
-**Validation:**
-
-- File must be `application/zip` or `application/x-zip-compressed`
-- Must start with ZIP magic bytes (`PK\x03\x04`)
-- Maximum 50 MB
-- ZIP must contain `trained.tflite` and `model-parameters/model_variables.h`
+| `file` | binary | 50 MB | Model file (`.zip`, `.tflite`, or `.cc`) |
+| `model_name` | string | — | Display name for the model (used for family grouping and versioning) |
+| `description` | string | — | Optional description |
+| `organisation_id` | string | — | Optional org UUID (auto-resolved if user manages only one) |
 
 **Response (200):**
 
@@ -305,18 +303,11 @@ Upload an Edge Impulse ZIP and convert through Vela for Ethos-U55 deployment. Th
 {
   "data": {
     "job_id": "def-456",
+    "model_id": "abc-789",
     "status": "queued"
   },
   "meta": { "request_id": "..." }
 }
-```
-
-**Example:**
-
-```bash
-curl -X POST http://localhost:8000/api/models/convert \
-  -H "Authorization: Bearer <JWT>" \
-  -F "file=@mymodel-custom-1.0.zip"
 ```
 
 **Status Codes:**
@@ -324,15 +315,90 @@ curl -X POST http://localhost:8000/api/models/convert \
 | Code | Meaning |
 |------|---------|
 | 200 | Job enqueued successfully |
-| 400 | Invalid file type or corrupt ZIP |
+| 400 | Invalid file type or corrupt file |
 | 401 | Not authenticated |
+| 403 | User is not an organisation manager |
 | 413 | File exceeds 50 MB limit |
+
+---
+
+### `POST /api/models/pretrained`
+
+Download, package, and register a pre-trained model. Supports both GitHub Zoo and SSCMA sources. This is an **async** operation.
+
+**Authentication:** Required (JWT Bearer token). User must have `organisation_manager` role.
+
+**Request Body:**
+
+```json
+{
+  "source_type": "pretrained",
+  "architecture": "Person Detection",
+  "resolution": "96x96",
+  "description": "Optional description",
+  "organisation_id": "b0000000-..."
+}
+```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `source_type` | string | Yes | `"pretrained"` (GitHub Zoo) or `"sscma"` (SenseCap Zoo) |
+| `architecture` | string | For `pretrained` | Model architecture name |
+| `resolution` | string | For `pretrained` | Input resolution (e.g. "96x96") |
+| `sscma_uuid` | string | For `sscma` | UUID from the SSCMA catalog |
+| `model_name` | string | For `sscma` | Display name |
+| `description` | string | No | Optional description |
+| `organisation_id` | string | No | Org UUID (auto-resolved if only one) |
+
+**Response (200):**
+
+```json
+{
+  "data": {
+    "job_id": "ghi-012",
+    "status": "queued"
+  },
+  "meta": { "request_id": "..." }
+}
+```
+
+---
+
+### `GET /api/models/pretrained/catalog`
+
+Return the built-in pretrained model registry. Used by the frontend to dynamically render architecture/resolution dropdowns.
+
+**Authentication:** None
+
+**Response (200):**
+
+```json
+{
+  "data": [
+    {
+      "architecture": "Person Detection",
+      "firmware_model_id": 20,
+      "resolutions": ["96x96"],
+      "labels": ["no person", "person"]
+    },
+    {
+      "architecture": "YOLOv11 Object Detection",
+      "firmware_model_id": 1,
+      "resolutions": ["192x192", "224x224"],
+      "labels": ["object"]
+    }
+  ],
+  "meta": { "request_id": "..." }
+}
+```
 
 ---
 
 ### `GET /api/models/sscma/catalog`
 
-Get the SSCMA (Seeed Studio Computer Model Assistant) model catalog. Results are cached for 1 hour.
+Get the SSCMA (Seeed Studio Model Assistant) model catalog. Results are cached for 1 hour.
 
 **Authentication:** None
 
@@ -343,11 +409,29 @@ Get the SSCMA (Seeed Studio Computer Model Assistant) model catalog. Results are
   "data": [
     {
       "name": "YOLOv8n Detection",
+      "uuid": "...",
       "description": "...",
-      "url": "https://...",
-      "task": "detection",
-      "resolution": "192x192"
+      "task": "detection"
     }
+  ],
+  "meta": { "request_id": "..." }
+}
+```
+
+---
+
+### `GET /api/models/managed-orgs`
+
+List organisations where the current user has the `organisation_manager` role. Used by the Upload Model form to populate the organisation selector.
+
+**Authentication:** Required (JWT Bearer token)
+
+**Response (200):**
+
+```json
+{
+  "data": [
+    { "id": "b0000000-...", "name": "Wildlife AI" }
   ],
   "meta": { "request_id": "..." }
 }
