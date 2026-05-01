@@ -58,6 +58,7 @@ export function UploadModel() {
   useEffect(() => {
     if (modelSource === 'Pre-trained Model' && pretrainedModels?.length) {
       if (!ptArchitecture || !pretrainedModels.find(m => m.architecture === ptArchitecture)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPtArchitecture(pretrainedModels[0].architecture)
         setPtResolution(pretrainedModels[0].resolutions[0] || '')
       }
@@ -70,6 +71,7 @@ export function UploadModel() {
       const model = pretrainedModels.find(m => m.architecture === ptArchitecture)
       const availableRes = model?.resolutions || []
       if (!availableRes.includes(ptResolution) && availableRes.length > 0) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setPtResolution(availableRes[0])
       }
     }
