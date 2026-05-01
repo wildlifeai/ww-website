@@ -33,6 +33,10 @@ from app.services.http_client import DownloadError, download_url_content
 from app.services.storage import download_from_storage
 from app.services.supabase_client import create_service_client
 
+logger = structlog.get_logger()
+
+DEFAULT_FIRMWARE_BRANCHES = ["main", "dev", "firmware_updates", "live_video", "ledflash2"]
+
 GROVE_VISION_REPO = "wildlifeai/Seeed_Grove_Vision_AI_Module_V2"
 MANIFEST_BASE = "EPII_CM55M_APP_S/app/ww_projects/ww500_md/MANIFEST"
 OUTPUT_IMG_PATH = "we2_image_gen_local_dpd/output_case1_sec_wlcsp/output.img"
@@ -414,7 +418,7 @@ async def fetch_github_branches() -> list[str]:
         return [b["name"] for b in data]
     except Exception as exc:
         logger.warning("github_branches_failed", error=str(exc))
-        return ["main", "dev", "firmware_updates", "live_video", "ledflash2"]
+        return DEFAULT_FIRMWARE_BRANCHES
 
 
 # ── Main entry point ─────────────────────────────────────────────────
