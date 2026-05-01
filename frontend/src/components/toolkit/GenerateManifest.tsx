@@ -187,7 +187,14 @@ export function GenerateManifest() {
                 {/* Org selector */}
                 <div>
                   <label style={labelStyle}>Organisation</label>
-                  {userOrgs && userOrgs.length > 0 ? (
+                  {userOrgs && userOrgs.length === 1 ? (
+                    <div style={{
+                      ...selectStyle,
+                      opacity: 0.8,
+                    }}>
+                      {userOrgs[0].name}
+                    </div>
+                  ) : userOrgs && userOrgs.length > 1 ? (
                     <select
                       value={selectedOrgId}
                       onChange={(e) => { setSelectedOrgId(e.target.value); setSelectedProjectId('') }}
@@ -198,7 +205,9 @@ export function GenerateManifest() {
                       ))}
                     </select>
                   ) : (
-                    <div style={{ padding: '0.5rem', opacity: 0.6 }}>No organisations found.</div>
+                    <div style={{ padding: '0.5rem', color: 'var(--text-color)', opacity: 0.5 }}>
+                      No organisations found.
+                    </div>
                   )}
                 </div>
 

@@ -414,7 +414,7 @@ async def fetch_github_branches() -> list[str]:
         return [b["name"] for b in data]
     except Exception as exc:
         logger.warning("github_branches_failed", error=str(exc))
-        return ["main"]
+        return ["main", "dev", "firmware_updates", "live_video", "ledflash2"]
 
 
 # ── Main entry point ─────────────────────────────────────────────────
