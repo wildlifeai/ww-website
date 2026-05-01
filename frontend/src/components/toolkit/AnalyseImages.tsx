@@ -56,7 +56,7 @@ export function AnalyseImages() {
     uploadedFiles: 0,
     jobs: [],
     logs: [],
-    lastUpdateTs: Date.now()
+    lastUpdateTs: 0
   })
   
   const [deployments, setDeployments] = useState<Deployment[]>([])
@@ -121,7 +121,7 @@ export function AnalyseImages() {
                 // events from this poll (consumed below, not stored in state)
                 _events: j.events ?? [],
               } as typeof job & { _events: Array<{ seq: number; type: string; phase: string; timestamp: string; message: string }> }
-            } catch (err) {
+            } catch {
               return job
             }
           })
@@ -330,11 +330,12 @@ export function AnalyseImages() {
               }
           })
 
-        } catch (e) {
+        } catch (e: any) {
           console.error("Chunk failed", e)
+          const errorMessage = e.response?.data?.detail || e.response?.data?.error?.message || e.message || String(e)
           setPipelineState(prev => ({
               ...prev,
-              logs: [...prev.logs, { ts: Date.now(), level: 'error', message: `❌ Failed to process images ${i+1}-${Math.min(i+chunkSize, imageFiles.length)}` }],
+              logs: [...prev.logs, { ts: Date.now(), level: 'error', message: `❌ Failed to process images ${i+1}-${Math.min(i+chunkSize, imageFiles.length)}: ${errorMessage}` }],
               uploadedFiles: Math.min(i + chunkSize, prev.totalFiles)
           }))
         }

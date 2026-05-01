@@ -15,19 +15,25 @@ extracts the 8-character deployment-ID prefix from the folder hierarchy and
 matches it against Supabase deployments.
 """
 
+import asyncio
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
-import asyncio
 
 import structlog
-from fastapi import APIRouter, UploadFile, File, Form, Header, Request
-
-from app.dependencies import get_optional_user
+from fastapi import APIRouter, File, Form, Header, Request, UploadFile
+from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.schemas.common import ApiResponse, ApiMeta
+from app.dependencies import get_optional_user
 from app.domain.exif import parse_exif_from_bytes
+from app.jobs.definitions import upload_drive_images_job
+from app.jobs.runner import enqueue_local_job
+from app.jobs.store import create_job
+from app.schemas.common import ApiMeta, ApiResponse
+from app.services.azure_storage import store_blob
+from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 
@@ -35,7 +41,7 @@ router = APIRouter(prefix="/api/exif", tags=["exif"])
 
 # Regex to extract the 8-char deployment prefix from the SD card folder path
 # e.g.  MEDIA/655BC4E5/IMAGES.000/file.JPG  →  655BC4E5
-_FOLDER_DEP_RE = re.compile(r'MEDIA[/\\]([A-Fa-f0-9]{8})[/\\]', re.IGNORECASE)
+_FOLDER_DEP_RE = re.compile(r"MEDIA[/\\]([A-Fa-f0-9]{8})[/\\]", re.IGNORECASE)
 
 
 def _hex_filename_to_timestamp(filename: str) -> Optional[str]:
@@ -44,13 +50,13 @@ def _hex_filename_to_timestamp(filename: str) -> Optional[str]:
     The firmware encodes timestamps as ``(unix_seconds << 4) + sub_second``
     in an 8-character hex string.  Shifting right by 4 recovers the second.
     """
-    stem = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
     try:
         value = int(stem, 16)
         seconds = value >> 4
         if seconds < 946684800:  # before year 2000 — probably not a real timestamp
             return None
-        return datetime.fromtimestamp(seconds, tz=timezone.utc).strftime('%Y:%m:%d %H:%M:%S')
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).strftime("%Y:%m:%d %H:%M:%S")
     except (ValueError, OSError):
         return None
 
@@ -91,7 +97,6 @@ async def parse_exif(
     MAX_ANON_IMAGES = 50
     user = await get_optional_user(authorization)
     if not user and len(files) > MAX_ANON_IMAGES:
-        from fastapi.responses import JSONResponse
         return JSONResponse(
             status_code=403,
             content={
@@ -192,9 +197,7 @@ async def parse_exif(
             "images": results,
             "drive_upload": drive_upload_info,
         },
-        meta=ApiMeta(
-            request_id=getattr(request.state, "request_id", None) if request else None
-        ),
+        meta=ApiMeta(request_id=getattr(request.state, "request_id", None) if request else None),
     )
 
 
@@ -211,9 +214,6 @@ async def _enqueue_drive_upload(
 
     Returns a dict describing the enqueued job for the API response.
     """
-    from app.services.storage import upload_to_storage
-    from app.services.supabase_client import create_service_client
-    from app.jobs.store import create_job
 
     client = create_service_client()
     context_map = {}
@@ -232,10 +232,7 @@ async def _enqueue_drive_upload(
             for dep_row in dep_resp.data:
                 dep_id = dep_row["id"]
                 dep_start = dep_row.get("deployment_start")
-                dep_date = (
-                    dep_start[:10] if dep_start
-                    else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                )
+                dep_date = dep_start[:10] if dep_start else datetime.now(timezone.utc).strftime("%Y-%m-%d")
                 deployment_info = {
                     "id": dep_id,
                     "date": dep_date,
@@ -249,7 +246,7 @@ async def _enqueue_drive_upload(
                 proj = dep_row.get("projects")
                 if proj:
                     project_info = {"id": proj["id"], "name": proj["name"]}
-                    
+
                 context_map[dep_id] = {
                     "deployment": deployment_info,
                     "project": project_info,
@@ -272,10 +269,7 @@ async def _enqueue_drive_upload(
                     dep_row = prefix_resp.data[0]
                     dep_id = dep_row["id"]
                     dep_start = dep_row.get("deployment_start")
-                    dep_date = (
-                        dep_start[:10] if dep_start
-                        else datetime.now(timezone.utc).strftime("%Y-%m-%d")
-                    )
+                    dep_date = dep_start[:10] if dep_start else datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     deployment_info = {
                         "id": dep_id,
                         "date": dep_date,
@@ -314,10 +308,10 @@ async def _enqueue_drive_upload(
                 size_bytes=len(content),
             )
             return None
-            
+
         exif_data = results[i].get("exif", {}) if i < len(results) else {}
         file_dep_id = exif_data.get("deployment_id")
-        
+
         # Resolve 8-char folder prefix to full UUID if available
         if file_dep_id and len(file_dep_id) == 8:
             resolved = prefix_to_full_id.get(file_dep_id.upper())
@@ -327,7 +321,7 @@ async def _enqueue_drive_upload(
         if not file_dep_id:
             logger.info("file_skipped_no_deployment_id", filename=upload.filename)
             return None
-            
+
         file_context = context_map.get(file_dep_id)
         if not file_context:
             exif_date = exif_data.get("date", "")
@@ -337,12 +331,10 @@ async def _enqueue_drive_upload(
                 "project": None,
             }
 
-        proj_id = file_context["project"]["id"] if file_context["project"] else "unknown"
         # Buffer to local disk instead of Supabase
-        from app.services.azure_storage import store_blob
-        import uuid
+
         blob_id = str(uuid.uuid4())
-        
+
         async with sem:
             await store_blob(blob_id, content, metadata={})
             uploaded = True
@@ -358,7 +350,7 @@ async def _enqueue_drive_upload(
 
     tasks = [_process_file(i, upload, content) for i, (upload, content) in enumerate(zip(files, file_contents))]
     results_list = await asyncio.gather(*tasks)
-    
+
     for res in results_list:
         if res:
             storage_entries.append(res)
@@ -374,8 +366,6 @@ async def _enqueue_drive_upload(
     }
 
     try:
-        from app.jobs.runner import enqueue_local_job
-        from app.jobs.definitions import upload_drive_images_job
         enqueue_local_job(upload_drive_images_job(job_id, payload))
     except Exception as exc:
         logger.error("arq_enqueue_failed", job_id=job_id, error=str(exc))

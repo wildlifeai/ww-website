@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the model domain — parsing, label extraction, filename generation."""
 
-import zipfile
 import tempfile
 from pathlib import Path
 
-from app.domain.model import (
-    _parse_model_zip_name,
-    _extract_labels_from_header,
-    _build_firmware_filename,
-    ModelDomainError,
-)
 import pytest
+
+from app.domain.model import (
+    ModelDomainError,
+    _build_firmware_filename,
+    _extract_labels_from_header,
+    _parse_model_zip_name,
+)
 
 
 class TestParseModelZipName:
@@ -40,9 +40,9 @@ class TestParseModelZipName:
 class TestExtractLabels:
     def test_valid_header(self):
         """Labels should be extracted from model_variables.h."""
-        content = '''
+        content = """
         const char* ei_classifier_inferencing_categories[] = { "cat", "dog", "bird" };
-        '''
+        """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".h", delete=False) as f:
             f.write(content)
             f.flush()
@@ -61,10 +61,10 @@ class TestExtractLabels:
 
 class TestBuildFirmwareFilename:
     def test_standard_ids(self):
-        content = '''
+        content = """
         .project_id = 12345
         .deploy_version = 3
-        '''
+        """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".h", delete=False) as f:
             f.write(content)
             f.flush()
@@ -74,10 +74,10 @@ class TestBuildFirmwareFilename:
 
     def test_truncation(self):
         """Filenames longer than 8 chars get truncated for 8.3 compliance."""
-        content = '''
+        content = """
         .project_id = 123456789
         .deploy_version = 99
-        '''
+        """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".h", delete=False) as f:
             f.write(content)
             f.flush()

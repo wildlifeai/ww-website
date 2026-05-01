@@ -10,7 +10,6 @@ Blobs auto-expire after 1 hour as a safety net.
 
 import asyncio
 import json
-import os
 import tempfile
 from pathlib import Path
 

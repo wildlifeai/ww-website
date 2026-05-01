@@ -9,9 +9,9 @@ Key format: ww_live_<32 hex chars>
 Storage: bcrypt hash in Supabase `api_keys` table.
 """
 
-import secrets
 import hashlib
-from typing import Optional, List, Dict, Any
+import secrets
+from typing import Any, Dict, List, Optional
 
 import structlog
 
@@ -42,6 +42,7 @@ class ApiKeyError(Exception):
 
 # ── Key generation ───────────────────────────────────────────────────
 
+
 def generate_api_key() -> tuple[str, str]:
     """Generate a new API key and its hash.
 
@@ -56,6 +57,7 @@ def generate_api_key() -> tuple[str, str]:
 
 
 # ── Key validation ───────────────────────────────────────────────────
+
 
 async def validate_api_key(
     raw_key: str,
@@ -77,18 +79,12 @@ async def validate_api_key(
         raise ApiKeyError("Invalid key format")
 
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    key_prefix = raw_key[:len(KEY_PREFIX) + 8]  # ww_live_ + first 8 chars
+    key_prefix = raw_key[: len(KEY_PREFIX) + 8]  # ww_live_ + first 8 chars
 
     client = create_service_client()
 
     try:
-        response = (
-            client.table("api_keys")
-            .select("*")
-            .eq("key_hash", key_hash)
-            .is_("revoked_at", "null")
-            .execute()
-        )
+        response = client.table("api_keys").select("*").eq("key_hash", key_hash).is_("revoked_at", "null").execute()
 
         if not response.data:
             raise ApiKeyError("Invalid or revoked API key")
@@ -109,9 +105,7 @@ async def validate_api_key(
 
         # Update last_used_at (fire-and-forget)
         try:
-            client.table("api_keys").update(
-                {"last_used_at": "now()"}
-            ).eq("id", key_record["id"]).execute()
+            client.table("api_keys").update({"last_used_at": "now()"}).eq("id", key_record["id"]).execute()
         except Exception:
             pass  # Non-critical
 
@@ -131,6 +125,7 @@ async def validate_api_key(
 
 
 # ── Key management ───────────────────────────────────────────────────
+
 
 async def create_api_key_record(
     org_id: str,
@@ -160,7 +155,7 @@ async def create_api_key_record(
         raise ApiKeyError(f"Invalid scopes: {invalid}")
 
     raw_key, key_hash = generate_api_key()
-    key_prefix = raw_key[:len(KEY_PREFIX) + 8]
+    key_prefix = raw_key[: len(KEY_PREFIX) + 8]
 
     client = create_service_client()
 

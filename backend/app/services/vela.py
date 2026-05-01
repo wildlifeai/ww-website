@@ -7,7 +7,6 @@ Wraps the ethos-u-vela CLI for converting TFLite models to Ethos-U55 format.
 
 import subprocess
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
@@ -44,27 +43,24 @@ async def run_vela_conversion(
     """
     cmd = [
         "vela",
-        "--accelerator-config", accelerator_config,
-        "--memory-mode", memory_mode,
-        "--output-dir", str(output_dir),
+        "--accelerator-config",
+        accelerator_config,
+        "--memory-mode",
+        memory_mode,
+        "--output-dir",
+        str(output_dir),
         str(input_path),
     ]
 
     logger.info("vela_conversion_start", input=str(input_path))
 
     try:
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, check=True, timeout=timeout
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=timeout)
         logger.info("vela_conversion_success", stdout=result.stdout[:500])
     except subprocess.CalledProcessError as e:
-        raise VelaConversionError(
-            f"Vela failed (code {e.returncode}): {e.stderr[:500]}"
-        ) from e
+        raise VelaConversionError(f"Vela failed (code {e.returncode}): {e.stderr[:500]}") from e
     except FileNotFoundError:
-        raise VelaConversionError(
-            "Vela command not found. Ensure ethos-u-vela is installed."
-        )
+        raise VelaConversionError("Vela command not found. Ensure ethos-u-vela is installed.")
     except subprocess.TimeoutExpired:
         raise VelaConversionError(f"Vela conversion timed out after {timeout}s")
 
@@ -91,6 +87,4 @@ def _find_vela_output(work_dir: Path, original_name: str) -> Path:
     if original_path.exists():
         return original_path
 
-    raise VelaConversionError(
-        f"Could not find Vela output in {work_dir}. Checked: {candidates}"
-    )
+    raise VelaConversionError(f"Could not find Vela output in {work_dir}. Checked: {candidates}")

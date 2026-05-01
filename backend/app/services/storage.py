@@ -6,21 +6,18 @@ Handles download/upload to Supabase Storage buckets with the same
 two-step fallback strategy as the Streamlit app (SDK → public URL).
 """
 
-from pathlib import Path
 from typing import Optional
 
-from app.config import settings
-from app.services.supabase_client import create_service_client
-from app.services.http_client import download_url_content, DownloadError
-
 import structlog
+
+from app.config import settings
+from app.services.http_client import DownloadError, download_url_content
+from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 
 
-async def download_from_storage(
-    bucket: str, path: str, *, silent: bool = False
-) -> Optional[bytes]:
+async def download_from_storage(bucket: str, path: str, *, silent: bool = False) -> Optional[bytes]:
     """Download a file from Supabase Storage.
 
     Tries SDK first, falls back to public URL.
@@ -57,17 +54,20 @@ async def download_from_storage(
         return None
 
 
-async def upload_to_storage(
-    bucket: str, path: str, content: bytes, content_type: str = "application/octet-stream"
-) -> bool:
+async def upload_to_storage(bucket: str, path: str, content: bytes, content_type: str = "application/octet-stream") -> bool:
     """Upload a file to Supabase Storage.
 
     Returns True on success, False on failure.
     """
+    import asyncio
+
     client = create_service_client()
     try:
-        client.storage.from_(bucket).upload(
-            path, content, file_options={"content-type": content_type}
+        await asyncio.to_thread(
+            client.storage.from_(bucket).upload,
+            path,
+            content,
+            file_options={"content-type": content_type},
         )
         return True
     except Exception as e:

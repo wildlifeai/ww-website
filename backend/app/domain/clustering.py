@@ -12,7 +12,7 @@ Ported from dev-inat-api:cluster_utils.py and adapted for the V2 pipeline
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from io import BytesIO
 from typing import Dict, List, Optional, Tuple
 
@@ -99,11 +99,11 @@ def laplacian_variance_sharpness(img: Image.Image) -> float:
 
     # 3x3 Laplacian convolution (valid region)
     sub = (
-        g[:-2, 1:-1]        # top
-        + g[1:-1, :-2]      # left
+        g[:-2, 1:-1]  # top
+        + g[1:-1, :-2]  # left
         + (-4) * g[1:-1, 1:-1]  # center
-        + g[1:-1, 2:]       # right
-        + g[2:, 1:-1]       # bottom
+        + g[1:-1, 2:]  # right
+        + g[2:, 1:-1]  # bottom
     )
     return float(np.var(sub))
 
@@ -196,9 +196,7 @@ class _UnionFind:
 # ── Core clustering logic ────────────────────────────────────────────
 
 
-def build_record_from_bytes(
-    filename: str, image_bytes: bytes, index: int, hash_size: int = 8
-) -> Optional[ImageRecord]:
+def build_record_from_bytes(filename: str, image_bytes: bytes, index: int, hash_size: int = 8) -> Optional[ImageRecord]:
     """Build an ImageRecord from raw image bytes."""
     try:
         img = Image.open(BytesIO(image_bytes))
@@ -220,9 +218,7 @@ def build_record_from_bytes(
         return None
 
 
-def cluster_by_dhash(
-    records: List[ImageRecord], max_hamming: int = 10
-) -> Dict[int, List[int]]:
+def cluster_by_dhash(records: List[ImageRecord], max_hamming: int = 10) -> Dict[int, List[int]]:
     """Cluster record indices by dHash within a Hamming threshold.
 
     Uses a BK-tree for O(N log N) average-case performance instead of O(N²).
@@ -249,9 +245,7 @@ def cluster_by_dhash(
     return dict(sorted(clusters.items(), key=lambda kv: (-len(kv[1]), kv[0])))
 
 
-def pick_representatives(
-    records: List[ImageRecord], clusters: Dict[int, List[int]]
-) -> Dict[int, int]:
+def pick_representatives(records: List[ImageRecord], clusters: Dict[int, List[int]]) -> Dict[int, int]:
     """Pick the sharpest image in each cluster as the representative."""
     reps: Dict[int, int] = {}
     for root, idxs in clusters.items():

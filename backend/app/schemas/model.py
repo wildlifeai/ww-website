@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Model conversion and upload schemas."""
 
+from typing import List
+
 from pydantic import BaseModel, Field
-from typing import Optional, List
 
 
 class ModelConvertRequest(BaseModel):

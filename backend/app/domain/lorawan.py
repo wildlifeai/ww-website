@@ -8,14 +8,15 @@ Supabase Realtime auto-broadcasts inserts to the mobile app.
 """
 
 import base64
-from typing import Optional, Dict, Any
+import json
+from typing import Any, Dict, Optional
 
 import structlog
 
 from app.schemas.lorawan import (
-    TTNUplink,
     ChirpstackUplink,
     ParsedMessage,
+    TTNUplink,
 )
 from app.services.supabase_client import create_service_client
 
@@ -37,9 +38,7 @@ class LoRaWANDomain:
         raw_bytes = base64.b64decode(payload.data)
         return await self._process_common(device_eui, raw_bytes, payload.model_dump())
 
-    async def _process_common(
-        self, device_eui: str, raw_bytes: bytes, raw_json: dict
-    ) -> ParsedMessage:
+    async def _process_common(self, device_eui: str, raw_bytes: bytes, raw_json: dict) -> ParsedMessage:
         """Common processing: match device, parse payload, store, notify.
 
         Steps:
@@ -71,9 +70,7 @@ class LoRaWANDomain:
         }
 
         try:
-            msg_response = (
-                client.table("lorawan_messages").insert(message_data).execute()
-            )
+            msg_response = client.table("lorawan_messages").insert(message_data).execute()
             message_id = msg_response.data[0]["id"] if msg_response.data else None
         except Exception as e:
             logger.error("lorawan_message_insert_failed", error=str(e))
@@ -105,21 +102,13 @@ class LoRaWANDomain:
     async def _match_device(self, client, device_eui: str) -> Optional[Dict[str, Any]]:
         """Look up a device by its LoRaWAN EUI."""
         try:
-            response = (
-                client.table("devices")
-                .select("id, name, organisation_id")
-                .eq("lorawan_device_eui", device_eui)
-                .limit(1)
-                .execute()
-            )
+            response = client.table("devices").select("id, name, organisation_id").eq("lorawan_device_eui", device_eui).limit(1).execute()
             return response.data[0] if response.data else None
         except Exception as e:
             logger.warning("device_lookup_failed", device_eui=device_eui, error=str(e))
             return None
 
-    async def _find_active_deployment(
-        self, client, device_id: str
-    ) -> Optional[Dict[str, Any]]:
+    async def _find_active_deployment(self, client, device_id: str) -> Optional[Dict[str, Any]]:
         """Find the currently active deployment for a device."""
         try:
             response = (
@@ -152,7 +141,6 @@ class LoRaWANDomain:
 
         if len(raw_bytes) > 2:
             try:
-                import json
                 model_output = json.loads(raw_bytes[2:].decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):
                 model_output = {"raw_hex": raw_bytes[2:].hex()}

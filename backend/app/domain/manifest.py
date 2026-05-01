@@ -13,22 +13,33 @@ The MANIFEST.zip is what gets deployed to the camera SD card. Structure:
     └── output.img          # Himax coprocessor firmware
 """
 
-import re
+# ── GitHub repo constants ────────────────────────────────────────────
+import asyncio
+import io
 import json
+import re
 import shutil
-import zipfile
 import tempfile
+import zipfile
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional
 
 import structlog
 
 from app.config import settings
-from app.registries.model_registry import MODEL_REGISTRY, get_model_config
 from app.registries.camera_configs import CAMERA_CONFIGS
-from app.services.supabase_client import create_service_client
+from app.registries.model_registry import MODEL_REGISTRY, get_model_config
+from app.services.http_client import DownloadError, download_url_content
 from app.services.storage import download_from_storage
-from app.services.http_client import download_url_content, DownloadError
+from app.services.supabase_client import create_service_client
+
+GROVE_VISION_REPO = "wildlifeai/Seeed_Grove_Vision_AI_Module_V2"
+MANIFEST_BASE = "EPII_CM55M_APP_S/app/ww_projects/ww500_md/MANIFEST"
+OUTPUT_IMG_PATH = "we2_image_gen_local_dpd/output_case1_sec_wlcsp/output.img"
+
+_GITHUB_MANIFEST_FILES = {
+    "CONFIG.TXT": f"{MANIFEST_BASE}/CONFIG.TXT",
+}
 
 logger = structlog.get_logger()
 
@@ -40,6 +51,7 @@ class ManifestDomainError(Exception):
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _flatten_directory(directory: Path) -> None:
     """Move all files from subdirectories into the root and remove subdirs.
@@ -78,6 +90,7 @@ def _extract_hex_array(c_content: str) -> bytes:
 
 # ── Config firmware fetching ─────────────────────────────────────────
 
+
 async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
     """Fetch and extract the latest config firmware into manifest_dir.
 
@@ -105,7 +118,7 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
             if content:
                 if path.lower().endswith(".zip"):
                     # Extract ZIP contents into manifest dir
-                    import io
+
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
                 else:
@@ -122,30 +135,19 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
 
     # Fallback: list files in the firmware/config bucket folder
     try:
-        files = client.storage.from_("firmware").list(
-            "config", {"sortBy": {"column": "created_at", "order": "desc"}}
-        )
+        files = client.storage.from_("firmware").list("config", {"sortBy": {"column": "created_at", "order": "desc"}})
         if not files:
             files = client.storage.from_("firmware").list("config")
-            files.sort(
-                key=lambda x: x.get("created_at", x.get("name")), reverse=True
-            )
+            files.sort(key=lambda x: x.get("created_at", x.get("name")), reverse=True)
 
         # Filter out placeholders
-        files = [
-            f
-            for f in files
-            if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")
-        ]
+        files = [f for f in files if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")]
 
         if files:
             latest = files[0]["name"]
-            content = await download_from_storage(
-                "firmware", f"config/{latest}", silent=True
-            )
+            content = await download_from_storage("firmware", f"config/{latest}", silent=True)
             if content:
                 if latest.lower().endswith(".zip"):
-                    import io
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
                 else:
@@ -159,6 +161,7 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
 
 
 # ── Himax firmware fetching ──────────────────────────────────────────
+
 
 async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
     """Fetch the latest active Himax firmware image into manifest_dir.
@@ -202,26 +205,16 @@ async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
 
     # Strategy 2: Fallback — list files in the himax/ folder of the firmware bucket
     try:
-        files = client.storage.from_("firmware").list(
-            "himax", {"sortBy": {"column": "created_at", "order": "desc"}}
-        )
+        files = client.storage.from_("firmware").list("himax", {"sortBy": {"column": "created_at", "order": "desc"}})
         if not files:
             files = client.storage.from_("firmware").list("himax")
-            files.sort(
-                key=lambda x: x.get("created_at", x.get("name")), reverse=True
-            )
+            files.sort(key=lambda x: x.get("created_at", x.get("name")), reverse=True)
 
-        files = [
-            f
-            for f in files
-            if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")
-        ]
+        files = [f for f in files if f["name"] != ".emptyFolderPlaceholder" and not f["name"].endswith("/")]
 
         if files:
             latest = files[0]["name"]
-            content = await download_from_storage(
-                "firmware", f"himax/{latest}", silent=True
-            )
+            content = await download_from_storage("firmware", f"himax/{latest}", silent=True)
             if content:
                 (manifest_dir / "output.img").write_bytes(content)
                 logger.info("himax_firmware_fallback", filename=latest)
@@ -233,6 +226,7 @@ async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
 
 
 # ── AI model fetching ────────────────────────────────────────────────
+
 
 async def _fetch_default_model(client, manifest_dir: Path) -> bool:
     """Fetch and extract the default AI model into manifest_dir.
@@ -260,7 +254,6 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
                 content = await download_from_storage("ai-models", path, silent=True)
 
                 if content:
-                    import io
                     with zipfile.ZipFile(io.BytesIO(content)) as zf:
                         zf.extractall(manifest_dir)
                     logger.info("ai_model_added", name=model.get("name", "default"))
@@ -276,9 +269,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
         if subdirs:
             for sd in subdirs:
                 model_name = sd["name"]
-                files = client.storage.from_("ai-models").list(
-                    f"{org_folder}/{model_name}"
-                )
+                files = client.storage.from_("ai-models").list(f"{org_folder}/{model_name}")
                 for f in files:
                     if f["name"] == "ai_model.zip":
                         content = await download_from_storage(
@@ -287,7 +278,6 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
                             silent=True,
                         )
                         if content:
-                            import io
                             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                                 zf.extractall(manifest_dir)
                             logger.info("ai_model_fallback", name=model_name)
@@ -298,9 +288,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
     return False
 
 
-async def _fetch_github_model(
-    model_type: str, resolution: str, manifest_dir: Path
-) -> bool:
+async def _fetch_github_model(model_type: str, resolution: str, manifest_dir: Path) -> bool:
     """Download and package a pre-trained model from GitHub into manifest_dir.
 
     Returns True on success.
@@ -341,7 +329,96 @@ async def _fetch_github_model(
         return False
 
 
+# ── GitHub-sourced firmware helpers ──────────────────────────────────
+
+
+async def _fetch_github_manifest_files(
+    branch: str,
+    manifest_dir: Path,
+) -> dict[str, bool]:
+    """Download manifest files (e.g., CONFIG.TXT) from GitHub."""
+    results: dict[str, bool] = {}
+    for filename, gh_path in _GITHUB_MANIFEST_FILES.items():
+        url = f"https://raw.githubusercontent.com/{GROVE_VISION_REPO}/{branch}/{gh_path}"
+        try:
+            content = await download_url_content(url)
+            (manifest_dir / filename).write_bytes(content)
+            results[filename] = True
+            logger.info("github_file_downloaded", file=filename, branch=branch)
+        except DownloadError as exc:
+            results[filename] = False
+            logger.warning("github_file_failed", file=filename, error=str(exc))
+    return results
+
+
+async def _fetch_github_output_img(branch: str, manifest_dir: Path) -> bool:
+    """Download output.img from the Grove Vision AI repo."""
+    url = f"https://raw.githubusercontent.com/{GROVE_VISION_REPO}/{branch}/{OUTPUT_IMG_PATH}"
+    try:
+        content = await download_url_content(url)
+        (manifest_dir / "output.img").write_bytes(content)
+        logger.info("github_output_img_downloaded", branch=branch, size=len(content))
+        return True
+    except DownloadError as exc:
+        logger.warning("github_output_img_failed", error=str(exc))
+        return False
+
+
+async def _resolve_project_model(client, project_id: str) -> dict:
+    """Query project → ai_models → ai_model_families to resolve firmware IDs.
+
+    Returns dict with keys: has_model, model_path, labels_path,
+    firmware_model_id, version_number, model_name, model_version.
+    """
+    query = (
+        client.table("projects")
+        .select(
+            "model_id, ai_models(id, name, version, model_path, labels_path, model_family_id, version_number, ai_model_families(firmware_model_id))"
+        )
+        .eq("id", project_id)
+    )
+    response = await asyncio.to_thread(query.execute)
+
+    if not response.data:
+        raise ManifestDomainError(f"Project {project_id} not found")
+
+    project = response.data[0]
+    if not project.get("model_id") or not project.get("ai_models"):
+        return {"has_model": False}
+
+    model = project["ai_models"]
+    family = model.get("ai_model_families") or {}
+    fw_model_id = family.get("firmware_model_id")
+    version_number = model.get("version_number")
+
+    if not fw_model_id or not version_number:
+        raise ManifestDomainError(f"Model {model.get('name')} is missing firmware_model_id or version_number")
+
+    return {
+        "has_model": True,
+        "model_path": model.get("model_path"),
+        "labels_path": model.get("labels_path"),
+        "firmware_model_id": fw_model_id,
+        "version_number": version_number,
+        "model_name": model.get("name"),
+        "model_version": model.get("version"),
+    }
+
+
+async def fetch_github_branches() -> list[str]:
+    """Fetch branch names from the Grove Vision AI repo (public API)."""
+    url = f"https://api.github.com/repos/{GROVE_VISION_REPO}/branches"
+    try:
+        content = await download_url_content(url)
+        data = json.loads(content)
+        return [b["name"] for b in data]
+    except Exception as exc:
+        logger.warning("github_branches_failed", error=str(exc))
+        return ["main"]
+
+
 # ── Main entry point ─────────────────────────────────────────────────
+
 
 async def generate_manifest(
     model_source: str = "default",
@@ -353,11 +430,14 @@ async def generate_manifest(
     sscma_model_id: Optional[str] = None,
     org_model_id: Optional[str] = None,
     camera_type: str = "Grove Vision AI V2",
+    project_id: Optional[str] = None,
+    github_branch: str = "main",
+    on_progress=None,
 ) -> bytes:
     """Generate a complete MANIFEST.zip package for SD card deployment.
 
     Args:
-        model_source: 'Pre-trained Model', 'SenseCap Models', etc., or legacy 'github'.
+        model_source: 'My Project', 'Pre-trained Model', etc., or legacy 'github'.
         model_type: Legacy model name from MODEL_REGISTRY.
         model_name: New frontend model name.
         model_id: Target firmware OP14 ID.
@@ -366,12 +446,15 @@ async def generate_manifest(
         sscma_model_id: For 'sscma' source — model catalog ID.
         org_model_id: For 'organisation' source — Supabase ai_models.id.
         camera_type: Camera config key from CAMERA_CONFIGS.
+        project_id: For 'project' source — Supabase projects.id.
+        github_branch: Branch for GitHub-sourced firmware files.
     """
     # Map frontend friendly names to backend legacy names
-    if model_source == "Pre-trained Model":
+    if model_source == "My Project":
+        model_source = "project"
+    elif model_source == "Pre-trained Model":
         model_source = "github"
         if model_name:
-            # model_name comes in as 'Person Detection (96x96)', strip resolution for model_type
             model_type = model_name.rsplit(" (", 1)[0]
     elif model_source == "SenseCap Models":
         model_source = "sscma"
@@ -382,6 +465,10 @@ async def generate_manifest(
 
     client = create_service_client()
 
+    async def _report(msg: str) -> None:
+        if on_progress:
+            await on_progress(msg)
+
     temp_dir = Path(tempfile.mkdtemp())
     manifest_dir = temp_dir / "MANIFEST"
     manifest_dir.mkdir()
@@ -390,87 +477,173 @@ async def generate_manifest(
     tfl_name = "trained_vela.TFL"
     txt_name = "trained_vela.TXT"
     if model_id is not None and model_version is not None:
-        tfl_name = f"{model_id}V{model_version}.TFL"
-        txt_name = f"{model_id}V{model_version}.TXT"
+        name_stem = f"{model_id}V{model_version}"
+        if len(name_stem) > 8:
+            name_stem = name_stem[:8]
+        tfl_name = f"{name_stem}.TFL"
+        txt_name = f"{name_stem}.TXT"
 
     try:
-        # 1. Fetch config firmware
-        config_added = await _fetch_config_firmware(client, manifest_dir)
-        if not config_added:
-            logger.warning("manifest_no_config", camera=camera_type)
-            # Non-fatal: camera config from static URL as fallback
-            cam_config = CAMERA_CONFIGS.get(camera_type, {})
-            if cam_config.get("url"):
-                try:
-                    content = await download_url_content(cam_config["url"])
-                    (manifest_dir / cam_config["filename"]).write_bytes(content)
-                    config_added = True
-                except DownloadError:
-                    pass
+        # ── PROJECT SOURCE: GitHub firmware + Supabase model ──────
+        if model_source == "project" and project_id:
+            # 1. Download firmware files from GitHub
+            await _report("Downloading firmware files from GitHub…")
+            gh_results = await _fetch_github_manifest_files(github_branch, manifest_dir)
+            config_added = gh_results.get("CONFIG.TXT", False)
 
-        # 2. Fetch AI model based on source
-        model_added = False
+            # 2. Download output.img from GitHub
+            await _report("Downloading output.img…")
+            himax_added = await _fetch_github_output_img(github_branch, manifest_dir)
 
-        if model_source == "github" and model_type and resolution:
-            # Reusing the github fetcher, but renaming the output files
-            model_added = await _fetch_github_model(model_type, resolution, manifest_dir)
-            
-            # The github fetcher hardcodes 'trained_vela', rename if needed
-            if model_added and tfl_name != "trained_vela.TFL":
-                default_tfl = manifest_dir / "trained_vela.TFL"
-                default_txt = manifest_dir / "trained_vela.TXT"
-                if default_tfl.exists(): default_tfl.rename(manifest_dir / tfl_name)
-                if default_txt.exists(): default_txt.rename(manifest_dir / txt_name)
+            # 3. Resolve project model
+            await _report("Resolving project model…")
+            model_info = await _resolve_project_model(client, project_id)
+            model_added = False
 
-        elif model_source == "organisation" and org_model_id:
-            # Fetch specific org model by ID
-            try:
-                response = (
-                    client.table("ai_models")
-                    .select("storage_path, name")
-                    .eq("id", org_model_id)
-                    .execute()
+            if model_info["has_model"]:
+                fw_id = model_info["firmware_model_id"]
+                ver = model_info["version_number"]
+                stem = f"{fw_id}V{ver}"
+                if len(stem) > 8:
+                    stem = stem[:8]
+                proj_tfl = f"{stem}.TFL"
+                proj_txt = f"{stem}.TXT"
+
+                # Download model binary
+                await _report(f"Downloading model {proj_tfl}…")
+                m_content = await download_from_storage("ai-models", model_info["model_path"])
+                if m_content:
+                    (manifest_dir / proj_tfl).write_bytes(m_content)
+                    model_added = True
+
+                # Download labels
+                await _report(f"Downloading labels {proj_txt}…")
+                l_content = await download_from_storage("ai-models", model_info["labels_path"])
+                if l_content:
+                    (manifest_dir / proj_txt).write_bytes(l_content)
+
+                # Inject OP 14/15 into CONFIG.TXT
+                await _report("Injecting model parameters into CONFIG.TXT…")
+                config_path = manifest_dir / "CONFIG.TXT"
+                if config_path.exists():
+                    lines = config_path.read_text().splitlines()
+                    lines = [ln for ln in lines if not (ln.strip().startswith("14 ") or ln.strip().startswith("15 "))]
+                    lines.append(f"14 {fw_id}")
+                    lines.append(f"15 {ver}")
+
+                    def _sort_key(line: str):
+                        s = line.strip()
+                        if s.startswith("#"):
+                            return (-1, 0)
+                        parts = s.split()
+                        if parts and parts[0].isdigit():
+                            return (0, int(parts[0]))
+                        return (1, 0)
+
+                    lines.sort(key=_sort_key)
+                    config_path.write_text("\n".join(lines) + "\n")
+
+                logger.info(
+                    "project_model_added",
+                    model=model_info["model_name"],
+                    tfl=proj_tfl,
                 )
-                if response.data:
-                    model = response.data[0]
-                    content = await download_from_storage(
-                        "ai-models", model["storage_path"]
-                    )
-                    if content:
-                        import io
-                        with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                            zf.extractall(manifest_dir)
-                        model_added = True
-                        
-                        # Apply custom names if needed
-                        if tfl_name != "trained_vela.TFL":
-                            for f in manifest_dir.glob("*.TFL"):
-                                f.rename(manifest_dir / tfl_name)
-                            for f in manifest_dir.glob("*.TXT"):
-                                f.rename(manifest_dir / txt_name)
-                                
-                        logger.info("org_model_added", name=model.get("name"))
-            except Exception as e:
-                logger.error("org_model_failed", error=str(e))
-        elif model_source == "sscma" and sscma_model_id:
-            # SSCMA model processing would go here
-            logger.warning("sscma_model_not_yet_implemented")
-        elif model_source == "none":
-            logger.info("skip_ai_model")
-            model_added = True
-        else:
-            # Default: fetch best available from DB
-            model_added = await _fetch_default_model(client, manifest_dir)
+            else:
+                logger.info("project_no_model", project_id=project_id)
+                model_added = True  # Not an error — just no model files
 
-        # 3. Fetch Himax firmware image (output.img)
-        himax_added = await _fetch_himax_firmware(client, manifest_dir)
-        if not himax_added:
-            logger.warning("manifest_no_himax_firmware")
+        # ── LEGACY SOURCES ───────────────────────────────────────
+        else:
+            # 1. Fetch config firmware
+            config_added = await _fetch_config_firmware(client, manifest_dir)
+            if not config_added:
+                logger.warning("manifest_no_config", camera=camera_type)
+                cam_config = CAMERA_CONFIGS.get(camera_type, {})
+                if cam_config.get("url"):
+                    try:
+                        content = await download_url_content(cam_config["url"])
+                        (manifest_dir / cam_config["filename"]).write_bytes(content)
+                        config_added = True
+                    except DownloadError:
+                        pass
+
+            # 2. Fetch AI model based on source
+            model_added = False
+
+            if model_source == "github" and model_type and resolution:
+                model_added = await _fetch_github_model(model_type, resolution, manifest_dir)
+                if model_added and tfl_name != "trained_vela.TFL":
+                    default_tfl = manifest_dir / "trained_vela.TFL"
+                    default_txt = manifest_dir / "trained_vela.TXT"
+                    if default_tfl.exists():
+                        default_tfl.rename(manifest_dir / tfl_name)
+                    if default_txt.exists():
+                        default_txt.rename(manifest_dir / txt_name)
+
+            elif model_source == "organisation" and org_model_id:
+                try:
+                    response = (
+                        client.table("ai_models")
+                        .select("storage_path, name, version, ai_model_families(firmware_model_id)")
+                        .eq("id", org_model_id)
+                        .execute()
+                    )
+                    if response.data:
+                        model = response.data[0]
+                        content = await download_from_storage("ai-models", model["storage_path"])
+                        if content:
+                            with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                                zf.extractall(manifest_dir)
+                            model_added = True
+
+                            family = model.get("ai_model_families")
+                            firmware_id = family.get("firmware_model_id") if family else None
+                            if not firmware_id:
+                                raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
+                            version_str = model.get("version", "1")
+                            version = version_str.split(".")[0] if "." in version_str else version_str
+
+                            name_stem = f"{firmware_id}V{version}"
+                            if len(name_stem) > 8:
+                                name_stem = name_stem[:8]
+
+                            dyn_tfl = f"{name_stem}.TFL"
+                            dyn_txt = f"{name_stem}.TXT"
+
+                            for f in manifest_dir.iterdir():
+                                if f.is_file() and f.suffix.upper() == ".TFL":
+                                    f.rename(manifest_dir / dyn_tfl)
+                                    break
+                            for f in manifest_dir.iterdir():
+                                if f.is_file() and f.suffix.upper() == ".TXT":
+                                    f.rename(manifest_dir / dyn_txt)
+                                    break
+
+                            logger.info(
+                                "org_model_added",
+                                name=model.get("name"),
+                                tfl_name=dyn_tfl,
+                            )
+                except Exception as e:
+                    logger.error("org_model_failed", error=str(e))
+            elif model_source == "sscma" and sscma_model_id:
+                logger.warning("sscma_model_not_yet_implemented")
+            elif model_source == "none":
+                logger.info("skip_ai_model")
+                model_added = True
+            else:
+                model_added = await _fetch_default_model(client, manifest_dir)
+
+            # 3. Fetch Himax firmware image (output.img)
+            himax_added = await _fetch_himax_firmware(client, manifest_dir)
+            if not himax_added:
+                logger.warning("manifest_no_himax_firmware")
 
         # 4. Flatten nested directories
         _flatten_directory(manifest_dir)
 
         # 5. Create final MANIFEST.zip (uncompressed for SD card)
+        await _report("Zipping MANIFEST folder…")
         files_to_zip = list(manifest_dir.glob("*"))
         if not files_to_zip:
             raise ManifestDomainError("No files found for MANIFEST — all downloads failed")

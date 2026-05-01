@@ -39,7 +39,9 @@ export function MyDataPage() {
   // Fetch projects
   useEffect(() => {
     if (!user) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
+
     setError(null)
 
     supabase
@@ -57,7 +59,9 @@ export function MyDataPage() {
   useEffect(() => {
     if (!user) return
     if (tab !== 'deployments') return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
+
     setError(null)
 
     let query = supabase
@@ -73,13 +77,14 @@ export function MyDataPage() {
     query.then(({ data, error: err }) => {
       if (err) setError(err.message)
       else {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rows = (data || []).map((d: any) => ({
           ...d,
           project_name: d.projects?.name ?? '—',
           device_name: d.devices?.name ?? '—',
           projects: undefined,
           devices: undefined,
-        }))
+        })) as Deployment[]
         setDeployments(rows)
       }
       setLoading(false)
@@ -93,10 +98,11 @@ export function MyDataPage() {
   }
 
   const sortedProjects = useMemo(() => {
-    let filtered = projects.filter(p =>
+    const filtered = projects.filter(p =>
       !search || p.name.toLowerCase().includes(search.toLowerCase())
     )
     if (sortCol) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       filtered.sort((a: any, b: any) => {
         const va = a[sortCol] ?? ''
         const vb = b[sortCol] ?? ''
@@ -107,13 +113,14 @@ export function MyDataPage() {
   }, [projects, sortCol, sortAsc, search])
 
   const sortedDeployments = useMemo(() => {
-    let filtered = deployments.filter(d =>
+    const filtered = deployments.filter(d =>
       !search ||
       (d.location_name || '').toLowerCase().includes(search.toLowerCase()) ||
       (d.project_name || '').toLowerCase().includes(search.toLowerCase()) ||
       (d.device_name || '').toLowerCase().includes(search.toLowerCase())
     )
     if (sortCol) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       filtered.sort((a: any, b: any) => {
         const va = a[sortCol] ?? ''
         const vb = b[sortCol] ?? ''
@@ -124,7 +131,7 @@ export function MyDataPage() {
   }, [deployments, sortCol, sortAsc, search])
 
   // CSV download
-  const downloadCsv = (filename: string, headers: string[], rows: any[][]) => {
+  const downloadCsv = (filename: string, headers: string[], rows: (string | number | null)[][]) => {
     const csv = [headers.join(','), ...rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))].join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
@@ -145,11 +152,11 @@ export function MyDataPage() {
   const exportDeploymentsCsv = () => {
     downloadCsv('deployments.csv',
       ['ID', 'Project', 'Device', 'Location', 'Latitude', 'Longitude', 'Start', 'End', 'Created'],
-      sortedDeployments.map(d => [d.id, d.project_name, d.device_name, d.location_name || '', d.latitude || '', d.longitude || '', d.deployment_start || '', d.deployment_end || '', d.created_at])
+      sortedDeployments.map(d => [d.id, d.project_name || '', d.device_name || '', d.location_name || '', d.latitude || '', d.longitude || '', d.deployment_start || '', d.deployment_end || '', d.created_at])
     )
   }
 
-  const SortIcon = ({ col }: { col: string }) => (
+  const renderSortIcon = (col: string) => (
     <span style={{ opacity: sortCol === col ? 1 : 0.3, marginLeft: '4px', fontSize: '0.75rem' }}>
       {sortCol === col ? (sortAsc ? '▲' : '▼') : '⇅'}
     </span>
@@ -255,9 +262,9 @@ export function MyDataPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={thStyle} onClick={() => handleSort('name')}>Name <SortIcon col="name" /></th>
-                <th style={thStyle} onClick={() => handleSort('description')}>Description <SortIcon col="description" /></th>
-                <th style={thStyle} onClick={() => handleSort('created_at')}>Created <SortIcon col="created_at" /></th>
+                <th style={thStyle} onClick={() => handleSort('name')}>Name {renderSortIcon('name')}</th>
+                <th style={thStyle} onClick={() => handleSort('description')}>Description {renderSortIcon('description')}</th>
+                <th style={thStyle} onClick={() => handleSort('created_at')}>Created {renderSortIcon('created_at')}</th>
                 <th style={{ ...thStyle, cursor: 'default' }}>Actions</th>
               </tr>
             </thead>
@@ -302,12 +309,12 @@ export function MyDataPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
-                <th style={thStyle} onClick={() => handleSort('project_name')}>Project <SortIcon col="project_name" /></th>
-                <th style={thStyle} onClick={() => handleSort('device_name')}>Device <SortIcon col="device_name" /></th>
-                <th style={thStyle} onClick={() => handleSort('location_name')}>Location <SortIcon col="location_name" /></th>
-                <th style={thStyle} onClick={() => handleSort('latitude')}>GPS <SortIcon col="latitude" /></th>
-                <th style={thStyle} onClick={() => handleSort('deployment_start')}>Start <SortIcon col="deployment_start" /></th>
-                <th style={thStyle} onClick={() => handleSort('deployment_end')}>End <SortIcon col="deployment_end" /></th>
+                <th style={thStyle} onClick={() => handleSort('project_name')}>Project {renderSortIcon('project_name')}</th>
+                <th style={thStyle} onClick={() => handleSort('device_name')}>Device {renderSortIcon('device_name')}</th>
+                <th style={thStyle} onClick={() => handleSort('location_name')}>Location {renderSortIcon('location_name')}</th>
+                <th style={thStyle} onClick={() => handleSort('latitude')}>GPS {renderSortIcon('latitude')}</th>
+                <th style={thStyle} onClick={() => handleSort('deployment_start')}>Start {renderSortIcon('deployment_start')}</th>
+                <th style={thStyle} onClick={() => handleSort('deployment_end')}>End {renderSortIcon('deployment_end')}</th>
               </tr>
             </thead>
             <tbody>

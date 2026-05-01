@@ -6,9 +6,8 @@ Provides a simple ``cached()`` helper for caching expensive lookups
 (SSCMA catalog, manifest input hashes, etc.) with configurable TTL.
 """
 
-import json
 import time
-from typing import Any, Callable, Awaitable, Dict, Tuple
+from typing import Any, Awaitable, Callable, Dict, Tuple
 
 import structlog
 
@@ -18,9 +17,7 @@ logger = structlog.get_logger()
 _memory_cache: Dict[str, Tuple[float, Any]] = {}
 
 
-async def cached(
-    key: str, ttl: int, fetch_fn: Callable[[], Awaitable[Any]]
-) -> Any:
+async def cached(key: str, ttl: int, fetch_fn: Callable[[], Awaitable[Any]]) -> Any:
     """Cache-aside: return cached value or call fetch_fn and cache the result.
 
     Args:
@@ -32,7 +29,7 @@ async def cached(
         The cached or freshly-fetched value.
     """
     now = time.monotonic()
-    
+
     # Clean up expired items lazily to avoid memory leaks
     expired_keys = [k for k, (exp, _) in _memory_cache.items() if now > exp]
     for k in expired_keys:

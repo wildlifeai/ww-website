@@ -19,12 +19,11 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Callable, Awaitable
+from typing import Any, Callable, Dict, List, Optional
 
 import structlog
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaInMemoryUpload
 
 from app.config import settings
 
@@ -95,9 +94,7 @@ class GoogleDriveService:
         """Load service-account credentials from file path or inline JSON."""
         raw = settings.GOOGLE_SERVICE_ACCOUNT_JSON
         if not raw:
-            raise RuntimeError(
-                "GOOGLE_SERVICE_ACCOUNT_JSON is not set — cannot authenticate with Google Drive"
-            )
+            raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is not set — cannot authenticate with Google Drive")
 
         # Try as a file path first
         path = Path(raw)
@@ -107,15 +104,15 @@ class GoogleDriveService:
             # Assume inline JSON
             info = json.loads(raw)
 
-        return service_account.Credentials.from_service_account_info(
-            info, scopes=SCOPES
-        )
+        return service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
 
     # ── Redis cache helpers ──────────────────────────────────────
 
     @staticmethod
     async def _get_cached_folder(cache_key: str) -> Optional[str]:
         """Try to read a folder ID from Redis. Returns None on miss / error."""
+        if not settings.REDIS_URL:
+            return None
         try:
             import redis.asyncio as aioredis
 
@@ -129,6 +126,8 @@ class GoogleDriveService:
     @staticmethod
     async def _set_cached_folder(cache_key: str, folder_id: str) -> None:
         """Store a folder ID in Redis with 24h TTL."""
+        if not settings.REDIS_URL:
+            return
         try:
             import redis.asyncio as aioredis
 
@@ -142,12 +141,7 @@ class GoogleDriveService:
 
     def _find_folder(self, parent_id: str, name: str) -> Optional[str]:
         """Search for an existing folder by name under *parent_id*."""
-        query = (
-            f"'{parent_id}' in parents"
-            f" and name = '{name}'"
-            f" and mimeType = 'application/vnd.google-apps.folder'"
-            f" and trashed = false"
-        )
+        query = f"'{parent_id}' in parents and name = '{name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
         results = (
             self._service.files()
             .list(q=query, fields="files(id)", spaces="drive", pageSize=1, supportsAllDrives=True, includeItemsFromAllDrives=True)
@@ -163,16 +157,10 @@ class GoogleDriveService:
             "mimeType": "application/vnd.google-apps.folder",
             "parents": [parent_id],
         }
-        folder = (
-            self._service.files()
-            .create(body=metadata, fields="id", supportsAllDrives=True)
-            .execute()
-        )
+        folder = self._service.files().create(body=metadata, fields="id", supportsAllDrives=True).execute()
         return folder["id"]
 
-    async def ensure_folder(
-        self, parent_id: str, name: str, cache_key: Optional[str] = None
-    ) -> str:
+    async def ensure_folder(self, parent_id: str, name: str, cache_key: Optional[str] = None) -> str:
         """Find or create a folder, with optional Redis caching.
 
         This is run in a thread pool because the Drive SDK is synchronous.
@@ -197,11 +185,7 @@ class GoogleDriveService:
 
     def _file_exists_by_hash(self, parent_id: str, file_hash: str) -> bool:
         """Check whether a file with the given hash already exists."""
-        query = (
-            f"'{parent_id}' in parents"
-            f" and appProperties has {{ key='sha256' and value='{file_hash}' }}"
-            f" and trashed = false"
-        )
+        query = f"'{parent_id}' in parents and appProperties has {{ key='sha256' and value='{file_hash}' }} and trashed = false"
         results = (
             self._service.files()
             .list(q=query, fields="files(id)", spaces="drive", pageSize=1, supportsAllDrives=True, includeItemsFromAllDrives=True)
@@ -227,18 +211,17 @@ class GoogleDriveService:
         """
         # Dedup check
         async with self._api_lock:
-            exists = await asyncio.to_thread(
-                self._file_exists_by_hash, parent_id, file_hash
-            )
-            
+            exists = await asyncio.to_thread(self._file_exists_by_hash, parent_id, file_hash)
+
         if exists:
             logger.info("drive_upload_skipped_duplicate", filename=filename)
             return None
 
         def _do_upload() -> str:
-            import requests
             import json
+
             import google.auth.transport.requests
+            import requests
 
             # Ensure credentials are fresh to get a valid token
             req = google.auth.transport.requests.Request()
@@ -252,16 +235,13 @@ class GoogleDriveService:
             }
 
             headers = {"Authorization": f"Bearer {access_token}"}
-            multipart_files = {
-                'metadata': ('metadata', json.dumps(metadata), 'application/json'),
-                'file': (filename, file_bytes, mime_type)
-            }
+            multipart_files = {"metadata": ("metadata", json.dumps(metadata), "application/json"), "file": (filename, file_bytes, mime_type)}
 
             resp = requests.post(
                 "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id",
                 headers=headers,
                 files=multipart_files,
-                timeout=60
+                timeout=60,
             )
 
             if resp.status_code not in (200, 201):
@@ -368,9 +348,7 @@ class GoogleDriveService:
                     # Use preprocessed filename if available, else fall back
                     drive_name = file_info.get("drive_filename") or sanitize_filename(timestamp, orig_name)
 
-                    file_hash = compute_file_hash(
-                        file_bytes, deployment["id"]
-                    )
+                    file_hash = compute_file_hash(file_bytes, deployment["id"])
 
                     result = await self.upload_file(
                         parent_id=dep_folder_id,

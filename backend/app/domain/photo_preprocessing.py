@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
+from app.services.google_drive import slugify
+
 logger = structlog.get_logger()
 
 # Lazy-loaded singletons
@@ -37,6 +39,7 @@ def _get_timezone_finder():
     global _tf
     if _tf is None:
         from timezonefinder import TimezoneFinder
+
         _tf = TimezoneFinder()
     return _tf
 
@@ -256,7 +259,6 @@ def preprocess_file_batch(
         deployment.get("location_name"),
     )
 
-    from app.services.google_drive import slugify
     proj_name = project.get("name", "unknown")
     proj_id = project.get("id", "00000000")
     project_folder = f"{slugify(proj_name)}_{proj_id[:8]}"
