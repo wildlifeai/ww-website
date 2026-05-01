@@ -250,7 +250,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
 
             if response.data:
                 model = response.data[0]
-                path = model["storage_path"]
+                path = model["model_path"]
                 content = await download_from_storage("ai-models", path, silent=True)
 
                 if content:
@@ -584,13 +584,14 @@ async def generate_manifest(
                 try:
                     response = (
                         client.table("ai_models")
-                        .select("storage_path, name, version, ai_model_families(firmware_model_id)")
+                        .select("model_path, labels_path, name, version, ai_model_families(firmware_model_id)")
                         .eq("id", org_model_id)
                         .execute()
                     )
                     if response.data:
                         model = response.data[0]
-                        content = await download_from_storage("ai-models", model["storage_path"])
+                        # For ZIP models, model_path contains both
+                        content = await download_from_storage("ai-models", model["model_path"])
                         if content:
                             with zipfile.ZipFile(io.BytesIO(content)) as zf:
                                 zf.extractall(manifest_dir)

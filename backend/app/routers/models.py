@@ -121,7 +121,8 @@ async def convert_model(
                 "description": description,
                 "uploaded_by": user.id,
                 "modified_by": user.id,
-                "storage_path": temp_storage_path,
+                "model_path": temp_storage_path,
+                "labels_path": temp_storage_path,
                 "file_type": "uploading",
             }
         )

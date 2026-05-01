@@ -152,7 +152,8 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         await update_model_status(
             status="validated",
             file_hash=file_hash,
-            storage_path=result_path,
+            model_path=result_path,
+            labels_path=result_path,
             file_size_bytes=len(model_bytes),
             detection_capabilities=labels,
             file_type="model",
