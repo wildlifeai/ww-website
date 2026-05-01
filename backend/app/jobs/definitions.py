@@ -152,7 +152,11 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         # 4. Storage upload is verified by Supabase SDK not raising an exception
         logger.info("convert_job_storage_verified", file_hash=file_hash, **log_ctx)
 
-        # 5. Update the ai_models row to 'validated'
+        # 5. Derive integer version_number from semantic version
+        major_version = version_num.split(".")[0] if "." in version_num else version_num
+        int_version = int(major_version) if major_version.isdigit() else 1
+
+        # 6. Update the ai_models row to 'validated'
         await update_model_status(
             status="validated",
             file_hash=file_hash,
@@ -161,6 +165,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
             file_size_bytes=len(tfl_bytes) + len(txt_bytes),
             detection_capabilities=labels,
             file_type="model",
+            version_number=int_version,
         )
 
         await update_job(

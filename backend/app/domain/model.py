@@ -280,6 +280,7 @@ async def upload_and_register(
         model_data = {
             "name": model_name,
             "version": model_version,
+            "version_number": int(version_num) if version_num.isdigit() else 1,
             "description": description,
             "organisation_id": org_id,
             "model_family_id": model_family_id,
