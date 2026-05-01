@@ -13,6 +13,9 @@ The MANIFEST.zip is what gets deployed to the camera SD card. Structure:
     └── output.img          # Himax coprocessor firmware
 """
 
+# ── GitHub repo constants ────────────────────────────────────────────
+import asyncio
+import json
 import re
 import shutil
 import tempfile
@@ -28,8 +31,6 @@ from app.registries.model_registry import MODEL_REGISTRY, get_model_config
 from app.services.http_client import DownloadError, download_url_content
 from app.services.storage import download_from_storage
 from app.services.supabase_client import create_service_client
-
-# ── GitHub repo constants ────────────────────────────────────────────
 
 GROVE_VISION_REPO = "wildlifeai/Seeed_Grove_Vision_AI_Module_V2"
 MANIFEST_BASE = "EPII_CM55M_APP_S/app/ww_projects/ww500_md/MANIFEST"
@@ -341,7 +342,7 @@ async def _fetch_github_manifest_files(
     branch: str,
     manifest_dir: Path,
 ) -> dict[str, bool]:
-    """Download CONFIG.TXT, config_file.md, HMSTB1.BIN, README.TXT from GitHub."""
+    """Download manifest files (e.g., CONFIG.TXT) from GitHub."""
     results: dict[str, bool] = {}
     for filename, gh_path in _GITHUB_MANIFEST_FILES.items():
         url = f"https://raw.githubusercontent.com/{GROVE_VISION_REPO}/{branch}/{gh_path}"
@@ -369,14 +370,12 @@ async def _fetch_github_output_img(branch: str, manifest_dir: Path) -> bool:
         return False
 
 
-def _resolve_project_model(client, project_id: str) -> dict:
+async def _resolve_project_model(client, project_id: str) -> dict:
     """Query project → ai_models → ai_model_families to resolve firmware IDs.
 
     Returns dict with keys: has_model, model_path, labels_path,
     firmware_model_id, version_number, model_name, model_version.
     """
-    import asyncio
-
     query = (
         client.table("projects")
         .select(
@@ -387,9 +386,7 @@ def _resolve_project_model(client, project_id: str) -> dict:
         )
         .eq("id", project_id)
     )
-    response = asyncio.get_event_loop().run_until_complete(
-        asyncio.to_thread(query.execute)
-    ) if not asyncio.get_event_loop().is_running() else query.execute()
+    response = await asyncio.to_thread(query.execute)
 
     if not response.data:
         raise ManifestDomainError(f"Project {project_id} not found")
@@ -424,8 +421,6 @@ async def fetch_github_branches() -> list[str]:
     url = f"https://api.github.com/repos/{GROVE_VISION_REPO}/branches"
     try:
         content = await download_url_content(url)
-        import json
-
         data = json.loads(content)
         return [b["name"] for b in data]
     except Exception as exc:
@@ -513,7 +508,7 @@ async def generate_manifest(
 
             # 3. Resolve project model
             await _report("Resolving project model…")
-            model_info = _resolve_project_model(client, project_id)
+            model_info = await _resolve_project_model(client, project_id)
             model_added = False
 
             if model_info["has_model"]:
