@@ -218,8 +218,8 @@ The workflow `.github/workflows/deploy-backend.yml` triggers on pushes to `dev` 
 | `SUPABASE_URL` | Supabase project URL (for model deployment) |
 | `SUPABASE_ANON_KEY` | Supabase anon key (for model deployment) |
 | `GENERAL_ORG_ID` | `b0000000-0000-0000-0000-000000000001` |
-| `UPLOADER_EMAIL` | `apps@wildlife.ai` |
-| `UPLOADER_PASSWORD` | Apps Manager password |
+
+
 
 ---
 

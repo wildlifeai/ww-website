@@ -29,6 +29,7 @@ from app.schemas.job import (
     ProgressEvent,
     ProgressPhase,
 )
+from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 
@@ -57,8 +58,6 @@ async def _sync_to_supabase(job_id: str) -> None:
 
     def _run_sync():
         try:
-            from app.services.supabase_client import create_service_client
-
             client = create_service_client()
             status_val = data_json.get("status", "queued")
             client.table("api_jobs").upsert({"id": job_id, "status": status_val, "job_data": data_json}).execute()
@@ -71,8 +70,6 @@ async def _sync_to_supabase(job_id: str) -> None:
 async def recover_stuck_jobs() -> None:
     """Load jobs from Supabase on startup and mark interrupted ones as failed."""
     try:
-        from app.services.supabase_client import create_service_client
-
         client = create_service_client()
         resp = client.table("api_jobs").select("id, job_data, status").eq("status", "processing").execute()
 
@@ -121,8 +118,6 @@ async def get_job(job_id: str) -> Optional[JobInfo]:
     if not raw:
         # Try loading from Supabase if not in memory
         try:
-            from app.services.supabase_client import create_service_client
-
             client = create_service_client()
             resp = client.table("api_jobs").select("job_data").eq("id", job_id).execute()
             if resp.data:

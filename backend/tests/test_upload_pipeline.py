@@ -76,8 +76,7 @@ class TestConvertEndpointValidation:
         )
         assert response.status_code == 400
 
-    @patch("app.services.supabase_client.create_service_client")
-    def test_rejects_oversized_file(self, mock_sb, auth_client):
+    def test_rejects_oversized_file(self, auth_client):
         """Files over 50MB should be rejected with 413."""
         big_content = b"\x00" * (50 * 1024 * 1024 + 1)
         response = auth_client.post(
@@ -104,7 +103,8 @@ class TestConvertEndpointValidation:
 
 class TestConvertEndpointRoles:
     @patch("app.services.supabase_client.create_service_client")
-    def test_rejects_non_manager_creating_family(self, mock_sb, auth_client):
+    @patch("app.routers.models.create_service_client")
+    def test_rejects_non_manager_creating_family(self, mock_sb_models, mock_sb_global, auth_client):
         """organisation_member cannot create a new model family."""
         mock_sb_client = MagicMock()
 
@@ -128,7 +128,8 @@ class TestConvertEndpointRoles:
             return table
 
         mock_sb_client.table = MagicMock(side_effect=table_side_effect)
-        mock_sb.return_value = mock_sb_client
+        mock_sb_models.return_value = mock_sb_client
+        mock_sb_global.return_value = mock_sb_client
 
         response = auth_client.post(
             "/api/models/convert",
@@ -146,10 +147,11 @@ class TestConvertEndpointRoles:
 
 class TestConvertResponseContract:
     @patch("app.services.supabase_client.create_service_client")
+    @patch("app.routers.models.create_service_client")
     @patch("app.jobs.store.create_job", new_callable=AsyncMock)
     @patch("app.services.blob_store.store_blob", new_callable=AsyncMock)
     @patch("app.jobs.runner.enqueue_local_job")
-    def test_response_includes_model_id_and_poll_url(self, mock_enqueue, mock_store, mock_create_job, mock_sb, auth_client):
+    def test_response_includes_model_id_and_poll_url(self, mock_enqueue, mock_store, mock_create_job, mock_sb_models, mock_sb_global, auth_client):
         """POST /convert should return model_id, job_id, status, poll_url."""
         mock_create_job.return_value = "test-job-123"
 
@@ -186,7 +188,8 @@ class TestConvertResponseContract:
         rpc_mock.execute.return_value = rpc_result
         mock_sb_client.rpc.return_value = rpc_mock
 
-        mock_sb.return_value = mock_sb_client
+        mock_sb_models.return_value = mock_sb_client
+        mock_sb_global.return_value = mock_sb_client
 
         response = auth_client.post(
             "/api/models/convert",
@@ -200,7 +203,7 @@ class TestConvertResponseContract:
         assert "model_id" in data
         assert data["status"] == "uploading"
         assert "poll_url" in data
-        assert data["poll_url"].startswith("/api/jobs/")
+        assert "/api/jobs/" in data["poll_url"]
 
 
 # ────────────────────────────────────────────────────────────

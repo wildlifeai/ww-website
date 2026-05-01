@@ -8,16 +8,22 @@ GET  /api/models/sscma/catalog → cached SSCMA model list (sync)
 POST /api/models/pretrained → download + package GitHub model (async)
 """
 
+import asyncio
 import uuid
 
+import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from app.dependencies import get_current_user, get_manager_roles
+from app.jobs.definitions import convert_model_job, download_github_pretrained_job, download_pretrained_job
+from app.jobs.runner import enqueue_local_job
 from app.jobs.store import create_job
 from app.schemas.common import ApiMeta, ApiResponse
 from app.schemas.job import JobCreateResponse
 from app.services.blob_store import store_blob
+from app.services.sscma import get_sscma_catalog
+from app.services.supabase_client import create_service_client
 
 router = APIRouter(prefix="/api/models", tags=["models"])
 
@@ -67,15 +73,12 @@ async def convert_model(
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(413, detail=f"File exceeds {MAX_UPLOAD_SIZE // 1024 // 1024}MB limit")
 
-    from app.services.supabase_client import create_service_client
-
     client = create_service_client()
 
     manager_roles = await get_manager_roles(user)
     org_id = resolve_managed_org(organisation_id, manager_roles)
 
     job_id = await create_job()
-    import asyncio
 
     # Resolve or create AI Model Family
     family_query = client.table("ai_model_families").select("id").eq("organisation_id", org_id).eq("name", model_name)
@@ -139,9 +142,6 @@ async def convert_model(
         },
     )
 
-    from app.jobs.definitions import convert_model_job
-    from app.jobs.runner import enqueue_local_job
-
     enqueue_local_job(convert_model_job(job_id, user.id, model_id))
 
     return ApiResponse(
@@ -174,9 +174,6 @@ async def get_managed_orgs(
     user=Depends(get_current_user),
 ):
     """Return organisations where the current user is an organisation_manager."""
-    import structlog
-
-    from app.services.supabase_client import create_service_client
 
     logger = structlog.get_logger()
     client = create_service_client()
@@ -192,7 +189,6 @@ async def get_managed_orgs(
         )
 
     # Fetch org names
-    import asyncio
 
     org_ids = [r["scope_id"] for r in manager_roles]
     orgs_query = client.table("organisations").select("id, name").in_("id", org_ids)
@@ -210,13 +206,10 @@ async def sscma_catalog(request: Request):
 
     Uses Redis cache with 1-hour TTL to avoid hitting GitHub on every request.
     """
-    from app.services.sscma import get_sscma_catalog
 
     try:
         models = await get_sscma_catalog()
     except Exception as e:
-        import structlog
-
         structlog.get_logger().error("sscma_catalog_failed", error=str(e))
         models = []
 
@@ -243,9 +236,6 @@ async def download_pretrained(
 
         job_id = await create_job()
 
-        from app.jobs.definitions import download_github_pretrained_job
-        from app.jobs.runner import enqueue_local_job
-
         enqueue_local_job(download_github_pretrained_job(job_id, user.id, org_id, body.architecture, body.resolution, body.description))
 
         return ApiResponse(
@@ -258,9 +248,6 @@ async def download_pretrained(
             raise HTTPException(400, detail="sscma_uuid is required for SenseCap models.")
 
         job_id = await create_job()
-
-        from app.jobs.definitions import download_pretrained_job
-        from app.jobs.runner import enqueue_local_job
 
         enqueue_local_job(download_pretrained_job(job_id, user.id, body.sscma_uuid, org_id, body.model_name, body.description))
 

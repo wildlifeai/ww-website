@@ -5,6 +5,7 @@
 All request-scoped dependencies live here so routers stay thin.
 """
 
+import asyncio
 from typing import Optional
 
 from fastapi import Depends, Header, HTTPException
@@ -75,7 +76,5 @@ async def get_manager_roles(user=Depends(get_current_user)):
         .eq("is_active", True)
         .is_("deleted_at", "null")
     )
-    import asyncio
-
     roles = await asyncio.to_thread(query.execute)
     return roles.data or []

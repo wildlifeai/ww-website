@@ -506,7 +506,6 @@ async def validate_upload(file: UploadFile):
     # MIME check
     if file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(400, detail=f"Invalid file type: {file.content_type}")
-    
     # Size check (read in chunks)
     size = 0
     chunks = []
@@ -515,12 +514,10 @@ async def validate_upload(file: UploadFile):
         if size > MAX_UPLOAD_SIZE:
             raise HTTPException(413, detail=f"File exceeds {MAX_UPLOAD_SIZE // 1024 // 1024}MB limit")
         chunks.append(chunk)
-    
     # ZIP structure validation
     content = b"".join(chunks)
     if not content[:4] == b'PK\x03\x04':
         raise HTTPException(400, detail="File is not a valid ZIP archive")
-    
     return content
 ```
 
@@ -585,9 +582,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         request_id = request.state.request_id  # Set by RequestIDMiddleware
         start = time.monotonic()
-        
         response = await call_next(request)
-        
         duration = time.monotonic() - start
         logger.info(
             "request_completed",
@@ -1377,8 +1372,8 @@ VITE_API_BASE_URL=https://api.wildlifewatcher.ai
 
 # --- General ---
 GENERAL_ORG_ID=b0000000-0000-0000-0000-000000000001
-UPLOADER_EMAIL=apps@wildlife.ai
-UPLOADER_PASSWORD=
+
+
 ```
 
 ---
