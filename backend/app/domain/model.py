@@ -252,7 +252,7 @@ async def upload_and_register(
             if firmware_model_id is not None:
                 fam_data["firmware_model_id"] = firmware_model_id
 
-            family_insert = client.table("ai_model_families").insert(fam_data).select("id").execute()
+            family_insert = client.table("ai_model_families").insert(fam_data).execute()
             if not family_insert.data:
                 raise ModelDomainError("Failed to create AI model family")
             model_family_id = family_insert.data[0]["id"]
