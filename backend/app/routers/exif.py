@@ -24,16 +24,23 @@ matches it against Supabase deployments.
 
 import asyncio
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
 import structlog
 from fastapi import APIRouter, File, Form, Header, Request, UploadFile
+from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.dependencies import get_optional_user
 from app.domain.exif import parse_exif_from_bytes
+from app.jobs.definitions import upload_drive_images_job
+from app.jobs.runner import enqueue_local_job
+from app.jobs.store import create_job
 from app.schemas.common import ApiMeta, ApiResponse
+from app.services.azure_storage import store_blob
+from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 

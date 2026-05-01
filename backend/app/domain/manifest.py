@@ -16,6 +16,7 @@ import io
 
 # ── GitHub repo constants ────────────────────────────────────────────
 import asyncio
+import io
 import json
 import re
 import shutil

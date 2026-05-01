@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
+from app.services.google_drive import slugify
+
 logger = structlog.get_logger()
 
 # Lazy-loaded singletons
@@ -256,8 +258,6 @@ def preprocess_file_batch(
         deployment.get("deployment_end"),
         deployment.get("location_name"),
     )
-
-    from app.services.google_drive import slugify
 
     proj_name = project.get("name", "unknown")
     proj_id = project.get("id", "00000000")
