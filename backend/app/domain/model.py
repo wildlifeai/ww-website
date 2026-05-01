@@ -119,21 +119,13 @@ def resolve_or_create_model_family(
     Raises:
         ModelDomainError: If the insert fails.
     """
-    family_res = (
-        client.table("ai_model_families")
-        .select("id, firmware_model_id")
-        .eq("organisation_id", org_id)
-        .eq("name", model_name)
-        .execute()
-    )
+    family_res = client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", org_id).eq("name", model_name).execute()
 
     if family_res.data:
         family_id = family_res.data[0]["id"]
         db_fw_id = family_res.data[0].get("firmware_model_id")
         if firmware_model_id is not None and db_fw_id is None:
-            client.table("ai_model_families").update(
-                {"firmware_model_id": firmware_model_id}
-            ).eq("id", family_id).execute()
+            client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", family_id).execute()
             db_fw_id = firmware_model_id
     else:
         fam_data: Dict[str, Any] = {"organisation_id": org_id, "name": model_name}
@@ -272,9 +264,7 @@ async def upload_and_register(
 
     # 1. Resolve or create AI Model Family
     try:
-        model_family_id, db_firmware_id = resolve_or_create_model_family(
-            client, org_id, model_name, firmware_model_id
-        )
+        model_family_id, db_firmware_id = resolve_or_create_model_family(client, org_id, model_name, firmware_model_id)
 
         # 2. Build 8.3 filenames
         safe_name = os.path.basename(model_name)

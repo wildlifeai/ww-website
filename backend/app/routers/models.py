@@ -82,9 +82,7 @@ async def convert_model(
     job_id = await create_job()
 
     # Resolve or create AI Model Family (shared domain helper)
-    model_family_id, _ = resolve_or_create_model_family(
-        client, org_id, model_name
-    )
+    model_family_id, _ = resolve_or_create_model_family(client, org_id, model_name)
 
     # Get existing models with this name to determine version
     existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
@@ -219,17 +217,20 @@ async def pretrained_catalog(request: Request):
 
     catalog = []
     for arch_name, arch_data in MODEL_REGISTRY.items():
-        catalog.append({
-            "architecture": arch_name,
-            "firmware_model_id": arch_data.get("firmware_model_id"),
-            "resolutions": list(arch_data.get("resolutions", {}).keys()),
-            "labels": arch_data.get("labels", []),
-        })
+        catalog.append(
+            {
+                "architecture": arch_name,
+                "firmware_model_id": arch_data.get("firmware_model_id"),
+                "resolutions": list(arch_data.get("resolutions", {}).keys()),
+                "labels": arch_data.get("labels", []),
+            }
+        )
 
     return ApiResponse(
         data=catalog,
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
     )
+
 
 @router.post("/pretrained")
 async def download_pretrained(
