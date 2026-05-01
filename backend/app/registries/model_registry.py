@@ -65,7 +65,7 @@ def get_model_config(model_type: str, resolution: str) -> dict:
         ValueError: If model_type or resolution is unknown.
     """
     try:
-        config = MODEL_REGISTRY[model_type]["resolutions"][resolution]
+        config = MODEL_REGISTRY[model_type]["resolutions"][resolution].copy()
         # Include firmware_model_id in the returned config
         config["firmware_model_id"] = MODEL_REGISTRY[model_type].get("firmware_model_id")
         return config

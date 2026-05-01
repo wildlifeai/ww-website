@@ -8,8 +8,8 @@ Reusable by both the API handler and the async ARQ worker.
 The MANIFEST.zip is what gets deployed to the camera SD card. Structure:
     MANIFEST/
     ├── CONFIG.TXT          # Camera configuration
-    ├── trained_vela.TFL    # AI model binary
-    ├── trained_vela.TXT    # Model labels
+    ├── {fw_id}V{ver}.TFL   # AI model binary (8.3 format)
+    ├── {fw_id}V{ver}.TXT   # Model labels (8.3 format)
     └── output.img          # Himax coprocessor firmware
 """
 
@@ -26,7 +26,6 @@ from typing import Optional
 
 import structlog
 
-from app.config import settings
 from app.registries.camera_configs import CAMERA_CONFIGS
 from app.registries.model_registry import MODEL_REGISTRY, get_model_config
 from app.services.http_client import DownloadError, download_url_content
@@ -231,12 +230,12 @@ async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
 
 
 async def _fetch_default_model(client, manifest_dir: Path) -> bool:
-    """Fetch and extract the default AI model into manifest_dir.
+    """Fetch the default AI model into manifest_dir.
 
+    Downloads the TFL and TXT files directly from Supabase Storage.
     Tries Person Detector first, then falls back to any available model.
     Returns True if a model was successfully added.
     """
-    # Try to find models in priority order
     queries = [
         ("ilike", "name", "%Person%Detector%"),
         ("ilike", "name", "%Person%"),
@@ -245,47 +244,28 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
 
     for query_type, field, pattern in queries:
         try:
-            q = client.table("ai_models").select("*").is_("deleted_at", "null")
+            q = client.table("ai_models").select("model_path, labels_path, name").is_("deleted_at", "null")
             if query_type == "ilike":
                 q = q.ilike(field, pattern)
             response = q.order("created_at", desc=True).limit(1).execute()
 
             if response.data:
                 model = response.data[0]
-                path = model["model_path"]
-                content = await download_from_storage("ai-models", path, silent=True)
+                tfl_content = await download_from_storage("ai-models", model["model_path"], silent=True)
+                if tfl_content:
+                    tfl_filename = model["model_path"].split("/")[-1]
+                    (manifest_dir / tfl_filename).write_bytes(tfl_content)
 
-                if content:
-                    with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                        zf.extractall(manifest_dir)
+                    txt_content = await download_from_storage("ai-models", model["labels_path"], silent=True)
+                    if txt_content:
+                        txt_filename = model["labels_path"].split("/")[-1]
+                        (manifest_dir / txt_filename).write_bytes(txt_content)
+
                     logger.info("ai_model_added", name=model.get("name", "default"))
                     return True
         except Exception as e:
             logger.debug("model_query_failed", pattern=pattern, error=str(e))
             continue
-
-    # Last resort: discover from storage bucket
-    try:
-        org_folder = settings.GENERAL_ORG_ID
-        subdirs = client.storage.from_("ai-models").list(org_folder, {"limit": 5})
-        if subdirs:
-            for sd in subdirs:
-                model_name = sd["name"]
-                files = client.storage.from_("ai-models").list(f"{org_folder}/{model_name}")
-                for f in files:
-                    if f["name"] == "ai_model.zip":
-                        content = await download_from_storage(
-                            "ai-models",
-                            f"{org_folder}/{model_name}/{f['name']}",
-                            silent=True,
-                        )
-                        if content:
-                            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                                zf.extractall(manifest_dir)
-                            logger.info("ai_model_fallback", name=model_name)
-                            return True
-    except Exception as e:
-        logger.warning("ai_model_discovery_failed", error=str(e))
 
     return False
 

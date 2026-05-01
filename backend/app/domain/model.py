@@ -3,7 +3,7 @@
 """Model conversion domain — ported from app.py L430-574, L1007-1171.
 
 Orchestrates: validate ZIP → extract tflite + labels → convert via Vela →
-package ai_model.zip → upload to Supabase Storage → register in DB.
+upload TFL + TXT to Supabase Storage → register in DB.
 
 Reusable by both the API handler (sync for small ops) and the ARQ worker.
 """
@@ -101,7 +101,7 @@ def _build_firmware_filename(vars_h_path: Path) -> str:
 # ── Core domain operations ───────────────────────────────────────────
 
 
-async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[bytes, List[str]]:
+async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[bytes, bytes, List[str]]:
     """Convert an uploaded Edge Impulse ZIP through Vela.
 
     Args:
@@ -324,7 +324,7 @@ async def upload_and_register(
         raise ModelDomainError(f"Database registration failed: {e}") from e
 
 
-async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], Dict[str, Any]]:
+async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, bytes, List[str], Dict[str, Any]]:
     """Download, convert, and package a pretrained SSCMA model.
 
     Args:
@@ -414,7 +414,7 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], D
         return tfl_bytes, txt_bytes, labels, metadata
 
 
-async def convert_github_pretrained_model(architecture: str, resolution: str) -> Tuple[bytes, List[str], Dict[str, Any]]:
+async def convert_github_pretrained_model(architecture: str, resolution: str) -> Tuple[bytes, bytes, List[str], Dict[str, Any]]:
     """Download, convert, and package a pretrained GitHub model.
 
     Args:
