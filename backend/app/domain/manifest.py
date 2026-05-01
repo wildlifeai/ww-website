@@ -10,7 +10,6 @@ The MANIFEST.zip is what gets deployed to the camera SD card. Structure:
     ├── CONFIG.TXT          # Camera configuration
     ├── trained_vela.TFL    # AI model binary
     ├── trained_vela.TXT    # Model labels
-import io
     └── output.img          # Himax coprocessor firmware
 """
 

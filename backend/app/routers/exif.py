@@ -10,13 +10,6 @@ When Google Drive upload is enabled, images are also persisted to Supabase
 Storage and an async ARQ job is enqueued to copy them to Drive.
 
 Supports folder uploads: if the frontend sends a ``paths`` form field with
-from app.jobs.runner import enqueue_local_job
-from app.jobs.definitions import upload_drive_images_job
-from app.services.azure_storage import store_blob
-import uuid
-from app.services.supabase_client import create_service_client
-from app.jobs.store import create_job
-from fastapi.responses import JSONResponse
 relative paths (e.g. ``MEDIA/655BC4E5/IMAGES.000/9DB650A0.JPG``), the router
 extracts the 8-character deployment-ID prefix from the folder hierarchy and
 matches it against Supabase deployments.

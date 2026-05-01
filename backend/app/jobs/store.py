@@ -10,7 +10,6 @@ bloating the main job key (important for large batches with many events).
 Each event carries a monotonic ``seq`` number so the frontend can safely
 consume events even when the list is trimmed.
 
-from app.services.supabase_client import create_service_client
 When Redis is unavailable (e.g. local dev), falls back to simple
 in-memory dicts so endpoints don't crash.
 """
