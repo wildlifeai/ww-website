@@ -55,7 +55,7 @@ export function GenerateManifest() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('projects')
-        .select('id, name, model_id, ai_models(id, name, version, model_family_id, version_number, ai_model_families(firmware_model_id))')
+        .select('id, name, model_id, ai_models(id, name, version, model_family_id, version_number)')
         .eq('organisation_id', selectedOrgId)
         .eq('is_active', true)
         .is('deleted_at', null)
@@ -93,20 +93,17 @@ export function GenerateManifest() {
     if (!project.model_id || !project.ai_models) return { hasModel: false }
 
     const model = project.ai_models
-    const family = model.ai_model_families
-    const fwId = family?.firmware_model_id
     const verNum = model.version_number
 
-    if (!fwId || !verNum) return { hasModel: true, incomplete: true, name: model.name }
+    if (!verNum) return { hasModel: true, incomplete: true, name: model.name }
 
     return {
       hasModel: true,
       incomplete: false,
       name: model.name,
       version: model.version,
-      firmwareModelId: fwId,
       versionNumber: verNum,
-      filename: `${fwId}V${verNum}.TFL`,
+      filename: `V${verNum}.TFL`, // Backend handles full filename resolution
     }
   }, [projects, selectedProjectId])
 
@@ -185,16 +182,9 @@ export function GenerateManifest() {
                 </div>
 
                 {/* Org selector */}
-                <div>
-                  <label style={labelStyle}>Organisation</label>
-                  {userOrgs && userOrgs.length === 1 ? (
-                    <div style={{
-                      ...selectStyle,
-                      opacity: 0.8,
-                    }}>
-                      {userOrgs[0].name}
-                    </div>
-                  ) : userOrgs && userOrgs.length > 1 ? (
+                {userOrgs && userOrgs.length > 1 && (
+                  <div>
+                    <label style={labelStyle}>Organisation</label>
                     <select
                       value={selectedOrgId}
                       onChange={(e) => { setSelectedOrgId(e.target.value); setSelectedProjectId('') }}
@@ -204,12 +194,8 @@ export function GenerateManifest() {
                         <option key={org.id} value={org.id}>{org.name}</option>
                       ))}
                     </select>
-                  ) : (
-                    <div style={{ padding: '0.5rem', color: 'var(--text-color)', opacity: 0.5 }}>
-                      No organisations found.
-                    </div>
-                  )}
-                </div>
+                  </div>
+                )}
 
                 {/* Project selector */}
                 {selectedOrgId && (
