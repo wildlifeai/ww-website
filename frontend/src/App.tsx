@@ -8,6 +8,9 @@ import { LoginPage } from './pages/LoginPage'
 import { MyDataPage } from './pages/MyDataPage'
 import { ManifestPage } from './pages/ManifestPage'
 import { UploadModelPage } from './pages/UploadModelPage'
+import { AnalyseImagesPage } from './pages/AnalyseImagesPage'
+import { useQuery } from '@tanstack/react-query'
+import { apiClient } from './lib/apiClient'
 import './styles/index.css'
 
 /** Redirects to /login if the user is not authenticated */
@@ -22,6 +25,22 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 function Layout({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth()
+
+  const { data: managedOrgs } = useQuery({
+    queryKey: ['managedOrgs', user?.id],
+    queryFn: async () => {
+      if (!user) return []
+      try {
+        const res = await apiClient.get('/api/models/managed-orgs')
+        return (res as any).data || []
+      } catch {
+        return []
+      }
+    },
+    enabled: !!user,
+  })
+
+  const isOrgManager = managedOrgs && managedOrgs.length > 0
 
   return (
     <>
@@ -38,8 +57,11 @@ function Layout({ children }: { children: React.ReactNode }) {
             {user && (
               <>
                 <Link to="/my-data" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>My Data</Link>
-                <Link to="/manifest" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>Generate Manifest</Link>
-                <Link to="/upload-model" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>Upload Model</Link>
+                <Link to="/analyse-images" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>Analyse Images</Link>
+                <Link to="/manifest" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>Prepare SD Card</Link>
+                {isOrgManager && (
+                  <Link to="/upload-model" style={{ textDecoration: 'none', color: 'var(--text-color)' }}>Upload Model</Link>
+                )}
               </>
             )}
             {user ? (
@@ -86,6 +108,7 @@ export default function App() {
             <Route path="/" element={<HomePage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/my-data" element={<RequireAuth><MyDataPage /></RequireAuth>} />
+            <Route path="/analyse-images" element={<RequireAuth><AnalyseImagesPage /></RequireAuth>} />
             <Route path="/manifest" element={<RequireAuth><ManifestPage /></RequireAuth>} />
             <Route path="/upload-model" element={<RequireAuth><UploadModelPage /></RequireAuth>} />
           </Routes>

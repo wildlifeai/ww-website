@@ -264,6 +264,8 @@ async def upload_and_register(
         ModelDomainError: If upload or registration fails.
     """
     client = create_service_client()
+    storage_path_tfl = None
+    storage_path_txt = None
 
     # 1. Resolve or create AI Model Family
     try:
@@ -340,21 +342,22 @@ async def upload_and_register(
 
         return response.data[0]
 
-    except ModelDomainError:
-        raise
     except Exception as e:
         # Rollback: delete uploaded files from storage
-        try:
-            client.storage.from_("ai-models").remove([storage_path_tfl, storage_path_txt])
-            logger.warning("model_storage_rollback", path_tfl=storage_path_tfl, path_txt=storage_path_txt)
-        except Exception as rollback_e:
-            logger.error(
-                "model_rollback_failed",
-                path_tfl=storage_path_tfl,
-                path_txt=storage_path_txt,
-                error=str(rollback_e),
-            )
-        raise ModelDomainError(f"Database registration failed: {e}") from e
+        if storage_path_tfl and storage_path_txt:
+            try:
+                await asyncio.to_thread(client.storage.from_("ai-models").remove, [storage_path_tfl, storage_path_txt])
+                logger.warning("model_storage_rollback", path_tfl=storage_path_tfl, path_txt=storage_path_txt)
+            except Exception as rollback_e:
+                logger.error(
+                    "model_rollback_failed",
+                    path_tfl=storage_path_tfl,
+                    path_txt=storage_path_txt,
+                    error=str(rollback_e),
+                )
+        if isinstance(e, ModelDomainError):
+            raise
+        raise ModelDomainError(f"Upload or registration failed: {e}") from e
 
 
 async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, bytes, List[str], Dict[str, Any]]:

@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
-import { AnalyseImages } from '../components/toolkit/AnalyseImages'
 
 export function HomePage() {
   const { user, loading } = useAuth()
@@ -35,7 +34,6 @@ export function HomePage() {
         )}
       </div>
 
-      {user && <AnalyseImages />}
     </div>
   )
 }
