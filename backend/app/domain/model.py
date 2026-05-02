@@ -8,9 +8,9 @@ upload TFL + TXT to Supabase Storage → register in DB.
 Reusable by both the API handler (sync for small ops) and the ARQ worker.
 """
 
+import asyncio
 import os
 import re
-import asyncio
 import shutil
 import tempfile
 import zipfile
@@ -283,17 +283,19 @@ async def upload_and_register(
         storage_path_txt = f"{base_storage_path}/{name_stem}.TXT"
 
         # 3. Upload to storage
-        await asyncio.to_thread(
-            client.storage.from_("ai-models").upload,
-            path=storage_path_tfl,
-            file=tfl_bytes,
-            file_options={"content-type": "application/octet-stream", "upsert": "true"},
-        )
-        await asyncio.to_thread(
-            client.storage.from_("ai-models").upload,
-            path=storage_path_txt,
-            file=txt_bytes,
-            file_options={"content-type": "text/plain", "upsert": "true"},
+        await asyncio.gather(
+            asyncio.to_thread(
+                client.storage.from_("ai-models").upload,
+                path=storage_path_tfl,
+                file=tfl_bytes,
+                file_options={"content-type": "application/octet-stream", "upsert": "true"},
+            ),
+            asyncio.to_thread(
+                client.storage.from_("ai-models").upload,
+                path=storage_path_txt,
+                file=txt_bytes,
+                file_options={"content-type": "text/plain", "upsert": "true"},
+            ),
         )
         logger.info("model_uploaded", path_tfl=storage_path_tfl, path_txt=storage_path_txt)
 

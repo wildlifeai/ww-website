@@ -572,8 +572,12 @@ async def generate_manifest(
                     )
                     if response.data:
                         model = response.data[0]
-                        family_list = model.get("ai_model_families")
-                        family = family_list[0] if family_list else None
+                        family_data = model.get("ai_model_families")
+                        family = (
+                            family_data[0]
+                            if isinstance(family_data, list) and family_data
+                            else (family_data if isinstance(family_data, dict) else None)
+                        )
                         firmware_id = family.get("firmware_model_id") if family else None
                         if not firmware_id:
                             raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
