@@ -3,11 +3,12 @@
 """Model conversion domain — ported from app.py L430-574, L1007-1171.
 
 Orchestrates: validate ZIP → extract tflite + labels → convert via Vela →
-package ai_model.zip → upload to Supabase Storage → register in DB.
+upload TFL + TXT to Supabase Storage → register in DB.
 
 Reusable by both the API handler (sync for small ops) and the ARQ worker.
 """
 
+import asyncio
 import os
 import re
 import shutil
@@ -98,10 +99,58 @@ def _build_firmware_filename(vars_h_path: Path) -> str:
     return "MOD00001.tfl"
 
 
+async def resolve_or_create_model_family(
+    client,
+    org_id: str,
+    model_name: str,
+    firmware_model_id: int = None,
+) -> Tuple[str, int]:
+    """Resolve an existing AI model family or create a new one.
+
+    Args:
+        client: Supabase service client.
+        org_id: Organisation UUID.
+        model_name: Display name used to look up the family.
+        firmware_model_id: Optional firmware ID to set/update on the family.
+
+    Returns:
+        Tuple of (model_family_id, firmware_model_id).
+        firmware_model_id falls back to 9999 if not resolvable.
+
+    Raises:
+        ModelDomainError: If the insert fails.
+    """
+    family_res = await asyncio.to_thread(
+        client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", org_id).eq("name", model_name).execute
+    )
+
+    if family_res.data:
+        family_id = family_res.data[0]["id"]
+        db_fw_id = family_res.data[0].get("firmware_model_id")
+        if firmware_model_id is not None and db_fw_id is None:
+            await asyncio.to_thread(client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", family_id).execute)
+            db_fw_id = firmware_model_id
+    else:
+        fam_data: Dict[str, Any] = {"organisation_id": org_id, "name": model_name}
+        if firmware_model_id is not None:
+            fam_data["firmware_model_id"] = firmware_model_id
+
+        family_insert = await asyncio.to_thread(client.table("ai_model_families").insert(fam_data).execute)
+        if not family_insert.data:
+            raise ModelDomainError("Failed to create AI model family")
+        family_id = family_insert.data[0]["id"]
+        db_fw_id = family_insert.data[0].get("firmware_model_id")
+
+    if not db_fw_id:
+        db_fw_id = 9999
+
+    return family_id, db_fw_id
+
+
 # ── Core domain operations ───────────────────────────────────────────
 
 
-async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[bytes, List[str]]:
+async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[bytes, bytes, List[str]]:
     """Convert an uploaded Edge Impulse ZIP through Vela.
 
     Args:
@@ -109,13 +158,14 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
         filename: Original filename (used for name/version extraction).
 
     Returns:
-        Tuple of (ai_model_zip_bytes, labels_list).
+        Tuple of (tfl_bytes, txt_bytes, labels_list).
 
     Raises:
         ModelDomainError: If any step fails.
     """
-    model_name, model_version = _parse_model_zip_name(filename)
-    container_name = f"{model_name}-custom-{model_version}"
+    # Derive a temp directory name from the filename (only used for local temp work)
+    base = os.path.splitext(os.path.basename(filename))[0] or "model"
+    container_name = base.replace(" ", "_")
 
     with tempfile.TemporaryDirectory() as temp_dir:
         base_path = Path(temp_dir)
@@ -143,17 +193,10 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
             labels = (work_dir / "labels.txt").read_text().splitlines()
             labels = [lbl.strip() for lbl in labels if lbl.strip()]
 
-            ai_model_zip_path = work_dir / "ai_model.zip"
-            # Ensure both files share the same 8.3-compliant stem
-            model_stem = tfl_file.stem.upper()[:8]
-            tfl_arcname = model_stem + ".TFL"
-            label_arcname = model_stem + ".TXT"
+            tfl_bytes = tfl_file.read_bytes()
+            txt_bytes = (work_dir / "labels.txt").read_bytes()
 
-            with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
-                zf.write(tfl_file, tfl_arcname)
-                zf.write(work_dir / "labels.txt", label_arcname)
-
-            return ai_model_zip_path.read_bytes(), labels
+            return tfl_bytes, txt_bytes, labels
 
         if not tflite_path.exists():
             raise ModelDomainError("trained.tflite not found in ZIP")
@@ -183,37 +226,30 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
         labels_txt_path = work_dir / "labels.txt"
         labels_txt_path.write_text("\n".join(labels))
 
-        # 5. Package ai_model.zip (uncompressed, firmware-compatible)
-        ai_model_zip_path = work_dir / "ai_model.zip"
-        model_arcname = vela_final_path.stem + ".TFL"
-        label_arcname = vela_final_path.stem + ".TXT"
+        tfl_bytes = vela_final_path.read_bytes()
+        txt_bytes = labels_txt_path.read_bytes()
 
-        with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
-            zf.write(vela_final_path, model_arcname)
-            zf.write(labels_txt_path, label_arcname)
+        logger.info("model_packaged", tfl_size=len(tfl_bytes), txt_size=len(txt_bytes), labels=labels)
 
-        if not ai_model_zip_path.exists():
-            raise ModelDomainError("Failed to create ai_model.zip")
-
-        result_bytes = ai_model_zip_path.read_bytes()
-        logger.info("model_packaged", size_bytes=len(result_bytes), labels=labels)
-
-        return result_bytes, labels
+        return tfl_bytes, txt_bytes, labels
 
 
 async def upload_and_register(
-    model_bytes: bytes,
+    tfl_bytes: bytes,
+    txt_bytes: bytes,
     model_name: str,
     model_version: str,
     description: str,
     labels: List[str],
     org_id: str,
     user_id: str,
+    firmware_model_id: int = None,
 ) -> Dict[str, Any]:
-    """Upload ai_model.zip to Supabase Storage and register in DB.
+    """Upload TFL and TXT to Supabase Storage and register in DB.
 
     Args:
-        model_bytes: The ai_model.zip content.
+        tfl_bytes: The .TFL file content.
+        txt_bytes: The labels .TXT file content.
         model_name: Display name for the model.
         model_version: Semantic version string.
         description: Model description.
@@ -229,43 +265,63 @@ async def upload_and_register(
     """
     client = create_service_client()
 
-    # Sanitize to prevent path traversal
-    safe_name = os.path.basename(model_name)
-    safe_version = os.path.basename(model_version)
-    storage_path = f"{org_id}/{safe_name}-custom-{safe_version}/ai_model.zip"
-
-    # 1. Upload to storage
+    # 1. Resolve or create AI Model Family
     try:
-        client.storage.from_("ai-models").upload(
-            path=storage_path,
-            file=model_bytes,
-            file_options={"content-type": "application/zip", "upsert": "true"},
+        model_family_id, db_firmware_id = await resolve_or_create_model_family(client, org_id, model_name, firmware_model_id)
+
+        # 2. Build 8.3 filenames
+        safe_name = os.path.basename(model_name)
+        safe_version = os.path.basename(model_version)
+        version_num = safe_version.split(".")[0] if "." in safe_version else safe_version
+
+        name_stem = f"{db_firmware_id}V{version_num}"
+        if len(name_stem) > 8:
+            name_stem = name_stem[:8]
+
+        base_storage_path = f"{org_id}/{safe_name}-custom-{safe_version}"
+        storage_path_tfl = f"{base_storage_path}/{name_stem}.TFL"
+        storage_path_txt = f"{base_storage_path}/{name_stem}.TXT"
+
+        # 3. Upload to storage
+        await asyncio.gather(
+            asyncio.to_thread(
+                client.storage.from_("ai-models").upload,
+                path=storage_path_tfl,
+                file=tfl_bytes,
+                file_options={"content-type": "application/octet-stream", "upsert": "true"},
+            ),
+            asyncio.to_thread(
+                client.storage.from_("ai-models").upload,
+                path=storage_path_txt,
+                file=txt_bytes,
+                file_options={"content-type": "text/plain", "upsert": "true"},
+            ),
         )
-        logger.info("model_uploaded", path=storage_path)
-    except Exception as e:
-        raise ModelDomainError(f"Storage upload failed: {e}") from e
+        logger.info("model_uploaded", path_tfl=storage_path_tfl, path_txt=storage_path_txt)
 
-    # 2. Register in database (upsert by org_id + name + version)
-    try:
-        existing = (
+        # 4. Register in database (upsert by org_id + name + version)
+        existing = await asyncio.to_thread(
             client.table("ai_models")
             .select("id")
             .eq("organisation_id", org_id)
             .eq("name", model_name)
             .eq("version", model_version)
             .is_("deleted_at", "null")
-            .execute()
+            .execute
         )
 
         model_data = {
             "name": model_name,
             "version": model_version,
+            "version_number": int(version_num) if version_num.isdigit() else 1,
             "description": description,
             "organisation_id": org_id,
+            "model_family_id": model_family_id,
             "uploaded_by": user_id,
             "modified_by": user_id,
-            "storage_path": storage_path,
-            "file_size_bytes": len(model_bytes),
+            "model_path": storage_path_tfl,
+            "labels_path": storage_path_txt,
+            "file_size_bytes": len(tfl_bytes) + len(txt_bytes),
             "file_type": "model",
             "status": "validated",
             "detection_capabilities": labels,
@@ -273,10 +329,10 @@ async def upload_and_register(
 
         if existing.data:
             model_id = existing.data[0]["id"]
-            response = client.table("ai_models").update(model_data).eq("id", model_id).execute()
+            response = await asyncio.to_thread(client.table("ai_models").update(model_data).eq("id", model_id).execute)
             logger.info("model_updated", model_id=model_id)
         else:
-            response = client.table("ai_models").insert(model_data).execute()
+            response = await asyncio.to_thread(client.table("ai_models").insert(model_data).execute)
             logger.info("model_inserted")
 
         if not response.data:
@@ -287,27 +343,28 @@ async def upload_and_register(
     except ModelDomainError:
         raise
     except Exception as e:
-        # Rollback: delete uploaded file from storage
+        # Rollback: delete uploaded files from storage
         try:
-            client.storage.from_("ai-models").remove([storage_path])
-            logger.warning("model_storage_rollback", path=storage_path)
+            client.storage.from_("ai-models").remove([storage_path_tfl, storage_path_txt])
+            logger.warning("model_storage_rollback", path_tfl=storage_path_tfl, path_txt=storage_path_txt)
         except Exception as rollback_e:
             logger.error(
                 "model_rollback_failed",
-                path=storage_path,
+                path_tfl=storage_path_tfl,
+                path_txt=storage_path_txt,
                 error=str(rollback_e),
             )
         raise ModelDomainError(f"Database registration failed: {e}") from e
 
 
-async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], Dict[str, Any]]:
+async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, bytes, List[str], Dict[str, Any]]:
     """Download, convert, and package a pretrained SSCMA model.
 
     Args:
         sscma_uuid: Standard UUID from Seeed model zoo.
 
     Returns:
-        Tuple of (ai_model_zip_bytes, labels_list, model_metadata).
+        Tuple of (tfl_bytes, txt_bytes, labels_list, model_metadata).
     """
     from app.services.sscma import get_sscma_model
 
@@ -376,16 +433,8 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], D
         labels_txt_path = work_dir / "labels.txt"
         labels_txt_path.write_text("\n".join(labels))
 
-        ai_model_zip_path = work_dir / "ai_model.zip"
-
-        with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
-            zf.write(vela_final_path, "MOD00001.TFL")
-            zf.write(labels_txt_path, "MOD00001.TXT")
-
-        if not ai_model_zip_path.exists():
-            raise ModelDomainError("Failed to create ai_model.zip")
-
-        result_bytes = ai_model_zip_path.read_bytes()
+        tfl_bytes = vela_final_path.read_bytes()
+        txt_bytes = labels_txt_path.read_bytes()
 
         # Prepare metadata for uploading script
         metadata = {
@@ -395,10 +444,10 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, List[str], D
             "labels": labels,
         }
 
-        return result_bytes, labels, metadata
+        return tfl_bytes, txt_bytes, labels, metadata
 
 
-async def convert_github_pretrained_model(architecture: str, resolution: str) -> Tuple[bytes, List[str], Dict[str, Any]]:
+async def convert_github_pretrained_model(architecture: str, resolution: str) -> Tuple[bytes, bytes, List[str], Dict[str, Any]]:
     """Download, convert, and package a pretrained GitHub model.
 
     Args:
@@ -406,13 +455,14 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
         resolution: e.g. "96x96"
 
     Returns:
-        Tuple of (ai_model_zip_bytes, labels_list, model_metadata).
+        Tuple of (tfl_bytes, txt_bytes, labels_list, model_metadata).
     """
 
     config = get_model_config(architecture, resolution)
     url = config["url"]
     file_type = config["type"]
     labels = config.get("labels", ["unknown"])
+    firmware_model_id = config.get("firmware_model_id")
 
     logger.info("github_downloading", architecture=architecture, url=url)
 
@@ -461,22 +511,15 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
         labels_txt_path = work_dir / "labels.txt"
         labels_txt_path.write_text("\n".join(labels))
 
-        ai_model_zip_path = work_dir / "ai_model.zip"
-
-        with zipfile.ZipFile(ai_model_zip_path, "w", zipfile.ZIP_STORED) as zf:
-            zf.write(vela_final_path, "MOD00001.TFL")
-            zf.write(labels_txt_path, "MOD00001.TXT")
-
-        if not ai_model_zip_path.exists():
-            raise ModelDomainError("Failed to create ai_model.zip")
-
-        result_bytes = ai_model_zip_path.read_bytes()
+        tfl_bytes = vela_final_path.read_bytes()
+        txt_bytes = labels_txt_path.read_bytes()
 
         metadata = {
             "name": f"{architecture} ({resolution})",
             "version": "1.0.0",
             "description": "Pre-trained model from Wildlife Watcher Zoo",
             "labels": labels,
+            "firmware_model_id": firmware_model_id,
         }
 
-        return result_bytes, labels, metadata
+        return tfl_bytes, txt_bytes, labels, metadata

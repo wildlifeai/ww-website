@@ -269,19 +269,23 @@ class TestConvertModelJobHash:
 
 class TestStoragePathFormat:
     def test_structured_path_format(self):
-        """Storage path must follow {org_id}/{firmware_id}/{version}/ai_model.zip."""
+        """Storage path must follow {org_id}/{firmware_id}/{version}/{stem}.TFL."""
         org_id = "b0000000-0000-0000-0000-000000000001"
         firmware_id = 42
         version = 3
 
-        result_path = f"{org_id}/{firmware_id}/{version}/ai_model.zip"
-        assert result_path == "b0000000-0000-0000-0000-000000000001/42/3/ai_model.zip"
+        name_stem = f"{firmware_id}V{version}"
+        result_path_tfl = f"{org_id}/{firmware_id}/{version}/{name_stem}.TFL"
+        result_path_txt = f"{org_id}/{firmware_id}/{version}/{name_stem}.TXT"
+        assert result_path_tfl == "b0000000-0000-0000-0000-000000000001/42/3/42V3.TFL"
+        assert result_path_txt == "b0000000-0000-0000-0000-000000000001/42/3/42V3.TXT"
 
     def test_path_components_are_deterministic(self):
         """Same inputs must always produce the same path (idempotent uploads)."""
         org = "org-123"
         fw = 1
         ver = 5
-        path1 = f"{org}/{fw}/{ver}/ai_model.zip"
-        path2 = f"{org}/{fw}/{ver}/ai_model.zip"
+        stem = f"{fw}V{ver}"
+        path1 = f"{org}/{fw}/{ver}/{stem}.TFL"
+        path2 = f"{org}/{fw}/{ver}/{stem}.TFL"
         assert path1 == path2

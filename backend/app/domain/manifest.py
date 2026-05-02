@@ -8,8 +8,8 @@ Reusable by both the API handler and the async ARQ worker.
 The MANIFEST.zip is what gets deployed to the camera SD card. Structure:
     MANIFEST/
     ├── CONFIG.TXT          # Camera configuration
-    ├── trained_vela.TFL    # AI model binary
-    ├── trained_vela.TXT    # Model labels
+    ├── {fw_id}V{ver}.TFL   # AI model binary (8.3 format)
+    ├── {fw_id}V{ver}.TXT   # Model labels (8.3 format)
     └── output.img          # Himax coprocessor firmware
 """
 
@@ -26,12 +26,13 @@ from typing import Optional
 
 import structlog
 
-from app.config import settings
 from app.registries.camera_configs import CAMERA_CONFIGS
 from app.registries.model_registry import MODEL_REGISTRY, get_model_config
 from app.services.http_client import DownloadError, download_url_content
 from app.services.storage import download_from_storage
 from app.services.supabase_client import create_service_client
+
+DEFAULT_FIRMWARE_BRANCHES = ["main", "dev", "firmware_updates", "live_video", "ledflash2"]
 
 GROVE_VISION_REPO = "wildlifeai/Seeed_Grove_Vision_AI_Module_V2"
 MANIFEST_BASE = "EPII_CM55M_APP_S/app/ww_projects/ww500_md/MANIFEST"
@@ -229,12 +230,12 @@ async def _fetch_himax_firmware(client, manifest_dir: Path) -> bool:
 
 
 async def _fetch_default_model(client, manifest_dir: Path) -> bool:
-    """Fetch and extract the default AI model into manifest_dir.
+    """Fetch the default AI model into manifest_dir.
 
+    Downloads the TFL and TXT files directly from Supabase Storage.
     Tries Person Detector first, then falls back to any available model.
     Returns True if a model was successfully added.
     """
-    # Try to find models in priority order
     queries = [
         ("ilike", "name", "%Person%Detector%"),
         ("ilike", "name", "%Person%"),
@@ -243,47 +244,28 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
 
     for query_type, field, pattern in queries:
         try:
-            q = client.table("ai_models").select("*").is_("deleted_at", "null")
+            q = client.table("ai_models").select("model_path, labels_path, name").is_("deleted_at", "null")
             if query_type == "ilike":
                 q = q.ilike(field, pattern)
             response = q.order("created_at", desc=True).limit(1).execute()
 
             if response.data:
                 model = response.data[0]
-                path = model["storage_path"]
-                content = await download_from_storage("ai-models", path, silent=True)
+                tfl_content = await download_from_storage("ai-models", model["model_path"], silent=True)
+                if tfl_content:
+                    tfl_filename = model["model_path"].split("/")[-1]
+                    (manifest_dir / tfl_filename).write_bytes(tfl_content)
 
-                if content:
-                    with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                        zf.extractall(manifest_dir)
+                    txt_content = await download_from_storage("ai-models", model["labels_path"], silent=True)
+                    if txt_content:
+                        txt_filename = model["labels_path"].split("/")[-1]
+                        (manifest_dir / txt_filename).write_bytes(txt_content)
+
                     logger.info("ai_model_added", name=model.get("name", "default"))
                     return True
         except Exception as e:
             logger.debug("model_query_failed", pattern=pattern, error=str(e))
             continue
-
-    # Last resort: discover from storage bucket
-    try:
-        org_folder = settings.GENERAL_ORG_ID
-        subdirs = client.storage.from_("ai-models").list(org_folder, {"limit": 5})
-        if subdirs:
-            for sd in subdirs:
-                model_name = sd["name"]
-                files = client.storage.from_("ai-models").list(f"{org_folder}/{model_name}")
-                for f in files:
-                    if f["name"] == "ai_model.zip":
-                        content = await download_from_storage(
-                            "ai-models",
-                            f"{org_folder}/{model_name}/{f['name']}",
-                            silent=True,
-                        )
-                        if content:
-                            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                                zf.extractall(manifest_dir)
-                            logger.info("ai_model_fallback", name=model_name)
-                            return True
-    except Exception as e:
-        logger.warning("ai_model_discovery_failed", error=str(e))
 
     return False
 
@@ -414,7 +396,7 @@ async def fetch_github_branches() -> list[str]:
         return [b["name"] for b in data]
     except Exception as exc:
         logger.warning("github_branches_failed", error=str(exc))
-        return ["main"]
+        return DEFAULT_FIRMWARE_BRANCHES
 
 
 # ── Main entry point ─────────────────────────────────────────────────
@@ -516,11 +498,11 @@ async def generate_manifest(
                     (manifest_dir / proj_tfl).write_bytes(m_content)
                     model_added = True
 
-                # Download labels
-                await _report(f"Downloading labels {proj_txt}…")
-                l_content = await download_from_storage("ai-models", model_info["labels_path"])
-                if l_content:
-                    (manifest_dir / proj_txt).write_bytes(l_content)
+                    # Download labels
+                    await _report(f"Downloading labels {proj_txt}…")
+                    l_content = await download_from_storage("ai-models", model_info["labels_path"])
+                    if l_content:
+                        (manifest_dir / proj_txt).write_bytes(l_content)
 
                 # Inject OP 14/15 into CONFIG.TXT
                 await _report("Injecting model parameters into CONFIG.TXT…")
@@ -582,42 +564,43 @@ async def generate_manifest(
 
             elif model_source == "organisation" and org_model_id:
                 try:
-                    response = (
+                    response = await asyncio.to_thread(
                         client.table("ai_models")
-                        .select("storage_path, name, version, ai_model_families(firmware_model_id)")
+                        .select("model_path, labels_path, name, version, ai_model_families(firmware_model_id)")
                         .eq("id", org_model_id)
-                        .execute()
+                        .execute
                     )
                     if response.data:
                         model = response.data[0]
-                        content = await download_from_storage("ai-models", model["storage_path"])
-                        if content:
-                            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                                zf.extractall(manifest_dir)
+                        family_data = model.get("ai_model_families")
+                        family = (
+                            family_data[0]
+                            if isinstance(family_data, list) and family_data
+                            else (family_data if isinstance(family_data, dict) else None)
+                        )
+                        firmware_id = family.get("firmware_model_id") if family else None
+                        if not firmware_id:
+                            raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
+                        version_str = model.get("version", "1")
+                        version = version_str.split(".")[0] if "." in version_str else version_str
+
+                        name_stem = f"{firmware_id}V{version}"
+                        if len(name_stem) > 8:
+                            name_stem = name_stem[:8]
+
+                        dyn_tfl = f"{name_stem}.TFL"
+                        dyn_txt = f"{name_stem}.TXT"
+
+                        # Download model binary
+                        m_content = await download_from_storage("ai-models", model["model_path"])
+                        if m_content:
+                            (manifest_dir / dyn_tfl).write_bytes(m_content)
                             model_added = True
 
-                            family = model.get("ai_model_families")
-                            firmware_id = family.get("firmware_model_id") if family else None
-                            if not firmware_id:
-                                raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
-                            version_str = model.get("version", "1")
-                            version = version_str.split(".")[0] if "." in version_str else version_str
-
-                            name_stem = f"{firmware_id}V{version}"
-                            if len(name_stem) > 8:
-                                name_stem = name_stem[:8]
-
-                            dyn_tfl = f"{name_stem}.TFL"
-                            dyn_txt = f"{name_stem}.TXT"
-
-                            for f in manifest_dir.iterdir():
-                                if f.is_file() and f.suffix.upper() == ".TFL":
-                                    f.rename(manifest_dir / dyn_tfl)
-                                    break
-                            for f in manifest_dir.iterdir():
-                                if f.is_file() and f.suffix.upper() == ".TXT":
-                                    f.rename(manifest_dir / dyn_txt)
-                                    break
+                        # Download labels
+                        l_content = await download_from_storage("ai-models", model["labels_path"])
+                        if l_content:
+                            (manifest_dir / dyn_txt).write_bytes(l_content)
 
                             logger.info(
                                 "org_model_added",
