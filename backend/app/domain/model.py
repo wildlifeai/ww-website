@@ -8,6 +8,7 @@ upload TFL + TXT to Supabase Storage → register in DB.
 Reusable by both the API handler (sync for small ops) and the ARQ worker.
 """
 
+import asyncio
 import os
 import re
 import shutil
@@ -98,7 +99,7 @@ def _build_firmware_filename(vars_h_path: Path) -> str:
     return "MOD00001.tfl"
 
 
-def resolve_or_create_model_family(
+async def resolve_or_create_model_family(
     client,
     org_id: str,
     model_name: str,
@@ -119,20 +120,22 @@ def resolve_or_create_model_family(
     Raises:
         ModelDomainError: If the insert fails.
     """
-    family_res = client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", org_id).eq("name", model_name).execute()
+    family_res = await asyncio.to_thread(
+        client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", org_id).eq("name", model_name).execute
+    )
 
     if family_res.data:
         family_id = family_res.data[0]["id"]
         db_fw_id = family_res.data[0].get("firmware_model_id")
         if firmware_model_id is not None and db_fw_id is None:
-            client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", family_id).execute()
+            await asyncio.to_thread(client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", family_id).execute)
             db_fw_id = firmware_model_id
     else:
         fam_data: Dict[str, Any] = {"organisation_id": org_id, "name": model_name}
         if firmware_model_id is not None:
             fam_data["firmware_model_id"] = firmware_model_id
 
-        family_insert = client.table("ai_model_families").insert(fam_data).execute()
+        family_insert = await asyncio.to_thread(client.table("ai_model_families").insert(fam_data).execute)
         if not family_insert.data:
             raise ModelDomainError("Failed to create AI model family")
         family_id = family_insert.data[0]["id"]
@@ -264,7 +267,7 @@ async def upload_and_register(
 
     # 1. Resolve or create AI Model Family
     try:
-        model_family_id, db_firmware_id = resolve_or_create_model_family(client, org_id, model_name, firmware_model_id)
+        model_family_id, db_firmware_id = await resolve_or_create_model_family(client, org_id, model_name, firmware_model_id)
 
         # 2. Build 8.3 filenames
         safe_name = os.path.basename(model_name)
@@ -280,27 +283,31 @@ async def upload_and_register(
         storage_path_txt = f"{base_storage_path}/{name_stem}.TXT"
 
         # 3. Upload to storage
-        client.storage.from_("ai-models").upload(
-            path=storage_path_tfl,
-            file=tfl_bytes,
-            file_options={"content-type": "application/octet-stream", "upsert": "true"},
-        )
-        client.storage.from_("ai-models").upload(
-            path=storage_path_txt,
-            file=txt_bytes,
-            file_options={"content-type": "text/plain", "upsert": "true"},
+        await asyncio.gather(
+            asyncio.to_thread(
+                client.storage.from_("ai-models").upload,
+                path=storage_path_tfl,
+                file=tfl_bytes,
+                file_options={"content-type": "application/octet-stream", "upsert": "true"},
+            ),
+            asyncio.to_thread(
+                client.storage.from_("ai-models").upload,
+                path=storage_path_txt,
+                file=txt_bytes,
+                file_options={"content-type": "text/plain", "upsert": "true"},
+            ),
         )
         logger.info("model_uploaded", path_tfl=storage_path_tfl, path_txt=storage_path_txt)
 
         # 4. Register in database (upsert by org_id + name + version)
-        existing = (
+        existing = await asyncio.to_thread(
             client.table("ai_models")
             .select("id")
             .eq("organisation_id", org_id)
             .eq("name", model_name)
             .eq("version", model_version)
             .is_("deleted_at", "null")
-            .execute()
+            .execute
         )
 
         model_data = {
@@ -322,10 +329,10 @@ async def upload_and_register(
 
         if existing.data:
             model_id = existing.data[0]["id"]
-            response = client.table("ai_models").update(model_data).eq("id", model_id).execute()
+            response = await asyncio.to_thread(client.table("ai_models").update(model_data).eq("id", model_id).execute)
             logger.info("model_updated", model_id=model_id)
         else:
-            response = client.table("ai_models").insert(model_data).execute()
+            response = await asyncio.to_thread(client.table("ai_models").insert(model_data).execute)
             logger.info("model_inserted")
 
         if not response.data:

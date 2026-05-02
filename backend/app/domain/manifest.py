@@ -564,15 +564,20 @@ async def generate_manifest(
 
             elif model_source == "organisation" and org_model_id:
                 try:
-                    response = (
+                    response = await asyncio.to_thread(
                         client.table("ai_models")
                         .select("model_path, labels_path, name, version, ai_model_families(firmware_model_id)")
                         .eq("id", org_model_id)
-                        .execute()
+                        .execute
                     )
                     if response.data:
                         model = response.data[0]
-                        family = model.get("ai_model_families")
+                        family_data = model.get("ai_model_families")
+                        family = (
+                            family_data[0]
+                            if isinstance(family_data, list) and family_data
+                            else (family_data if isinstance(family_data, dict) else None)
+                        )
                         firmware_id = family.get("firmware_model_id") if family else None
                         if not firmware_id:
                             raise ManifestDomainError(f"Model family for {org_model_id} is missing a firmware_model_id")
