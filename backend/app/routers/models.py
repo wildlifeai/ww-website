@@ -82,7 +82,7 @@ async def convert_model(
     job_id = await create_job()
 
     # Resolve or create AI Model Family (shared domain helper)
-    model_family_id, _ = resolve_or_create_model_family(client, org_id, model_name)
+    model_family_id, _ = await resolve_or_create_model_family(client, org_id, model_name)
 
     # Get existing models with this name to determine version
     existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
