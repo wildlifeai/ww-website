@@ -45,7 +45,6 @@ export function GenerateManifest() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedProjectId(projects[0].id)
     } else if (projects && !projects.length) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelectedProjectId('')
     }
   }, [projects, selectedProjectId])

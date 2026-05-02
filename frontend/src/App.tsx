@@ -33,7 +33,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       try {
         const res = await apiClient.get('/api/models/managed-orgs')
         return (res as any).data || []
-      } catch (e) {
+      } catch {
         return []
       }
     },
