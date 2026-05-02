@@ -342,13 +342,11 @@ async def upload_and_register(
 
         return response.data[0]
 
-    except ModelDomainError:
-        raise
     except Exception as e:
         # Rollback: delete uploaded files from storage
         if storage_path_tfl and storage_path_txt:
             try:
-                client.storage.from_("ai-models").remove([storage_path_tfl, storage_path_txt])
+                await asyncio.to_thread(client.storage.from_("ai-models").remove, [storage_path_tfl, storage_path_txt])
                 logger.warning("model_storage_rollback", path_tfl=storage_path_tfl, path_txt=storage_path_txt)
             except Exception as rollback_e:
                 logger.error(
@@ -357,6 +355,8 @@ async def upload_and_register(
                     path_txt=storage_path_txt,
                     error=str(rollback_e),
                 )
+        if isinstance(e, ModelDomainError):
+            raise
         raise ModelDomainError(f"Upload or registration failed: {e}") from e
 
 
