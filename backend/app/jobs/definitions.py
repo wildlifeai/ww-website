@@ -224,10 +224,10 @@ async def generate_manifest_job(job_id: str, params: dict):
             on_progress=_on_progress,
         )
 
-        await update_job(job_id, progress=0.8, message="Uploading MANIFEST.zip…")
+        await update_job(job_id, progress=0.8, message="Uploading Setup_Package.zip…")
 
-        # Upload result to temp storage for download
-        result_path = f"temp/manifests/{job_id}/MANIFEST.zip"
+        # 5. Upload final ZIP
+        result_path = f"temp/manifests/{job_id}/Setup_Package.zip"
         uploaded = await upload_to_storage("firmware", result_path, manifest_bytes, "application/zip")
 
         if uploaded:
@@ -246,7 +246,7 @@ async def generate_manifest_job(job_id: str, params: dict):
                 status=JobStatus.COMPLETED,
                 progress=1.0,
                 result_url=result_url,
-                message="✅ MANIFEST.zip ready for download",
+                message="✅ Setup_Package.zip ready for download",
             )
         else:
             await update_job(
