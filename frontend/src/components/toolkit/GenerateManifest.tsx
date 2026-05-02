@@ -11,7 +11,6 @@ export function GenerateManifest() {
   const [jobId, setJobId] = useState<string | null>(null)
 
   // Project-based state
-  const [selectedOrgId, setSelectedOrgId] = useState<string>('')
   const [selectedProjectId, setSelectedProjectId] = useState<string>('')
   const [githubBranch, setGithubBranch] = useState<string>('main')
 
@@ -24,55 +23,21 @@ export function GenerateManifest() {
     },
   })
 
-  // Fetch user's organisations
-  const { data: userOrgs } = useQuery({
-    queryKey: ['userOrgs', user?.id],
-    queryFn: async () => {
-      const { data: roles, error: rolesErr } = await supabase
-        .from('user_roles')
-        .select('scope_id')
-        .eq('user_id', user!.id)
-        .eq('scope_type', 'organisation')
-        .eq('is_active', true)
-        .is('deleted_at', null)
-      if (rolesErr) throw rolesErr
-      if (!roles?.length) return []
-
-      const orgIds = [...new Set(roles.map(r => r.scope_id))]
-      const { data: orgs, error: orgsErr } = await supabase
-        .from('organisations')
-        .select('id, name')
-        .in('id', orgIds)
-      if (orgsErr) throw orgsErr
-      return (orgs || []).sort((a, b) => a.name.localeCompare(b.name))
-    },
-    enabled: !!user
-  })
-
-  // Fetch projects for selected org
+  // Fetch accessible projects
   const { data: projects, isLoading: isLoadingProjects } = useQuery({
-    queryKey: ['orgProjects', selectedOrgId],
+    queryKey: ['allProjects', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('projects')
-        .select('id, name, model_id, ai_models(id, name, version, model_family_id, version_number, ai_model_families(firmware_model_id))')
-        .eq('organisation_id', selectedOrgId)
+        .select('id, name, model_id, ai_models(id, name, version, model_family_id, version_number, ai_model_families(firmware_model_id)), organisations(name)')
         .eq('is_active', true)
         .is('deleted_at', null)
         .order('name')
       if (error) throw error
       return data || []
     },
-    enabled: !!selectedOrgId
+    enabled: !!user
   })
-
-  // Auto-select first org
-  useEffect(() => {
-    if (userOrgs?.length && !selectedOrgId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedOrgId(userOrgs[0].id)
-    }
-  }, [userOrgs, selectedOrgId])
 
   // Auto-select first project
   useEffect(() => {
@@ -148,12 +113,11 @@ export function GenerateManifest() {
 
   return (
     <div>
-      <h3 style={{ marginBottom: '0.5rem' }}>Generate Firmware Manifest</h3>
+      <h3 style={{ marginBottom: '0.5rem' }}>Prepare SD Card</h3>
       <p style={{ opacity: 0.7, marginBottom: '1.5rem', lineHeight: 1.5 }}>
-        Generate a MANIFEST.zip with everything your device needs.
-        Download it, unzip, copy the <code>MANIFEST</code> folder to an SD card, and insert it
-        into your Wildlife Watcher. The mobile app will detect the files are already present
-        and skip the slow BLE transfer.
+        While the mobile app can update your camera wirelessly, AI Models and System Software are large files that take a long time to send over Bluetooth.
+        <br/><br/>
+        For the fastest setup, download this package to your computer and move it to your SD card. When you insert the card into your Wildlife Watcher, it will instantly recognize the files and skip the long wireless wait.
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem', maxWidth: '600px' }}>
@@ -169,7 +133,7 @@ export function GenerateManifest() {
               <>
                 {/* Branch selector */}
                 <div>
-                  <label style={labelStyle}>Firmware Branch</label>
+                  <label style={labelStyle}>Software Version</label>
                   <select
                     value={githubBranch}
                     onChange={(e) => setGithubBranch(e.target.value)}
@@ -180,49 +144,36 @@ export function GenerateManifest() {
                     ))}
                   </select>
                   <p style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: '0.25rem' }}>
-                    Branch of the Grove Vision AI firmware repo for CONFIG.TXT, output.img, etc.
+                    Select the system version for your camera hardware.
                   </p>
                 </div>
 
-                {/* Org selector */}
-                {userOrgs && userOrgs.length > 1 && (
-                  <div>
-                    <label style={labelStyle}>Organisation</label>
+                {/* Project selector */}
+                <div>
+                  <label style={labelStyle}>Project & Species AI</label>
+                  {isLoadingProjects ? (
+                    <div style={{ padding: '0.5rem', opacity: 0.6 }}>Loading projects…</div>
+                  ) : projects && projects.length > 0 ? (
                     <select
-                      value={selectedOrgId}
-                      onChange={(e) => { setSelectedOrgId(e.target.value); setSelectedProjectId('') }}
+                      value={selectedProjectId}
+                      onChange={(e) => setSelectedProjectId(e.target.value)}
                       style={selectStyle}
                     >
-                      {userOrgs.map((org: any) => (
-                        <option key={org.id} value={org.id}>{org.name}</option>
+                      {projects.map((p: any) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.organisations?.name ? `(${p.organisations.name})` : ''}
+                        </option>
                       ))}
                     </select>
-                  </div>
-                )}
-
-                {/* Project selector */}
-                {selectedOrgId && (
-                  <div>
-                    <label style={labelStyle}>Project</label>
-                    {isLoadingProjects ? (
-                      <div style={{ padding: '0.5rem', opacity: 0.6 }}>Loading projects…</div>
-                    ) : projects && projects.length > 0 ? (
-                      <select
-                        value={selectedProjectId}
-                        onChange={(e) => setSelectedProjectId(e.target.value)}
-                        style={selectStyle}
-                      >
-                        {projects.map((p: any) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div style={{ padding: '0.5rem', color: 'var(--error)' }}>
-                        No projects found for this organisation.
-                      </div>
-                    )}
-                  </div>
-                )}
+                  ) : (
+                    <div style={{ padding: '0.5rem', color: 'var(--error)' }}>
+                      No accessible projects found.
+                    </div>
+                  )}
+                  <p style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: '0.25rem' }}>
+                    Choose which project this camera belongs to. This includes the specific AI "brain" for identifying animals.
+                  </p>
+                </div>
 
                 {/* Model info (read-only) */}
                 {projectModelInfo && (
@@ -249,9 +200,10 @@ export function GenerateManifest() {
                         </div>
                       )
                     ) : (
-                      <div style={{ fontSize: '0.8125rem', opacity: 0.8 }}>
-                        ℹ️ No AI model assigned to this project. The MANIFEST will be generated
-                        <strong> without model files</strong>. To assign a model, use the mobile app.
+                      <div style={{ fontSize: '0.8125rem', opacity: 0.8, color: 'var(--primary)' }}>
+                        🤖 <strong>Note on AI Identification:</strong>
+                        <br/>
+                        This project doesn't have an AI model assigned yet. The setup folder will include the camera system and settings, but it won't be able to identify species automatically. You can add a "Species Brain" later via the Project Settings in the app.
                       </div>
                     )}
                   </div>
@@ -269,7 +221,7 @@ export function GenerateManifest() {
           onClick={() => generateMutation.mutate()}
           style={{ padding: '0.75rem 2rem' }}
         >
-          {generateMutation.isPending ? 'Submitting…' : 'Generate Manifest'}
+          {generateMutation.isPending ? 'Submitting…' : '📥 Download Setup Folder'}
         </button>
       </div>
 
@@ -280,6 +232,24 @@ export function GenerateManifest() {
       )}
 
       <JobProgress jobId={jobId} />
+
+      {jobId && (
+        <div style={{
+          marginTop: '2rem',
+          padding: '1.5rem',
+          backgroundColor: 'var(--surface)',
+          border: '1px solid var(--primary)',
+          borderRadius: 'var(--radius)',
+        }}>
+          <h4 style={{ marginTop: 0, marginBottom: '1rem', color: 'var(--primary)' }}>Next Steps Checklist:</h4>
+          <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <li><label style={{ cursor: 'pointer' }}><input type="checkbox" style={{ marginRight: '0.5rem' }} /> Unzip the downloaded folder.</label></li>
+            <li><label style={{ cursor: 'pointer' }}><input type="checkbox" style={{ marginRight: '0.5rem' }} /> Copy the "MANIFEST" folder with its contents as it is to the root of your SD card.</label></li>
+            <li><label style={{ cursor: 'pointer' }}><input type="checkbox" style={{ marginRight: '0.5rem' }} /> Insert the card in your Wildlife Watcher and power on the device.</label></li>
+            <li><label style={{ cursor: 'pointer' }}><input type="checkbox" style={{ marginRight: '0.5rem' }} /> Connect the device with your app and start monitoring.</label></li>
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
