@@ -20,7 +20,7 @@ const STATUS_META: Record<JobStatusValue, { icon: string; label: string; color: 
 
 const KIND_ICON: Record<string, string> = {
   upload: '⬆️', ai_pipeline: '🤖', ai_embed: '🧠', ai_reprocess: '♻️',
-  active_learning: '🎯', export: '📦', maintenance: '🛠️',
+  active_learning: '🎯', export: '📦', maintenance: '🛠️', model_train: '🧬', model_upload: '📟',
 }
 
 function timeAgo(iso: string | null): string {

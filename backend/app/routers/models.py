@@ -6,6 +6,8 @@ POST /api/models/convert  → validates + stores blob + enqueues conversion job
 POST /api/models/upload   → enqueues upload + registration job
 GET  /api/models/sscma/catalog → cached SSCMA model list (sync)
 POST /api/models/pretrained → download + package GitHub model (async)
+GET  /api/models/train/status → is training on, which trainer, dataset limits (sync)
+POST /api/models/train    → train a Species Brain from an Annotations selection (async)
 """
 
 import asyncio
@@ -15,13 +17,19 @@ import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
-from app.dependencies import get_current_user, get_manager_roles
-from app.domain.model import resolve_or_create_model_family
+from app.authz import accessible_deployment_ids
+from app.config import settings
+from app.dependencies import get_current_user, get_manager_roles, get_verified_user
+from app.domain.model import next_model_version, resolve_or_create_model_family
+from app.domain.training import media_deployments, training_mode, training_status
 from app.jobs.definitions import convert_model_job, download_github_pretrained_job, download_pretrained_job
+from app.jobs.dispatch import enqueue_job
 from app.jobs.runner import enqueue_local_job
 from app.jobs.store import create_job
-from app.schemas.common import ApiMeta, ApiResponse
+from app.middleware.rate_limit import limiter
+from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.schemas.job import JobCreateResponse
+from app.schemas.model import TrainModelRequest
 from app.services.blob_store import store_blob
 from app.services.sscma import get_sscma_catalog
 from app.services.supabase_client import create_service_client
@@ -279,3 +287,91 @@ async def download_pretrained(
             data=JobCreateResponse(job_id=job_id).model_dump(),
             meta=ApiMeta(request_id=getattr(request.state, "request_id", None) if request else None),
         )
+
+
+# ── Species Brain training (Annotations → Actions → "Create species ID model…") ──────
+
+
+def _training_disabled(req_id):
+    return ApiResponse(
+        error=ApiError(code="FEATURE_DISABLED", message="Model training is disabled (FF_MODEL_TRAINING_ENABLED)."),
+        meta=ApiMeta(request_id=req_id),
+    )
+
+
+@router.get("/train/status")
+async def train_status(request: Request, user=Depends(get_current_user)):
+    """What the Annotations action needs before it opens: is training on, which trainer
+    runs it (``edge_impulse`` or ``export_only``), and the dataset limits to validate against."""
+    return ApiResponse(data=training_status(), meta=ApiMeta(request_id=getattr(request.state, "request_id", None)))
+
+
+@router.post("/train")
+@limiter.limit("10/minute")
+async def train_model(request: Request, body: TrainModelRequest, user=Depends(get_verified_user)):
+    """Train a Species Brain from an Annotations selection (async; ``train_species_brain_job``).
+
+    Checks, in order: the feature flag; that the caller manages the organisation that
+    will own the model; that every selected image still exists and sits in a deployment
+    the caller may read. With a trainer configured an ``ai_models`` row is created up
+    front (status ``uploading`` → ``validated`` | ``failed``, like an upload); without
+    one the job only packages the dataset. Poll ``GET /api/jobs/{job_id}``.
+    """
+    req_id = getattr(request.state, "request_id", None)
+    if not settings.FF_MODEL_TRAINING_ENABLED:
+        return _training_disabled(req_id)
+
+    manager_roles = await get_manager_roles(user)
+    org_id = resolve_managed_org(body.organisation_id, manager_roles)
+
+    media_ids = list(dict.fromkeys(body.media_ids))
+    client = create_service_client()
+    found = await media_deployments(client, media_ids)
+    missing = len(media_ids) - len(found)
+    if missing:
+        raise HTTPException(400, detail=f"{missing} of the selected images no longer exist. Refresh the grid and select again.")
+    deployment_ids = sorted(set(found.values()))
+    allowed = set(await accessible_deployment_ids(user.id, deployment_ids))
+    if any(d not in allowed for d in deployment_ids):
+        raise HTTPException(403, detail="You do not have access to every selected image.")
+
+    mode = training_mode()
+    model_id = None
+    if mode == "edge_impulse":
+        model_family_id, _ = await resolve_or_create_model_family(client, org_id, body.model_name)
+        next_ver, version_string = await next_model_version(client, org_id, body.model_name)
+        model_insert = (
+            client.table("ai_models")
+            .insert(
+                {
+                    "organisation_id": org_id,
+                    "model_family_id": model_family_id,
+                    "version": version_string,
+                    "version_number": next_ver,
+                    "name": body.model_name,
+                    "description": body.description or f"Trained on the website from {len(media_ids)} annotated images",
+                    "uploaded_by": user.id,
+                    "modified_by": user.id,
+                    "file_type": "training",
+                    "model_path": None,
+                    "labels_path": None,
+                }
+            )
+            .select("id")
+        )
+        model_row = await asyncio.to_thread(model_insert.execute)
+        if not model_row.data:
+            raise HTTPException(500, detail="Failed to create the AI model record")
+        model_id = model_row.data[0]["id"]
+
+    job_id = await create_job(user_id=user.id, kind="model_train", label=f"Train {body.model_name}")
+    params = body.model_dump()
+    params["media_ids"] = media_ids
+    params["organisation_id"] = org_id
+    await enqueue_job("train_species_brain_job", job_id, user.id, model_id, org_id, params)
+    structlog.get_logger().info("train_model_queued", job_id=job_id, model_id=model_id, mode=mode, images=len(media_ids), org_id=org_id)
+
+    return ApiResponse(
+        data={"job_id": job_id, "model_id": model_id, "mode": mode, "status": "queued", "poll_url": f"/api/jobs/{job_id}"},
+        meta=ApiMeta(request_id=req_id),
+    )

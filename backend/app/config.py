@@ -84,6 +84,34 @@ class Settings(BaseSettings):
     FF_INTELLIGENCE_ENABLED: bool = Field(False, description="Enable conservation intelligence endpoints (health, alerts, shift)")
     FF_LOCAL_EMBEDDING_ENABLED: bool = Field(False, description="Accept client-computed (WebGPU) embedding vectors")
 
+    # ── Species Brain training ("Create species ID model" on the Annotations page) ──
+    FF_MODEL_TRAINING_ENABLED: bool = Field(
+        False,
+        description=(
+            "Enable POST /api/models/train: build a labelled dataset from selected annotated images, "
+            "train an int8 image classifier through Edge Impulse, compile it with Vela and register it "
+            "as a Species Brain (ai_models row). Without Edge Impulse credentials the endpoint still "
+            "works in export-only mode (an Edge Impulse-ready dataset ZIP)."
+        ),
+    )
+    EDGE_IMPULSE_API_KEY: str = Field("", description="Edge Impulse *project* API key (ei_…) for the training-bench project")
+    EDGE_IMPULSE_PROJECT_ID: int = Field(0, description="Edge Impulse project ID the trainer uploads to and trains in (0 = not configured)")
+    EDGE_IMPULSE_STUDIO_URL: str = Field("https://studio.edgeimpulse.com/v1", description="Edge Impulse Studio API base URL")
+    EDGE_IMPULSE_INGESTION_URL: str = Field("https://ingestion.edgeimpulse.com", description="Edge Impulse ingestion API base URL")
+    EDGE_IMPULSE_DEPLOY_FORMAT: str = Field(
+        "custom",
+        description="Deployment target `format` to build and download (the 'Custom' zip carries trained.tflite + model-parameters/)",
+    )
+    EDGE_IMPULSE_TRANSFER_MODEL: str = Field(
+        "transfer_mobilenetv2_a35",
+        description="Keras visual layer type for the transfer-learning block (MobileNetV2 0.35, the recipe used for the rat model)",
+    )
+    EDGE_IMPULSE_JOB_TIMEOUT_S: int = Field(1800, ge=60, description="Max seconds to wait for one Edge Impulse job (features, training, build)")
+    MODEL_TRAINING_MIN_IMAGES_PER_CLASS: int = Field(20, ge=2, description="Refuse to train a class with fewer samples than this")
+    MODEL_TRAINING_RECOMMENDED_IMAGES_PER_CLASS: int = Field(100, ge=1, description="Below this the UI warns (guide: 100 to 1000 per class)")
+    MODEL_TRAINING_MAX_IMAGES: int = Field(3000, ge=10, description="Max samples in one training run")
+    MODEL_TRAINING_MAX_CLASSES: int = Field(16, ge=2, le=16, description="Device MAX_CLASSES (firmware result buffer), never raise above 16")
+
     # ── Motion ROI (SpeciesNet-free crop fallback) ───────────────────
     FF_MOTION_ROI_FALLBACK_ENABLED: bool = Field(
         False,
