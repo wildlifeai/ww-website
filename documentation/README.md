@@ -46,6 +46,7 @@ status banner. When in doubt, the living docs in `resources/` and `onboarding/` 
 
 | Spec | For | Covers |
 |------|-----|--------|
+| [2026-09_false-negatives-and-vlm-audit](development%20reports/2026-09_false-negatives-and-vlm-audit/README.md) | website + pipeline | 📋 Proposal / Analysis. Handling detector false negatives (SpeciesNet/MegaDetector), Motion ROI burst differencing, Wildlife Brain fallbacks, cascaded VLM auditing (PaliGemma/GPT-4o), and iNaturalist policy constraints |
 | [dual-layer-ai-architecture-proposal](development%20reports/dual-layer-ai-architecture-proposal.md) | all repos | **Adopted; v0 merged.** Camera AI / Cloud AI / Wildlife Brain naming (canon now lives in [AI-ARCHITECTURE](resources/AI-ARCHITECTURE.md)), edge↔cloud integration framework, LoRaWAN alert-logic design (instant/digest/back-off), validation roadmap + user stories |
 | [decoupled-upload-pipeline-spec](development%20reports/decoupled-upload-pipeline-spec.md) | ww-backend + website | 📋 Proposal, **not implemented**. Create `media` rows at ingest instead of inside the Drive job, + resumable backup sync, precheck/dedup and integrity audit — so a storage failure can't make photos vanish |
 | [lorawan-alert-execution-spec](development%20reports/lorawan-alert-execution-spec.md) | website + backend + both firmwares | Build breakdown for `device_alert_rules` execution: manifest compile → Nordic strategy execution → Himax I2C score forward → backend uplink decode. Implements the proposal's §3 alert logic |
