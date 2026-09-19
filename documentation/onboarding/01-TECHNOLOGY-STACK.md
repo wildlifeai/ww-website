@@ -54,6 +54,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | **iNaturalist** | Taxa autocomplete + lineage registration, observation publishing + community-ID sync | `FF_INAT_ENABLED` |
 | **TTN / Chirpstack** | LoRaWAN uplink webhooks | `FF_LORAWAN_WEBHOOKS_ENABLED` |
 | **Sentry** | Error tracking | `SENTRY_DSN` |
+| **Edge Impulse** | Trains Species Brains (on-camera classifiers) from an Annotations selection: Studio + ingestion APIs driven by `services/edge_impulse.py`. Without credentials the action packages a dataset ZIP instead | `FF_MODEL_TRAINING_ENABLED` + `EDGE_IMPULSE_API_KEY` / `EDGE_IMPULSE_PROJECT_ID` (set on the **worker** too) |
 
 ## Feature flags
 
@@ -78,6 +79,7 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_MEDIA_REGISTRY_ENABLED` | `false` | Thumbnail/crop generation + resolve endpoints |
 | `FF_ACTIVE_LEARNING_ENABLED` | `false` | Active-learning review queue + QA report |
 | `FF_INTELLIGENCE_ENABLED` | `false` | Conservation-intelligence endpoints (health, alerts, shift) |
+| `FF_MODEL_TRAINING_ENABLED` | `false` | Annotations → *Create species ID model…* (Edge Impulse training or dataset export). Set on the ARQ worker as well; see [species-brain-training-spec](../development%20reports/species-brain-training-spec.md) |
 | `FF_BMP_INGEST_ENABLED` | `false`¹ | Raw-BMP ingest → JPEG re-compress on upload (¹ compose default: `true`) |
 
 > Always confirm the current set against `config.py` — flags are added as features land.

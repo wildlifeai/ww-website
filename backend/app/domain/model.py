@@ -571,6 +571,72 @@ async def upload_and_register(
         raise ModelDomainError(f"Upload or registration failed: {e}") from e
 
 
+async def next_model_version(client, org_id: str, model_name: str) -> Tuple[int, str]:
+    """Auto-version a model by name within an organisation → ``(major, "major.0.0-xxxxxx")``.
+
+    The integer is ``ai_models.version_number`` (the ``V<n>`` of the 8.3 device
+    filename); the string is the human ``version`` column. Shared by the upload
+    and the training endpoints so both number the same way.
+    """
+    import uuid
+
+    existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
+    existing_res = await asyncio.to_thread(existing_query.execute)
+    majors = []
+    for r in existing_res.data or []:
+        v = r.get("version")
+        if v:
+            head = v.split(".")[0]
+            if head.isdigit():
+                majors.append(int(head))
+    next_ver = max(majors) + 1 if majors else 1
+    return next_ver, f"{next_ver}.0.0-{uuid.uuid4().hex[:6]}"
+
+
+async def store_model_artifacts(
+    client,
+    *,
+    org_id: str,
+    firmware_id,
+    version_num: str,
+    tfl_bytes: bytes,
+    txt_bytes: bytes,
+) -> Dict[str, Any]:
+    """Upload a converted ``.TFL`` + ``.TXT`` pair to the ``ai-models`` bucket.
+
+    Path: ``{org}/{firmware_id}/{version}/{stem}.TFL`` with the 8.3 stem
+    ``{firmware_id}V{version}`` (truncated to 8 chars). Upserts, so a re-run
+    overwrites. Returns the storage paths, the stem, the SHA-256 of the ``.TFL``
+    (what the mobile app transfers) and the combined size.
+    """
+    import hashlib
+
+    name_stem = f"{firmware_id}V{version_num}"[:8]
+    path_tfl = f"{org_id}/{firmware_id}/{version_num}/{name_stem}.TFL"
+    path_txt = f"{org_id}/{firmware_id}/{version_num}/{name_stem}.TXT"
+    # upsert must be the STRING "true": the storage client passes file_options as
+    # HTTP headers and a bool raises "Header value must be str or bytes".
+    await asyncio.to_thread(
+        client.storage.from_("ai-models").upload,
+        path=path_tfl,
+        file=tfl_bytes,
+        file_options={"content-type": "application/octet-stream", "upsert": "true"},
+    )
+    await asyncio.to_thread(
+        client.storage.from_("ai-models").upload,
+        path=path_txt,
+        file=txt_bytes,
+        file_options={"content-type": "text/plain", "upsert": "true"},
+    )
+    return {
+        "model_path": path_tfl,
+        "labels_path": path_txt,
+        "name_stem": name_stem,
+        "file_hash": hashlib.sha256(tfl_bytes).hexdigest(),
+        "file_size_bytes": len(tfl_bytes) + len(txt_bytes),
+    }
+
+
 async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, bytes, List[str], Dict[str, Any]]:
     """Download, convert, and package a pretrained SSCMA model.
 

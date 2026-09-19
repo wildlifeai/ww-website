@@ -42,7 +42,9 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
     Promise.all([
       projQuery,
       supabase.from('capture_methods').select('id, value, description').eq('is_active', true),
-      supabase.from('ai_models').select('id, name, version').eq('status', 'deployed').order('name'),
+      // A converted or trained model is 'validated' (ready to load); 'deployed' means on a device.
+      // Both are usable as a project's Species Brain.
+      supabase.from('ai_models').select('id, name, version').in('status', ['validated', 'deployed']).order('name'),
     ]).then(([p, c, m]) => {
       if (cancelled) return
       setProjects((p.data as Project[] | null) ?? [])

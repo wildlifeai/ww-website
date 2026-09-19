@@ -109,6 +109,34 @@ All uploads are **async jobs**. The API returns a `job_id` immediately, and the 
 
 **Accepted file types:** `.zip` (Edge Impulse export), `.tflite` (raw TFLite), `.cc` (C array)
 
+### Trained on the website (Annotations selection → Edge Impulse API)
+
+**Endpoint:** `POST /api/models/train` (behind `FF_MODEL_TRAINING_ENABLED`; status and limits from
+`GET /api/models/train/status`)
+
+**Flow:**
+
+1. The Annotations page sends the selected `media_ids`, the classes to train (matched on the
+   observations' `scientific_name`, with a device label each), an optional background class and the
+   recipe knobs (`image_size` 96 or 160, `colour`, `epochs`).
+2. Router checks the flag, the org-manager role and that every image is in a deployment the caller
+   can read; with a trainer configured it creates the `ai_models` row (`file_type: "training"`)
+   the same way the upload path does (`next_model_version`), then enqueues `train_species_brain_job`.
+3. The worker builds the dataset (`domain/training.py`: crops when available, human labels first,
+   camera labels never), uploads it to the Edge Impulse project, sets the impulse (image block,
+   `fit-short`, grayscale), generates features, trains the transfer-learning block
+   (`EDGE_IMPULSE_TRANSFER_MODEL`), builds the int8 deployment (`EDGE_IMPULSE_DEPLOY_FORMAT`) and
+   downloads the ZIP.
+4. From there it is the custom-upload path: `convert_uploaded_model()` (Vela), `store_model_artifacts()`
+   (8.3 names, `ai-models` bucket), row → `validated` with `label_map` and `detection_capabilities`
+   filled from the chosen classes and the run recorded in `processing_log`.
+5. Without `EDGE_IMPULSE_API_KEY` / `EDGE_IMPULSE_PROJECT_ID` the job stops once the dataset is built: it packages
+   the dataset as an Edge-Impulse-ready ZIP in the `firmware` bucket (`temp/training/{job_id}/`) and the
+   job's `result_url` is a one-hour download link.
+
+Design, limits and the class-order trap:
+[species-brain-training-spec](../development%20reports/species-brain-training-spec.md).
+
 ### Pre-trained Model (GitHub Zoo)
 
 **Endpoint:** `POST /api/models/pretrained` with `source_type: "pretrained"`
@@ -293,12 +321,28 @@ If the combined stem exceeds 8 characters, it is truncated (e.g. `12345V99` → 
 | `convert_pretrained_model()` | Downloads an SSCMA model, optionally runs Vela, returns `(tfl_bytes, txt_bytes, labels, metadata)`. |
 | `convert_github_pretrained_model()` | Downloads a GitHub zoo model, handles `.cc` arrays and `.tflite`, returns `(tfl_bytes, txt_bytes, labels, metadata)`. |
 | `upload_and_register()` | Resolves model family → builds 8.3 filenames → uploads TFL+TXT to storage → inserts/updates `ai_models` row. |
+| `next_model_version()` | Auto-versions a model by name within an org → `(version_number, "n.0.0-xxxxxx")`. Shared by the upload and training endpoints. |
+| `store_model_artifacts()` | Builds the 8.3 names from the family's firmware id, uploads `.TFL` + `.TXT` to `ai-models`, returns paths + hash. |
+
+### `backend/app/domain/training.py`
+
+| Function | Description |
+|----------|-------------|
+| `assign_samples()` | Turns media rows + observations into labelled samples (target / background), skipping camera-produced labels. |
+| `validate_dataset()` / `split_samples()` | Enforce the per-class minimum and the run limits; deterministic 80/20 train/test split. |
+| `build_dataset_zip()` | Edge-Impulse-ready dataset ZIP (one folder per class, `dataset.json`, README with the recipe). |
+| `build_label_map()` / `firmware_target_warning()` | `label_map` from the chosen classes; warns when class index 1 is not a target. |
+
+### `backend/app/services/edge_impulse.py`
+
+`EdgeImpulseClient`: Studio + ingestion API client (upload samples, set impulse and DSP config, generate features, train, poll jobs, build and download the int8 deployment).
 
 ### `backend/app/jobs/definitions.py`
 
 | Function | Description |
 |----------|-------------|
 | `convert_model_job()` | Worker for custom uploads. Retrieves blob, converts, uploads, updates DB. |
+| `train_species_brain_job()` | Worker for website training. Dataset → Edge Impulse → int8 ZIP → Vela → registered model (or dataset ZIP export). |
 | `download_pretrained_job()` | Worker for SSCMA models. Downloads, converts, registers. |
 | `download_github_pretrained_job()` | Worker for GitHub zoo models. Downloads, converts, registers. |
 | `generate_manifest_job()` | Worker for manifest assembly. Downloads all components, builds MANIFEST.zip. |

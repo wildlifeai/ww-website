@@ -12,6 +12,8 @@ Repos: **website** (`ww-website`), **backend** (`ww-backend`, canonical schema),
  (1) Train/export        (2) Upload & convert      (3) Label mapping      (4) Manifest
    Edge Impulse   ──►   website /api/models/  ──►  website label_map ──► website MANIFEST.zip
    int8 .tflite zip      convert → Vela → .TFL       (species ↔ taxon)     (.TFL + labels.txt)
+   (by hand, or the website drives it: Annotations → Actions → Create species ID model…, which
+    covers stages 1 to 3 in one job; see stage 1)
                                                                                  │
  (8) Reflect (planned)  (7) Ingest EXIF        (6) On-device inference    (5) Deploy
    edge observations ◄─ website exif.py    ◄──  firmware: load+run    ◄──  mobile (BLE) or
@@ -45,6 +47,19 @@ class/label mismatch) is #225.
 A **fully int8-quantized** TFLite classifier. The Edge Impulse "TensorFlow Lite
 (int8 quantized)" export contains `trained.tflite` + label metadata. Float or
 partially-quantized models fail Vela compilation (see stage 2).
+
+Two ways to get there:
+
+- **By hand in Edge Impulse**, following the recipe in the Notion page *Machine Learning
+  Models* (96×96 grayscale, MobileNetV2 0.35 transfer learning, 30 to 50 cycles), then the
+  Toolkit upload in stage 2.
+- **From the website** (behind `FF_MODEL_TRAINING_ENABLED`): select labelled images on the
+  Annotations page, *Actions → Create species ID model…*. `POST /api/models/train` builds the
+  dataset (human labels beat Cloud AI ones, camera labels are never used), drives the same
+  recipe through the Edge Impulse API, downloads the int8 export and continues with stages 2
+  and 3 automatically, `label_map` included. With no Edge Impulse credentials configured it
+  packages the dataset as a ZIP for a manual run instead. Details, limits and the class-order
+  trap: [species-brain-training-spec](../development%20reports/species-brain-training-spec.md).
 
 ## 2. Upload & convert (website → backend)
 `POST /api/models/convert` → `convert_model_job` → `convert_uploaded_model`
@@ -158,6 +173,9 @@ Gated on `FF_EDGE_REFLECT_ENABLED`. The ww-backend `dual_ai_v0` migration
   the sync only sends files the card is missing, so the old `.TXT` has to be deleted from
   `/MANIFEST/` or the card reformatted
   ([#134](https://github.com/wildlifeai/ww-website/issues/134)).
+- **Website-trained model, end to end.** The Annotations training path (stage 1) has not yet
+  run against a live Edge Impulse project or been loaded on a camera; that run, on the rat
+  images, is the next step ([species-brain-training-spec](../development%20reports/species-brain-training-spec.md)).
 - **Detection models** (YOLOv8/YOLOv11 OD, YOLOv8 Pose) stay `blocked` in the registry until
   the firmware can run a detection head; see *What the device can run* above.
 - **Rollout:** promote schema (ww-backend `main`) + app (staging) + enable the flag per
