@@ -192,8 +192,40 @@ secret (ACA secret / vault, never in chat).
 
 ## Google Drive
 
-- Service account (`ww-drive-uploader@...`) archives originals to a canonical folder structure under a
-  root folder ID. Credentials are a service-account JSON (an ACA secret on the backend/worker).
+Originals are archived by one service account —
+**`ww-drive-uploader@ww-drive-upload-photos.iam.gserviceaccount.com`** (GCP project
+`ww-drive-upload-photos`) — shared by every environment. Only the *folder* differs.
+
+**Folder layout.** Each environment writes into its own subfolder of a shared `Data` folder, and
+the app creates the project/deployment tree beneath it:
+
+```
+Data/          1jIWV3OjSEnBK4Z64syHd2ugoRuXdVrK5   ← shared parent; NOT an upload target
+├── dev/       1-F6cQc5lpYOJNSPKRs7i79Gh539N5hUT   ← ww-backend-dev + local dev
+├── Production/ 1apf13KX075Fv4K0A2nbaTqOmCwZ9vJzr  ← ww-backend
+└── (ad-hoc human folders — AE_photos_charles, temp_Tommy_WW_footage)
+```
+
+`GOOGLE_DRIVE_FOLDER_ID` has **no default in code** on purpose. It used to default to the `Data`
+parent, so any environment that forgot to set it wrote into the shared root alongside real data.
+Unset + Drive enabled now raises at upload time instead.
+
+**Where the credential comes from — three different mechanisms, which is the usual source of
+confusion:**
+
+| Environment | Credential source |
+|---|---|
+| `ww-backend-dev`, `ww-backend` | ACA secret **`google-sa-json`** on each container app, injected as a `secretref`. Neither touches Key Vault. |
+| Local dev | The `.env` in Key Vault (`ww-kv-dev-ae` → `ww-website-dotenv`), which carries the **inline JSON**. `bash scripts/fetch-env.sh` is all a developer needs. |
+| Docker (dev compose) | `docker-compose.dev.yml` mounts a `service-account.json` at `/app/service-account.json`; the env var is a path in that case. |
+
+`GOOGLE_SERVICE_ACCOUNT_JSON` accepts **either** inline JSON (starts with `{`) or a filesystem path
+— see `services/google_drive.py::_creds`. Until 2026-08-27 the vault copy held a *Windows path* that
+only resolved on one maintainer's machine, so `fetch-env.sh` could never produce working Drive
+uploads; it now holds the JSON itself.
+
+> Rotating the account means updating **three** places: the `google-sa-json` ACA secret on both
+> container apps, and the `GOOGLE_SERVICE_ACCOUNT_JSON` line inside the vault `.env`.
 
 ---
 

@@ -177,7 +177,8 @@ self-serve:
 |------------|--------------------|---------------|
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | Supabase dashboard → dev project → *Settings → API* | Invite to the Wildlife.ai Supabase org |
 | `AZURE_STORAGE_CONNECTION_STRING` | `az storage account show-connection-string -n wwuploadsae -g WW-AE` | Azure subscription (Entra ID invite) |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | `service-account.json` at the repo root — obtain from a maintainer via a secure channel (never commit it) | Drive folder shared with the service account |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Ships **inline** in the `.env` from `fetch-env.sh` — nothing else to obtain. (Also accepts a path to a `service-account.json`; the dev compose mounts one at `/app/service-account.json`.) | Key Vault access, as above |
+| `GOOGLE_DRIVE_FOLDER_ID` | Also in the fetched `.env`. **No default in code** — each environment archives into its own subfolder of the shared `Data` folder, so an unset value fails loudly rather than writing somewhere unwatched | — |
 | `SEED_USER_PASSWORD` (seed-user login) | GitHub Actions secret in `ww-backend` / `ww-website`; see [Testing with Seed Users](./documentation/resources/testing-with-seed-users.md) | Ask a maintainer |
 | `HF_TOKEN` | Your own HuggingFace token (DINOv3 is a gated model) | Self-serve at huggingface.co |
 | `LORAWAN_*`, `INAT_*`, `SENTRY_DSN` | Optional for local dev — from a maintainer if you work on those integrations | — |

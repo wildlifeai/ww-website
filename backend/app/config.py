@@ -121,8 +121,13 @@ class Settings(BaseSettings):
     # ── Google Drive ──────────────────────────────────────────────────
     GOOGLE_DRIVE_ENABLED: bool = Field(False, description="Enable async Google Drive upload of analysed images")
     GOOGLE_DRIVE_FOLDER_ID: str = Field(
-        "1jIWV3OjSEnBK4Z64syHd2ugoRuXdVrK5",
-        description="Root Google Drive folder ID for uploads",
+        "",
+        description=(
+            "Root Google Drive folder ID this environment archives into. No default on "
+            "purpose: every environment gets its own subfolder of the shared 'Data' folder "
+            "(dev, Production), so a default would silently write into whichever folder it "
+            "named. Unset + Drive enabled fails loudly at upload time."
+        ),
     )
     GOOGLE_SERVICE_ACCOUNT_JSON: str = Field(
         "",
