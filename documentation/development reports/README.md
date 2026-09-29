@@ -30,6 +30,14 @@ the right shape for a spec or an analysis. When a discussion grows working files
 carrying **Status / Outcome / Open items** instead. Append as it evolves — these are the audit
 trail, don't rewrite them.
 
+Keep to decisions, contracts, measured numbers, commands and open items; link to the document
+that owns a fact instead of restating it (the standard is in
+[`.agents/skills/SKILL.md`](../../.agents/skills/SKILL.md), Documentation Invariant).
+
+A report whose status is **📋 Proposal** carries, in its status banner, either a link to the
+issue that tracks the work or the words "not scheduled". A proposal with neither is how the
+decoupled upload pipeline spec sat untracked for two months.
+
 Closing a report (the only ritual):
 
 - [ ] Outcome written — the short "why" a future developer reads instead of the whole thread
