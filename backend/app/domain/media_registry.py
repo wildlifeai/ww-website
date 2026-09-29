@@ -197,42 +197,17 @@ async def generate_observation_crops(media_id: str) -> Optional[str]:
     return hero_url
 
 
-def _parse_timestamp(value) -> Optional[float]:
-    """Parse a media ``timestamp`` (ISO-8601 string) to epoch seconds; None if unparseable."""
-    from datetime import datetime
-
-    if not value:
-        return None
-    try:
-        s = str(value).replace("Z", "+00:00")
-        return datetime.fromisoformat(s).timestamp()
-    except (ValueError, TypeError):
-        return None
-
-
 def group_bursts(media_rows: list[dict], gap_seconds: float) -> list[list[dict]]:
-    """Split timestamp-ordered media into bursts, breaking when the gap exceeds ``gap_seconds``.
+    """Trigger bursts of ``media_rows``: the one grouper, ``domain.burst_evidence.group_bursts``.
 
-    Frames with an unparseable/missing timestamp start their own singleton burst so a bad
-    timestamp can't merge two unrelated triggers. Singletons are dropped by the caller
-    (motion ROI needs ≥2 frames), but kept here so the function is purely structural.
+    Kept under this name for the motion-ROI caller. Frames with an unparseable or
+    missing timestamp are singletons; singletons are dropped by the crop caller
+    (motion ROI needs at least two frames) but kept here so the function is
+    purely structural.
     """
-    bursts: list[list[dict]] = []
-    cur: list[dict] = []
-    prev_ts: Optional[float] = None
-    for row in media_rows:
-        ts = _parse_timestamp(row.get("timestamp"))
-        same = cur and prev_ts is not None and ts is not None and (ts - prev_ts) <= gap_seconds
-        if same:
-            cur.append(row)
-        else:
-            if cur:
-                bursts.append(cur)
-            cur = [row]
-        prev_ts = ts
-    if cur:
-        bursts.append(cur)
-    return bursts
+    from app.domain.burst_evidence import group_bursts as _group
+
+    return _group(media_rows, gap_seconds)
 
 
 async def generate_motion_roi_crops(
