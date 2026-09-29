@@ -68,6 +68,7 @@ Ordered roughly by how likely you are to need them. Descriptions live in the
 
 | Report | Status |
 |---|---|
+| [2026-09_evidence-pipeline-architecture](2026-09_evidence-pipeline-architecture/README.md) | 📋 Proposal, 2026-09-29: evidence score, consensus row and `media_evidence` contract; items 1 to 3 in progress, issues not filed |
 | [2026-09_false-negatives-and-vlm-audit](2026-09_false-negatives-and-vlm-audit/README.md) | 📋 Proposal / Analysis — detector false negatives, Wildlife Brain fallbacks, cascaded VLM blank auditing, and iNaturalist constraints |
 | [2026-09_person-detection-e2e](2026-09_person-detection-e2e/README.md) | 🔧 Active — model uploaded, transferred and run on hardware with correct labels; website-side reflection blocked on a fresh capture set ([#140](https://github.com/wildlifeai/ww-website/issues/140)) |
 | [ios-universal-links-team-id](ios-universal-links-team-id.md) | 🔧 Active — one-value fix identified and verified; iOS password-reset links stay broken until it ships |
