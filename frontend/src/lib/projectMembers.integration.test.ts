@@ -32,7 +32,8 @@ if (configured && !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/.tes
 }
 
 const run      = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
-const password = `pw-${crypto.randomUUID()}`
+// Generated per run for throwaway local users; nothing is stored.
+const password = crypto.randomUUID()
 const clientOpts = { auth: { persistSession: false, autoRefreshToken: false } }
 
 interface Actor { id: string; email: string; db: SupabaseClient }
