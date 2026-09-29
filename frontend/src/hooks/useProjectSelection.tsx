@@ -14,6 +14,8 @@ interface ProjectSelectionContextType {
   toggleProject: (id: string) => void
   selectAll: () => void
   clearAll: () => void
+  /** Refetch the list, e.g. after accepting a project invitation. */
+  reloadProjects: () => void
 }
 
 const ProjectSelectionContext = createContext<ProjectSelectionContextType | undefined>(undefined)
@@ -23,6 +25,7 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     if (!user) {
@@ -53,7 +56,7 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
     fetchProjects()
     
     return () => { isMounted = false }
-  }, [user])
+  }, [user, reloadKey])
 
   const toggleProject = (id: string) => {
     setSelectedProjectIds(prev => 
@@ -63,6 +66,7 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
 
   const selectAll = () => setSelectedProjectIds(projects.map(p => p.id))
   const clearAll = () => setSelectedProjectIds([])
+  const reloadProjects = () => setReloadKey(k => k + 1)
 
   const value = {
     projects,
@@ -71,6 +75,7 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
     toggleProject,
     selectAll,
     clearAll,
+    reloadProjects,
   }
 
   return (
