@@ -47,9 +47,24 @@ permissions, verify against the **live** DB, not just the migrations.
 | `media_assets` | embedded in `media` queries (renditions: provider, dimensions, bytes) | RLS read — a missing GRANT aborts the **whole** embedding query (prod, Jul 2026) |
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
 | `taxa` | SpeciesPicker (local search) | RLS read |
-| `user_roles` | membership / `has_project_role` | RLS + `get_organisation_users` RPC |
+| `user_roles`, `project_invitations` | members panel, invitation banner | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below) |
 | `media_embeddings`, `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
 | `devices`, `lorawan_*`, `firmware`, `ai_models`, `api_jobs` | LoRaWAN, manifests, models, jobs | service-role |
+
+**Project membership goes through RPCs, never direct queries.** RLS lets a user read only their
+own `users` row and their own `user_roles` rows, and it turns an unauthorised UPDATE into
+"0 rows changed" with no error. The members panel was built on direct queries, so it listed only
+the caller, failed every add and reported removals that never happened. It now uses
+`get_project_members`, `send_project_invitation`, `get_project_pending_invitations`,
+`remove_project_member`, `get_my_pending_invitations` and `respond_to_invitation`, all through
+`frontend/src/lib/projectMembers.ts`. Adding a member is an invitation the invitee accepts from
+the banner under the nav (or in the mobile app). Emails are lowercased before sending, because
+`respond_to_invitation` compares them case-sensitively.
+
+`frontend/src/lib/projectMembers.integration.test.ts` runs that module against a **local**
+`ww-backend` stack as real signed-in users (invite, accept, decline, remove, the refusals). Run it
+whenever a `ww-backend` change touches roles, invitations or RLS; the header of the file has the
+two commands. Without the `WW_TEST_*` variables it skips, so `npm test` stays offline.
 
 Observation provenance fields (`source_type`, `review_status`, `reviewer_id`, `annotator_id`,
 `classification_method`) are written through one helper, `frontend/src/lib/observations.ts`, so

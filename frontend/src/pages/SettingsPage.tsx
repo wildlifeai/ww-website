@@ -312,7 +312,7 @@ export function SettingsPage() {
               >✕</button>
             </div>
             {panel.kind === 'members' && (
-              <ProjectMembersPanel projectId={panel.id} projectName={panel.name} organisationId={panel.org_id} />
+              <ProjectMembersPanel projectId={panel.id} projectName={panel.name} />
             )}
             {panel.kind === 'defaults' && (
               <>
