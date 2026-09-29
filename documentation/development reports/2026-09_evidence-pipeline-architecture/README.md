@@ -1,16 +1,14 @@
 # Evidence pipeline architecture: recall, evidence preservation, cost
 
 > **Status:** 📋 Proposal, 2026-09-29; decisions updated 2026-09-30. Items 1 to 3 of section 4
-> are in progress on branch `docs/2026-09-detector-false-negatives-and-vlm-audit`; items 4 to 10
-> are issues to file (section 17). This report owns the evidence design: layers, score, weights,
-> bands, consensus row, `media_evidence`, prompt v2, burst rules. The detector false-negative
-> analysis is sections 1 to 5 of
-> [2026-09_false-negatives-and-vlm-audit](../2026-09_false-negatives-and-vlm-audit/README.md);
-> the Gemini experiment (how to run, results, prompt versions measured) is section 6 of the same
-> report (lands with `feat/gemini-presence-evidence-fusion`). Google Cloud rates
-> are in [2026-09_gcp-pilot-and-migration](../2026-09_gcp-pilot-and-migration/README.md) (lands
-> with `docs/gcp-pilot-and-migration`). Schema items are proposals to ww-backend, never
-> migrations here.
+> are built in [#155](https://github.com/wildlifeai/ww-website/pull/155); the rest are tracked in
+> section 17. This report owns the evidence design: layers, score, weights, bands, consensus row,
+> `media_evidence`, prompt v2, burst rules. The detector false-negative analysis is sections 1 to 5
+> of [2026-09_false-negatives-and-vlm-audit](../2026-09_false-negatives-and-vlm-audit/README.md);
+> the Gemini experiment is section 6 of the same report (lands with #155). Google Cloud rates are in
+> [2026-09_gcp-pilot-and-migration](../2026-09_gcp-pilot-and-migration/README.md) (lands with
+> [#157](https://github.com/wildlifeai/ww-website/pull/157)). Schema items are proposals to
+> ww-backend, never migrations here.
 
 ## Contents
 
@@ -32,7 +30,7 @@
 16. [Learned cascade](#16-learned-cascade)
 17. [Not yet, and open items](#17-not-yet-and-open-items)
 
-Code marked * exists only on branch `docs/2026-09-detector-false-negatives-and-vlm-audit`;
+Code marked * lands with [#155](https://github.com/wildlifeai/ww-website/pull/155);
 everything else is on dev. Paths are under `backend/app/` unless they start with `scripts/` or
 `tests/` (under `backend/`).
 
@@ -239,8 +237,8 @@ part of the `media_evidence` issue).
 
 ## 8. `media_evidence` contract
 
-Owned by ww-backend; the ready-to-file issue with full DDL, RLS and pgTAP is
-[`issue-ww-backend-media-evidence.md`](issue-ww-backend-media-evidence.md).
+Owned by ww-backend; full DDL, RLS and pgTAP in
+[ww-backend#208](https://github.com/wildlifeai/ww-backend/issues/208).
 
 ```sql
 media_evidence(
@@ -506,32 +504,29 @@ self-hosted VLM; no box fusion, species on the consensus row, DINO attention, qu
 classifier or learned classifier in this iteration; no hand-tuning beyond the v1 guesses; no
 change to `events.py`; no `observations` schema change from this repo.
 
-Issues to file (none filed yet; the two drafts are beside this report):
+Tracking:
 
-| # | Repo | Issue | Acceptance criterion |
-|---|---|---|---|
-| 4 | ww-website | Stratified benchmark: the section 10 columns and human strata in `label_presence.py` and `eval_presence.py` | Recall with `n` and interval for every stratum with 30 or more animal frames |
-| 5 | ww-website | Image-quality stage (`domain/image_quality.py`) writing `quality_class` | Every frame in a run has a `quality_class` row; `night_ir` and `motion_blur` agree with humans on at least 90% of a 200-frame check |
-| 6 | ww-website | Localisation recovery: VLM bbox, motion ROI, DINO attention, crop, classifier; `crop_method` recorded (`detector`, `vlm_bbox`, `motion_roi`, `dino_attention`) | A consensus-animal frame with no detector box gets a crop and a species row naming the link that produced the box |
-| 7 | ww-website + ww-backend | Disagreement matrix: `domain/disagreement.py` now, `media_verdicts` view to ww-backend | Every verdict combination with count and human-agreement share per deployment; v2 weights derived and recorded here |
-| 8 | ww-website | Human-review loop: FN dataset, taxonomy field in the review UI, snapshot export | A human flipping a blank to animal produces an `index.csv` row with `missed_by` and `taxonomy` |
-| 9 | ww-website | Escalation budget and random sample, behind a flag | Per-deployment report as in section 13; calls never exceed `B` |
-| 10 | ww-website | Learned FN-risk classifier as `learned_v1` | Suspicious-only recall at the same budget at or above v1's, per stratum |
-| P1 | ww-backend | `media_evidence` table, [`issue-ww-backend-media-evidence.md`](issue-ww-backend-media-evidence.md) | Table, unique constraint, RLS and pgTAP merged; the website writer's skip path no longer fires on dev |
-| P2 | firmware | Capture-sequence EXIF tag, [`issue-firmware-sequence-tag.md`](issue-firmware-sequence-tag.md) | Frames of one trigger carry one trigger id and their index; `exif.py` parses it; the grouper uses it |
-| P3 | ww-backend | `ai_models` row for the Gemini presence model (September report §6.7) | A Gemini-only run records `annotation_runs` without `annotation_run_record_failed` |
-| P4 | ww-website | Record `speciesnet_max_conf` before the threshold filter; done in `SpeciesNetStep`*, file only if that branch does not merge | Every SpeciesNet blank has the row, 0 when the detector returned nothing |
-| P5 | ww-website | Per-crop refinement writes its own row instead of patching SpeciesNet's | After a per-crop run the SpeciesNet row's `classified_by` is unchanged and a classifier row exists beside it |
-| P6 | ww-website | Frontend badge and `emit_detection_notifications` read the consensus row for presence | Both follow the consensus row when one exists, today's precedence otherwise |
-| P7 | ww-website | One grouper (decided 2026-09-30): `media_registry.group_bursts` and the labeller delegate to `burst_evidence.group_bursts` | `MOTION_ROI_BURST_GAP_SECONDS` removed; one `BURST_GAP_SECONDS`, default 10 |
-| P8 | ww-website | GPU seconds per frame per run: `duration_seconds / media_processed` from `PipelineStepResult` in a run log line | Every run logs seconds per frame for each GPU step |
+| # | Issue | Acceptance criterion |
+|---|---|---|
+| 4 | [#163](https://github.com/wildlifeai/ww-website/issues/163) stratified benchmark | Recall with `n` and interval for every stratum with 30 or more animal frames |
+| 5 | [#164](https://github.com/wildlifeai/ww-website/issues/164) image-quality stage | Every frame has a `quality_class`; `night_ir` and `motion_blur` agree with humans on at least 90% of 200 frames |
+| 6 | [#165](https://github.com/wildlifeai/ww-website/issues/165) localisation recovery | A consensus-animal frame with no detector box gets a crop and a species row naming its `crop_method` |
+| 7 | [#166](https://github.com/wildlifeai/ww-website/issues/166) disagreement matrix (the `media_verdicts` view follows [ww-backend#208](https://github.com/wildlifeai/ww-backend/issues/208)) | Every verdict combination with count and human-agreement share per deployment; v2 weights recorded here |
+| 8 | [#167](https://github.com/wildlifeai/ww-website/issues/167) human-review loop and FN dataset | A human flipping a blank to animal produces an `index.csv` row with `missed_by` and `taxonomy` |
+| 9 | [#168](https://github.com/wildlifeai/ww-website/issues/168) escalation budget and random sample | Per-deployment report as in section 13; calls never exceed `B` |
+| 10 | [#169](https://github.com/wildlifeai/ww-website/issues/169) learned FN-risk classifier | Suspicious-only recall at the same budget at or above v1's, per stratum |
+| P1 | [ww-backend#208](https://github.com/wildlifeai/ww-backend/issues/208) `media_evidence` table | Table, unique constraint, RLS and pgTAP merged; the website writer's skip path no longer fires on dev |
+| P2 | [Seeed#242](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/issues/242) capture-sequence EXIF tag | Frames of one trigger carry one trigger id and their index; `exif.py` parses it; the grouper uses it |
+| P3 | [ww-backend#209](https://github.com/wildlifeai/ww-backend/issues/209) `ai_models` row for the Gemini model | A Gemini-only run records `annotation_runs` without `annotation_run_record_failed` |
+| P4 | done in #155 (`speciesnet_max_conf` before the threshold filter) | |
+| P5 | [#162](https://github.com/wildlifeai/ww-website/issues/162) per-crop refinement writes its own row | The SpeciesNet row's `classified_by` is unchanged after a per-crop run |
+| P6 | [#170](https://github.com/wildlifeai/ww-website/issues/170) badge and notifications read the consensus row | Both follow the consensus row when one exists |
+| P7 | done in #155 (one burst grouper, `BURST_GAP_SECONDS` 10 s) | |
+| P8 | [#171](https://github.com/wildlifeai/ww-website/issues/171) GPU seconds per frame in the run log | Every run logs seconds per frame for each GPU step |
+| E | [#161](https://github.com/wildlifeai/ww-website/issues/161) Edge AI reflected after the pipeline on `auto_annotate_deployments` | Fusion sees `edge_presence` on that path |
 
 Open items:
 
-- `auto_annotate_deployments` calls `reflect_edge_deployment` after `run_pipeline`, so
-  `edge_presence` is absent at fusion time on that path (September report §6.8.4).
-- `burst_index` from the tag is `frame_index - 1` (section 5); the vlm branch uses `frame_index`
-  as is. Align before the firmware tag ships.
 - Unmeasured: the Azure T4 per-second rate, L4 seconds per image, DINOv3 time per frame,
   contact-sheet cost on real burst lengths, and the placeholders 0.02 (motion saturation) and
   2% / 20% (size strata).
