@@ -278,6 +278,7 @@ async def train_species_brain_job(job_id: str, user_id: str, model_id: str | Non
     ``ai_models`` row validated with ``label_map`` filled from the classes the user
     chose. When no trainer is configured (or no model row was created) the dataset
     is packaged as an Edge-Impulse-ready ZIP instead and offered for download.
+    With ``training_mode() == "gcp"`` the trainer half is ``jobs/native_training.py``.
     Runs on the GPU worker when Redis is configured, in-process otherwise.
     """
     from app.config import settings
@@ -338,51 +339,70 @@ async def train_species_brain_job(job_id: str, user_id: str, model_id: str | Non
             return
 
         from app.domain.model import convert_uploaded_model, store_model_artifacts
-        from app.services.edge_impulse import EdgeImpulseClient
 
-        ei = EdgeImpulseClient(
-            settings.EDGE_IMPULSE_API_KEY,
-            settings.EDGE_IMPULSE_PROJECT_ID,
-            studio_url=settings.EDGE_IMPULSE_STUDIO_URL,
-            ingestion_url=settings.EDGE_IMPULSE_INGESTION_URL,
-        )
-        timeout_s = settings.EDGE_IMPULSE_JOB_TIMEOUT_S
         # 'uploaded' = "in flight, not yet validated" (the status enum has no 'training').
         await model_status("uploaded", training={"stage": "dataset", "dataset": summary.as_dict()})
 
-        async with job_heartbeat(job_id):
-            await progress(0.2, "Clearing the Edge Impulse training project…")
-            await ei.delete_all_samples()
+        if training_mode() == "gcp":
+            from app.jobs.native_training import train_on_gcp
 
-            await progress(0.25, f"Uploading {total} images to Edge Impulse…")
-            for category, rows in (("training", train), ("testing", test)):
-                by_label: dict[str, list] = {}
-                for sample, data in rows:
-                    by_label.setdefault(sample.label, []).append((f"{label_slug(sample.label)}.{sample.sample_id[:8]}.jpg", data))
-                for label, files in by_label.items():
-                    await ei.upload_samples(category, label, files)
+            async with job_heartbeat(job_id):
+                zip_bytes, trained = await train_on_gcp(model_id, req, train, test, summary.labels, progress=progress, tick=tick)
+        else:
+            from app.services.edge_impulse import EdgeImpulseClient
 
-            await progress(0.4, f"Setting up the impulse ({req.image_size}×{req.image_size} {req.colour}, transfer learning)…")
-            await ei.set_impulse(req.image_size)
-            await ei.set_dsp_config(req.colour)
-            feat_job = await ei.start_generate_features()
-            await ei.wait_for_job(feat_job, what="Generating features", timeout_s=timeout_s, on_tick=tick)
-
-            await progress(0.5, f"Training ({req.epochs} epochs at {req.learning_rate})…")
-            train_job = await ei.start_training(
-                transfer_type=settings.EDGE_IMPULSE_TRANSFER_MODEL, epochs=req.epochs, learning_rate=req.learning_rate
+            ei = EdgeImpulseClient(
+                settings.EDGE_IMPULSE_API_KEY,
+                settings.EDGE_IMPULSE_PROJECT_ID,
+                studio_url=settings.EDGE_IMPULSE_STUDIO_URL,
+                ingestion_url=settings.EDGE_IMPULSE_INGESTION_URL,
             )
-            await ei.wait_for_job(train_job, what="Training", timeout_s=timeout_s, on_tick=tick)
-            metrics = await ei.get_training_metrics()
+            timeout_s = settings.EDGE_IMPULSE_JOB_TIMEOUT_S
 
-            await progress(0.8, "Building the int8 model…")
-            fmt = settings.EDGE_IMPULSE_DEPLOY_FORMAT
-            formats = await ei.list_deployment_formats()
-            if formats and fmt not in formats:
-                raise TrainingError(f"Edge Impulse deployment format '{fmt}' is not available; available: {', '.join(formats[:20])}")
-            build_job = await ei.start_build(fmt)
-            await ei.wait_for_job(build_job, what="Building the model", timeout_s=timeout_s, on_tick=tick)
-            zip_bytes = await ei.download_build(fmt)
+            async with job_heartbeat(job_id):
+                await progress(0.2, "Clearing the Edge Impulse training project…")
+                await ei.delete_all_samples()
+
+                await progress(0.25, f"Uploading {total} images to Edge Impulse…")
+                for category, rows in (("training", train), ("testing", test)):
+                    by_label: dict[str, list] = {}
+                    for sample, data in rows:
+                        by_label.setdefault(sample.label, []).append((f"{label_slug(sample.label)}.{sample.sample_id[:8]}.jpg", data))
+                    for label, files in by_label.items():
+                        await ei.upload_samples(category, label, files)
+
+                await progress(0.4, f"Setting up the impulse ({req.image_size}×{req.image_size} {req.colour}, transfer learning)…")
+                await ei.set_impulse(req.image_size)
+                await ei.set_dsp_config(req.colour)
+                feat_job = await ei.start_generate_features()
+                await ei.wait_for_job(feat_job, what="Generating features", timeout_s=timeout_s, on_tick=tick)
+
+                await progress(0.5, f"Training ({req.epochs} epochs at {req.learning_rate})…")
+                train_job = await ei.start_training(
+                    transfer_type=settings.EDGE_IMPULSE_TRANSFER_MODEL, epochs=req.epochs, learning_rate=req.learning_rate
+                )
+                await ei.wait_for_job(train_job, what="Training", timeout_s=timeout_s, on_tick=tick)
+                metrics = await ei.get_training_metrics()
+
+                await progress(0.8, "Building the int8 model…")
+                fmt = settings.EDGE_IMPULSE_DEPLOY_FORMAT
+                formats = await ei.list_deployment_formats()
+                if formats and fmt not in formats:
+                    raise TrainingError(f"Edge Impulse deployment format '{fmt}' is not available; available: {', '.join(formats[:20])}")
+                build_job = await ei.start_build(fmt)
+                await ei.wait_for_job(build_job, what="Building the model", timeout_s=timeout_s, on_tick=tick)
+                zip_bytes = await ei.download_build(fmt)
+            trained = {
+                "recipe": {
+                    "image_size": req.image_size,
+                    "colour": req.colour,
+                    "epochs": req.epochs,
+                    "learning_rate": req.learning_rate,
+                    "transfer_model": settings.EDGE_IMPULSE_TRANSFER_MODEL,
+                },
+                "metrics": metrics,
+                "edge_impulse": {"project_id": settings.EDGE_IMPULSE_PROJECT_ID, "jobs": [feat_job, train_job, build_job]},
+            }
 
         await progress(0.88, "Compiling for the camera (Vela)…")
         # Fetch the row for its family / version (the filename only names a temp dir).
@@ -406,15 +426,7 @@ async def train_species_brain_job(job_id: str, user_id: str, model_id: str | Non
         training_info = {
             "stage": "complete",
             "dataset": summary.as_dict(),
-            "recipe": {
-                "image_size": req.image_size,
-                "colour": req.colour,
-                "epochs": req.epochs,
-                "learning_rate": req.learning_rate,
-                "transfer_model": settings.EDGE_IMPULSE_TRANSFER_MODEL,
-            },
-            "metrics": metrics,
-            "edge_impulse": {"project_id": settings.EDGE_IMPULSE_PROJECT_ID, "jobs": [feat_job, train_job, build_job]},
+            **trained,
             "labels": labels,
             "warning": warning,
         }
@@ -430,7 +442,7 @@ async def train_species_brain_job(job_id: str, user_id: str, model_id: str | Non
             file_type="model",
             version_number=int(version_num) if str(version_num).isdigit() else 1,
         )
-        acc = metrics.get("accuracy")
+        acc = trained["metrics"].get("accuracy")
         acc_txt = f" {round(float(acc) * 100)}% accuracy on held-out images." if isinstance(acc, (int, float)) else ""
         await update_job(
             job_id,

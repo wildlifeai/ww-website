@@ -302,7 +302,7 @@ def _training_disabled(req_id):
 @router.get("/train/status")
 async def train_status(request: Request, user=Depends(get_current_user)):
     """What the Annotations action needs before it opens: is training on, which trainer
-    runs it (``edge_impulse`` or ``export_only``), and the dataset limits to validate against."""
+    runs it (``edge_impulse``, ``gcp`` or ``export_only``), and the dataset limits to validate against."""
     return ApiResponse(data=training_status(), meta=ApiMeta(request_id=getattr(request.state, "request_id", None)))
 
 
@@ -337,7 +337,7 @@ async def train_model(request: Request, body: TrainModelRequest, user=Depends(ge
 
     mode = training_mode()
     model_id = None
-    if mode == "edge_impulse":
+    if mode != "export_only":
         model_family_id, _ = await resolve_or_create_model_family(client, org_id, body.model_name)
         next_ver, version_string = await next_model_version(client, org_id, body.model_name)
         model_insert = (

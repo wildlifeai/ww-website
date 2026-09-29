@@ -136,6 +136,8 @@ All uploads are **async jobs**. The API returns a `job_id` immediately, and the 
 
 Design, limits and the class-order trap:
 [species-brain-training-spec](../development%20reports/species-brain-training-spec.md).
+Two trainers, by `MODEL_TRAINER`: `edge_impulse` (steps 3 to 4) or `gcp`, a Cloud Run job behind `FF_NATIVE_TRAINING_ENABLED` whose int8
+model the worker compiles with Vela and registers as in step 4: [2026-09_gcp-native-model-training](../development%20reports/2026-09_gcp-native-model-training/README.md).
 
 ### Pre-trained Model (GitHub Zoo)
 

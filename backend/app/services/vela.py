@@ -5,10 +5,16 @@
 Wraps the ethos-u-vela CLI for converting TFLite models to Ethos-U55 format.
 """
 
+import csv
+import io
+import re
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 import structlog
+
+from app.config import settings
 
 logger = structlog.get_logger()
 
@@ -19,14 +25,49 @@ class VelaConversionError(Exception):
     pass
 
 
+class ArenaBudgetExceeded(VelaConversionError):
+    """The compiled model needs more SRAM than the camera's tensor arena."""
+
+
+def parse_sram_used_bytes(summary_csv: Optional[str], stdout: str = "") -> Optional[int]:
+    """Peak SRAM Vela reports, in bytes, or None when it reports none.
+
+    Vela writes ``<stem>_summary_<system>.csv`` with a ``sram_memory_used`` column
+    in KiB and prints ``Total SRAM used ... KiB``; the CSV is read first.
+    """
+    rows = list(csv.DictReader(io.StringIO(summary_csv or "")))
+    value = (rows[0].get("sram_memory_used") or "").strip() if rows else ""
+    if not value:
+        m = re.search(r"Total SRAM used\s+([0-9.]+)\s*KiB", stdout or "")
+        value = m.group(1) if m else ""
+    try:
+        return int(round(float(value) * 1024)) if value else None
+    except ValueError:
+        return None
+
+
+def check_arena_budget(sram_used_bytes: Optional[int], arena_bytes: int) -> None:
+    """Refuse a model whose SRAM estimate exceeds the arena; an unknown estimate only logs."""
+    if sram_used_bytes is None:
+        logger.warning("vela_sram_unknown", arena_bytes=arena_bytes)
+        return
+    if sram_used_bytes > arena_bytes:
+        raise ArenaBudgetExceeded(
+            f"The compiled model needs {sram_used_bytes / 1024:.1f} KiB of SRAM but the camera's tensor arena is "
+            f"{arena_bytes / 1024:.0f} KiB (MODEL_ARENA_BYTES). It would fail to load on the WW500: use a 96 px input, "
+            "fewer classes or a smaller model."
+        )
+
+
 async def run_vela_conversion(
     input_path: Path,
     output_dir: Path,
     accelerator_config: str = "ethos-u55-64",
     memory_mode: str = "Shared_Sram",
     timeout: int = 120,
+    arena_bytes: Optional[int] = None,
 ) -> Path:
-    """Run Vela conversion on a TFLite model.
+    """Run Vela conversion on a TFLite model, then check it fits the tensor arena.
 
     Args:
         input_path: Path to the source .tflite file.
@@ -34,12 +75,14 @@ async def run_vela_conversion(
         accelerator_config: Target accelerator config.
         memory_mode: Memory mode for the target.
         timeout: Maximum seconds to wait for Vela.
+        arena_bytes: SRAM budget; defaults to ``settings.MODEL_ARENA_BYTES``.
 
     Returns:
         Path to the converted output file.
 
     Raises:
         VelaConversionError: If conversion fails.
+        ArenaBudgetExceeded: If Vela's SRAM estimate exceeds the arena.
     """
     cmd = [
         "vela",
@@ -73,6 +116,12 @@ async def run_vela_conversion(
         raise VelaConversionError("Vela command not found. Ensure ethos-u-vela is installed.")
     except subprocess.TimeoutExpired:
         raise VelaConversionError(f"Vela conversion timed out after {timeout}s")
+
+    summary = next(iter(sorted(Path(output_dir).glob(f"{input_path.stem}_summary_*.csv"))), None)
+    sram = parse_sram_used_bytes(summary.read_text(encoding="utf-8", errors="replace") if summary else None, result.stdout)
+    budget = settings.MODEL_ARENA_BYTES if arena_bytes is None else arena_bytes
+    logger.info("vela_arena_check", sram_used_bytes=sram, arena_bytes=budget)
+    check_arena_budget(sram, budget)
 
     # Find output file
     return _find_vela_output(output_dir, input_path.name)

@@ -80,6 +80,7 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_ACTIVE_LEARNING_ENABLED` | `false` | Active-learning review queue + QA report |
 | `FF_INTELLIGENCE_ENABLED` | `false` | Conservation-intelligence endpoints (health, alerts, shift) |
 | `FF_MODEL_TRAINING_ENABLED` | `false` | Annotations → *Create species ID model…* (Edge Impulse training or dataset export). Set on the ARQ worker as well; see [species-brain-training-spec](../development%20reports/species-brain-training-spec.md) |
+| `FF_NATIVE_TRAINING_ENABLED` | `false` | With `MODEL_TRAINER=gcp`, that action trains in a Cloud Run job instead of Edge Impulse. Worker too; see [2026-09_gcp-native-model-training](../development%20reports/2026-09_gcp-native-model-training/README.md) |
 | `FF_BMP_INGEST_ENABLED` | `false`¹ | Raw-BMP ingest → JPEG re-compress on upload (¹ compose default: `true`) |
 
 > Always confirm the current set against `config.py` — flags are added as features land.

@@ -76,6 +76,7 @@ Robustness notes (all current): the converter accepts any `.tflite` in the ZIP
 could not run on NPU" = not int8-quantized), and uses unique `_pending/{job_id}`
 placeholder paths to satisfy the `NOT NULL UNIQUE` path columns
 (see backend [path-columns design issue](../../../ww-backend/documentation/development%20reports/ai-models-path-columns-design-issue.md)).
+Every Vela run also refuses a model whose SRAM estimate exceeds `MODEL_ARENA_BYTES` (512 KiB, the arena `ww500_md.ld` reserves).
 
 **Label integrity is enforced here**, because upload is the last point where the
 model and its labels are seen together. Conversion is refused when the labels list

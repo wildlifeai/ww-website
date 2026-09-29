@@ -5,13 +5,13 @@
  * and `backend/app/domain/training.py` (training_status). Keep the two in step.
  */
 
-export type TrainingMode = 'edge_impulse' | 'export_only'
+export type TrainingMode = 'edge_impulse' | 'gcp' | 'export_only'
 
 /** GET /api/models/train/status */
 export interface TrainingStatus {
   /** FF_MODEL_TRAINING_ENABLED on the server the frontend talks to. */
   enabled: boolean
-  /** edge_impulse = trained end to end; export_only = the dataset ZIP is prepared for a manual run. */
+  /** edge_impulse or gcp = trained end to end (MODEL_TRAINER); export_only = the dataset ZIP is prepared for a manual run. */
   mode: TrainingMode
   min_images_per_class: number
   recommended_images_per_class: number
