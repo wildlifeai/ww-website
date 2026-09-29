@@ -2,7 +2,8 @@
 
 > **Status:** 📋 Proposal, 2026-09-26; decisions updated 2026-09-30. Nothing created on Google
 > Cloud, no code changed. Track 1, the ML-worker pilot, is due **16 October 2026** for OKR G3
-> "Cloud cost per photo processed and stored, measured on a Google Cloud pilot". Track 2, the
+> "Cloud cost per photo processed and stored, measured on a Google Cloud pilot", tracked in
+> [#172](https://github.com/wildlifeai/ww-website/issues/172). Track 2, the
 > full migration, follows the pilot number and credit approval. Prices are USD, read from the
 > official pricing pages on 2026-09-26; NZD uses the ECB reference rate of 2026-09-25,
 > **1 USD = 1.7634 NZD** (via `api.frankfurter.app`). Figures marked *unverified* must not be
