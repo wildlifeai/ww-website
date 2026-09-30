@@ -421,6 +421,22 @@ Verify against the actual backend schema before writing queries.
 
 ---
 
+## RLS denials are silent on reads and updates
+
+A query RLS refuses usually returns **no rows and no error**: a SELECT comes back empty, an
+UPDATE changes 0 rows and reports success. Only an INSERT fails loudly (`42501`). So "no error"
+proves nothing. A user sees only their own `users` row and their own `user_roles` rows, which is
+why the members panel listed only the caller and "removed" members it never touched.
+
+For anything about other users (members, invitations, roles), call the `ww-backend` RPC that
+checks the caller itself; `frontend/src/lib/projectMembers.ts` wraps the membership ones. After a
+write, refetch and show what the database holds rather than updating local state optimistically.
+When a `ww-backend` change touches roles, invitations or RLS, run
+`frontend/src/lib/projectMembers.integration.test.ts` against a local stack (see
+[03-DATA-AND-SYNC](../../documentation/onboarding/03-DATA-AND-SYNC.md)).
+
+---
+
 ## Shared Model Lists
 
 Do not invent model names.

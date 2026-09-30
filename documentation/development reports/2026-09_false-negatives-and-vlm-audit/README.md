@@ -1,6 +1,6 @@
 # Detector False Negatives, Wildlife Brain Fallbacks, and VLM Auditing
 
-> **Status:** 📋 Proposal / Analysis · 2026-09-09 · Web Platform & AI Pipeline
+> **Status:** 🔧 Active · 2026-09-28 · Web Platform & AI Pipeline. Sections 1 to 5 are the 2026-09-09 analysis; section 6 is the implementation on this branch (Gemini presence step, labeller, evaluation script), flag-gated. 962 frames are labelled and a partial run on the free tier gives 98.1% recall at $0.21 per 1,000 frames (section 6.6); the full table waits on a billed Gemini tier.
 
 This report analyses what happens when object detection models (MegaDetector / SpeciesNet) fail to detect animals (false negatives), details the existing fallbacks across the Wildlife Watcher architecture, and evaluates how Vision-Language Models (VLMs like PaliGemma, Gemma 3, and GPT-4o/Omni) and iNaturalist can be used for false-negative recovery.
 
@@ -182,3 +182,154 @@ To enhance false-negative detection in Wildlife Watcher:
    * Implement a background worker task (`AuditBlankTask`) using an open-weights grounded VLM (PaliGemma 2 3B or Qwen2.5-VL) that periodically audits a random 5% sample of blanks, plus 100% of blanks with high Active Learning uncertainty.
 4. **Disagreement Telemetry on Model Evaluation:**
    * Surface Edge AI vs. Cloud AI detection discrepancies on the project dashboard to highlight camera sites with high false-negative rates due to camouflage or challenging local lighting.
+
+---
+
+## 6. Implementation (2026-09-26, extended 2026-09-29)
+
+What is on this branch, how to run it, what it measured, what is still open. The design (evidence score, weights, bands, burst rules, consensus row and `media_evidence` contracts, prompt v2) lives in the [evidence-pipeline architecture report](../2026-09_evidence-pipeline-architecture/README.md), sections 5 to 9; nothing here restates it.
+
+### 6.1 Decisions
+
+| Date | Decision |
+|---|---|
+| 2026-09-26 | Gemini scores **every** frame, beside SpeciesNet, each model writing its own rows; nothing overwrites another model's row |
+| 2026-09-26 | Access through a Google AI Studio key and the `google-genai` SDK (`GEMINI_API_KEY`, empty = disabled); no torch, ships in the lean API image |
+| 2026-09-26 | Three token-saving variants, single frame / burst contact sheet / Batch API; **not** the motion-ROI crop (it removes the context the prompt asks about) |
+| 2026-09-26 | Ground truth is labelled by hand (`label_presence.py`); SpeciesNet's verdicts cannot be the reference for a detector-miss study |
+| 2026-09-26 | Jev AI dropped: text-only, would need another model to describe the frame first |
+| 2026-09-29 | Gemini's own confidence is not a probability (1.0 on most answers) and is excluded from every decision; prompt v2 asks for structured evidence instead and the row's `confidence` is computed by us |
+| 2026-09-29 | The final verdict is a separate consensus row from a weighted evidence score (weights v1, hand-set, threshold 0.50, suspicious band from 0.25) |
+| 2026-09-29 | One burst grouper for every stage (`domain/burst_evidence.py::group_bursts`): firmware sequence tag first, else a 10 s timestamp gap (`BURST_GAP_SECONDS`; today's firmware spaces one trigger 3 to 5 s apart), never across a deployment or folder. `MOTION_ROI_BURST_GAP_SECONDS` is gone |
+| 2026-09-29 | Fusion signals persist in the ww-backend table `media_evidence`; until it exists the writer probes once, logs and skips |
+
+### 6.2 Files
+
+| File | What |
+|---|---|
+| `backend/app/services/gemini_pricing.py` | The one price table and the image-token rules, each with source URL and date read; the per-prompt-version output-token estimate |
+| `backend/app/services/gemini_presence.py` | Image preparation for the three variants, prompts v1 and v2, the JSON schemas, parsing, `derived_confidence`, the `observation_comments` line (`format_verdict_comment` / `parse_verdict_comment`), token accounting, the three network functions tests mock |
+| `backend/app/services/media_evidence.py` | `media_evidence` writer: one-shot existence probe, `signal_rows`, `write_signals`, `read_signal` |
+| `backend/app/domain/burst_evidence.py` | The burst grouper, per-frame signal assembly, `evidence_score`, `consensus_type`, `band_of`, the audit line |
+| `backend/app/domain/motion_roi.py` | `compute_motion_fractions`, the raw changed-pixel fraction per frame |
+| `backend/app/domain/media_registry.py` | `group_bursts` is now a thin call into `burst_evidence.group_bursts` |
+| `backend/app/domain/pipeline.py` | `GeminiPresenceStep` and `build_gemini_presence_observation`; `SpeciesNetStep` records `speciesnet_max_conf` before the threshold filter; `EvidenceFusionStep` and `build_consensus_observation` |
+| `backend/app/schemas/pipeline.py` | `PipelineStepType.GEMINI_PRESENCE`, `EVIDENCE_FUSION`; `PipelineStepResult.input_tokens`, `output_tokens`, `cost_usd`, `counts` |
+| `backend/app/jobs/definitions.py` | `build_pipeline_steps`: Gemini before SpeciesNet, fusion last |
+| `backend/app/config.py` | `FF_GEMINI_PRESENCE_ENABLED`, `GEMINI_API_KEY`, `GEMINI_PRESENCE_MODEL`, `GEMINI_PRESENCE_VARIANT`, `FF_EVIDENCE_FUSION_ENABLED`, `EVIDENCE_FUSION_THRESHOLD`, `BURST_GAP_SECONDS` |
+| `backend/scripts/label_presence.py` | Tkinter labeller, folders in, CSV out, resumable; optional strata columns `animal_size`, `visibility`, `conditions` in the prompt v2 vocabulary |
+| `backend/scripts/eval_presence.py` | Runs the variants over the labelled frames: dry-run cost, `--prompt-version`, `--max-calls`, `--dump-verdicts`, SpeciesNet dump and comparison, recall per stratum (light, burst length, folder, model-reported size and location) |
+| `backend/tests/test_gemini_presence*.py`, `test_label_presence.py`, `test_eval_presence.py`, `test_burst_evidence.py`, `test_evidence_fusion_step.py`, `test_media_evidence.py` | 109 tests, no network, SDK and Supabase client mocked; `test_six_frame_burst_worked_example_section_6_3` pins the architecture report's worked example |
+
+Verified against the Gemini docs on 2026-09-26 (model ids, image tokens, bounding-box format, JSON mode, Batch API, SDK 2.25.0); the sources and rules are in the two service modules' docstrings.
+
+### 6.3 How to run
+
+**Label** (from `backend/`, any Python with Pillow; folders are read only):
+
+```bash
+python scripts/label_presence.py --out labels.csv --by charles \
+    "C:/Users/ww/AE_photos_charles" "C:/Users/ww/ww-website/test-fixtures/camera-trap/sdcard" \
+    "C:/Users/ww/person-test-images-run2/MEDIA" "C:/Users/ww/person-test-images" "C:/Users/ww/sample photos"
+```
+
+Keys: `a` animal, `e` empty, `u` unsure, `b` back, `q` quit; after a verdict, optional strata 1/2/3/4 tiny/small/medium/large, 5/6/7 clear/partial/obscured, 8/9/0 night_ir/low_light/motion_blur. `--list` prints the bursts without the window. Columns: `path, burst_id, has_animal, label, labelled_by, labelled_at, notes, animal_size, visibility, conditions`; an older CSV is widened in place.
+
+**Estimate the cost, no key:** `python scripts/eval_presence.py labels.csv --dry-run`
+
+**Run the variants** (`GEMINI_API_KEY` in the root `.env`; `--cache` never pays twice, the cache key carries the prompt version):
+
+```bash
+python scripts/eval_presence.py labels.csv --variants single,contact_sheet,batch \
+    --models gemini-3.1-flash-lite --prompt-version v2 --min-interval 4.2 \
+    --cache eval_cache.jsonl --dump-verdicts verdicts.json --out results.md
+```
+
+**SpeciesNet on the same table** (needs torch, so dump once inside the dev Docker image):
+
+```bash
+python scripts/eval_presence.py labels.csv --dump-speciesnet speciesnet.json
+python scripts/eval_presence.py labels.csv --speciesnet-results speciesnet.json --cache eval_cache.jsonl --out results.md
+```
+
+**The pipeline**, set on the ARQ worker (the API only needs them when the pipeline runs in-process):
+
+```
+FF_ML_ENABLED=true
+FF_PIPELINE_ENABLED=true
+FF_GEMINI_PRESENCE_ENABLED=true
+GEMINI_API_KEY=<AI Studio key>
+GEMINI_PRESENCE_MODEL=gemini-3.1-flash-lite     # default
+GEMINI_PRESENCE_VARIANT=single                   # single | contact_sheet | batch
+FF_EVIDENCE_FUSION_ENABLED=true
+EVIDENCE_FUSION_THRESHOLD=0.5                    # default
+BURST_GAP_SECONDS=10.0                           # default; shared by motion ROI, contact sheet and fusion
+```
+
+Step results and the `gemini_presence_step_complete` / `speciesnet_step_complete` / `evidence_fusion_step_complete` log events carry tokens, USD, evidence rows written and, for fusion, the band counts. With `media_evidence` missing the log shows `media_evidence_table_missing` once, then `media_evidence_write_skipped` per write.
+
+### 6.4 Prices
+
+From https://ai.google.dev/gemini-api/docs/pricing, read 2026-09-26, USD per 1M tokens; Batch is 50% of standard. Cost per call = input tokens x input rate + (answer + thinking tokens) x output rate.
+
+| Model | Input | Output | Batch input | Batch output | Note |
+|---|---:|---:|---:|---:|---|
+| `gemini-3.1-flash-lite` | 0.25 | 1.50 | 0.125 | 0.75 | default, cheapest open tier |
+| `gemini-3.5-flash-lite` | 0.30 | 2.50 | 0.15 | 1.25 | "fastest, most cost-effective" |
+| `gemini-3.8-flash` | 0.75 | 3.75 | 0.375 | 1.875 | promotional through 2026-12-31, then 1.50 / 7.50 |
+| `gemini-3.5-flash` | 1.50 | 9.00 | 0.75 | 4.50 | |
+| `gemini-2.5-flash-lite` | 0.10 | 0.40 | 0.05 | 0.20 | access limited to prior users |
+| `gemini-2.5-flash` | 0.30 | 2.50 | 0.15 | 1.25 | access limited to prior users |
+
+### 6.5 Results
+
+**Smoke test, prompt v1, 2026-09-26.** 8 hand-picked frames, `gemini-3.1-flash-lite`, `MEDIA_RESOLUTION_LOW`, about $0.003:
+
+| Variant | Calls | Prompt tokens per call | Output tokens per call | USD per frame | USD per 1,000 | Median latency |
+|---|---:|---|---|---:|---:|---:|
+| single (640x480) | 8 | 397 = 266 image + 131 text | 46 to 79 | $0.00019 | $0.19 | 2.2 s |
+| contact_sheet (1 to 2 cells) | 6 | 479 to 483 = 266 to 270 image + 213 text | 70 to 94 per cell | $0.00021 | $0.21 | 2.1 s |
+
+A Gemini 3 model bills the image as a fixed block (266 to 270 tokens at low), not by 768 px tiles, so downscaling is a no-op on WW500 frames and the sheet only saves with three or more frames per burst. The model reported confidence 1.0 on most answers.
+
+**Labelled set, 2026-09-26, corrected 2026-09-30.** 962 WW500 frames from six exports: three Colorado exports (600 frames, deployment `ad4ca41f`, June 2026, greyscale night frames of a small rodent at close range), Tommy's tests (262), two MEDIA exports (100). 588 animal, 292 empty, 82 person. The person class holds the `MEDIA_VICTOR_090626` person-detection frames, first labelled animal; it is kept out of the wildlife metrics and reported on its own line. `20260616190039_01` was relabelled animal on review. `labels-2026-09-26.csv` beside this report, paths relative to the export folder (`eval_presence.py --root <folder>`).
+
+**Interim evaluation, prompt v1, 2026-09-28**, free tier (15 requests per minute, 500 per day, no Batch API), recomputed 2026-09-30 against the corrected labels. The single variant reached 632 of 962 frames: 600 Colorado and 32 MEDIA frames, so empty removal still rests on 39 frames. Raw verdicts in `eval-cache-single-2026-09-28.jsonl` (a record; keys hold the relative paths, so a live run keeps its own cache).
+
+| Variant | Model | Frames | Recall (animal) | FN rate | Precision | Empty removed | Tokens/frame | USD/frame | USD/1,000 | Median latency | T3 (>=85% removed, <1.5% FN) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|
+| single | gemini-3.1-flash-lite | 616 wildlife (577 animal, 39 empty) | 98.1% | 1.9% | 100% | 100% (39 of 39) | 473 | $0.00021 | $0.21 | 2.03 s | no (FN 1.9%) |
+
+Person frames (16 answered): prompt v1 called 14 of them an animal.
+| contact_sheet | gemini-3.1-flash-lite | 7 sheets | not enough data | | | | | | | | |
+| batch | gemini-3.1-flash-lite | 0 | needs a billed tier | | | | | | | | |
+
+The 11 misses, all one Colorado night, a dark low-contrast rodent a few centimetres from the lens with no eye shine: `20260616174202_01`, `180016_01`, `180044_01`, `180650_01`, `181231_01`, `181256_01`, `190648_01`, `190653_01`, `193452_01`, `193459_01`, `194801_01` under `2026-07-17_ad4ca41f`.
+
+**Smoke test, prompt v2 draft, 2026-09-29.** 20 live calls, `gemini-3.1-flash-lite`, single variant, 4.2 s apart, about $0.006, over the 11 misses, the false positive, 4 Colorado hits and 4 NZ frames. The prompt was the first v2 draft (same near-lens cue and fields, the earlier vocabulary: visibility none/partial/full, nine location cells, free-text evidence); the section 9 vocabulary landed after the budget was spent, so the run should be repeated. Cache `eval-cache-single-v2-smoke.jsonl` in the session scratchpad, keyed `prompt: v2`.
+
+| | Value |
+|---|---|
+| Input tokens per call | 494 = 266 image + 228 prompt (v1 prompt: 131) |
+| Output tokens per call | 93 to 151 (93 to 108 empty, 121 to 151 animal with an evidence list) |
+| USD per frame / per 1,000 | $0.00030 / $0.30 (v1: $0.21) |
+| Median latency | 1.97 s |
+
+| Frame | v1 | v2 draft | Visibility, size | Evidence given |
+|---|---|---|---|---|
+| `20260616174202_01` | blank | **animal** | partial, small | tail on the right, part of a small body |
+| `20260616190648_01` | blank | **animal** | partial, small | rodent shape bottom right, snout and ear |
+| `20260616193452_01` | blank | **animal** | partial, small | tail on the left edge |
+
+Of the 11 misses, 5 recovered (`174202`, `181256`, `190648`, `190653`, `193452`) and 6 still blank (`180016`, `180044`, `180650`, `181231`, `193459`, `194801`: dry grass, leaf litter, a feather). The 4 Colorado hits stayed animal, the empty Colorado frame stayed blank, `190039_01` came back animal again ("blurred tail shape, fur texture"), now its label. The two person frames (`A27ACD90`, `A27ACDE0`) came back empty with the person named in the description, where v1 called most person frames an animal. The near-lens cue recovers about half of the hard misses at 1.4x the v1 cost; the rest are the burst cases the fusion step exists for.
+
+T3 target, for reference: at least 85% of empty frames removed at under 1.5% false negatives; a frame the model failed to answer is kept, so it counts against the filter, never as a lost animal.
+
+### 6.6 Open items
+
+- Finish the labelled set with prompt v2 (the section 9 vocabulary) on the free tier over daily windows, about US$0.40 in total; the batch variant needs a billed tier. The v1 and v2 caches are separate. The NZ sets hold 269 of the 292 empty frames, so the empty-removal figure only becomes real when they are scored.
+- Run `--dump-speciesnet` inside the dev Docker image over the same CSV so the SpeciesNet row exists and the fusion can be evaluated offline; then fit the weights.
+- ww-backend: the `media_evidence` table ([ww-backend#208](https://github.com/wildlifeai/ww-backend/issues/208)); firmware: the `trigger_id` / `frame_index` EXIF tag ([Seeed#242](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/issues/242)). Until the table exists `near_threshold` is absent for every frame and the signals live only in the log and the consensus row's comment.
+- Done: [#161](https://github.com/wildlifeai/ww-website/issues/161) (#178), both paths reflect the edge model before `run_pipeline`, so `edge_presence` is present at fusion time; [#162](https://github.com/wildlifeai/ww-website/issues/162) (#179), per-crop classification writes its own row.
+- `annotation_runs.chk_annotation_run_provenance` needs a `model_id`; a run whose only step is Gemini has none, so the provenance insert logs `annotation_run_record_failed` (the observations are still written). Seed a cloud-model row in ww-backend ([ww-backend#209](https://github.com/wildlifeai/ww-backend/issues/209)).
+- The observed Gemini 3 image tokens (266 to 270 at low) sit under the documented 280; the price table keeps 280 as the conservative estimate.

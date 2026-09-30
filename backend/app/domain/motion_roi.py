@@ -13,9 +13,11 @@ the lean dev-cloud image where SpeciesNet is unavailable. Uses:
   - a cheap blank / false-trigger filter (``motion_frac`` near zero ⇒ empty frame),
   - ROI-cropped burst clustering that ignores the static background.
 
-Two entry points:
+Three entry points:
   - :func:`compute_motion_roi` — one union ROI across the whole sequence.
   - :func:`compute_motion_roi_per_frame` — a tracked ROI per frame.
+  - :func:`compute_motion_fractions`, the raw changed-pixel fraction per frame
+    (the ``motion_frac`` evidence signal, no box).
 
 Salvaged from the deprecated ``v2-migration/cluster-progression-dev`` branch
 (commit 6d7278bc, "Clustering motion ROI added") and extracted into a reusable
@@ -244,6 +246,34 @@ def compute_motion_roi(
     y1 = max(y0 + 1, min(ref_full.height, y1))
 
     return (x0, y0, x1, y1)
+
+
+def compute_motion_fractions(
+    images: List[Optional[Image.Image]],
+    *,
+    small_size: Tuple[int, int] = (320, 240),
+    diff_threshold: int = 15,
+) -> List[float]:
+    """Fraction of low-res pixels that changed per frame, the ``motion_frac`` evidence signal.
+
+    Same greyscale absdiff and threshold as :func:`compute_motion_roi_per_frame`
+    (which keeps the fraction internal and returns boxes), but returned raw, with no
+    noise floor, no camera-shift ceiling and no carry-forward, so a still frame after
+    a moving one reads 0. Every frame is differenced against the first valid frame;
+    the reference frame itself is differenced against the second so it is not 0 by
+    construction. Missing frames and singletons read 0.
+    """
+    n = len(images)
+    out = [0.0] * n
+    valid = [i for i, im in enumerate(images) if im is not None]
+    if len(valid) < 2:
+        return out
+    smalls = {i: _to_grayscale_small(images[i], small_size).astype(np.int16) for i in valid}
+    ref = valid[0]
+    for i in valid:
+        other = smalls[valid[1]] if i == ref else smalls[ref]
+        out[i] = float((np.abs(smalls[i] - other) > diff_threshold).mean())
+    return out
 
 
 def compute_motion_roi_per_frame(
