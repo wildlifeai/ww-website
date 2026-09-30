@@ -519,11 +519,11 @@ Tracking:
 | P2 | [Seeed#242](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/issues/242) capture-sequence EXIF tag | Frames of one trigger carry one trigger id and their index; `exif.py` parses it; the grouper uses it |
 | P3 | [ww-backend#209](https://github.com/wildlifeai/ww-backend/issues/209) `ai_models` row for the Gemini model | A Gemini-only run records `annotation_runs` without `annotation_run_record_failed` |
 | P4 | done in #155 (`speciesnet_max_conf` before the threshold filter) | |
-| P5 | [#162](https://github.com/wildlifeai/ww-website/issues/162) per-crop refinement writes its own row | The SpeciesNet row's `classified_by` is unchanged after a per-crop run |
+| P5 | done in #179 ([#162](https://github.com/wildlifeai/ww-website/issues/162), per-crop classification writes its own row on the detection's box) | |
 | P6 | [#170](https://github.com/wildlifeai/ww-website/issues/170) badge and notifications read the consensus row | Both follow the consensus row when one exists |
 | P7 | done in #155 (one burst grouper, `BURST_GAP_SECONDS` 10 s) | |
 | P8 | [#171](https://github.com/wildlifeai/ww-website/issues/171) GPU seconds per frame in the run log | Every run logs seconds per frame for each GPU step |
-| E | [#161](https://github.com/wildlifeai/ww-website/issues/161) Edge AI reflected after the pipeline on `auto_annotate_deployments` | Fusion sees `edge_presence` on that path |
+| E | done in #178 ([#161](https://github.com/wildlifeai/ww-website/issues/161), both paths reflect Camera AI before the pipeline, and edge rows no longer make it skip a frame) | |
 
 Open items:
 
