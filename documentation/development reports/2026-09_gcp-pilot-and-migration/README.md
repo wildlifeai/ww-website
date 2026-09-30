@@ -1,7 +1,7 @@
 # Google Cloud pilot and migration plan
 
-> **Status:** 📋 Proposal, 2026-09-26; decisions updated 2026-09-30. Nothing created on Google
-> Cloud, no code changed. Track 1, the ML-worker pilot, is due **16 October 2026** for OKR G3
+> **Status:** 🔧 Active. Proposal 2026-09-26, decisions updated 2026-09-30; project `ww-pilot-dev`
+> set up 2026-10-01 (§2, "State"); no code changed. Track 1, the ML-worker pilot, is due **16 October 2026** for OKR G3
 > "Cloud cost per photo processed and stored, measured on a Google Cloud pilot", tracked in
 > [#172](https://github.com/wildlifeai/ww-website/issues/172). Track 2, the
 > full migration, follows the pilot number and credit approval. Prices are USD, read from the
@@ -60,6 +60,18 @@ Source: the inventory in
 Owners: **Victor** (infrastructure, code), **Dinnie** (billing account, cost model, G3),
 **Google CE** (credits, quota, architecture review).
 
+**State, 2026-10-01.** Project `ww-pilot-dev` (number 762962404573) under organisation
+`wildlife.ai` (963739238076), billed to `wildlife.ai_general` (015F09-37458C-7396FF, NZD).
+
+| Step | State |
+|---|---|
+| 1 | No credits yet; US$2,000 requested from the accelerator ASM and mentor on 2026-10-01 |
+| 2, 3, 6, 7 | Done. Step 3 also enabled `billingbudgets` and `serviceusage` (14 APIs). The 8 secrets exist, empty |
+| 4 | Dataset `billing` (US) created; the Standard usage cost export is switched on in the Console only (still to do). Until credits land the budget is **NZ$50, credits excluded**, alerts at 50/80/100%; raise it to the credit amount then |
+| 5 | Done except the throwaway-workflow check. GitHub variables `GCP_PROJECT_ID`, `GCP_WIF_PROVIDER`, `GCP_DEPLOYER_SA` set on the repository |
+| 8 | Quota not checked yet |
+| 9 to 15 | Not started; the code is §8 |
+
 | # | Step | Owner | Acceptance check |
 |---|---|---|---|
 | 1 | Confirm the credits and the billing account they land on; note its currency (an NZD account needs no conversion) | Dinnie + CE | Account shows the credit; Victor holds `Billing Account Administrator` or `Costs Manager` |
@@ -85,9 +97,10 @@ IAM (step 5):
 | Victor | `roles/owner` |
 | Dinnie | `roles/billing.viewer`, `roles/bigquery.user` on the project |
 | `ww-ml-worker@` (job runtime) | `roles/secretmanager.secretAccessor`, `roles/logging.logWriter` |
-| `github-deployer@` | `roles/artifactregistry.writer`, `roles/cloudbuild.builds.editor`, `roles/run.developer`, `roles/iam.serviceAccountUser` on `ww-ml-worker@` |
-| WIF pool `github`, OIDC provider `https://token.actions.githubusercontent.com/` | Mapping `google.subject=assertion.sub, attribute.repository=assertion.repository, attribute.repository_owner=assertion.repository_owner`; condition `assertion.repository_owner == 'wildlifeai'`; `roles/iam.workloadIdentityUser` on `github-deployer@` for `principalSet://…/attribute.repository/wildlifeai/ww-website` ([WIF for pipelines](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)) |
-| Default compute service account | No automatic Editor grant ([service identity](https://docs.cloud.google.com/run/docs/securing/service-identity)) |
+| `github-deployer@` | `roles/artifactregistry.writer`, `roles/cloudbuild.builds.editor`, `roles/run.developer`, `roles/logging.logWriter`, `roles/serviceusage.serviceUsageConsumer`; `roles/iam.serviceAccountUser` on `ww-ml-worker@` and on itself; `roles/storage.admin` on `gs://ww-pilot-dev-build-source` only. Builds run **as this account** (§4.1), because a new project's default build account has no rights to push or log |
+| `ww-job-trigger@` | Created, no role and no key yet: `roles/run.developer` on the job once it exists (§4.2) |
+| WIF pool `github`, OIDC provider `wildlifeai`, issuer `https://token.actions.githubusercontent.com` | Mapping `google.subject=assertion.sub, attribute.repository=assertion.repository, attribute.repository_owner=assertion.repository_owner`; condition `assertion.repository_owner == 'wildlifeai'`; `roles/iam.workloadIdentityUser` on `github-deployer@` for `principalSet://…/attribute.repository/wildlifeai/ww-website` ([WIF for pipelines](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)) |
+| Default compute service account | No Editor ([service identity](https://docs.cloud.google.com/run/docs/securing/service-identity)). The organisation sets no policy against the automatic grant, so enabling Cloud Run gave it `roles/editor`; removed by hand on 2026-10-01. Check again after enabling any API |
 
 Steps 10 and 11 (flags from [jobs GPU](https://docs.cloud.google.com/run/docs/configuring/jobs/gpu)
 and [execute jobs](https://docs.cloud.google.com/run/docs/execute/jobs)):
@@ -230,7 +243,7 @@ jobs:
 
       - uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}   # projects/N/locations/global/workloadIdentityPools/github/providers/github
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}   # projects/762962404573/locations/global/workloadIdentityPools/github/providers/wildlifeai
           service_account: ${{ vars.GCP_DEPLOYER_SA }}               # github-deployer@ww-pilot-dev.iam.gserviceaccount.com
 
       - uses: google-github-actions/setup-gcloud@v3
@@ -241,6 +254,7 @@ jobs:
           IMG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}"
           gcloud builds submit backend/ \
             --config backend/cloudbuild.worker.yaml \
+            --gcs-source-staging-dir "gs://${PROJECT_ID}-build-source/source" \
             --substitutions _IMAGE="${IMG}",_SHA="${GITHUB_SHA}",_ENV_TAG=dev-latest
 
       - name: Roll the job to the new image
@@ -268,9 +282,12 @@ steps:
            '-t', '${_IMAGE}:${_SHA}', '-t', '${_IMAGE}:${_ENV_TAG}',
            '-f', 'Dockerfile', '.']
 images: ['${_IMAGE}:${_SHA}', '${_IMAGE}:${_ENV_TAG}']
+# Run as the deployer (IAM table): a user-specified build account needs a logging option.
+serviceAccount: 'projects/ww-pilot-dev/serviceAccounts/github-deployer@ww-pilot-dev.iam.gserviceaccount.com'
 options:
   machineType: E2_HIGHCPU_32
   diskSizeGb: 200
+  logging: CLOUD_LOGGING_ONLY
 timeout: 2400s
 ```
 
