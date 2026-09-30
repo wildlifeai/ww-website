@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useEffectEvent, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import type { ObservationRecord, MediaRecord, MediaAssetRecord } from './MediaBrowser'
@@ -8,6 +9,7 @@ import { StatusBadge } from '../ui/StatusBadge'
 import { AiOriginBadge } from '../ui/AiOriginBadge'
 import { cameraModel, cameraScores } from '../../lib/cameraScores'
 import { formatCaptureTime } from '../../lib/time'
+import { canEditObservations, deleteObservation as deleteObservationRow } from '../../lib/observationWrites'
 
 interface Props {
   media: MediaRecord
@@ -39,6 +41,11 @@ const TOOL_BTN: React.CSSProperties = {
 const TOOL_BTN_ACTIVE: React.CSSProperties = { ...TOOL_BTN, backgroundColor: '#f59e0b', borderColor: '#f59e0b', color: '#fff' }
 const CONFIRM_BTN: React.CSSProperties = { ...TOOL_BTN, color: '#10b981', borderColor: 'rgba(16,185,129,0.5)' }
 const REJECT_BTN: React.CSSProperties = { ...TOOL_BTN, color: '#ef4444', borderColor: 'rgba(239,68,68,0.5)' }
+// A label on a bounding box; the background carries the box's state.
+const BOX_LABEL: React.CSSProperties = {
+  border: 'none', cursor: 'pointer', fontFamily: 'inherit', lineHeight: 'inherit', color: '#fff',
+  fontSize: '0.625rem', padding: '1px 4px', borderRadius: '2px', whiteSpace: 'nowrap',
+}
 
 const NAV_ARROW: React.CSSProperties = {
   position: 'absolute', top: '50%', transform: 'translateY(-50%)', zIndex: 6,
@@ -364,6 +371,13 @@ function MediaInfoSection({ media, timezone }: { media: MediaRecord; timezone?: 
 export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onUpdated, onNext, onPrev, focusObsId }: Props) {
   const { user } = useAuth()
   const imgUrl = resolveImageUrl(media, 'full')
+  // Remove is offered only to users the database lets delete (#183).
+  const { data: canRemove = false } = useQuery({
+    queryKey: ['can-edit-observations', media.deployment_id, user?.id],
+    queryFn: () => canEditObservations(supabase, user!.id, media.deployment_id),
+    enabled: !!user,
+    staleTime: 5 * 60_000,
+  })
 
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState<string | null>(null)
@@ -385,11 +399,13 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
   const [draft, setDraft] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const drawStart = useRef<{ x: number; y: number } | null>(null)
   const panStart = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
+  const [panning, setPanning] = useState(false)
   const imgWrapRef = useRef<HTMLDivElement>(null)
 
   // Reset per-image view state when the image changes. Pre-select the focused
   // observation (the crop card the user clicked) when it belongs to this image.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one reset per image, not a render loop
     setZoom(1); setPan({ x: 0, y: 0 }); setBrightness(100); setContrast(100)
     setMovement(false); setPicker(null)
     const focus = focusObsId && media.observations.some(o => o.id === focusObsId) ? focusObsId : null
@@ -449,14 +465,14 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
 
   const deleteObservation = async (obsId: string) => {
     setSaving(true); setSaveMsg(null)
-    const { error } = await supabase.from('observations').delete().eq('id', obsId)
-    if (error) {
-      setSaveMsg(`Error: ${error.message}`)
-    } else {
+    try {
+      await deleteObservationRow(supabase, obsId)
       onUpdated({ ...media, observations: media.observations.filter(o => o.id !== obsId) })
       if (selectedObsId === obsId) setSelectedObsId(null)
       setSaveMsg('Removed ✓')
       setTimeout(() => setSaveMsg(null), 1800)
+    } catch (e) {
+      setSaveMsg(`Error: ${(e as Error).message}`)
     }
     setSaving(false)
   }
@@ -521,42 +537,44 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
   const onStageDown = (e: React.MouseEvent) => {
     if (bboxObsId || zoom === 1) return
     panStart.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y }
+    setPanning(true)
   }
   const onStageMove = (e: React.MouseEvent) => {
     const s = panStart.current; if (!s) return
     setPan({ x: s.px + (e.clientX - s.x), y: s.py + (e.clientY - s.y) })
   }
-  const onStageUp = () => { panStart.current = null }
+  const onStageUp = () => { panStart.current = null; setPanning(false) }
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
-      if (e.key === 'Escape') {
-        if (picker) setPicker(null)
-        else if (bboxObsId) { setBboxObsId(null); setDraft(null); drawStart.current = null }
-        else onClose()
-        return
-      }
-      if (typing || picker) return
-      switch (e.key) {
-        case 'ArrowRight': if (!bboxObsId) onNext?.(); break
-        case 'ArrowLeft': if (!bboxObsId) onPrev?.(); break
-        case '+': case '=': zoomBy(1.25); break
-        case '-': case '_': zoomBy(0.8); break
-        case '0': resetView(); break
-        case 'm': case 'M': if (prevUrl) setMovement(v => !v); break
-        case 'f': case 'F': setAnnFilter(p => p === 'all' ? 'reviewed' : p === 'reviewed' ? 'ai' : p === 'ai' ? 'none' : 'all'); break
-        case 'c': case 'C': if (!saving) confirm(); break
-        case 'b': case 'B': if (!saving) blank(); break
-        case 'a': case 'A': setPicker('add'); break
-        case 'Delete': case 'Backspace': if (selectedObs && !saving) deleteObservation(selectedObs.id); break
-      }
+  // An effect event always sees the current state, so the listener is added once.
+  const onKey = useEffectEvent((e: KeyboardEvent) => {
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+    if (e.key === 'Escape') {
+      if (picker) setPicker(null)
+      else if (bboxObsId) { setBboxObsId(null); setDraft(null); drawStart.current = null }
+      else onClose()
+      return
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [picker, bboxObsId, saving, selectedObsId, prevUrl, onNext, onPrev, onClose, media])
+    if (typing || picker) return
+    switch (e.key) {
+      case 'ArrowRight': if (!bboxObsId) onNext?.(); break
+      case 'ArrowLeft': if (!bboxObsId) onPrev?.(); break
+      case '+': case '=': zoomBy(1.25); break
+      case '-': case '_': zoomBy(0.8); break
+      case '0': resetView(); break
+      case 'm': case 'M': if (prevUrl) setMovement(v => !v); break
+      case 'f': case 'F': setAnnFilter(p => p === 'all' ? 'reviewed' : p === 'reviewed' ? 'ai' : p === 'ai' ? 'none' : 'all'); break
+      case 'c': case 'C': if (!saving) confirm(); break
+      case 'b': case 'B': if (!saving) blank(); break
+      case 'a': case 'A': setPicker('add'); break
+      case 'Delete': case 'Backspace': if (selectedObs && !saving && canRemove) deleteObservation(selectedObs.id); break
+    }
+  })
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => onKey(e)
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [])
 
   // Which boxes to render under the current filter.
   const visibleObs = media.observations.filter(o => {
@@ -581,7 +599,7 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
             flex: 1, minHeight: 0, position: 'relative',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             overflow: 'hidden', padding: '1rem',
-            cursor: zoom > 1 && !bboxObsId ? (panStart.current ? 'grabbing' : 'grab') : 'default',
+            cursor: zoom > 1 && !bboxObsId ? (panning ? 'grabbing' : 'grab') : 'default',
           }}
         >
           {onPrev && <button onClick={onPrev} title="Previous (←)" style={{ ...NAV_ARROW, left: 12 }}>‹</button>}
@@ -593,7 +611,7 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
               style={{
                 position: 'relative', display: 'inline-block', lineHeight: 0,
                 transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-                transition: panStart.current ? 'none' : 'transform 0.12s',
+                transition: panning ? 'none' : 'transform 0.12s',
               }}
             >
               <img
@@ -635,16 +653,15 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
                       {group.map(o => {
                         const conf = o.classification_probability
                         return (
-                          <span
+                          <button
                             key={o.id}
+                            type="button"
+                            aria-pressed={o.id === selectedObsId}
                             onClick={e => { e.stopPropagation(); setSelectedObsId(o.id) }}
-                            style={{
-                              backgroundColor: o.id === selectedObsId ? 'rgba(245,158,11,0.95)' : color, color: '#fff',
-                              fontSize: '0.625rem', padding: '1px 4px', borderRadius: '2px', whiteSpace: 'nowrap',
-                            }}
+                            style={{ ...BOX_LABEL, backgroundColor: o.id === selectedObsId ? 'rgba(245,158,11,0.95)' : color }}
                           >
                             {obsLabel(o)} {conf ? `${(conf * 100).toFixed(0)}%` : ''}
-                          </span>
+                          </button>
                         )
                       })}
                     </span>
@@ -752,7 +769,9 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
                 ▭ Box
               </button>
               <button onClick={blank} disabled={saving} style={REJECT_BTN} title="Mark false trigger / blank (B)">✕ Blank</button>
-              <button onClick={() => deleteObservation(selectedObs.id)} disabled={saving} style={REJECT_BTN} title="Remove observation (Del)">🗑 Remove</button>
+              {canRemove && (
+                <button onClick={() => deleteObservation(selectedObs.id)} disabled={saving} style={REJECT_BTN} title="Remove observation (Del)">🗑 Remove</button>
+              )}
             </>
           )}
         </div>
