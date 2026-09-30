@@ -421,6 +421,22 @@ Verify against the actual backend schema before writing queries.
 
 ---
 
+## RLS denials are silent on reads and updates
+
+A query RLS refuses usually returns **no rows and no error**: a SELECT comes back empty, an
+UPDATE changes 0 rows and reports success. Only an INSERT fails loudly (`42501`). So "no error"
+proves nothing. A user sees only their own `users` row and their own `user_roles` rows, which is
+why the members panel listed only the caller and "removed" members it never touched.
+
+For anything about other users (members, invitations, roles), call the `ww-backend` RPC that
+checks the caller itself; `frontend/src/lib/projectMembers.ts` wraps the membership ones. After a
+write, refetch and show what the database holds rather than updating local state optimistically.
+When a `ww-backend` change touches roles, invitations or RLS, run
+`frontend/src/lib/projectMembers.integration.test.ts` against a local stack (see
+[03-DATA-AND-SYNC](../../documentation/onboarding/03-DATA-AND-SYNC.md)).
+
+---
+
 ## Shared Model Lists
 
 Do not invent model names.
@@ -434,6 +450,47 @@ Reuse existing model registries and constants rather than duplicating configurat
 Do not hardcode credentials.
 
 Consult the backend seed documentation when test users are required.
+
+---
+
+## Cloud dev is reseeded without notice
+
+The linked dev Supabase project is reset from `ww-backend`'s seeds whenever that repo's
+workflow runs. Rows you created by hand (a model uploaded through the registry path, a
+deployment, a project pointed at a model) can be gone the next morning. Scripts that set up a
+test must be re-runnable, reports must record ids as evidence rather than as things to rely
+on, and a "missing row" is a reseed until proven otherwise (2026-09-05: the `20V1` Person
+Detection built in step 1 of the person-detection runbook disappeared this way).
+
+---
+
+## The shared Supabase service client is one HTTP/2 connection
+
+`create_service_client()` returns a process-wide cached client (see
+`services/supabase_client.py`). A request handler and a background job (the Drive upload job
+runs in-process on the dev image) share that connection. When the server drops it, both see
+`ConnectionTerminated` at once. On 2026-09-05 that cost an upload batch its Drive job while the
+request still returned 200. Callers on that path retry once after `reset_service_client()`
+(`routers/exif.py`); do the same for any new call that runs beside a background job, and never
+let a transport error surface as a silent success.
+
+---
+
+## Object URLs and React StrictMode
+
+Create and revoke an object URL (`URL.createObjectURL`) inside the **same** effect. StrictMode,
+which the dev server runs, unmounts and remounts effects once on mount without re-running
+state initialisers, so a URL created in `useState(() => ...)` and revoked in the cleanup points
+at a revoked blob for the life of the component. Every triage thumbnail rendered as a broken
+image for that reason until #142.
+
+---
+
+## "Closes #N" on a PR to `dev` does not close the issue
+
+GitHub auto-closes only on merge to the default branch. PRs here target `dev`, so the issue
+stays open until `dev` reaches `main`. Close it by hand when the PR merges, or expect it on the
+open list for a while (#140 after #141).
 
 ---
 
@@ -454,7 +511,10 @@ Run:
 Run:
 
 * ESLint
-* TypeScript validation
+* TypeScript validation: `npx tsc -b --noEmit`, **not** `npx tsc --noEmit`. The root
+  `tsconfig.json` is references-only (`"files": []`), so plain `tsc --noEmit` type-checks
+  nothing and exits 0 with errors present. `npm run build` (`tsc -b && vite build`) catches
+  them; so does the `-b` form on its own.
 * Production build if applicable
 
 ## General

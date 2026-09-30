@@ -1,0 +1,62 @@
+name: Backend Integration Tests
+
+# Runs every frontend *.integration.test.ts against a local Supabase stack built
+# from ww-backend's dev branch: real RLS, real RPCs, real signed-in users. RLS
+# denies reads and updates by returning nothing, so a data-layer change can look
+# fine against mocks and still do nothing for a real user.
+#
+# The steps live in ww-backend (.github/actions/website-integration-tests), which
+# runs the same action against its own schema PRs. ww-backend is private, so the
+# checkout needs WW_BACKEND_READ_TOKEN: a fine-grained token with Contents: read
+# on wildlifeai/ww-backend and nothing else. Dependabot PRs read Dependabot
+# secrets, so it has to be stored there too.
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'frontend/src/**'
+      - 'frontend/package-lock.json'
+      - '.github/workflows/backend-integration.yml'
+
+concurrency:
+  group: backend-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration:
+    name: Integration tests (ww-backend dev)
+    # A fork's PR gets no secrets, so it cannot check out ww-backend at all.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the ww-backend read token is set
+        env:
+          TOKEN: ${{ secrets.WW_BACKEND_READ_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::WW_BACKEND_READ_TOKEN is not set, so ww-backend cannot be checked out. See the header of .github/workflows/backend-integration.yml."
+            exit 1
+          fi
+
+      - name: Check out ww-backend
+        uses: actions/checkout@v4
+        with:
+          repository: wildlifeai/ww-backend
+          ref: dev
+          path: ww-backend
+          token: ${{ secrets.WW_BACKEND_READ_TOKEN }}
+          persist-credentials: false
+
+      - uses: ./ww-backend/.github/actions/setup-supabase-cli
+        with:
+          project-dir: ww-backend
+
+      - uses: ./ww-backend/.github/actions/website-integration-tests
+        with:
+          backend-dir: ww-backend
+          website-dir: .

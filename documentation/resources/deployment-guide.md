@@ -28,7 +28,7 @@ How to deploy the Wildlife Watcher V2 platform (backend + frontend) to productio
 | **Azure Container App** | `ww-backend-dev` (WW-AE RG) | `ww-backend` (WW-AE RG) |
 | **Azure Blob Container** | `wildlife-watcher-uploads-dev` | `wildlife-watcher-uploads` (storage account `wwuploadsae`) |
 | **Frontend** | Cloudflare Pages preview deploys (per branch) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
-| **Google Drive** | Dev subfolder under root folder | Root folder `1jIWV3OjSEnBK4Z64syHd2ugoRuXdVrK5` |
+| **Google Drive** | `Data/dev` — `1-F6cQc5lpYOJNSPKRs7i79Gh539N5hUT` | `Data/Production` — `1apf13KX075Fv4K0A2nbaTqOmCwZ9vJzr` |
 
 > **Seed data**: The dev Supabase project is seeded with test users, organisations, projects, devices
 > and deployments. Counts and credentials are **not** duplicated here —

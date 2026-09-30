@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import type { ObservationRecord, MediaRecord, MediaAssetRecord } from './MediaBrowser'
-import { humanCreateFields, humanReviewFields, isHumanReviewed, isAiLabel } from '../../lib/observations'
+import { groupByBox, humanCreateFields, humanReviewFields, isHumanReviewed, isAiLabel } from '../../lib/observations'
 import { SpeciesPicker } from './SpeciesPicker'
 import { StatusBadge } from '../ui/StatusBadge'
 import { AiOriginBadge } from '../ui/AiOriginBadge'
@@ -609,18 +609,18 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
               {/* Movement compare overlay */}
               {movement && prevUrl && imgUrl && <MovementOverlay key={`${imgUrl}|${prevUrl}`} currentUrl={imgUrl} prevUrl={prevUrl} />}
 
-              {/* Bounding boxes (respect the annotation filter) */}
-              {visibleObs.map(obs => {
-                const hasBbox = obs.bbox_x != null && obs.bbox_y != null && obs.bbox_w != null && obs.bbox_h != null
-                if (!hasBbox) return null
-                const reviewed = isHumanReviewed(obs)
-                const selected = obs.id === selectedObsId
-                const color = selected ? 'rgba(245,158,11,0.95)' : reviewed ? 'rgba(33,150,243,0.85)' : 'rgba(76,175,80,0.85)'
-                const conf = obs.classification_probability
+              {/* Bounding boxes (respect the annotation filter). One box per position:
+                  a detection and its per-crop classifier row share a box (#162), so the
+                  box is drawn once with each row's label, and a label selects its row. */}
+              {groupByBox(visibleObs).map(group => {
+                const obs = group[0]
+                const selectedInGroup = group.find(o => o.id === selectedObsId)
+                const reviewed = group.some(isHumanReviewed)
+                const color = selectedInGroup ? 'rgba(245,158,11,0.95)' : reviewed ? 'rgba(33,150,243,0.85)' : 'rgba(76,175,80,0.85)'
                 return (
                   <div
                     key={obs.id}
-                    onClick={() => setSelectedObsId(obs.id)}
+                    onClick={() => { if (!selectedInGroup) setSelectedObsId(obs.id) }}
                     style={{
                       position: 'absolute',
                       left: `${obs.bbox_x! * 100}%`, top: `${obs.bbox_y! * 100}%`,
@@ -630,14 +630,27 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
                     }}
                   >
                     <span style={{
-                      position: 'absolute', top: -18, left: 0, backgroundColor: color, color: '#fff',
-                      fontSize: '0.625rem', padding: '1px 4px', borderRadius: '2px', whiteSpace: 'nowrap',
+                      position: 'absolute', top: -18, left: 0, display: 'flex', gap: 2,
                     }}>
-                      {obsLabel(obs)} {conf ? `${(conf * 100).toFixed(0)}%` : ''}
+                      {group.map(o => {
+                        const conf = o.classification_probability
+                        return (
+                          <span
+                            key={o.id}
+                            onClick={e => { e.stopPropagation(); setSelectedObsId(o.id) }}
+                            style={{
+                              backgroundColor: o.id === selectedObsId ? 'rgba(245,158,11,0.95)' : color, color: '#fff',
+                              fontSize: '0.625rem', padding: '1px 4px', borderRadius: '2px', whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {obsLabel(o)} {conf ? `${(conf * 100).toFixed(0)}%` : ''}
+                          </span>
+                        )
+                      })}
                     </span>
-                    {!bboxObsId && selected && (
+                    {!bboxObsId && selectedInGroup && (
                       <button
-                        onClick={e => { e.stopPropagation(); clearBox(obs.id) }}
+                        onClick={e => { e.stopPropagation(); clearBox(selectedInGroup.id) }}
                         title="Delete this box"
                         style={{
                           position: 'absolute', top: -8, right: -8, width: 18, height: 18, borderRadius: '50%',

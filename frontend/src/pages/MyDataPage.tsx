@@ -201,6 +201,7 @@ export function MyDataPage() {
     supabase
       .from('projects')
       .select('id, name, description, created_at')
+      .is('deleted_at', null)
       .order('created_at', { ascending: false })
       .then(({ data, error: err }) => {
         if (err) setError(err.message)

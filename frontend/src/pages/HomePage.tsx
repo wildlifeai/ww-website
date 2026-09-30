@@ -84,7 +84,9 @@ function ProjectCardTile({
 function Dashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const { clearAll, toggleProject } = useProjectSelection()
+  // `projects` changes when the shared list reloads (e.g. an accepted
+  // invitation), which refetches the cards below.
+  const { clearAll, toggleProject, projects: selectableProjects } = useProjectSelection()
   const [projects, setProjects] = useState<ProjectCard[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -94,6 +96,7 @@ function Dashboard() {
     supabase
       .from('projects')
       .select('id, name, description, created_at, deployments(id)')
+      .is('deleted_at', null)
       .is('deployments.deleted_at', null)
       .order('created_at', { ascending: false })
       .then(({ data }) => {
@@ -106,7 +109,7 @@ function Dashboard() {
         setLoading(false)
       })
     return () => { cancelled = true }
-  }, [user])
+  }, [user, selectableProjects])
 
   const firstName = user?.email?.split('@')[0] ?? 'there'
 

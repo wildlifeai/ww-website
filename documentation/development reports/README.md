@@ -70,6 +70,7 @@ Ordered roughly by how likely you are to need them. Descriptions live in the
 |---|---|
 | [species-brain-training-spec](species-brain-training-spec.md) | 🔧 Active: built behind `FF_MODEL_TRAINING_ENABLED`; first live Edge Impulse run and a load on a camera still to do |
 | [2026-09_gcp-native-model-training](2026-09_gcp-native-model-training/README.md) | 📋 Proposal with code, stacked on #151; no cloud resource yet, first measured run to do |
+| [2026-09_false-negatives-and-vlm-audit](2026-09_false-negatives-and-vlm-audit/README.md) | 🔧 Active. Gemini presence step, labeller and eval script implemented behind `FF_GEMINI_PRESENCE_ENABLED`; interim prompt v1 results on 962 labelled frames in section 6; the prompt v2 benchmark is pending |
 | [2026-09_person-detection-e2e](2026-09_person-detection-e2e/README.md) | 🔧 Active — model uploaded, transferred and run on hardware with correct labels; website-side reflection blocked on a fresh capture set ([#140](https://github.com/wildlifeai/ww-website/issues/140)) |
 | [ios-universal-links-team-id](ios-universal-links-team-id.md) | 🔧 Active — one-value fix identified and verified; iOS password-reset links stay broken until it ships |
 | [model-class-semantics](model-class-semantics.md) | 📋 Design decision needed ([#135](https://github.com/wildlifeai/ww-website/issues/135)) — blocks behaviour models and any GBIF export |
