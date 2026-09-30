@@ -56,13 +56,14 @@ own `users` row and their own `user_roles` rows, and it turns an unauthorised UP
 "0 rows changed" with no error. The members panel was built on direct queries, so it listed only
 the caller, failed every add and reported removals that never happened. It now uses
 `get_project_members`, `send_project_invitation`, `get_project_pending_invitations`,
-`remove_project_member`, `get_my_pending_invitations` and `respond_to_invitation`, all through
-`frontend/src/lib/projectMembers.ts`. Adding a member is an invitation the invitee accepts from
-the banner under the nav (or in the mobile app). Emails are lowercased before sending, because
-`respond_to_invitation` compares them case-sensitively.
+`remove_project_member`, `cancel_project_invitation`, `get_my_pending_invitations` and
+`respond_to_invitation`, all through `frontend/src/lib/projectMembers.ts`. Adding a member is an
+invitation the invitee accepts from the banner under the nav (or in the mobile app); an admin can
+cancel it while it is pending. The server compares emails case-insensitively
+(ww-backend#216), and `toMembersError` maps the SQLSTATEs the RPCs raise.
 
 `frontend/src/lib/projectMembers.integration.test.ts` runs that module against a **local**
-`ww-backend` stack as real signed-in users (invite, accept, decline, remove, the refusals). Run it
+`ww-backend` stack as real signed-in users (invite, accept, decline, cancel, remove, the refusals). Run it
 whenever a `ww-backend` change touches roles, invitations or RLS; the header of the file has the
 two commands. Without the `WW_TEST_*` variables it skips, so `npm test` stays offline.
 

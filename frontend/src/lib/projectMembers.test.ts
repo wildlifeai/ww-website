@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  inviteMember, normaliseEmail, removeMember, toMembersError,
+  cancelInvitation, inviteMember, normaliseEmail, removeMember, toMembersError,
   type ProjectMember,
 } from './projectMembers'
 
@@ -16,7 +16,7 @@ const member = (email: string): ProjectMember => ({
 })
 
 describe('normaliseEmail', () => {
-  it('trims and lowercases, because respond_to_invitation compares case-sensitively', () => {
+  it('trims and lowercases, as the server stores it', () => {
     expect(normaliseEmail('  Kiri.Tane@Example.ORG ')).toBe('kiri.tane@example.org')
   })
 })
@@ -24,11 +24,19 @@ describe('normaliseEmail', () => {
 describe('toMembersError', () => {
   it.each([
     [{ code: '42501', message: 'Unauthorized: p_removed_by must be the calling user' }, 'not_allowed'],
+    [{ code: '42501', message: 'Only project admins can cancel invitations' }, 'not_allowed'],
     [{ code: '23505', message: 'duplicate key value violates unique constraint "idx_unique_pending_invitation"' }, 'already_pending'],
+    [{ code: '23505', message: 'Already a member of this project' }, 'already_member'],
     [{ code: '23514', message: 'Cannot remove the last project admin' }, 'last_admin'],
     [{ code: '22023', message: 'User is not a member of this project' }, 'not_a_member'],
+    [{ code: '22023', message: 'Invalid email address' }, 'invalid_email'],
+    [{ code: '22023', message: 'Invalid role: must be project_admin, project_member or project_viewer' }, 'unknown'],
+    [{ code: 'P0002', message: 'Invitation not found or expired' }, 'invitation_gone'],
+    // An older backend raised plain P0001 from the invitation RPCs.
     [{ code: 'P0001', message: 'Only project admins can send invitations' }, 'not_allowed'],
     [{ code: 'P0001', message: 'Only project admins can view invitations' }, 'not_allowed'],
+    [{ code: 'P0001', message: 'Already a member of this project' }, 'already_member'],
+    [{ code: 'P0001', message: 'Invalid email address' }, 'invalid_email'],
     [{ code: 'P0001', message: 'Invitation not found or expired' }, 'invitation_gone'],
     [{ code: 'PGRST202', message: 'Could not find the function' }, 'unknown'],
   ])('maps %o to %s', (err, kind) => {
@@ -65,6 +73,19 @@ describe('inviteMember', () => {
   it('turns a repeat invitation into already_pending', async () => {
     const { db } = fakeDb({ data: null, error: { code: '23505', message: 'duplicate key' } })
     await expect(inviteMember(db, 'p1', 'kiri@example.org', 'project_member')).rejects.toMatchObject({ kind: 'already_pending' })
+  })
+})
+
+describe('cancelInvitation', () => {
+  it('passes the invitation as p_invitation_id', async () => {
+    const { db, rpc } = fakeDb({ data: null })
+    await cancelInvitation(db, 'inv-1')
+    expect(rpc).toHaveBeenCalledWith('cancel_project_invitation', { p_invitation_id: 'inv-1' })
+  })
+
+  it('turns an answered or expired invitation into invitation_gone', async () => {
+    const { db } = fakeDb({ data: null, error: { code: 'P0002', message: 'Invitation not found or expired' } })
+    await expect(cancelInvitation(db, 'inv-1')).rejects.toMatchObject({ kind: 'invitation_gone' })
   })
 })
 
