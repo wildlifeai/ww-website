@@ -510,8 +510,8 @@ firmware spaces burst frames 3 to 5 s apart, so a tighter gap splits real bursts
 
 SpeciesNet, Gemini, BioCLIP and Camera AI each write their own `observations` rows; no step
 edits another model's row. The final presence verdict is a derived `source_type='consensus'`
-row (`evidence_fusion_v1`). Known exception still to fix: per-crop refinement patches
-SpeciesNet's row (#162).
+row (`evidence_fusion_v1`). Per-crop classification follows it too: its row sits on the
+detection's box beside SpeciesNet's (#162).
 
 ---
 
