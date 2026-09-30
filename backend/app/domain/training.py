@@ -415,7 +415,9 @@ async def resolve_sample_images(samples: List[TrainingSample], *, concurrency: i
 
 
 def training_mode() -> str:
-    """'edge_impulse' when credentials are configured, else 'export_only'."""
+    """'gcp' when the native trainer is on, 'edge_impulse' when credentials are configured, else 'export_only'."""
+    if settings.FF_NATIVE_TRAINING_ENABLED and settings.MODEL_TRAINER == "gcp":
+        return "gcp"
     return "edge_impulse" if settings.EDGE_IMPULSE_API_KEY and settings.EDGE_IMPULSE_PROJECT_ID else "export_only"
 
 

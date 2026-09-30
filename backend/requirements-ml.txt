@@ -10,4 +10,6 @@ scikit-learn>=1.4                # Clustering/reduction utilities
 umap-learn>=0.5                  # UMAP 2D/50D reduction (stable coords)
 speciesnet>=4.0.1                # Detector + species classifier ensemble
 pybioclip>=1.0                   # BioCLIP secondary/zero-shot classifier (Tree-of-Life)
+google-cloud-storage==3.15.0     # gcp trainer (services/gcp_training.py): dataset upload, artefact download
+google-cloud-run==0.16.1         # gcp trainer: run_v2 JobsClient / ExecutionsClient (imported lazily)
 # arq lives in requirements.txt (base) so both the API (enqueue) and worker (execute) have it.
