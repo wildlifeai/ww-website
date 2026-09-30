@@ -1,7 +1,7 @@
 /**
  * Burst capture: how many photos the camera takes on every trigger, and the gap between them.
  *
- * projects.pictures_per_trigger and projects.picture_interval_ms (ww-backend#218) reach the
+ * projects.photos_per_trigger and projects.photo_interval_milliseconds (ww-backend#218) reach the
  * WW500 at deployment as op5 NUM_PICTURES and op6 PICTURE_INTERVAL, written by the mobile app
  * (ww-mobile-app#317). The count is photos as the user sees them: when the project also records
  * the raw BMP, the app doubles it for op5. The ranges mirror the columns' CHECK constraints;

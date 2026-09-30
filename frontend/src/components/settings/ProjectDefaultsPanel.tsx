@@ -3,7 +3,7 @@
 //
 // ProjectDefaultsPanel — per-project capture + AI defaults (Settings).
 // Sets projects.capture_method_id (default triggering method), projects.model_id
-// (default AI model) and the burst, projects.pictures_per_trigger and picture_interval_ms
+// (default AI model) and the burst, projects.photos_per_trigger and photo_interval_milliseconds
 // (lib/burstCapture.ts). Writes are gated by RLS to project admins (a non-admin save
 // surfaces an inline message).
 /* eslint-disable react-hooks/set-state-in-effect */
@@ -17,8 +17,8 @@ interface Project {
   name: string
   capture_method_id: number | null
   model_id: string | null
-  pictures_per_trigger: number
-  picture_interval_ms: number
+  photos_per_trigger: number
+  photo_interval_milliseconds: number
 }
 interface CaptureMethod { id: number; value: string; description: string | null }
 interface AiModel { id: string; name: string; version: string | null }
@@ -41,7 +41,7 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
     let cancelled = false
     setLoading(true)
     // Scope to one project when opened as a per-project action; otherwise list all.
-    let projQuery = supabase.from('projects').select('id, name, capture_method_id, model_id, pictures_per_trigger, picture_interval_ms').order('name')
+    let projQuery = supabase.from('projects').select('id, name, capture_method_id, model_id, photos_per_trigger, photo_interval_milliseconds').order('name')
     if (projectId) projQuery = projQuery.eq('id', projectId)
     Promise.all([
       projQuery,
@@ -108,8 +108,8 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
             <label style={{ fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
               <span style={{ opacity: 0.7 }}>Photos per trigger</span>
               <select
-                value={p.pictures_per_trigger}
-                onChange={e => save(p.id, { pictures_per_trigger: Number(e.target.value) })}
+                value={p.photos_per_trigger}
+                onChange={e => save(p.id, { photos_per_trigger: Number(e.target.value) })}
                 style={{ ...sel, minWidth: 90 }}
               >
                 {photoCountOptions().map(n => <option key={n} value={n}>{n}</option>)}
@@ -118,17 +118,17 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
             <label style={{ fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
               <span style={{ opacity: 0.7 }}>Time between photos</span>
               <select
-                value={p.picture_interval_ms}
-                onChange={e => save(p.id, { picture_interval_ms: Number(e.target.value) })}
-                disabled={p.pictures_per_trigger <= 1}
+                value={p.photo_interval_milliseconds}
+                onChange={e => save(p.id, { photo_interval_milliseconds: Number(e.target.value) })}
+                disabled={p.photos_per_trigger <= 1}
                 style={{ ...sel, minWidth: 90 }}
               >
-                {photoIntervalOptions(p.picture_interval_ms).map(ms => <option key={ms} value={ms}>{formatInterval(ms)}</option>)}
+                {photoIntervalOptions(p.photo_interval_milliseconds).map(ms => <option key={ms} value={ms}>{formatInterval(ms)}</option>)}
               </select>
             </label>
           </div>
-          {burstCostNote(p.pictures_per_trigger) && (
-            <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>{burstCostNote(p.pictures_per_trigger)}</div>
+          {burstCostNote(p.photos_per_trigger) && (
+            <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>{burstCostNote(p.photos_per_trigger)}</div>
           )}
           {msg[p.id] && (
             <div style={{ fontSize: '0.72rem', marginTop: '0.4rem', color: msg[p.id].startsWith('Saved') ? 'var(--success)' : 'var(--error)' }}>

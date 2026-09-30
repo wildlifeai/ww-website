@@ -69,7 +69,7 @@ two commands. Without the `WW_TEST_*` variables it skips, so `npm test` stays of
 
 **The project owns the camera's settings; the mobile app writes them to the device at
 deployment.** Settings → ⚙ Defaults edits `capture_method_id`, `model_id` and the burst:
-`pictures_per_trigger` (1 to 10, default 3) and `picture_interval_ms` (200 to 2000, default
+`photos_per_trigger` (1 to 10, default 3) and `photo_interval_milliseconds` (200 to 2000, default
 1000), which the app writes as op5 and op6 (ww-backend#218, ww-mobile-app#317). The count is
 photos as the user sees them; with the raw BMP on, the app doubles it for op5. A running
 camera keeps its old values until its next deployment start. Ranges and the cost note live in
