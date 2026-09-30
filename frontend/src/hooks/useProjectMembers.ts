@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../config/supabase'
 import { useAuth } from './useAuth'
 import {
-  inviteMember, listMembers, listMyInvitations, listPendingInvitations,
+  cancelInvitation, inviteMember, listMembers, listMyInvitations, listPendingInvitations,
   removeMember, respondToInvitation,
   type ProjectMember, type ProjectRole,
 } from '../lib/projectMembers'
@@ -52,6 +52,15 @@ export function useRemoveMember(projectId: string) {
     // Refetch rather than filter locally: the list shows what the database
     // holds, not what the panel hoped happened.
     onSettled: () => qc.invalidateQueries({ queryKey: keys.members(projectId) }),
+  })
+}
+
+export function useCancelInvitation(projectId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (invitationId: string) => cancelInvitation(supabase, invitationId),
+    // On failure too: invitation_gone means it was answered or expired meanwhile.
+    onSettled: () => qc.invalidateQueries({ queryKey: keys.pending(projectId) }),
   })
 }
 

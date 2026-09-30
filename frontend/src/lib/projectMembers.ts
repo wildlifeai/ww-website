@@ -79,26 +79,33 @@ export class MembersError extends Error {
 
 interface PgError { code?: string; message?: string }
 
-/** Map a PostgREST error to what the user can act on. Codes are the
- *  SQLSTATEs the RPCs raise; the invitation RPCs raise plain exceptions
- *  (P0001), so those are matched on their message. */
+/** Map a PostgREST error to what the user can act on, by the SQLSTATE the
+ *  RPCs raise (ww-backend#216). The message fallbacks keep an older backend,
+ *  whose invitation RPCs raised plain P0001, mapping the same way. */
 export function toMembersError(err: PgError): MembersError {
   const message = err.message ?? ''
   switch (err.code) {
     case '42501': return new MembersError('not_allowed')
-    case '23505': return new MembersError('already_pending')
+    case '23505':
+      // Both "already a member" and the pending-invitation unique index raise 23505.
+      return new MembersError(/already a member/i.test(message) ? 'already_member' : 'already_pending')
     case '23514': return new MembersError('last_admin')
+    case 'P0002': return new MembersError('invitation_gone')
     case '22023':
       if (/not a member/i.test(message)) return new MembersError('not_a_member')
+      // Other membership RPCs raise 22023 for an invalid role, so match the email case.
+      if (/email/i.test(message)) return new MembersError('invalid_email')
       break
   }
   if (/only project admins/i.test(message)) return new MembersError('not_allowed')
+  if (/already a member/i.test(message)) return new MembersError('already_member')
+  if (/invalid email/i.test(message)) return new MembersError('invalid_email')
   if (/invitation not found or expired/i.test(message)) return new MembersError('invitation_gone')
   return new MembersError('unknown', message || undefined)
 }
 
-/** The invitation is matched against the invitee's sign-in email with a
- *  case-sensitive comparison, and Supabase Auth stores emails lowercased. */
+/** The server lowercases and trims too (ww-backend#216); doing it here keeps
+ *  the confirmation and the existing-member check showing what is stored. */
 export function normaliseEmail(raw: string): string {
   return raw.trim().toLowerCase()
 }
@@ -134,6 +141,7 @@ export async function inviteMember(
   role: ProjectRole,
   currentMembers: ProjectMember[] = [],
 ): Promise<string> {
+  // Both checks save a round trip; the server enforces them anyway.
   const email = normaliseEmail(rawEmail)
   if (!EMAIL_SHAPE.test(email)) throw new MembersError('invalid_email')
   if (currentMembers.some(m => normaliseEmail(m.email ?? '') === email)) {
@@ -144,6 +152,12 @@ export async function inviteMember(
     p_invitee_email: email,
     p_role:          role,
   })
+}
+
+/** Project admins only. An invitation already answered, cancelled or expired
+ *  gives `invitation_gone`. */
+export async function cancelInvitation(db: SupabaseClient, invitationId: string): Promise<void> {
+  await call(db, 'cancel_project_invitation', { p_invitation_id: invitationId })
 }
 
 /** `removedBy` must be the signed-in user; the RPC refuses anything else. */

@@ -15,8 +15,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import {
-  inviteMember, listMembers, listMyInvitations, listPendingInvitations,
-  removeMember, respondToInvitation,
+  cancelInvitation, inviteMember, listMembers, listMyInvitations, listPendingInvitations,
+  removeMember, respondToInvitation, toMembersError,
 } from './projectMembers'
 
 // The app tsconfig carries browser types only; Vitest runs this file in Node.
@@ -146,5 +146,32 @@ describe.skipIf(!configured)('project members, against a local stack', () => {
     await respondToInvitation(outsider.db, inv!.id, false)
     expect((await listMembers(admin.db, projectId)).map(m => m.id)).toEqual([admin.id])
     await expect(respondToInvitation(outsider.db, inv!.id, true)).rejects.toMatchObject({ kind: 'invitation_gone' })
+  })
+
+  it('an admin cancels a pending invitation, and the invitee can no longer accept it', async () => {
+    const id = await inviteMember(admin.db, projectId, outsider.email, 'project_member')
+    await cancelInvitation(admin.db, id)
+    expect(await listPendingInvitations(admin.db, projectId)).toEqual([])
+    expect((await listMyInvitations(outsider.db)).filter(i => i.project_id === projectId)).toEqual([])
+    await expect(respondToInvitation(outsider.db, id, true)).rejects.toMatchObject({ kind: 'invitation_gone' })
+    await expect(cancelInvitation(admin.db, id)).rejects.toMatchObject({ kind: 'invitation_gone' })
+  })
+
+  it('only an admin can cancel', async () => {
+    const id = await inviteMember(admin.db, projectId, outsider.email, 'project_member')
+    await expect(cancelInvitation(outsider.db, id)).rejects.toMatchObject({ kind: 'not_allowed' })
+    expect((await listPendingInvitations(admin.db, projectId)).map(p => p.id)).toEqual([id])
+    await cancelInvitation(admin.db, id)
+  })
+
+  it('the server refuses an existing member whatever the casing', async () => {
+    // currentMembers = [] skips the client check, so the refusal is the server's.
+    await expect(inviteMember(admin.db, projectId, admin.email, 'project_member', []))
+      .rejects.toMatchObject({ kind: 'already_member' })
+    // inviteMember lowercases, so call the RPC directly to send a different casing.
+    const { error } = await admin.db.rpc('send_project_invitation', {
+      p_project_id: projectId, p_invitee_email: admin.email.toUpperCase(), p_role: 'project_member',
+    })
+    expect(error && toMembersError(error).kind).toBe('already_member')
   })
 })

@@ -1,7 +1,8 @@
 /**
  * ProjectMembersPanel
  *
- * Lists a project's members, invites new ones by email and removes them,
+ * Lists a project's members, invites new ones by email, withdraws pending
+ * invitations and removes members,
  * through the ww-backend membership RPCs (see lib/projectMembers.ts for why
  * nothing here queries `users` or `user_roles` directly).
  *
@@ -13,7 +14,7 @@
 import { useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import {
-  useInviteMember, usePendingInvitations, useProjectMembers, useRemoveMember,
+  useCancelInvitation, useInviteMember, usePendingInvitations, useProjectMembers, useRemoveMember,
 } from '../../hooks/useProjectMembers'
 import { ROLE_LABELS, normaliseEmail, type ProjectRole } from '../../lib/projectMembers'
 
@@ -50,6 +51,7 @@ export function ProjectMembersPanel({ projectId, projectName }: Props) {
   const pending = usePendingInvitations(projectId, isAdmin)
   const invite  = useInviteMember(projectId)
   const remove  = useRemoveMember(projectId)
+  const cancel  = useCancelInvitation(projectId)
 
   const [email,  setEmail]  = useState('')
   const [role,   setRole]   = useState<ProjectRole>('project_member')
@@ -130,7 +132,7 @@ export function ProjectMembersPanel({ projectId, projectName }: Props) {
           <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>Pending invitations</div>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8125rem' }}>
             <thead>
-              <tr>{['Email', 'Role', 'Sent', 'Expires'].map(h => <th key={h} style={TH}>{h}</th>)}</tr>
+              <tr>{['Email', 'Role', 'Sent', 'Expires', ''].map(h => <th key={h} style={TH}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {pending.data!.map(inv => (
@@ -139,12 +141,23 @@ export function ProjectMembersPanel({ projectId, projectName }: Props) {
                   <td style={{ padding: '0.5rem' }}><RoleChip role={inv.role} /></td>
                   <td style={{ padding: '0.5rem', opacity: 0.6, fontSize: '0.75rem' }}>{new Date(inv.created_at).toLocaleDateString()}</td>
                   <td style={{ padding: '0.5rem', opacity: 0.6, fontSize: '0.75rem' }}>{new Date(inv.expires_at).toLocaleDateString()}</td>
+                  <td style={{ padding: '0.5rem' }}>
+                    <button
+                      style={BTN_DANGER}
+                      disabled={cancel.isPending}
+                      onClick={() => cancel.mutate(inv.id)}
+                      title="Withdraw this invitation"
+                    >
+                      Cancel
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+      {cancel.isError && <p style={ERROR_TEXT}>⚠ {cancel.error.message}</p>}
 
       {isAdmin && (
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
