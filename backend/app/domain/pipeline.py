@@ -806,6 +806,17 @@ def speciesnet_evidence_signals(prediction, rows: list[dict]) -> dict[str, Any]:
     return {"speciesnet_presence": 1.0 if presence else 0.0, "speciesnet_max_conf": min(1.0, max(0.0, max_conf))}
 
 
+def cloud_annotated_media_ids(ai_rows: list[dict]) -> set[str]:
+    """Media the cloud pipeline has already annotated, from ``source_type='ai'`` rows.
+
+    Camera AI rows (``ai_origin='edge'``) are ``source_type='ai'`` too, and they are
+    written before the pipeline runs, so counting them would skip exactly the frames
+    the camera flagged (#161). A NULL ``ai_origin`` is a cloud row from before the
+    column existed.
+    """
+    return {r["media_id"] for r in ai_rows if r.get("ai_origin") != "edge"}
+
+
 def delete_superseded_ai_observations(svc, media_ids, model_version: str) -> None:
     """Delete prior *machine* observations for these media + model version.
 
@@ -1035,34 +1046,52 @@ def build_bioclip_observations(
     ]
 
 
-def bioclip_observation_patch(
+def build_crop_classification_observation(
+    detection: dict,
+    deployment_id: str,
     prediction,  # services.bioclip_service.CropPrediction (duck-typed)
     model_version: str,
     timestamp: str,
     confidence_threshold: float = 0.0,
 ) -> Optional[dict]:
-    """Per-crop refinement patch for one existing animal observation (pure).
+    """The per-crop classifier's own row for one detector observation (pure).
 
-    The per-crop path (``FF_PER_CROP_CLASSIFY_ENABLED``) does not add a second-opinion
-    row — it refines the *existing* per-detection observation (created by the detector
-    with a provisional, image-level species) using BioCLIP run on that detection's own
-    crop. This maps a ``CropPrediction`` to the species fields written onto that row.
+    The per-crop path (``FF_PER_CROP_CLASSIFY_ENABLED``) classifies each detection's
+    crop and writes the result beside the detector's row, never onto it, so each
+    model keeps its own verdict (#162). The row carries the detection's box and
+    detection confidence, which is what links it to that detection, and the
+    classifier's species, score and version. It has no ``crop_url``: the crop
+    belongs to the detector's row.
 
-    Returns ``None`` when BioCLIP has no usable name or scores below the threshold, so
-    the caller keeps the provisional SpeciesNet label — fail-safe: an uncertain crop
-    never overwrites a label with a confidently-wrong one. ``confidence`` (the detection
-    score) is left untouched; only the classification fields are refined.
+    Returns ``None`` when the classifier has no usable name or scores below the
+    threshold, as for the whole-image rows (``build_bioclip_observations``).
     """
     if not prediction.scientific_name:
         return None
     if prediction.score is not None and prediction.score < confidence_threshold:
         return None
     return {
+        "id": str(uuid.uuid4()),
+        "deployment_id": deployment_id,
+        "media_id": detection["media_id"],
+        "observation_level": "media",
+        "observation_type": "animal",
+        "source_type": "ai",
+        "ai_origin": "cloud",
+        "source_model_version": model_version,
+        "review_status": "ai_reviewed",
+        "classification_method": "machine",
+        "classified_by": model_version,
+        "classification_timestamp": timestamp,
         "scientific_name": prediction.scientific_name,
         "vernacular_name": prediction.common_name,
         "classification_probability": prediction.score,
-        "classified_by": model_version,
-        "classification_timestamp": timestamp,
+        "confidence": detection.get("confidence"),
+        "count": 1,
+        "bbox_x": detection.get("bbox_x"),
+        "bbox_y": detection.get("bbox_y"),
+        "bbox_w": detection.get("bbox_w"),
+        "bbox_h": detection.get("bbox_h"),
     }
 
 
@@ -1242,15 +1271,16 @@ class BioCLIPStep(PipelineStep):
         threshold: float,
         start: float,
     ) -> PipelineStepResult:
-        """Classify *each* per-detection animal crop and refine that row in place.
+        """Classify *each* per-detection animal crop into its own row beside the detector's.
 
         The ``FF_PER_CROP_CLASSIFY_ENABLED`` path. Each ``animal`` observation already
         carries its own ``crop_url`` (written by ``generate_observation_crops`` in the
-        Animal-Crop step), so we run the classifier on every crop and overwrite that
-        observation's provisional species with the per-crop result. No new rows are
-        created (so no superseded-cleanup needed) — a cat+rat frame ends up with two
-        observations bearing distinct species. Below-threshold / nameless crops keep
-        their provisional SpeciesNet label (see ``bioclip_observation_patch``).
+        Animal-Crop step), so we run the classifier on every crop and write one
+        classifier row per detection, with that detection's box
+        (``build_crop_classification_observation``). The SpeciesNet row is never edited,
+        so a cat+rat frame keeps SpeciesNet's two rows and gains the classifier's two
+        (#162). This classifier's prior rows for the same media are replaced, as on the
+        whole-image path; below-threshold or nameless crops add nothing.
         """
         import os
         import shutil
@@ -1261,14 +1291,14 @@ class BioCLIPStep(PipelineStep):
         svc = create_service_client()
         media_ids = [m["id"] for m in media]
         errors = 0
-        observations_updated = 0
+        observations_created = 0
 
         def _fetch_animal_crops() -> list[dict]:
             if not media_ids:
                 return []
             resp = (
                 svc.table("observations")
-                .select("id, media_id, crop_url")
+                .select("id, media_id, crop_url, confidence, bbox_x, bbox_y, bbox_w, bbox_h")
                 .in_("media_id", media_ids)
                 .eq("source_type", "ai")
                 .eq("observation_type", "animal")
@@ -1300,23 +1330,25 @@ class BioCLIPStep(PipelineStep):
             predictions = await classifier.classify(list(path_to_obs.keys()), config)
             timestamp = datetime.now(timezone.utc).isoformat()
 
-            patches: list[tuple[str, dict]] = []
+            obs_batch: list[dict] = []
             for pred in predictions:
                 obs = path_to_obs.get(pred.filepath)
                 if not obs:
                     continue
-                patch = bioclip_observation_patch(pred, model_version, timestamp, threshold)
-                if patch:
-                    patches.append((obs["id"], patch))
+                row = build_crop_classification_observation(obs, deployment_id, pred, model_version, timestamp, threshold)
+                if row:
+                    obs_batch.append(row)
 
             def _persist() -> int:
-                n = 0
-                for obs_id, patch in patches:
-                    svc.table("observations").update(patch).eq("id", obs_id).execute()
-                    n += 1
-                return n
+                # Replace this classifier's prior rows for the media it re-ran (keyed by its
+                # own model version, so the SpeciesNet rows are untouched), then insert.
+                delete_superseded_ai_observations(svc, {o["media_id"] for o in obs_batch}, model_version)
+                for i in range(0, len(obs_batch), 50):
+                    svc.table("observations").insert(obs_batch[i : i + 50]).execute()
+                return len(obs_batch)
 
-            observations_updated = await asyncio.to_thread(_persist)
+            if obs_batch:
+                observations_created = await asyncio.to_thread(_persist)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
@@ -1326,13 +1358,13 @@ class BioCLIPStep(PipelineStep):
             deployment_id=deployment_id,
             classifier=classifier.name,
             crops_classified=len(path_to_obs),
-            observations_updated=observations_updated,
+            observations_created=observations_created,
             errors=errors,
             duration_seconds=round(duration, 2),
         )
         return PipelineStepResult(
             step=self.step_type,
-            observations_updated=observations_updated,
+            observations_created=observations_created,
             media_processed=len(media),
             errors=errors,
             duration_seconds=round(duration, 2),
@@ -1456,7 +1488,7 @@ async def run_pipeline(
         if only_unannotated:
             ai = (
                 svc.table("observations")
-                .select("media_id")
+                .select("media_id, ai_origin")
                 .eq("deployment_id", deployment_id)
                 .eq("source_type", "ai")
                 .not_.is_("media_id", "null")
@@ -1464,7 +1496,7 @@ async def run_pipeline(
                 .data
                 or []
             )
-            skip |= {o["media_id"] for o in ai}
+            skip |= cloud_annotated_media_ids(ai)
         return [m for m in rows if m["id"] not in skip]
 
     media = await asyncio.to_thread(_fetch_media)

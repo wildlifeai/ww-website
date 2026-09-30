@@ -86,3 +86,42 @@ def test_default_threshold_applies_when_label_map_has_none():
 def test_no_user_comment_fields_yields_no_rows():
     assert build_edge_observations({"id": "m", "exif_metadata": None}, "d", MODEL, "t") == []
     assert build_edge_observations({"id": "m", "exif_metadata": {}}, "d", MODEL, "t") == []
+
+
+def test_camera_ai_rows_do_not_count_as_cloud_annotated():
+    """The upload job reflects before the pipeline; an edge row must not make it skip the frame (#161)."""
+    from app.domain.pipeline import cloud_annotated_media_ids
+
+    rows = [
+        {"media_id": "flagged-by-camera", "ai_origin": "edge"},
+        {"media_id": "done-by-cloud", "ai_origin": "cloud"},
+        {"media_id": "done-before-ai-origin", "ai_origin": None},
+    ]
+    assert cloud_annotated_media_ids(rows) == {"done-by-cloud", "done-before-ai-origin"}
+
+
+async def test_auto_annotate_reflects_the_camera_before_the_pipeline(monkeypatch):
+    """So the Camera AI result exists when the cloud steps run (#161)."""
+    from app.domain import edge_reflection, pipeline
+    from app.jobs import definitions
+
+    calls: list[str] = []
+
+    async def reflect(dep_id):
+        calls.append("reflect")
+        return 1
+
+    async def run(**kwargs):
+        calls.append("pipeline")
+
+    async def after(*args, **kwargs):
+        calls.append("after")
+
+    monkeypatch.setattr(definitions, "build_pipeline_steps", lambda: [pipeline.PipelineStepType.SPECIESNET])
+    monkeypatch.setattr(edge_reflection, "reflect_edge_deployment", reflect)
+    monkeypatch.setattr(pipeline, "run_pipeline", run)
+    monkeypatch.setattr(definitions, "emit_detection_notifications", after)
+    monkeypatch.setattr(definitions, "auto_embed_deployment", after)
+
+    await definitions.auto_annotate_deployments(["44444444-4444-4444-4444-444444444444"])
+    assert calls == ["reflect", "pipeline", "after", "after"]

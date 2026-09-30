@@ -65,24 +65,29 @@ classifier flows through the same observation builder unchanged.
 A frame holding a cat *and* a rat gets **one** species by default, because SpeciesNet's classifier is
 image-level even though its detector is multi-box. With the flag on, the collapse in
 `build_speciesnet_observations` is skipped and BioCLIP classifies **each crop**, so every animal gets
-its own observation and species:
+its own species:
 
 ```
-SpeciesNet DETECT → one observation per detection (provisional species, count=1)
+SpeciesNet DETECT → one observation per detection (its own species, count=1)
   → generate_observation_crops → crop_url per observation
-  → classify_crops (BioCLIP per crop) → per-observation species
+  → classify_crops (BioCLIP per crop) → one BioCLIP row per detection, on the same bbox
   → DINOv3 embeddings on crops → clustering / similarity
 ```
 
-Low-scoring crops still roll up to a coarse taxon rather than a confidently-wrong species. With the
+The BioCLIP row sits **beside** the SpeciesNet row and never edits it, so each model keeps its own
+verdict (#162); it carries the detection's box and confidence and no `crop_url`
+(`build_crop_classification_observation`). The photo viewer draws a shared box once and lists both
+labels (`groupByBox` in `frontend/src/lib/observations.ts`). Below-threshold crops add no row. With the
 flag on, `count` becomes **human-only** ("N individuals" annotations) since AI rows are 1-per-detection.
 Requires the GPU worker; set it on the **worker**, and reprocess a deployment to migrate existing rows
 (`delete_superseded_ai_observations` makes re-runs replace, not append). Design detail:
 [per-crop-classification-spec](../development%20reports/per-crop-classification-spec.md).
 
 **Idempotent + incremental (Guard 2):** by default `run_pipeline(only_unannotated=True)` fetches only
-media that **don't already have an `source_type='ai'` observation**, so re-running (or re-uploading)
-a deployment processes only the *new* images. The manual endpoint accepts `only_unannotated=false`
+media that **don't already have a cloud `source_type='ai'` observation**, so re-running (or
+re-uploading) a deployment processes only the *new* images. Camera AI rows (`ai_origin='edge'`)
+don't count: they are reflected before the pipeline runs, on the upload job and in
+`auto_annotate_deployments` alike (#161). The manual endpoint accepts `only_unannotated=false`
 to force a full re-run. Each run records an `annotation_runs` row (steps, threshold, observation
 count, `created_by`) for provenance.
 
