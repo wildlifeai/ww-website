@@ -30,6 +30,14 @@ the right shape for a spec or an analysis. When a discussion grows working files
 carrying **Status / Outcome / Open items** instead. Append as it evolves — these are the audit
 trail, don't rewrite them.
 
+Keep to decisions, contracts, measured numbers, commands and open items; link to the document
+that owns a fact instead of restating it (the standard is in
+[`.agents/skills/SKILL.md`](../../.agents/skills/SKILL.md), Documentation Invariant).
+
+A report whose status is **📋 Proposal** carries, in its status banner, either a link to the
+issue that tracks the work or the words "not scheduled". A proposal with neither is how the
+decoupled upload pipeline spec sat untracked for two months.
+
 Closing a report (the only ritual):
 
 - [ ] Outcome written — the short "why" a future developer reads instead of the whole thread
@@ -68,6 +76,9 @@ Ordered roughly by how likely you are to need them. Descriptions live in the
 
 | Report | Status |
 |---|---|
+| [2026-09_evidence-pipeline-architecture](2026-09_evidence-pipeline-architecture/README.md) | 📋 Proposal, 2026-09-29: evidence score, consensus row and `media_evidence` contract; items 1 to 3 built in #155, the rest tracked in its section 17 |
+| [2026-09_false-negatives-and-vlm-audit](2026-09_false-negatives-and-vlm-audit/README.md) | 🔧 Active. Gemini presence step, labeller and eval script implemented behind `FF_GEMINI_PRESENCE_ENABLED`; interim prompt v1 results on 962 labelled frames in section 6; the prompt v2 benchmark is pending |
+| [2026-09_gcp-pilot-and-migration](2026-09_gcp-pilot-and-migration/README.md) | 📋 Proposal, 2026-09-26: ML-worker pilot on a Cloud Run L4 due 16 Oct, then the Azure to Google Cloud migration; nothing created yet |
 | [2026-09_person-detection-e2e](2026-09_person-detection-e2e/README.md) | 🔧 Active — model uploaded, transferred and run on hardware with correct labels; website-side reflection blocked on a fresh capture set ([#140](https://github.com/wildlifeai/ww-website/issues/140)) |
 | [ios-universal-links-team-id](ios-universal-links-team-id.md) | 🔧 Active — one-value fix identified and verified; iOS password-reset links stay broken until it ships |
 | [model-class-semantics](model-class-semantics.md) | 📋 Design decision needed ([#135](https://github.com/wildlifeai/ww-website/issues/135)) — blocks behaviour models and any GBIF export |

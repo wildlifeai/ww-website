@@ -30,9 +30,9 @@ The `ww-website` repository is a multi-service platform consisting of:
 > * `documentation/onboarding/03-DATA-AND-SYNC.md`
 > * `documentation/resources/api-reference.md`
 > * `documentation/resources/deployment-guide.md`
-> * `documentation/resources/cloud-infrastructure.md` — what actually exists in Azure/Supabase/Cloudflare
-> * `documentation/README.md` — the index; says which docs are **living** vs **frozen history**
-> * `.agents/DESIGN.md` — design system (colors, typography, spacing, component patterns) for any UI work or screen generation
+> * `documentation/resources/cloud-infrastructure.md`: what actually exists in Azure/Supabase/Cloudflare
+> * `documentation/README.md`: the index; says which docs are **living** vs **frozen history**
+> * `.agents/DESIGN.md`: design system (colors, typography, spacing, component patterns) for any UI work or screen generation
 >
 > This skill defines architectural guardrails and decision rules. Detailed implementation guidance belongs in documentation.
 
@@ -60,7 +60,8 @@ The `ww-website` repository is a multi-service platform consisting of:
   [references/documentation.md](references/documentation.md).
 - Before you claim work is done, run the gates:
   `cd backend && ruff check . && ruff format --check . && pytest`, then
-  `cd frontend && npm run lint && npx tsc --noEmit && npm run build`.
+  `cd frontend && npm run lint && npx tsc -b --noEmit && npm run build` (`tsc -b`: plain
+  `tsc --noEmit` checks nothing here, see `AGENTS.md`).
 - **Verify against the code, not the docs**, and against `ww-backend` for anything about the
   database. Column names guessed from memory are a recurring source of failures here.
 

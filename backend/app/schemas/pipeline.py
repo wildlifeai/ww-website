@@ -21,9 +21,11 @@ class PipelineStepType(str, Enum):
     """Supported pipeline step types."""
 
     MEDIA_PREP = "media_prep"  # thumbnails + previews → media_assets (run before SPECIESNET)
+    GEMINI_PRESENCE = "gemini_presence"  # VLM animal-present verdict per frame (run before SPECIESNET, does not alter it)
     SPECIESNET = "speciesnet"  # detector + classifier ensemble (preferred)
     ANIMAL_CROP = "animal_crop"  # crop best detection → animal_crop_url (run after SPECIESNET)
     BIOCLIP = "bioclip"  # secondary zero-shot classifier on crops (run after ANIMAL_CROP)
+    EVIDENCE_FUSION = "evidence_fusion"  # consensus row per frame from all of the above plus burst motion (run last)
     CUSTOM = "custom"
 
 
@@ -62,6 +64,13 @@ class PipelineStepResult(BaseModel):
     errors: int = 0
     duration_seconds: float = 0.0
     model_version: Optional[str] = None
+    # Metered steps (Gemini presence) report what the batch cost; None for local models.
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    cost_usd: Optional[float] = None
+    # Step-specific tallies (evidence fusion: bursts, consensus_animal, consensus_blank,
+    # evidence_rows, ...); empty for steps that have none.
+    counts: dict[str, int] = Field(default_factory=dict)
 
 
 class PipelineRunResult(BaseModel):

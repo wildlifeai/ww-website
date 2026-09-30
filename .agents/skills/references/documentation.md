@@ -27,6 +27,12 @@ When behavior changes:
 
 Do not create duplicate documentation when existing documentation can be updated.
 
+What a report or doc keeps: decisions (one line each, the reason in a clause), contracts
+(columns, signals, weights, env vars, schemas), measured numbers with source and date, commands,
+open items. What it cuts: background, restatements of another document, prose explaining
+existing code (a `file::function` link does it), worked narratives. Each fact has one home;
+everything else links to it. Before writing, decide which document owns each fact.
+
 
 # 9. Validation Requirements
 

@@ -41,6 +41,11 @@ cd frontend && npm run lint && npx tsc -b --noEmit && npm run build
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
 
+Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
+(`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
+ww-backend runs them against its own schema PRs, so a red run can come from either side. To
+run one locally, follow the instructions in its header.
+
 ## Non-negotiables
 
 - **Ask the maintainer before committing or pushing** to any shared branch.

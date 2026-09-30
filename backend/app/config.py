@@ -93,10 +93,52 @@ class Settings(BaseSettings):
             "animal region. No ML — works on the lean dev-cloud image where SpeciesNet is unavailable."
         ),
     )
-    MOTION_ROI_BURST_GAP_SECONDS: float = Field(
+    # One burst grouper, one gap (domain/burst_evidence.py::group_bursts), shared by the
+    # motion-ROI crop fallback, the Gemini contact sheet and evidence fusion. 10 s because
+    # today's firmware spaces the frames of one trigger 3 to 5 s apart; the firmware
+    # sequence tag, once it lands in EXIF, makes the gap irrelevant.
+    BURST_GAP_SECONDS: float = Field(
         10.0,
         ge=0.0,
-        description="Max seconds between consecutive frames to treat them as one motion burst for ROI cropping",
+        description="Max seconds between consecutive frames of one trigger burst (used when the firmware sequence tag is absent)",
+    )
+
+    # ── Gemini presence filter (Cloud AI, VLM blank audit) ────────────
+    # Runs BEFORE SpeciesNet on every frame in the batch and records a per-frame
+    # animal-present verdict as its own observation row (source_model_version = the
+    # Gemini model id). Does not alter SpeciesNet's rows: the two are compared by
+    # backend/scripts/eval_presence.py before any production wiring is decided.
+    # Set on the ARQ worker, not just the API, or the step silently no-ops.
+    FF_GEMINI_PRESENCE_ENABLED: bool = Field(
+        False,
+        description="Run the Gemini animal-presence step before SpeciesNet (needs GEMINI_API_KEY)",
+    )
+    GEMINI_API_KEY: str = Field("", description="Google AI Studio API key for the google-genai SDK (empty = feature disabled)")
+    GEMINI_PRESENCE_MODEL: str = Field(
+        "gemini-3.1-flash-lite",
+        description="Gemini model id for the presence step; must have a row in services/gemini_pricing.py",
+    )
+    GEMINI_PRESENCE_VARIANT: str = Field(
+        "single",
+        description="Token-saving variant: 'single' (one downscaled frame per call), 'contact_sheet' (one burst per call), 'batch' (Batch API)",
+    )
+
+    # ── Evidence fusion (consensus verdict per frame) ─────────────────
+    # Runs after Gemini, SpeciesNet (and BioCLIP): groups the batch into trigger
+    # bursts, scores every frame from the rows the other steps wrote plus motion
+    # between the burst's frames, and writes ONE consensus observation per media
+    # (source_type='consensus', classified_by='evidence_fusion_v1'). Signals are
+    # also written to the ww-backend table media_evidence when it exists. Set on
+    # the ARQ worker, not just the API.
+    FF_EVIDENCE_FUSION_ENABLED: bool = Field(
+        False,
+        description="Write a consensus observation per frame from SpeciesNet + Gemini + burst evidence (domain/burst_evidence.py)",
+    )
+    EVIDENCE_FUSION_THRESHOLD: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Evidence score at or above which the consensus row says animal (weights are hand-set guesses, version v1)",
     )
 
     # Vector store is pgvector in Supabase (media_embeddings.embedding) — no separate

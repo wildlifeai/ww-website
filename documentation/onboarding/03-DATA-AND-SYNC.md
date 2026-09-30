@@ -42,14 +42,38 @@ permissions, verify against the **live** DB, not just the migrations.
 
 | Table | Used by | Access |
 |-------|---------|--------|
-| `projects`, `deployments` | Insights, EXIF matching, Drive folders | RLS (+ service-role) |
+| `projects`, `deployments` | Insights, EXIF matching, Drive folders, project defaults | RLS (+ service-role) |
 | `media` | Annotations grid + modal | RLS (read; uploads via backend) |
 | `media_assets` | embedded in `media` queries (renditions: provider, dimensions, bytes) | RLS read — a missing GRANT aborts the **whole** embedding query (prod, Jul 2026) |
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
 | `taxa` | SpeciesPicker (local search) | RLS read |
-| `user_roles` | membership / `has_project_role` | RLS + `get_organisation_users` RPC |
+| `user_roles`, `project_invitations` | members panel, invitation banner | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below) |
 | `media_embeddings`, `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
 | `devices`, `lorawan_*`, `firmware`, `ai_models`, `api_jobs` | LoRaWAN, manifests, models, jobs | service-role |
+
+**Project membership goes through RPCs, never direct queries.** RLS lets a user read only their
+own `users` row and their own `user_roles` rows, and it turns an unauthorised UPDATE into
+"0 rows changed" with no error. The members panel was built on direct queries, so it listed only
+the caller, failed every add and reported removals that never happened. It now uses
+`get_project_members`, `send_project_invitation`, `get_project_pending_invitations`,
+`remove_project_member`, `cancel_project_invitation`, `get_my_pending_invitations` and
+`respond_to_invitation`, all through `frontend/src/lib/projectMembers.ts`. Adding a member is an
+invitation the invitee accepts from the banner under the nav (or in the mobile app); an admin can
+cancel it while it is pending. The server compares emails case-insensitively
+(ww-backend#216), and `toMembersError` maps the SQLSTATEs the RPCs raise.
+
+`frontend/src/lib/projectMembers.integration.test.ts` runs that module against a **local**
+`ww-backend` stack as real signed-in users (invite, accept, decline, cancel, remove, the refusals). Run it
+whenever a `ww-backend` change touches roles, invitations or RLS; the header of the file has the
+two commands. Without the `WW_TEST_*` variables it skips, so `npm test` stays offline.
+
+**The project owns the camera's settings; the mobile app writes them to the device at
+deployment.** Settings → ⚙ Defaults edits `capture_method_id`, `model_id` and the burst:
+`photos_per_trigger` (1 to 10, default 3) and `photo_interval_milliseconds` (200 to 2000, default
+1000), which the app writes as op5 and op6 (ww-backend#218, ww-mobile-app#317). The count is
+photos as the user sees them; with the raw BMP on, the app doubles it for op5. A running
+camera keeps its old values until its next deployment start. Ranges and the cost note live in
+`frontend/src/lib/burstCapture.ts`.
 
 Observation provenance fields (`source_type`, `review_status`, `reviewer_id`, `annotator_id`,
 `classification_method`) are written through one helper, `frontend/src/lib/observations.ts`, so
@@ -217,7 +241,7 @@ so key rotation can't take down both.
   `media.file_hash` **or** `gdrive://` path (no duplicate rows), and **back-fills a `media` row for
   any image that's in Drive but has no DB row yet** — so re-uploading recovers stranded images.
 - **Guard 2 — annotate only un-annotated media:** the auto-trigger runs `only_unannotated=true`, so
-  it processes only images without an AI observation (see [04-AI-PIPELINE](./04-AI-PIPELINE.md)).
+  it processes only images without a Cloud AI observation (see [04-AI-PIPELINE](./04-AI-PIPELINE.md)).
 
 > **Local dev gotcha:** the Drive credential file is mounted by the **dev** compose, so always start
 > the API with both files: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`.
