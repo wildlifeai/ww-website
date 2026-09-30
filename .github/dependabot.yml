@@ -7,7 +7,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Into dev like every other change, as in ww-backend and ww-mobile-app; a release
+    # carries it to main. Security updates still target main, whatever this says.
+    target-branch: dev
     groups:
       actions:
         patterns:
           - '*'
+    ignore:
+      # Paired with the CLI version pinned in react-doctor.yml; bump both by hand.
+      - dependency-name: millionco/react-doctor

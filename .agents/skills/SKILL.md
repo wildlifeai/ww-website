@@ -169,6 +169,12 @@ When behavior changes:
 
 Do not create duplicate documentation when existing documentation can be updated.
 
+What a report or doc keeps: decisions (one line each, the reason in a clause), contracts
+(columns, signals, weights, env vars, schemas), measured numbers with source and date, commands,
+open items. What it cuts: background, restatements of another document, prose explaining
+existing code (a `file::function` link does it), worked narratives. Each fact has one home;
+everything else links to it. Before writing, decide which document owns each fact.
+
 ---
 
 # 2. Repository Ecosystem Awareness
@@ -421,6 +427,22 @@ Verify against the actual backend schema before writing queries.
 
 ---
 
+## RLS denials are silent on reads and updates
+
+A query RLS refuses usually returns **no rows and no error**: a SELECT comes back empty, an
+UPDATE changes 0 rows and reports success. Only an INSERT fails loudly (`42501`). So "no error"
+proves nothing. A user sees only their own `users` row and their own `user_roles` rows, which is
+why the members panel listed only the caller and "removed" members it never touched.
+
+For anything about other users (members, invitations, roles), call the `ww-backend` RPC that
+checks the caller itself; `frontend/src/lib/projectMembers.ts` wraps the membership ones. After a
+write, refetch and show what the database holds rather than updating local state optimistically.
+When a `ww-backend` change touches roles, invitations or RLS, run
+`frontend/src/lib/projectMembers.integration.test.ts` against a local stack (see
+[03-DATA-AND-SYNC](../../documentation/onboarding/03-DATA-AND-SYNC.md)).
+
+---
+
 ## Shared Model Lists
 
 Do not invent model names.
@@ -475,6 +497,68 @@ image for that reason until #142.
 GitHub auto-closes only on merge to the default branch. PRs here target `dev`, so the issue
 stays open until `dev` reaches `main`. Close it by hand when the PR merges, or expect it on the
 open list for a while (#140 after #141).
+
+---
+
+## Search the open branches before writing a helper
+
+Grep the open PR branches, not only `dev`, for a function before adding one. In September 2026
+parallel branches produced four burst groupers, two TFLite readers and two train/test split
+functions before a review merged them (#155, #158).
+
+```bash
+gh pr list --state open --json headRefName -q '.[].headRefName' | while read b; do
+  git grep -n "def group_bursts" "origin/$b" -- backend/ ; done
+```
+
+---
+
+## One burst grouper
+
+Frames of one trigger are grouped only by `domain/burst_evidence.py::group_bursts`: firmware
+sequence tag first, EXIF timestamp gap otherwise (`BURST_GAP_SECONDS`, 10 s), never across a
+deployment or folder. `media_registry.group_bursts`, the labeller and the eval call it. Today's
+firmware spaces burst frames 3 to 5 s apart, so a tighter gap splits real bursts.
+
+---
+
+## Every model keeps its own observation row
+
+SpeciesNet, Gemini, BioCLIP and Camera AI each write their own `observations` rows; no step
+edits another model's row. The final presence verdict is a derived `source_type='consensus'`
+row (`evidence_fusion_v1`). Per-crop classification follows it too: its row sits on the
+detection's box beside SpeciesNet's (#162).
+
+---
+
+## `consensus_approved` means human truth
+
+`active_learning` treats `review_status='consensus_approved'` as a human verdict. Machine rows,
+the consensus row included, use `ai_reviewed`.
+
+---
+
+## Gemini API key limits
+
+`GEMINI_API_KEY` in the root `.env` is on the free tier: 15 requests per minute and 500 per
+day per model, and no Batch API. Run `scripts/eval_presence.py` with `--min-interval 4.2` and
+`--cache` (resumable, never pays twice); a full 962-frame run spans two daily windows.
+
+---
+
+## Committed data files carry relative paths
+
+A labels CSV or result cache committed beside a report must not contain a machine path
+(`C:\Users\...`). Write paths relative to the export folder; `eval_presence.py --root` resolves
+them.
+
+---
+
+## GitGuardian flags a test password with a literal prefix
+
+A per-run password such as `` `pw-${crypto.randomUUID()}` `` trips the Generic Password
+detector (#159). Generate test passwords with no literal part (`crypto.randomUUID()`), and mark
+a genuine false positive in the GitGuardian dashboard rather than ignoring a path.
 
 ---
 

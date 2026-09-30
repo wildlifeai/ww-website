@@ -51,6 +51,7 @@ Selecting a photo opens a **full-screen modal** (`MediaDetail.tsx`):
 | **Correct** | Change species via the taxon-validated `SpeciesPicker` (writes `taxon_id`) |
 | **▭ Box / Redraw / ✕** | Draw, replace, or delete the bounding box (writes the bbox quad) |
 | **+ Add Observation** | Create a new fully human-provenanced observation |
+| **🗑 Remove** (Del) | Delete the observation. Shown only to project members and above, checked with `has_project_role` (`lib/observationWrites.ts`); a delete that removes no row is reported as not removed (#183) |
 
 > With `FF_PER_CROP_CLASSIFY_ENABLED` on, AI produces **one observation per animal** rather than one
 > per image, so a mixed-species frame shows a card (and crop) per detection and `count` is reserved for

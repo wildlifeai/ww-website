@@ -25,7 +25,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Determine target
         id: target
@@ -75,7 +75,7 @@ jobs:
           docker push ${{ secrets.ACR_LOGIN_SERVER }}/ww-backend:${{ github.sha }}
 
       - name: Log in to Azure CLI
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 

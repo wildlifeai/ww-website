@@ -82,6 +82,33 @@ export function aiOriginMeta(o: ObservationStatusFields): AiOriginMeta | null {
   return { icon: '☁', label: 'Cloud AI', title: 'Cloud pipeline prediction (SpeciesNet / Wildlife Brain)' }
 }
 
+// ── Boxes ────────────────────────────────────────────────────────────────────
+
+export interface ObservationBox {
+  bbox_x?: number | null
+  bbox_y?: number | null
+  bbox_w?: number | null
+  bbox_h?: number | null
+}
+
+/**
+ * Boxed observations grouped by position, in input order; unboxed rows are left
+ * out. The per-crop classifier writes its own row on its detection's box (#162),
+ * so one animal can carry a SpeciesNet row and a classifier row with the same box:
+ * a viewer draws each group once and lists every label on it.
+ */
+export function groupByBox<T extends ObservationBox>(obs: T[]): T[][] {
+  const groups = new Map<string, T[]>()
+  for (const o of obs) {
+    if (o.bbox_x == null || o.bbox_y == null || o.bbox_w == null || o.bbox_h == null) continue
+    const key = [o.bbox_x, o.bbox_y, o.bbox_w, o.bbox_h].map(v => v.toFixed(4)).join(',')
+    const group = groups.get(key)
+    if (group) group.push(o)
+    else groups.set(key, [o])
+  }
+  return [...groups.values()]
+}
+
 // ── Provenance builders ──────────────────────────────────────────────────────
 
 export interface Actor {

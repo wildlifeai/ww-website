@@ -33,7 +33,8 @@ src/
 │   └── common/             # nav/shared bits
 ├── contexts/UploadContext.tsx  # global upload store (survives navigation)
 ├── hooks/                  # useAuth, useJob, useBrain, useIntelligence, usePipeline, …
-├── lib/                    # apiClient (fetch + Supabase JWT), observations (provenance helpers)
+├── lib/                    # apiClient (fetch + Supabase JWT), observations (provenance helpers),
+│                           #   projectMembers (membership + invitation RPCs)
 ├── config/supabase.ts      # Supabase client init
 └── styles/index.css        # CSS variables + base styles
 ```

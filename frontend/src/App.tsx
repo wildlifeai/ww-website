@@ -11,6 +11,7 @@ import { InatAutoSync } from './components/settings/InatAutoSync'
 import { useIsAdmin } from './hooks/useIsAdmin'
 import { AdminUsagePage } from './pages/AdminUsagePage'
 import { UploadQuotaBanner } from './components/UploadQuotaBanner'
+import { InvitationsBanner } from './components/InvitationsBanner'
 import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
 import { MyDataPage } from './pages/MyDataPage'
@@ -416,6 +417,7 @@ function Layout({ children }: { children: React.ReactNode }) {
       <main style={{ flex: 1, padding: '2rem 0' }}>
         <div className="container">
           <UploadQuotaBanner />
+          {user && <InvitationsBanner />}
           {children}
         </div>
       </main>
