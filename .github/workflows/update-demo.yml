@@ -40,9 +40,9 @@ jobs:
     # Manual input wins; otherwise main → staging, any other branch → dev.
     environment: ${{ github.event.inputs.environment || (github.ref_name == 'main' && 'staging' || 'dev') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
 
