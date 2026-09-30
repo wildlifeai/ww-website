@@ -81,8 +81,10 @@ Requires the GPU worker; set it on the **worker**, and reprocess a deployment to
 [per-crop-classification-spec](../development%20reports/per-crop-classification-spec.md).
 
 **Idempotent + incremental (Guard 2):** by default `run_pipeline(only_unannotated=True)` fetches only
-media that **don't already have an `source_type='ai'` observation**, so re-running (or re-uploading)
-a deployment processes only the *new* images. The manual endpoint accepts `only_unannotated=false`
+media that **don't already have a cloud `source_type='ai'` observation**, so re-running (or
+re-uploading) a deployment processes only the *new* images. Camera AI rows (`ai_origin='edge'`)
+don't count: they are reflected before the pipeline runs, on the upload job and in
+`auto_annotate_deployments` alike (#161). The manual endpoint accepts `only_unannotated=false`
 to force a full re-run. Each run records an `annotation_runs` row (steps, threshold, observation
 count, `created_by`) for provenance.
 
