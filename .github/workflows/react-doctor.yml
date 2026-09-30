@@ -24,8 +24,9 @@ jobs:
         # Action tag and CLI version are pinned as a pair: the action passes flags
         # the CLI must understand, and @main + version:latest drift independently
         # (broke 2026-06-11: @main passed --scope, which stable 0.5.1 rejects).
-        # Bump both together (Dependabot proposes the action tag).
-        uses: millionco/react-doctor@v2.2.9
+        # Bump both together, by hand: Dependabot ignores this action (dependabot.yml),
+        # because it can only move the tag and a lone tag bump breaks the scan.
+        uses: millionco/react-doctor@v2.1.0
         with:
           directory: 'frontend'
           verbose: ${{ github.event.inputs.verbose || 'true' }}
