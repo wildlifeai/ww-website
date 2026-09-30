@@ -1,0 +1,84 @@
+# Builds the ML worker image in Cloud Build and rolls the Cloud Run job to it (Google Cloud
+# pilot, documentation/development reports/2026-09_gcp-pilot-and-migration). Signs in with
+# Workload Identity Federation as github-deployer@, so the repository holds no key; the
+# project, provider and account come from the repository variables GCP_*.
+#
+# Runs by hand. A push to dev also deploys once the repository variable
+# GCP_WORKER_AUTODEPLOY is 'true': each build uses a 32-CPU build machine and each self-test
+# about a minute of L4 time, so it stays off until the pilot is live.
+name: Deploy ML worker (Google Cloud)
+
+on:
+  push:
+    branches: [dev]
+    paths: ['backend/**', '.github/workflows/deploy-ml-worker-gcp.yml']
+  workflow_dispatch:
+    inputs:
+      selftest:
+        description: 'Run the GPU self-test after the roll'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write          # OIDC token for Workload Identity Federation
+
+concurrency:
+  group: deploy-ml-worker-gcp
+  cancel-in-progress: false
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: asia-southeast1                         # the only APAC region with L4 on Cloud Run
+  REPO: ww-backend
+  IMAGE: ww-backend-worker
+  JOB: ww-ml-worker-dev
+
+jobs:
+  build-and-roll:
+    if: github.event_name == 'workflow_dispatch' || vars.GCP_WORKER_AUTODEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Build the worker image in Cloud Build
+        run: |
+          IMG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}"
+          # Runs as the deployer, not the default build account (report §2, IAM table).
+          # --suppress-logs: streaming the log here needs project Viewer on the deployer; it
+          # still waits and fails with the build. The log is in Cloud Build history.
+          gcloud builds submit backend/ \
+            --suppress-logs \
+            --project "${PROJECT_ID}" \
+            --config backend/cloudbuild.worker.yaml \
+            --service-account "projects/${PROJECT_ID}/serviceAccounts/${{ vars.GCP_DEPLOYER_SA }}" \
+            --gcs-source-staging-dir "gs://${PROJECT_ID}-build-source/source" \
+            --substitutions "_IMAGE=${IMG},_SHA=${GITHUB_SHA},_ENV_TAG=dev-latest"
+
+      - name: Roll the job to the new image
+        id: roll
+        run: |
+          IMG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:${GITHUB_SHA}"
+          if ! gcloud run jobs describe "${JOB}" --project "${PROJECT_ID}" --region "${REGION}" --format="value(name)" >/dev/null 2>&1; then
+            echo "::notice::Job ${JOB} does not exist yet; create it once by hand (report §2, step 10) with image ${IMG}."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Changes only the image; GPU, secrets, env, labels and task timeout are kept.
+          gcloud run jobs update "${JOB}" --project "${PROJECT_ID}" --region "${REGION}" \
+            --image "${IMG}" --update-labels "git_sha=${GITHUB_SHA::12}"
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+      - name: Self-test on the GPU
+        if: steps.roll.outputs.exists == 'true' && (github.event_name == 'push' || inputs.selftest)
+        run: |
+          gcloud run jobs execute "${JOB}" --project "${PROJECT_ID}" --region "${REGION}" --wait \
+            --args=-m,app.jobs.cloudrun_entry,selftest

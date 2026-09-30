@@ -819,9 +819,9 @@ async def annotate_deployments_job(
 ) -> None:
     """Registered (ARQ-routable) AI job: annotate + embed a set of deployments.
 
-    This is the offload target for the upload flow's AI phase. When ``REDIS_URL`` is
-    set the upload job enqueues this and it runs on the GPU ``embedding-worker`` (the
-    heavy ML image); with no Redis it falls back to running in-process. Either way it
+    This is the offload target for the upload flow's AI phase. When a worker is
+    configured (``settings.job_offload_configured``: the Cloud Run job or Redis) the upload
+    job enqueues this and it runs on the heavy ML image; otherwise it runs in-process. Either way it
     reports status to ``job_id`` so it appears in the user's Processing history.
 
     The actual work (``run_pipeline`` per deployment + detection notifications + DINOv3
@@ -1330,10 +1330,10 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         if _dep_ids and _steps and not _run_ai:
             logger.info("ai_pipeline_skipped_by_request", job_id=job_id, deployments=len(_dep_ids))
         pipeline_errors = 0
-        # Run the AI inline only on a single-container / dev image (no Redis worker).
-        # When REDIS_URL is set, the heavy AI is offloaded to the GPU worker (the
+        # Run the AI inline only on a single-container / dev image (no worker configured).
+        # With the Cloud Run job or Redis configured, the heavy AI is offloaded (the
         # `elif` branch below) so this CPU process never imports torch/SpeciesNet.
-        if _dep_ids and _steps and _run_ai and not settings.REDIS_URL:
+        if _dep_ids and _steps and _run_ai and not settings.job_offload_configured:
             await start_phase(job_id, ProgressPhase.AI_PIPELINE)
             # Record the resolved deployments so the Annotations grid can show a
             # "being processed" banner for them while this inline AI phase runs.
@@ -1408,12 +1408,12 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                     )
             await complete_phase(job_id, ProgressPhase.AI_PIPELINE)
 
-        # ── Phase 4 (offloaded): with a Redis-backed GPU worker configured, the
-        # heavy AI runs there (the two-container split) instead of in this CPU
-        # process. The upload itself is complete; AI is tracked as its own
-        # Processing-history job. enqueue_job falls back to in-process if Redis is
-        # unreachable, so this never silently drops the analysis. ──
-        elif _dep_ids and _steps and _run_ai and settings.REDIS_URL:
+        # ── Phase 4 (offloaded): with the Cloud Run job or a Redis-backed GPU worker
+        # configured, the heavy AI runs there (the two-container split) instead of in
+        # this CPU process. The upload itself is complete; AI is tracked as its own
+        # Processing-history job. enqueue_job falls back to in-process if neither can
+        # take it, so this never silently drops the analysis. ──
+        elif _dep_ids and _steps and _run_ai and settings.job_offload_configured:
             from datetime import timedelta  # noqa: PLC0415
 
             from app.jobs.dispatch import enqueue_job  # noqa: PLC0415
