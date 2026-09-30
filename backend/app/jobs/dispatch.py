@@ -1,6 +1,6 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Job dispatch — route a job to the Cloud Run job, the ARQ worker, or run it in-process.
+"""Job dispatch: route a job to the Cloud Run job, the ARQ worker, or run it in-process.
 
 Single seam used by GPU/ML-heavy endpoints (the Wildlife Brain) so the routers
 don't care *where* a job runs. First match wins:
