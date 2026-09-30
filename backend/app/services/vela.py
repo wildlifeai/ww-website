@@ -59,6 +59,36 @@ def check_arena_budget(sram_used_bytes: Optional[int], arena_bytes: int) -> None
         )
 
 
+def compiled_sram_bytes(model_path: Path) -> Optional[int]:
+    """SRAM an already Vela-compiled model needs: its ``_scratch`` tensor size, or None.
+
+    Vela sizes that tensor from the figure its summary reports as
+    ``sram_memory_used`` (``ethosu/vela/npu_serialisation.py``). ``_scratch_fast``
+    aliases the same SRAM in Shared_Sram mode, so it is not added. None when the
+    file has no scratch tensor (not Vela output) or will not parse.
+    """
+    from ethosu.vela.tflite.Model import Model
+
+    try:
+        subgraph = Model.GetRootAs(bytearray(Path(model_path).read_bytes()), 0).Subgraphs(0)
+        for i in range(subgraph.TensorsLength()):
+            tensor = subgraph.Tensors(i)
+            name = (tensor.Name() or b"").decode(errors="replace")
+            if name.endswith("scratch") and tensor.ShapeLength() == 1:
+                return int(tensor.Shape(0))
+    except Exception:  # noqa: BLE001 unreadable means unknown, which only logs
+        logger.info("compiled_sram_unreadable", file=Path(model_path).name)
+    return None
+
+
+def check_compiled_model(model_path: Path, arena_bytes: Optional[int] = None) -> None:
+    """The arena check for a model that arrives compiled and so never meets Vela here."""
+    budget = settings.MODEL_ARENA_BYTES if arena_bytes is None else arena_bytes
+    sram = compiled_sram_bytes(model_path)
+    logger.info("compiled_arena_check", file=Path(model_path).name, sram_used_bytes=sram, arena_bytes=budget)
+    check_arena_budget(sram, budget)
+
+
 async def run_vela_conversion(
     input_path: Path,
     output_dir: Path,

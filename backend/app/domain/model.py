@@ -24,7 +24,7 @@ from app.config import settings
 from app.registries.model_registry import get_model_config
 from app.services.http_client import download_url_content
 from app.services.supabase_client import create_service_client
-from app.services.vela import VelaConversionError, run_vela_conversion
+from app.services.vela import VelaConversionError, check_compiled_model, run_vela_conversion
 
 logger = structlog.get_logger()
 
@@ -210,6 +210,14 @@ def _check_label_count(labels: List[str], class_count: Optional[int]) -> None:
         )
 
 
+def _check_compiled_arena(tfl_path: Path) -> None:
+    """Arena check for a precompiled package or registry model (Vela already ran elsewhere)."""
+    try:
+        check_compiled_model(tfl_path)
+    except VelaConversionError as e:
+        raise ModelDomainError(str(e)) from e
+
+
 def _build_firmware_filename(vars_h_path: Path) -> str:
     """Build 8.3-style filename from model_variables.h project/version IDs.
 
@@ -390,6 +398,7 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
             # sees a precompiled package carrying no Edge Impulse metadata, which
             # is how a one-label two-class model got through before.
             _check_label_count(labels, _classifier_class_count(tfl_file))
+            _check_compiled_arena(tfl_file)
 
             tfl_bytes = tfl_file.read_bytes()
             txt_bytes = labels_txt.read_bytes()
@@ -750,6 +759,7 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, bytes, List[
         if not model_info.get("classes"):
             logger.warning("sscma_model_declares_no_classes", uuid=sscma_uuid, name=model_info.get("name"))
         _check_label_count(labels, _classifier_class_count(vela_final_path))
+        _check_compiled_arena(vela_final_path)
 
         labels_txt_path = work_dir / "labels.txt"
         labels_txt_path.write_text("\n".join(labels), newline="\n")
@@ -854,6 +864,7 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
         # the wrong number of classes for the model it points at, which is the
         # same defect as #134 arriving by a different route.
         _check_label_count(labels, _classifier_class_count(vela_final_path))
+        _check_compiled_arena(vela_final_path)
 
         labels_txt_path = work_dir / "labels.txt"
         labels_txt_path.write_text("\n".join(labels), newline="\n")

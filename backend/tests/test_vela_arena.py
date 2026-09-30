@@ -8,7 +8,15 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import vela
-from app.services.vela import ArenaBudgetExceeded, VelaConversionError, check_arena_budget, parse_sram_used_bytes, run_vela_conversion
+from app.services.vela import (
+    ArenaBudgetExceeded,
+    VelaConversionError,
+    check_arena_budget,
+    check_compiled_model,
+    compiled_sram_bytes,
+    parse_sram_used_bytes,
+    run_vela_conversion,
+)
 
 CSV = "experiment,network,sram_memory_used,off_chip_flash_memory_used\ndefault,model_int8,{sram},412.25\n"
 
@@ -101,6 +109,50 @@ class TestRunVelaConversion:
             z.writestr("trained.tflite", b"x")
         with pytest.raises(ModelDomainError, match="tensor arena"):
             await convert_uploaded_model(buf.getvalue(), "rat-custom-v1.zip")
+
+
+def _compiled(tmp_path, scratch_bytes, name="1V1.tfl"):
+    from tests.tflite_fixtures import build_classifier_tflite
+
+    path = tmp_path / name
+    path.write_bytes(build_classifier_tflite(input_shape=[1, 96, 96, 1], output_classes=2, scratch_bytes=scratch_bytes))
+    return path
+
+
+class TestCompiledModel:
+    """Precompiled uploads and catalogue models skip Vela here, so the arena is read from the file."""
+
+    def test_scratch_tensor_is_the_sram_and_scratch_fast_is_not_added(self, tmp_path):
+        assert compiled_sram_bytes(_compiled(tmp_path, 74096)) == 74096
+
+    def test_no_scratch_tensor_or_no_model_is_unknown(self, tmp_path):
+        assert compiled_sram_bytes(_compiled(tmp_path, None)) is None
+        junk = tmp_path / "7V1.tfl"
+        junk.write_bytes(b"PK\x03\x04 a zip, not a model")
+        assert compiled_sram_bytes(junk) is None
+
+    def test_over_the_arena_is_refused(self, tmp_path):
+        check_compiled_model(_compiled(tmp_path, 264512))  # Edge Impulse YOLOv5 192 px, dev bucket
+        with pytest.raises(ArenaBudgetExceeded, match="1051.3 KiB"):
+            check_compiled_model(_compiled(tmp_path, 1076544))  # YOLOv11 192 px, dev bucket
+
+    async def test_precompiled_upload_surfaces_the_refusal(self, tmp_path):
+        import io
+        import zipfile
+
+        from app.domain.model import ModelDomainError, convert_uploaded_model
+
+        def package(scratch_bytes):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w") as z:
+                z.writestr("1V1.tfl", _compiled(tmp_path, scratch_bytes).read_bytes())
+                z.writestr("labels.txt", "no person\nperson\n")
+            return buf.getvalue()
+
+        tfl, _, labels = await convert_uploaded_model(package(74096), "person-custom-v1.zip")
+        assert labels == ["no person", "person"] and tfl
+        with pytest.raises(ModelDomainError, match="tensor arena"):
+            await convert_uploaded_model(package(1076544), "person-custom-v2.zip")
 
 
 def test_default_is_the_firmware_reservation():

@@ -54,13 +54,23 @@ def build_classifier_tflite(
     dtype: str = "INT8",
     input_quant: Optional[Tuple[float, int]] = (1.0, -128),
     output_quant: Optional[Tuple[float, int]] = (1.0 / 256, -128),
+    scratch_bytes: Optional[int] = None,
 ) -> bytes:
-    """A flatbuffer with one input ``input_shape`` and one output ``[1, output_classes]``."""
+    """A flatbuffer with one input ``input_shape`` and one output ``[1, output_classes]``.
+
+    ``scratch_bytes`` adds the ``_split_1_scratch`` / ``_scratch_fast`` pair Vela
+    writes into a compiled model, both that size, as Vela does in Shared_Sram mode.
+    """
     builder = flatbuffers.Builder(1024)
     tensors = [
         _tensor(builder, "image", dtype, list(input_shape), input_quant),
         _tensor(builder, "classes", dtype, [1, output_classes], output_quant),
     ]
+    if scratch_bytes is not None:
+        tensors += [
+            _tensor(builder, "_split_1_scratch", "UINT8", [scratch_bytes], None),
+            _tensor(builder, "_split_1_scratch_fast", "UINT8", [scratch_bytes], None),
+        ]
     SubGraph.SubGraphStartTensorsVector(builder, len(tensors))
     for off in reversed(tensors):
         builder.PrependUOffsetTRelative(off)
