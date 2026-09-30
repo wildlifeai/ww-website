@@ -33,6 +33,17 @@ per image derived from `review_status` (`lib/observations.ts`):
 | ⧗ Processing (grey) | no observations yet — still working through the pipeline |
 | ✕ Issue (red) | explicit pipeline error (reserved; see `StatusBadge.tsx`) |
 
+### Selection actions
+
+Click selects, double-click opens. Once something is selected the **Actions** menu
+(`components/data/MediaBulkActions.tsx`) offers: *Label as…* (one human observation on every
+selected image), *Find similar images* (single selection, Wildlife Brain), *Upload to iNaturalist*,
+*Remove images* (soft delete with undo), *Run AI (re-classify)* and *Create species ID model…*.
+The last one trains a Camera AI model (a Species Brain) from the selected labelled images through
+the Edge Impulse recipe (`TrainModelModal.tsx`, `POST /api/models/train`, behind
+`FF_MODEL_TRAINING_ENABLED`); camera-produced labels are never used as training data. See
+[species-brain-training-spec](../development%20reports/species-brain-training-spec.md).
+
 ## The full-screen labeling modal
 
 Selecting a photo opens a **full-screen modal** (`MediaDetail.tsx`):
@@ -51,6 +62,7 @@ Selecting a photo opens a **full-screen modal** (`MediaDetail.tsx`):
 | **Correct** | Change species via the taxon-validated `SpeciesPicker` (writes `taxon_id`) |
 | **▭ Box / Redraw / ✕** | Draw, replace, or delete the bounding box (writes the bbox quad) |
 | **+ Add Observation** | Create a new fully human-provenanced observation |
+| **🗑 Remove** (Del) | Delete the observation. Shown only to project members and above, checked with `has_project_role` (`lib/observationWrites.ts`); a delete that removes no row is reported as not removed (#183) |
 
 > With `FF_PER_CROP_CLASSIFY_ENABLED` on, AI produces **one observation per animal** rather than one
 > per image, so a mixed-species frame shows a card (and crop) per detection and `count` is reserved for

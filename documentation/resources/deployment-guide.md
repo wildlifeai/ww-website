@@ -28,7 +28,7 @@ How to deploy the Wildlife Watcher V2 platform (backend + frontend) to productio
 | **Azure Container App** | `ww-backend-dev` (WW-AE RG) | `ww-backend` (WW-AE RG) |
 | **Azure Blob Container** | `wildlife-watcher-uploads-dev` | `wildlife-watcher-uploads` (storage account `wwuploadsae`) |
 | **Frontend** | Cloudflare Pages preview deploys (per branch) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
-| **Google Drive** | Dev subfolder under root folder | Root folder `1jIWV3OjSEnBK4Z64syHd2ugoRuXdVrK5` |
+| **Google Drive** | `Data/dev` — `1-F6cQc5lpYOJNSPKRs7i79Gh539N5hUT` | `Data/Production` — `1apf13KX075Fv4K0A2nbaTqOmCwZ9vJzr` |
 
 > **Seed data**: The dev Supabase project is seeded with test users, organisations, projects, devices
 > and deployments. Counts and credentials are **not** duplicated here —
@@ -197,6 +197,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 | `FF_SPECIESNET_ENABLED=true` (+ `SPECIESNET_RUN_MODE`) | SpeciesNet detector+classifier. **Runs in the ARQ worker, not the API image (`--target api`)** — confirm the worker container is deployed with the same flags + `REDIS_URL` + GPU. |
 | `FF_MEDIA_REGISTRY_ENABLED=true` | Thumbnails / animal crops (the **Labels** view is empty without crops). |
 | `FF_BIOCLIP_ENABLED`, `FF_WILDLIFE_BRAIN_ENABLED` (+ `HF_TOKEN` for the gated DINOv3 weights, `EMBEDDING_*`; the vector store is **pgvector** in Supabase — no `QDRANT_*` vars, Qdrant is removed) | BioCLIP + DINOv3 embeddings / clustering. See [Vector Store](#vector-store--pgvector-supabase). |
+| `FF_MODEL_TRAINING_ENABLED` (+ `EDGE_IMPULSE_API_KEY`, `EDGE_IMPULSE_PROJECT_ID`) | Species Brain training from the Annotations page. The job runs on the **worker** when `REDIS_URL` is set, so set all three there as well as on the API; without the credentials the action only exports a dataset ZIP. |
 | `FF_PER_CROP_CLASSIFY_ENABLED` | Per-detection (per-crop) species — one observation per animal, BioCLIP refines each crop. **Requires the GPU worker**; default off (collapses per image when off). |
 
 **Demo account** — *missing → "Try the demo" self-disables (`DEMO_DISABLED`):*

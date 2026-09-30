@@ -8,7 +8,7 @@ domain mapping to CamtrapDP observation rows — all without the heavy
 """
 
 from app.domain.pipeline import (
-    bioclip_observation_patch,
+    build_crop_classification_observation,
     build_speciesnet_observations,
     rollup_taxon,
     run_pipeline,
@@ -191,38 +191,52 @@ def test_build_observations_per_detection_threshold_and_blank():
     assert len(blank) == 1 and blank[0]["observation_type"] == "blank" and "bbox_x" not in blank[0]
 
 
-# ── Phase 3: per-crop classification refinement (bioclip_observation_patch) ──
+# ── Phase 3: per-crop classification (build_crop_classification_observation) ──
 
 
 def _crop(sci="Felis catus", common="Domestic Cat", score=0.8):
     return CropPrediction(filepath="/tmp/c.jpg", scientific_name=sci, common_name=common, score=score, rank="species")
 
 
-def test_bioclip_patch_refines_species_without_touching_detection_confidence():
-    patch = bioclip_observation_patch(_crop(), "bioclip-v1", "2026-01-01T00:00:00Z")
-    assert patch["scientific_name"] == "Felis catus"
-    assert patch["vernacular_name"] == "Domestic Cat"
-    assert patch["classification_probability"] == 0.8
-    assert patch["classified_by"] == "bioclip-v1"
-    # detection confidence is NOT in the patch — only classification fields are refined
-    assert "confidence" not in patch
+_DETECTION = {
+    "id": "speciesnet-row",
+    "media_id": "m1",
+    "crop_url": "crops/dep/m1/speciesnet-row.jpg",
+    "confidence": 0.91,
+    "bbox_x": 0.1,
+    "bbox_y": 0.2,
+    "bbox_w": 0.3,
+    "bbox_h": 0.4,
+}
 
 
-def test_bioclip_patch_keeps_provisional_label_when_no_name():
-    # No usable name → None → caller keeps the provisional SpeciesNet species.
-    assert bioclip_observation_patch(_crop(sci=None), "bioclip-v1", "t") is None
+def test_crop_classification_is_its_own_row_on_the_detection_box():
+    """#162: the classifier writes beside the SpeciesNet row, never onto it."""
+    row = build_crop_classification_observation(_DETECTION, "dep", _crop(), "bioclip-v1", "2026-01-01T00:00:00Z")
+    assert row["id"] != _DETECTION["id"]
+    assert (row["media_id"], row["deployment_id"]) == ("m1", "dep")
+    assert (row["scientific_name"], row["vernacular_name"]) == ("Felis catus", "Domestic Cat")
+    assert row["source_model_version"] == row["classified_by"] == "bioclip-v1"
+    assert (row["source_type"], row["ai_origin"], row["review_status"]) == ("ai", "cloud", "ai_reviewed")
+    assert row["classification_probability"] == 0.8
+    # The detection's box and confidence link it to that detection; the crop stays the detector's.
+    assert (row["bbox_x"], row["bbox_y"], row["bbox_w"], row["bbox_h"]) == (0.1, 0.2, 0.3, 0.4)
+    assert row["confidence"] == 0.91
+    assert "crop_url" not in row
 
 
-def test_bioclip_patch_keeps_provisional_label_below_threshold():
-    # Uncertain crop must never overwrite with a confidently-wrong species.
-    assert bioclip_observation_patch(_crop(score=0.2), "bioclip-v1", "t", confidence_threshold=0.5) is None
+def test_crop_classification_adds_nothing_without_a_name():
+    assert build_crop_classification_observation(_DETECTION, "dep", _crop(sci=None), "bioclip-v1", "t") is None
 
 
-def test_bioclip_patch_allows_missing_score():
-    # A None score is not "below threshold" — it still refines (the classifier just
-    # didn't report a probability).
-    patch = bioclip_observation_patch(_crop(score=None), "bioclip-v1", "t", confidence_threshold=0.5)
-    assert patch is not None and patch["classification_probability"] is None
+def test_crop_classification_adds_nothing_below_threshold():
+    assert build_crop_classification_observation(_DETECTION, "dep", _crop(score=0.2), "bioclip-v1", "t", confidence_threshold=0.5) is None
+
+
+def test_crop_classification_allows_missing_score():
+    # A None score is not "below threshold": the classifier just didn't report a probability.
+    row = build_crop_classification_observation(_DETECTION, "dep", _crop(score=None), "bioclip-v1", "t", confidence_threshold=0.5)
+    assert row is not None and row["classification_probability"] is None
 
 
 def test_delete_superseded_ai_observations_scopes_and_cleans_crops():
@@ -364,3 +378,37 @@ def test_build_observations_dedups_animal_boxes_into_one_with_count():
     # Representative bbox + confidence come from the highest-confidence box.
     assert r["confidence"] == 0.93
     assert (r["bbox_x"], r["bbox_y"], r["bbox_w"], r["bbox_h"]) == (0.1, 0.2, 0.3, 0.4)
+
+
+async def test_per_crop_run_inserts_beside_speciesnet_and_never_updates_it(monkeypatch, tmp_path):
+    """#162 acceptance: after a per-crop run the SpeciesNet row is untouched and a classifier row exists."""
+    import time
+    from unittest.mock import MagicMock
+
+    from app.domain import media_resolver, pipeline
+
+    svc = MagicMock()
+    fetch = svc.table.return_value.select.return_value.in_.return_value.eq.return_value.eq.return_value.like.return_value.execute
+    fetch.return_value.data = [_DETECTION]
+    monkeypatch.setattr(pipeline, "create_service_client", lambda: svc)
+    deleted = []
+    monkeypatch.setattr(pipeline, "delete_superseded_ai_observations", lambda _svc, ids, version: deleted.append((set(ids), version)))
+
+    async def resolve(url, size="full"):
+        return b"jpeg", "image/jpeg"
+
+    monkeypatch.setattr(media_resolver, "resolve_media", resolve)
+
+    class Classifier:
+        name = "bioclip"
+
+        async def classify(self, paths, config):
+            return [CropPrediction(filepath=p, scientific_name="Felis catus", common_name="Domestic Cat", score=0.8, rank="species") for p in paths]
+
+    result = await pipeline.BioCLIPStep()._refine_crops_per_detection([{"id": "m1"}], "dep", {}, Classifier(), "bioclip-v1", 0.0, time.monotonic())
+
+    svc.table.return_value.update.assert_not_called()
+    inserted = svc.table.return_value.insert.call_args.args[0]
+    assert [(r["media_id"], r["source_model_version"], r["bbox_x"]) for r in inserted] == [("m1", "bioclip-v1", 0.1)]
+    assert deleted == [({"m1"}, "bioclip-v1")]
+    assert result.observations_created == 1

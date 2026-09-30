@@ -7,7 +7,7 @@ python-multipart>=0.0.12
 supabase>=2.27.0
 gotrue>=2.0
 httpx>=0.28.0
-ethos-u-vela>=3.10
+ethos-u-vela==5.2.0               # Ethos-U55 compiler, pinned: every model source (upload, Edge Impulse, gcp trainer) compiles here
 structlog>=24.0
 sentry-sdk[fastapi]>=2.0
 slowapi>=0.1.9
@@ -20,6 +20,7 @@ aiohttp>=3.9.0                   # Async transport for Azure Storage
 timezonefinder>=6.5.0            # GPS coordinates → timezone lookup
 Pillow>=10.0.0                   # Image processing for clustering (dHash, sharpness)
 numpy>=1.24                      # Numerical ops for perceptual hashing
+google-genai>=2.25.0             # Gemini API SDK for the animal-presence step (services/gemini_presence.py); light, no torch
 arq>=0.25                        # ARQ queue CLIENT — the API enqueues GPU jobs to Redis; the
 #                                  worker (requirements-ml.txt) executes them. Lightweight (redis dep only).
 # Heavy ML deps (torch, transformers, hdbscan, umap-learn, speciesnet) live in

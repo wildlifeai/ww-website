@@ -14,6 +14,7 @@ import re
 import shutil
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -23,7 +24,7 @@ from app.config import settings
 from app.registries.model_registry import get_model_config
 from app.services.http_client import download_url_content
 from app.services.supabase_client import create_service_client
-from app.services.vela import VelaConversionError, run_vela_conversion
+from app.services.vela import VelaConversionError, check_compiled_model, run_vela_conversion
 
 logger = structlog.get_logger()
 
@@ -115,6 +116,45 @@ def _extract_labels_from_header(vars_h_path: Path) -> List[str]:
     raise HeaderLabelsNotFound("No labels found in model_variables.h")
 
 
+@dataclass(frozen=True)
+class TensorFacts:
+    """What the device contract needs from one model tensor."""
+
+    dtype: str  # TFLite TensorType name: "INT8", "FLOAT32", ...
+    shape: Tuple[int, ...]
+    scale: Optional[float] = None
+    zero_point: Optional[int] = None
+
+
+def read_io_tensors(model_path: Path) -> Tuple[Optional[TensorFacts], TensorFacts]:
+    """First input (None when the graph declares none) and first output tensor of a
+    TFLite flatbuffer, a Vela ``.tfl`` included.
+
+    Uses the flatbuffer bindings that ship with ``ethos-u-vela``, so no TensorFlow.
+    Raises ValueError when the file is not a readable model or has no output.
+    """
+    from ethosu.vela.tflite.Model import Model
+    from ethosu.vela.tflite.TensorType import TensorType
+
+    names = {v: k for k, v in vars(TensorType).items() if not k.startswith("_")}
+
+    def facts(tensor) -> TensorFacts:
+        quant = tensor.Quantization()
+        scale = float(quant.Scale(0)) if quant is not None and quant.ScaleLength() else None
+        zero_point = int(quant.ZeroPoint(0)) if quant is not None and quant.ZeroPointLength() else None
+        shape = tuple(int(tensor.Shape(i)) for i in range(tensor.ShapeLength()))
+        return TensorFacts(names.get(tensor.Type(), f"UNKNOWN({tensor.Type()})"), shape, scale, zero_point)
+
+    try:
+        subgraph = Model.GetRootAs(bytearray(Path(model_path).read_bytes()), 0).Subgraphs(0)
+        if not subgraph.OutputsLength():
+            raise ValueError("no output tensor")
+        inp = facts(subgraph.Tensors(subgraph.Inputs(0))) if subgraph.InputsLength() else None
+        return inp, facts(subgraph.Tensors(subgraph.Outputs(0)))
+    except Exception as exc:  # noqa: BLE001 any parse failure means "not a readable model"
+        raise ValueError(f"{Path(model_path).name} is not a readable TFLite model") from exc
+
+
 def _classifier_class_count(model_path: Path) -> Optional[int]:
     """How many classes a *classification* model has, or None when not knowable.
 
@@ -135,22 +175,15 @@ def _classifier_class_count(model_path: Path) -> Optional[int]:
     loader anyway.
     """
     try:
-        from ethosu.vela.tflite.Model import Model
-
-        subgraph = Model.GetRootAs(bytearray(model_path.read_bytes()), 0).Subgraphs(0)
-        if subgraph is None or subgraph.OutputsLength() < 1:
-            return None
-        tensor = subgraph.Tensors(subgraph.Outputs(0))
-        if tensor is None:
-            return None
-        shape = [int(tensor.Shape(i)) for i in range(tensor.ShapeLength())]
-        if len(shape) != 2 or shape[1] < 1:
-            logger.info("lm1_skipped_not_a_classifier", file=model_path.name, output_shape=shape)
-            return None
-        return shape[1]
-    except Exception:  # noqa: BLE001 — any parse failure means "unknown", not "invalid"
+        _, output = read_io_tensors(model_path)
+    except ValueError:  # any parse failure means "unknown", not "invalid"
         logger.info("output_tensor_shape_unreadable", file=model_path.name)
         return None
+    shape = list(output.shape)
+    if len(shape) != 2 or shape[1] < 1:
+        logger.info("lm1_skipped_not_a_classifier", file=model_path.name, output_shape=shape)
+        return None
+    return shape[1]
 
 
 def _check_label_count(labels: List[str], class_count: Optional[int]) -> None:
@@ -175,6 +208,14 @@ def _check_label_count(labels: List[str], class_count: Optional[int]) -> None:
             "line in labels.txt, in class order. The device reports a class with no "
             "label as an empty name, which cannot be mapped to a species."
         )
+
+
+def _check_compiled_arena(tfl_path: Path) -> None:
+    """Arena check for a precompiled package or registry model (Vela already ran elsewhere)."""
+    try:
+        check_compiled_model(tfl_path)
+    except VelaConversionError as e:
+        raise ModelDomainError(str(e)) from e
 
 
 def _build_firmware_filename(vars_h_path: Path) -> str:
@@ -357,6 +398,7 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
             # sees a precompiled package carrying no Edge Impulse metadata, which
             # is how a one-label two-class model got through before.
             _check_label_count(labels, _classifier_class_count(tfl_file))
+            _check_compiled_arena(tfl_file)
 
             tfl_bytes = tfl_file.read_bytes()
             txt_bytes = labels_txt.read_bytes()
@@ -571,6 +613,72 @@ async def upload_and_register(
         raise ModelDomainError(f"Upload or registration failed: {e}") from e
 
 
+async def next_model_version(client, org_id: str, model_name: str) -> Tuple[int, str]:
+    """Auto-version a model by name within an organisation → ``(major, "major.0.0-xxxxxx")``.
+
+    The integer is ``ai_models.version_number`` (the ``V<n>`` of the 8.3 device
+    filename); the string is the human ``version`` column. Shared by the upload
+    and the training endpoints so both number the same way.
+    """
+    import uuid
+
+    existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
+    existing_res = await asyncio.to_thread(existing_query.execute)
+    majors = []
+    for r in existing_res.data or []:
+        v = r.get("version")
+        if v:
+            head = v.split(".")[0]
+            if head.isdigit():
+                majors.append(int(head))
+    next_ver = max(majors) + 1 if majors else 1
+    return next_ver, f"{next_ver}.0.0-{uuid.uuid4().hex[:6]}"
+
+
+async def store_model_artifacts(
+    client,
+    *,
+    org_id: str,
+    firmware_id,
+    version_num: str,
+    tfl_bytes: bytes,
+    txt_bytes: bytes,
+) -> Dict[str, Any]:
+    """Upload a converted ``.TFL`` + ``.TXT`` pair to the ``ai-models`` bucket.
+
+    Path: ``{org}/{firmware_id}/{version}/{stem}.TFL`` with the 8.3 stem
+    ``{firmware_id}V{version}`` (truncated to 8 chars). Upserts, so a re-run
+    overwrites. Returns the storage paths, the stem, the SHA-256 of the ``.TFL``
+    (what the mobile app transfers) and the combined size.
+    """
+    import hashlib
+
+    name_stem = f"{firmware_id}V{version_num}"[:8]
+    path_tfl = f"{org_id}/{firmware_id}/{version_num}/{name_stem}.TFL"
+    path_txt = f"{org_id}/{firmware_id}/{version_num}/{name_stem}.TXT"
+    # upsert must be the STRING "true": the storage client passes file_options as
+    # HTTP headers and a bool raises "Header value must be str or bytes".
+    await asyncio.to_thread(
+        client.storage.from_("ai-models").upload,
+        path=path_tfl,
+        file=tfl_bytes,
+        file_options={"content-type": "application/octet-stream", "upsert": "true"},
+    )
+    await asyncio.to_thread(
+        client.storage.from_("ai-models").upload,
+        path=path_txt,
+        file=txt_bytes,
+        file_options={"content-type": "text/plain", "upsert": "true"},
+    )
+    return {
+        "model_path": path_tfl,
+        "labels_path": path_txt,
+        "name_stem": name_stem,
+        "file_hash": hashlib.sha256(tfl_bytes).hexdigest(),
+        "file_size_bytes": len(tfl_bytes) + len(txt_bytes),
+    }
+
+
 async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, bytes, List[str], Dict[str, Any]]:
     """Download, convert, and package a pretrained SSCMA model.
 
@@ -651,6 +759,7 @@ async def convert_pretrained_model(sscma_uuid: str) -> Tuple[bytes, bytes, List[
         if not model_info.get("classes"):
             logger.warning("sscma_model_declares_no_classes", uuid=sscma_uuid, name=model_info.get("name"))
         _check_label_count(labels, _classifier_class_count(vela_final_path))
+        _check_compiled_arena(vela_final_path)
 
         labels_txt_path = work_dir / "labels.txt"
         labels_txt_path.write_text("\n".join(labels), newline="\n")
@@ -755,6 +864,7 @@ async def convert_github_pretrained_model(architecture: str, resolution: str) ->
         # the wrong number of classes for the model it points at, which is the
         # same defect as #134 arriving by a different route.
         _check_label_count(labels, _classifier_class_count(vela_final_path))
+        _check_compiled_arena(vela_final_path)
 
         labels_txt_path = work_dir / "labels.txt"
         labels_txt_path.write_text("\n".join(labels), newline="\n")

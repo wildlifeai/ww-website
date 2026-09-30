@@ -6,7 +6,7 @@ All environment variables are declared here with sensible defaults.
 Validated at startup — the app refuses to boot if required vars are missing.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -84,6 +84,60 @@ class Settings(BaseSettings):
     FF_INTELLIGENCE_ENABLED: bool = Field(False, description="Enable conservation intelligence endpoints (health, alerts, shift)")
     FF_LOCAL_EMBEDDING_ENABLED: bool = Field(False, description="Accept client-computed (WebGPU) embedding vectors")
 
+    # ── Species Brain training ("Create species ID model" on the Annotations page) ──
+    FF_MODEL_TRAINING_ENABLED: bool = Field(
+        False,
+        description=(
+            "Enable POST /api/models/train: build a labelled dataset from selected annotated images, "
+            "train an int8 image classifier through Edge Impulse, compile it with Vela and register it "
+            "as a Species Brain (ai_models row). Without Edge Impulse credentials the endpoint still "
+            "works in export-only mode (an Edge Impulse-ready dataset ZIP)."
+        ),
+    )
+    EDGE_IMPULSE_API_KEY: str = Field("", description="Edge Impulse *project* API key (ei_…) for the training-bench project")
+    EDGE_IMPULSE_PROJECT_ID: int = Field(0, description="Edge Impulse project ID the trainer uploads to and trains in (0 = not configured)")
+    EDGE_IMPULSE_STUDIO_URL: str = Field("https://studio.edgeimpulse.com/v1", description="Edge Impulse Studio API base URL")
+    EDGE_IMPULSE_INGESTION_URL: str = Field("https://ingestion.edgeimpulse.com", description="Edge Impulse ingestion API base URL")
+    EDGE_IMPULSE_DEPLOY_FORMAT: str = Field(
+        "custom",
+        description="Deployment target `format` to build and download (the 'Custom' zip carries trained.tflite + model-parameters/)",
+    )
+    EDGE_IMPULSE_TRANSFER_MODEL: str = Field(
+        "transfer_mobilenetv2_a35",
+        description="Keras visual layer type for the transfer-learning block (MobileNetV2 0.35, the recipe used for the rat model)",
+    )
+    EDGE_IMPULSE_JOB_TIMEOUT_S: int = Field(1800, ge=60, description="Max seconds to wait for one Edge Impulse job (features, training, build)")
+    MODEL_TRAINING_MIN_IMAGES_PER_CLASS: int = Field(20, ge=2, description="Refuse to train a class with fewer samples than this")
+    MODEL_TRAINING_RECOMMENDED_IMAGES_PER_CLASS: int = Field(100, ge=1, description="Below this the UI warns (guide: 100 to 1000 per class)")
+    MODEL_TRAINING_MAX_IMAGES: int = Field(3000, ge=10, description="Max samples in one training run")
+    MODEL_TRAINING_MAX_CLASSES: int = Field(16, ge=2, le=16, description="Device MAX_CLASSES (firmware result buffer), never raise above 16")
+    MODEL_ARENA_BYTES: int = Field(
+        512 * 1024,
+        ge=1,
+        description=(
+            "Tensor arena the ww500_md firmware reserves (ww500_md.ld: `. = . + 512K;`). services/vela.py refuses any model "
+            "whose Vela SRAM estimate exceeds it, whatever its source (upload, Edge Impulse, gcp trainer)"
+        ),
+    )
+
+    # ── Native Species Brain training on Google Cloud (MODEL_TRAINER=gcp) ──
+    # Report: documentation/development reports/2026-09_gcp-native-model-training. The job
+    # runs on the ARQ worker, so set these there as well as on the API.
+    FF_NATIVE_TRAINING_ENABLED: bool = Field(False, description="Allow MODEL_TRAINER=gcp; off = POST /api/models/train behaves as without it")
+    MODEL_TRAINER: Literal["edge_impulse", "gcp"] = Field(
+        "edge_impulse",
+        description="Trainer behind POST /api/models/train: 'edge_impulse' or 'gcp' (the Cloud Run job built from backend/training/)",
+    )
+    # GOOGLE_CLOUD_PROJECT and CLOUD_RUN_JOB_REGION are the names the Google Cloud migration plan
+    # (2026-09_gcp-pilot-and-migration, §8) uses for the ML-worker job; the trainer shares them.
+    # Credentials are Application Default Credentials (the worker's runtime identity), no key.
+    GOOGLE_CLOUD_PROJECT: str = Field("", description="Google Cloud project of the Cloud Run jobs (ww-pilot-dev, later ww-dev / ww-prod)")
+    CLOUD_RUN_JOB_REGION: str = Field("asia-southeast1", description="Region of the Cloud Run jobs (Singapore: no Cloud Run L4 in Australia)")
+    GCS_TRAINING_BUCKET: str = Field("", description="Bucket for runs/<run_key>/dataset (manifest + images) and runs/<run_key>/output (artefacts)")
+    TRAINING_JOB_NAME: str = Field("ww-species-trainer", description="Cloud Run job built from backend/training/Dockerfile")
+    TRAINING_POLL_INTERVAL_S: float = Field(15.0, ge=1.0, description="Seconds between Cloud Run execution polls")
+    TRAINING_RUN_TIMEOUT_S: int = Field(3600, ge=60, le=3600, description="Max seconds per training run; Cloud Run caps GPU job tasks at 1 hour")
+
     # ── Motion ROI (SpeciesNet-free crop fallback) ───────────────────
     FF_MOTION_ROI_FALLBACK_ENABLED: bool = Field(
         False,
@@ -93,10 +147,52 @@ class Settings(BaseSettings):
             "animal region. No ML — works on the lean dev-cloud image where SpeciesNet is unavailable."
         ),
     )
-    MOTION_ROI_BURST_GAP_SECONDS: float = Field(
+    # One burst grouper, one gap (domain/burst_evidence.py::group_bursts), shared by the
+    # motion-ROI crop fallback, the Gemini contact sheet and evidence fusion. 10 s because
+    # today's firmware spaces the frames of one trigger 3 to 5 s apart; the firmware
+    # sequence tag, once it lands in EXIF, makes the gap irrelevant.
+    BURST_GAP_SECONDS: float = Field(
         10.0,
         ge=0.0,
-        description="Max seconds between consecutive frames to treat them as one motion burst for ROI cropping",
+        description="Max seconds between consecutive frames of one trigger burst (used when the firmware sequence tag is absent)",
+    )
+
+    # ── Gemini presence filter (Cloud AI, VLM blank audit) ────────────
+    # Runs BEFORE SpeciesNet on every frame in the batch and records a per-frame
+    # animal-present verdict as its own observation row (source_model_version = the
+    # Gemini model id). Does not alter SpeciesNet's rows: the two are compared by
+    # backend/scripts/eval_presence.py before any production wiring is decided.
+    # Set on the ARQ worker, not just the API, or the step silently no-ops.
+    FF_GEMINI_PRESENCE_ENABLED: bool = Field(
+        False,
+        description="Run the Gemini animal-presence step before SpeciesNet (needs GEMINI_API_KEY)",
+    )
+    GEMINI_API_KEY: str = Field("", description="Google AI Studio API key for the google-genai SDK (empty = feature disabled)")
+    GEMINI_PRESENCE_MODEL: str = Field(
+        "gemini-3.1-flash-lite",
+        description="Gemini model id for the presence step; must have a row in services/gemini_pricing.py",
+    )
+    GEMINI_PRESENCE_VARIANT: str = Field(
+        "single",
+        description="Token-saving variant: 'single' (one downscaled frame per call), 'contact_sheet' (one burst per call), 'batch' (Batch API)",
+    )
+
+    # ── Evidence fusion (consensus verdict per frame) ─────────────────
+    # Runs after Gemini, SpeciesNet (and BioCLIP): groups the batch into trigger
+    # bursts, scores every frame from the rows the other steps wrote plus motion
+    # between the burst's frames, and writes ONE consensus observation per media
+    # (source_type='consensus', classified_by='evidence_fusion_v1'). Signals are
+    # also written to the ww-backend table media_evidence when it exists. Set on
+    # the ARQ worker, not just the API.
+    FF_EVIDENCE_FUSION_ENABLED: bool = Field(
+        False,
+        description="Write a consensus observation per frame from SpeciesNet + Gemini + burst evidence (domain/burst_evidence.py)",
+    )
+    EVIDENCE_FUSION_THRESHOLD: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Evidence score at or above which the consensus row says animal (weights are hand-set guesses, version v1)",
     )
 
     # Vector store is pgvector in Supabase (media_embeddings.embedding) — no separate
@@ -121,8 +217,13 @@ class Settings(BaseSettings):
     # ── Google Drive ──────────────────────────────────────────────────
     GOOGLE_DRIVE_ENABLED: bool = Field(False, description="Enable async Google Drive upload of analysed images")
     GOOGLE_DRIVE_FOLDER_ID: str = Field(
-        "1jIWV3OjSEnBK4Z64syHd2ugoRuXdVrK5",
-        description="Root Google Drive folder ID for uploads",
+        "",
+        description=(
+            "Root Google Drive folder ID this environment archives into. No default on "
+            "purpose: every environment gets its own subfolder of the shared 'Data' folder "
+            "(dev, Production), so a default would silently write into whichever folder it "
+            "named. Unset + Drive enabled fails loudly at upload time."
+        ),
     )
     GOOGLE_SERVICE_ACCOUNT_JSON: str = Field(
         "",

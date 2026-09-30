@@ -37,6 +37,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | Storage | `azure-storage-blob`, Google Drive API | temp buffer + permanent archive |
 | HTTP | `httpx` + `tenacity` | retrying external calls |
 | AI | SpeciesNet, DINOv3 (Wildlife Brain), `ethos-u-vela` | inference, embeddings, model conversion |
+| Hosted VLM | `google-genai` (Gemini API SDK) | animal-presence filter step (`services/gemini_presence.py`); no torch, ships in the lean API image; prices and token rules in `services/gemini_pricing.py` |
 | Logging | `structlog` | structured JSON logs |
 | Errors | `sentry-sdk` | optional, via `SENTRY_DSN` |
 | Lint/test | `ruff`, `pytest` | `pyproject.toml` config (line length 100) |
@@ -54,6 +55,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | **iNaturalist** | Taxa autocomplete + lineage registration, observation publishing + community-ID sync | `FF_INAT_ENABLED` |
 | **TTN / Chirpstack** | LoRaWAN uplink webhooks | `FF_LORAWAN_WEBHOOKS_ENABLED` |
 | **Sentry** | Error tracking | `SENTRY_DSN` |
+| **Edge Impulse** | Trains Species Brains (on-camera classifiers) from an Annotations selection: Studio + ingestion APIs driven by `services/edge_impulse.py`. Without credentials the action packages a dataset ZIP instead | `FF_MODEL_TRAINING_ENABLED` + `EDGE_IMPULSE_API_KEY` / `EDGE_IMPULSE_PROJECT_ID` (set on the **worker** too) |
 
 ## Feature flags
 
@@ -73,11 +75,15 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_PER_CROP_CLASSIFY_ENABLED` | `false` | One AI observation per detection (not collapsed per image) — requires the GPU worker; see [04-AI-PIPELINE](./04-AI-PIPELINE.md) |
 | `FF_EDGE_REFLECT_ENABLED` | `false`¹ | Reflect the camera's on-device (Camera AI) EXIF predictions as `ai_origin='edge'` observations (¹ **on** for dev). See [dual-ai-production-rollout](../resources/dual-ai-production-rollout.md) |
 | `FF_MOTION_ROI_FALLBACK_ENABLED` | `false` | Motion-ROI crop fallback when SpeciesNet finds no bbox |
+| `FF_GEMINI_PRESENCE_ENABLED` | `false` | Gemini animal-presence step before SpeciesNet (one `animal`/`blank` row per frame, `source_model_version` = the Gemini model id, prompt v2 structured evidence in `observation_comments`); needs `GEMINI_API_KEY`, tuned by `GEMINI_PRESENCE_MODEL` / `GEMINI_PRESENCE_VARIANT`. Set on the **worker**. See the [false-negatives report §6](../development%20reports/2026-09_false-negatives-and-vlm-audit/README.md) |
+| `FF_EVIDENCE_FUSION_ENABLED` | `false` | Evidence-fusion step, last in the pipeline: one `source_type='consensus'` row per frame (`evidence_fusion_v1`) from the SpeciesNet, Gemini and edge rows plus burst motion; tuned by `EVIDENCE_FUSION_THRESHOLD` (0.5) and `BURST_GAP_SECONDS` (10, shared with motion ROI and the contact sheet). Set on the **worker**. Design: [evidence-pipeline architecture](../development%20reports/2026-09_evidence-pipeline-architecture/README.md); results: [false-negatives report §6](../development%20reports/2026-09_false-negatives-and-vlm-audit/README.md) |
 | `FF_WILDLIFE_BRAIN_ENABLED` | `false` | DINOv3 embedding / clustering / similarity |
 | `FF_LOCAL_EMBEDDING_ENABLED` | `false` | Accept client-computed (WebGPU) embedding vectors |
 | `FF_MEDIA_REGISTRY_ENABLED` | `false` | Thumbnail/crop generation + resolve endpoints |
 | `FF_ACTIVE_LEARNING_ENABLED` | `false` | Active-learning review queue + QA report |
 | `FF_INTELLIGENCE_ENABLED` | `false` | Conservation-intelligence endpoints (health, alerts, shift) |
+| `FF_MODEL_TRAINING_ENABLED` | `false` | Annotations → *Create species ID model…* (Edge Impulse training or dataset export). Set on the ARQ worker as well; see [species-brain-training-spec](../development%20reports/species-brain-training-spec.md) |
+| `FF_NATIVE_TRAINING_ENABLED` | `false` | With `MODEL_TRAINER=gcp`, that action trains in a Cloud Run job instead of Edge Impulse. Worker too; see [2026-09_gcp-native-model-training](../development%20reports/2026-09_gcp-native-model-training/README.md) |
 | `FF_BMP_INGEST_ENABLED` | `false`¹ | Raw-BMP ingest → JPEG re-compress on upload (¹ compose default: `true`) |
 
 > Always confirm the current set against `config.py` — flags are added as features land.

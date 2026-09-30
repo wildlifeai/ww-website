@@ -27,6 +27,7 @@ import { useUploadStore } from '../../contexts/UploadContext'
 import { useJobsList } from '../../hooks/useJobs'
 import { MediaBulkActions, type BulkAction } from './MediaBulkActions'
 import { DeleteConfirmModal, AiModelPickerModal, PipelineLogModal } from './BulkActionModals'
+import { TrainModelModal } from './TrainModelModal'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ClusterLabelAll — per-cluster header action shown when grouping by cluster.
@@ -362,6 +363,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   const [showDeleteModal, setShowDeleteModal]   = useState(false)
   const [showAiPicker, setShowAiPicker]         = useState(false)
   const [showLabelModal, setShowLabelModal]     = useState(false)
+  const [showTrainModal, setShowTrainModal]     = useState(false)
   const [labelBusy, setLabelBusy]               = useState(false)
   const [pipelineLogs, setPipelineLogs]         = useState<string[] | null>(null)
   // Quick in-context connect: paste a personal API token (Pathway 2). The full
@@ -437,6 +439,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
       setShowAiPicker(true)
     } else if (action === 'label') {
       setShowLabelModal(true)
+    } else if (action === 'train') {
+      setShowTrainModal(true)
     } else if (action === 'inat') {
       if (!inat.connected) {
         connectInat()
@@ -1647,6 +1651,19 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
           onClose={() => setShowLabelModal(false)}
         />
       )}
+      {showTrainModal && (() => {
+        // The selection as the trainer will see it (optimistic upload placeholders are not rows yet).
+        const rows = filtered.filter(m => selectedIds.has(m.id) && !m._pending)
+        const depIds = new Set(rows.map(m => m.deployment_id))
+        const projectIds = [...new Set(deployments.filter(d => depIds.has(d.id)).map(d => d.project_id))]
+        return (
+          <TrainModelModal
+            media={rows}
+            projectIds={projectIds}
+            onClose={() => setShowTrainModal(false)}
+          />
+        )
+      })()}
       {pipelineLogs !== null && (
         <PipelineLogModal
           isRunning={pipelineLogs.length > 0 && !pipelineLogs[pipelineLogs.length - 1]?.startsWith('✓') && !pipelineLogs[pipelineLogs.length - 1]?.startsWith('⚠')}

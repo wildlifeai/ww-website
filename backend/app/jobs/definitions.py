@@ -38,15 +38,19 @@ ANNOTATE_DEBOUNCE_SECONDS = 60
 # Human-readable labels for AI pipeline steps, surfaced in the upload progress log.
 _STEP_LABEL = {
     "media_prep": "Generating thumbnails",
+    "gemini_presence": "Checking frames for animals (Gemini)",
     "speciesnet": "Detecting & classifying species",
     "animal_crop": "Cropping animals",
     "bioclip": "Running BioCLIP classifier",
+    "evidence_fusion": "Combining the evidence per frame",
 }
 _STEP_EMOJI = {
     "media_prep": "🖼️",
+    "gemini_presence": "👁️",
     "speciesnet": "🦊",
     "animal_crop": "✂️",
     "bioclip": "🧬",
+    "evidence_fusion": "⚖️",
 }
 
 
@@ -247,6 +251,218 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
             await delete_blob(job_id)
         except Exception:
             pass
+        raise
+
+
+async def _append_model_status(client, model_id: str, job_id: str, status: str, error_message: str = None, training: dict = None, **fields):
+    """Set ``ai_models.status`` (+ any columns) and append an entry to ``processing_log``."""
+    payload = {"status": status, **fields}
+    if error_message:
+        payload["error_message"] = error_message
+    log_entry = {"timestamp": datetime.now(timezone.utc).isoformat(), "status": status, "job_id": job_id}
+    if error_message:
+        log_entry["error"] = error_message
+    if training:
+        log_entry["training"] = training
+    # TODO(schema): Use a JSONB append RPC to prevent race conditions on processing_log
+    try:
+        existing = await asyncio.to_thread(client.table("ai_models").select("processing_log").eq("id", model_id).execute)
+        current_log = (existing.data[0].get("processing_log") or []) if existing.data else []
+        current_log.append(log_entry)
+        payload["processing_log"] = current_log
+    except Exception:
+        payload["processing_log"] = [log_entry]
+    await asyncio.to_thread(client.table("ai_models").update(payload).eq("id", model_id).execute)
+
+
+async def train_species_brain_job(job_id: str, user_id: str, model_id: str | None, org_id: str, params: dict):
+    """Train a Species Brain from an Annotations selection (``POST /api/models/train``).
+
+    Dataset → Edge Impulse (upload, impulse, features, train, int8 build) → Vela →
+    ``ai_models`` row validated with ``label_map`` filled from the classes the user
+    chose. When no trainer is configured (or no model row was created) the dataset
+    is packaged as an Edge-Impulse-ready ZIP instead and offered for download.
+    With ``training_mode() == "gcp"`` the trainer half is ``jobs/native_training.py``.
+    Runs on the GPU worker when Redis is configured, in-process otherwise.
+    """
+    from app.config import settings
+    from app.domain.training import (
+        TrainingError,
+        build_dataset_zip,
+        build_label_map,
+        build_training_dataset,
+        firmware_target_warning,
+        label_slug,
+        training_mode,
+    )
+    from app.schemas.model import TrainModelRequest
+    from app.services.storage import upload_to_storage
+    from app.services.supabase_client import create_service_client
+
+    log_ctx = {"job_type": "train_species_brain", "job_id": job_id, "model_id": model_id, "org_id": org_id}
+    logger.info("train_job_start", **log_ctx)
+    req = TrainModelRequest(**params)
+    client = create_service_client()
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.05, message="Building the training dataset…")
+
+    async def progress(pct: float, msg: str) -> None:
+        await update_job(job_id, progress=pct, message=msg)
+
+    async def tick(msg: str) -> None:
+        await update_job(job_id, message=msg)
+
+    async def model_status(status: str, error_message: str = None, training: dict = None, **fields) -> None:
+        if model_id:
+            await _append_model_status(client, model_id, job_id, status, error_message=error_message, training=training, **fields)
+
+    try:
+        train, test, summary = await build_training_dataset(client, req, progress)
+        total = len(train) + len(test)
+
+        if training_mode() == "export_only" or model_id is None:
+            zip_bytes = build_dataset_zip(train, test, summary, model_name=req.model_name, request=params)
+            path = f"temp/training/{job_id}/{label_slug(req.model_name)}-dataset.zip"
+            if not await upload_to_storage("firmware", path, zip_bytes, "application/zip"):
+                raise TrainingError("Could not store the dataset ZIP")
+            try:
+                signed = client.storage.from_("firmware").create_signed_url(path, expires_in=3600)
+                result_url = signed.get("signedURL", "") or path
+            except Exception:
+                result_url = path
+            await update_job(
+                job_id,
+                status=JobStatus.COMPLETED,
+                progress=1.0,
+                result_url=result_url,
+                message=(
+                    f"📦 Dataset ready: {total} images across {len(summary.labels)} classes. Edge Impulse is not connected on "
+                    "this server, so train it there by hand (README.txt inside the ZIP) and upload the int8 export on the Toolkit page."
+                ),
+            )
+            logger.info("train_job_exported_dataset", images=total, **log_ctx)
+            return
+
+        from app.domain.model import convert_uploaded_model, store_model_artifacts
+
+        # 'uploaded' = "in flight, not yet validated" (the status enum has no 'training').
+        await model_status("uploaded", training={"stage": "dataset", "dataset": summary.as_dict()})
+
+        if training_mode() == "gcp":
+            from app.jobs.native_training import train_on_gcp
+
+            async with job_heartbeat(job_id):
+                zip_bytes, trained = await train_on_gcp(model_id, req, train, test, summary.labels, progress=progress, tick=tick)
+        else:
+            from app.services.edge_impulse import EdgeImpulseClient
+
+            ei = EdgeImpulseClient(
+                settings.EDGE_IMPULSE_API_KEY,
+                settings.EDGE_IMPULSE_PROJECT_ID,
+                studio_url=settings.EDGE_IMPULSE_STUDIO_URL,
+                ingestion_url=settings.EDGE_IMPULSE_INGESTION_URL,
+            )
+            timeout_s = settings.EDGE_IMPULSE_JOB_TIMEOUT_S
+
+            async with job_heartbeat(job_id):
+                await progress(0.2, "Clearing the Edge Impulse training project…")
+                await ei.delete_all_samples()
+
+                await progress(0.25, f"Uploading {total} images to Edge Impulse…")
+                for category, rows in (("training", train), ("testing", test)):
+                    by_label: dict[str, list] = {}
+                    for sample, data in rows:
+                        by_label.setdefault(sample.label, []).append((f"{label_slug(sample.label)}.{sample.sample_id[:8]}.jpg", data))
+                    for label, files in by_label.items():
+                        await ei.upload_samples(category, label, files)
+
+                await progress(0.4, f"Setting up the impulse ({req.image_size}×{req.image_size} {req.colour}, transfer learning)…")
+                await ei.set_impulse(req.image_size)
+                await ei.set_dsp_config(req.colour)
+                feat_job = await ei.start_generate_features()
+                await ei.wait_for_job(feat_job, what="Generating features", timeout_s=timeout_s, on_tick=tick)
+
+                await progress(0.5, f"Training ({req.epochs} epochs at {req.learning_rate})…")
+                train_job = await ei.start_training(
+                    transfer_type=settings.EDGE_IMPULSE_TRANSFER_MODEL, epochs=req.epochs, learning_rate=req.learning_rate
+                )
+                await ei.wait_for_job(train_job, what="Training", timeout_s=timeout_s, on_tick=tick)
+                metrics = await ei.get_training_metrics()
+
+                await progress(0.8, "Building the int8 model…")
+                fmt = settings.EDGE_IMPULSE_DEPLOY_FORMAT
+                formats = await ei.list_deployment_formats()
+                if formats and fmt not in formats:
+                    raise TrainingError(f"Edge Impulse deployment format '{fmt}' is not available; available: {', '.join(formats[:20])}")
+                build_job = await ei.start_build(fmt)
+                await ei.wait_for_job(build_job, what="Building the model", timeout_s=timeout_s, on_tick=tick)
+                zip_bytes = await ei.download_build(fmt)
+            trained = {
+                "recipe": {
+                    "image_size": req.image_size,
+                    "colour": req.colour,
+                    "epochs": req.epochs,
+                    "learning_rate": req.learning_rate,
+                    "transfer_model": settings.EDGE_IMPULSE_TRANSFER_MODEL,
+                },
+                "metrics": metrics,
+                "edge_impulse": {"project_id": settings.EDGE_IMPULSE_PROJECT_ID, "jobs": [feat_job, train_job, build_job]},
+            }
+
+        await progress(0.88, "Compiling for the camera (Vela)…")
+        # Fetch the row for its family / version (the filename only names a temp dir).
+        model_res = await asyncio.to_thread(client.table("ai_models").select("*, ai_model_families(firmware_model_id)").eq("id", model_id).execute)
+        if not model_res.data:
+            raise RuntimeError(f"Model record {model_id} not found")
+        model_row = model_res.data[0]
+        version_str = model_row.get("version", "1.0.0")
+        version_num = version_str.split(".")[0] if "." in version_str else version_str
+        firmware_id = (model_row.get("ai_model_families") or {}).get("firmware_model_id", 9999)
+        tfl_bytes, txt_bytes, labels = await convert_uploaded_model(zip_bytes, f"{label_slug(req.model_name)}-custom-v{version_num}.zip")
+
+        classes = [c.model_dump() for c in req.classes]
+        label_map = build_label_map(classes, labels, summary.labels[0] if req.include_background else "")
+        warning = firmware_target_warning(labels, label_map)
+
+        await progress(0.95, "Registering the Species Brain…")
+        stored = await store_model_artifacts(
+            client, org_id=org_id, firmware_id=firmware_id, version_num=version_num, tfl_bytes=tfl_bytes, txt_bytes=txt_bytes
+        )
+        training_info = {
+            "stage": "complete",
+            "dataset": summary.as_dict(),
+            **trained,
+            "labels": labels,
+            "warning": warning,
+        }
+        await model_status(
+            "validated",
+            training=training_info,
+            file_hash=stored["file_hash"],
+            model_path=stored["model_path"],
+            labels_path=stored["labels_path"],
+            file_size_bytes=stored["file_size_bytes"],
+            detection_capabilities=labels,
+            label_map=label_map,
+            file_type="model",
+            version_number=int(version_num) if str(version_num).isdigit() else 1,
+        )
+        acc = trained["metrics"].get("accuracy")
+        acc_txt = f" {round(float(acc) * 100)}% accuracy on held-out images." if isinstance(acc, (int, float)) else ""
+        await update_job(
+            job_id,
+            status=JobStatus.COMPLETED,
+            progress=1.0,
+            message=f"✅ {req.model_name} is ready ({', '.join(labels)}).{acc_txt}" + (f" ⚠ {warning}" if warning else ""),
+        )
+        logger.info("train_job_complete", labels=labels, accuracy=acc, **log_ctx)
+
+    except Exception as e:
+        try:
+            await model_status("failed", error_message=str(e))
+        except Exception as status_err:
+            logger.warning("failed_to_update_model_status_on_error", error=str(status_err))
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+        logger.error("train_job_failed", error=str(e), **log_ctx)
         raise
 
 
@@ -478,11 +694,18 @@ def build_pipeline_steps() -> list:
     steps: list = []
     if settings.FF_MEDIA_REGISTRY_ENABLED:
         steps.append(PipelineStepType.MEDIA_PREP)
+    # Gemini presence runs before SpeciesNet and writes its own rows without
+    # altering SpeciesNet's, so the two can be compared on the same frames.
+    if settings.FF_GEMINI_PRESENCE_ENABLED:
+        steps.append(PipelineStepType.GEMINI_PRESENCE)
     if settings.FF_SPECIESNET_ENABLED:
         steps.append(PipelineStepType.SPECIESNET)
         steps.append(PipelineStepType.ANIMAL_CROP)
     if settings.FF_BIOCLIP_ENABLED:
         steps.append(PipelineStepType.BIOCLIP)
+    # Evidence fusion reads what every step above wrote, so it always goes last.
+    if settings.FF_EVIDENCE_FUSION_ENABLED:
+        steps.append(PipelineStepType.EVIDENCE_FUSION)
     return steps
 
 
@@ -514,9 +737,11 @@ async def auto_annotate_deployments(
     # Friendlier labels for the per-step progress messages the dock surfaces.
     step_labels = {
         "media_prep": "Preparing thumbnails",
+        "gemini_presence": "Checking frames for animals (Gemini)",
         "speciesnet": "Detecting animals",
         "animal_crop": "Cropping detections",
         "bioclip": "Identifying species",
+        "evidence_fusion": "Combining the evidence per frame",
     }
 
     # Heartbeat api_jobs.updated_at across the whole run: a single long step (e.g.
@@ -537,6 +762,13 @@ async def auto_annotate_deployments(
 
             try:
                 logger.info("auto_annotate_start", deployment_id=dep_id, steps=[s.value for s in steps])
+                # Reflect the camera's own EXIF scores as edge observations before the
+                # pipeline, as the upload job does, so the Camera AI result exists when
+                # the cloud steps run and feeds the detection notifications below (#161).
+                # Self-gated on FF_EDGE_REFLECT_ENABLED; best-effort (never raises).
+                from app.domain.edge_reflection import reflect_edge_deployment
+
+                await reflect_edge_deployment(dep_id)
                 await run_pipeline(
                     deployment_id=dep_id,
                     steps=steps,
@@ -545,13 +777,6 @@ async def auto_annotate_deployments(
                     force=force,
                     media_ids=media_ids,
                 )
-                # Reflect the camera's own EXIF scores as edge observations so the
-                # Camera AI result sits beside the Cloud AI result (and feeds the
-                # detection notifications below). Self-gated on FF_EDGE_REFLECT_ENABLED;
-                # best-effort (never raises).
-                from app.domain.edge_reflection import reflect_edge_deployment
-
-                await reflect_edge_deployment(dep_id)
                 await emit_detection_notifications(dep_id)
                 # Chain DINOv3 embedding + clustering so "Group by Cluster" has data
                 # without a manual per-deployment trigger. Needs the animal crops the
@@ -1020,7 +1245,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             # Reflect the camera's own verdict (the EXIF UserComment scores) as Camera AI
             # observations now that the rows exist: the camera decided in the field, so
             # its result should not wait for the cloud pipeline (minutes on CPU) and must
-            # not depend on the run_ai opt-out. Idempotent, so the post-pipeline call in
+            # not depend on the run_ai opt-out. Idempotent, so the call in
             # auto_annotate_deployments stays harmless. Best-effort (never raises).
             from app.domain.edge_reflection import reflect_edge_deployment  # noqa: PLC0415
 
@@ -1439,6 +1664,7 @@ async def embeddings_backup_job(job_id: str):
 
 JOBS = [
     convert_model_job,
+    train_species_brain_job,
     generate_manifest_job,
     export_camtrapdp_job,
     download_pretrained_job,

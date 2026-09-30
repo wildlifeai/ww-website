@@ -481,6 +481,17 @@ class GoogleDriveService:
         dict with ``uploaded``, ``skipped``, ``failed`` counts.
         """
         root_folder_id = settings.GOOGLE_DRIVE_FOLDER_ID
+        if not root_folder_id:
+            # Without a root, Drive would create the project/deployment tree in the service
+            # account's own (invisible) Drive rather than the team folder — silent data loss.
+            # Each environment has its own subfolder of the shared "Data" folder; see
+            # documentation/resources/cloud-infrastructure.md → Google Drive.
+            raise RuntimeError(
+                "GOOGLE_DRIVE_FOLDER_ID is not set, but Google Drive upload is enabled. "
+                "Set it to this environment's Drive folder id (dev and production each have "
+                "their own). The shared dev value ships in the .env from "
+                "`bash scripts/fetch-env.sh`."
+            )
         sem = asyncio.Semaphore(MAX_CONCURRENT_UPLOADS)
         stats = {"uploaded": 0, "skipped": 0, "failed": 0}
         # Per-file mapping so callers (e.g. CamtrapDP import) can patch the media
