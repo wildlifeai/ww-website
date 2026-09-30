@@ -42,7 +42,7 @@ permissions, verify against the **live** DB, not just the migrations.
 
 | Table | Used by | Access |
 |-------|---------|--------|
-| `projects`, `deployments` | Insights, EXIF matching, Drive folders | RLS (+ service-role) |
+| `projects`, `deployments` | Insights, EXIF matching, Drive folders, project defaults | RLS (+ service-role) |
 | `media` | Annotations grid + modal | RLS (read; uploads via backend) |
 | `media_assets` | embedded in `media` queries (renditions: provider, dimensions, bytes) | RLS read — a missing GRANT aborts the **whole** embedding query (prod, Jul 2026) |
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
@@ -66,6 +66,14 @@ cancel it while it is pending. The server compares emails case-insensitively
 `ww-backend` stack as real signed-in users (invite, accept, decline, cancel, remove, the refusals). Run it
 whenever a `ww-backend` change touches roles, invitations or RLS; the header of the file has the
 two commands. Without the `WW_TEST_*` variables it skips, so `npm test` stays offline.
+
+**The project owns the camera's settings; the mobile app writes them to the device at
+deployment.** Settings → ⚙ Defaults edits `capture_method_id`, `model_id` and the burst:
+`pictures_per_trigger` (1 to 10, default 3) and `picture_interval_ms` (200 to 2000, default
+1000), which the app writes as op5 and op6 (ww-backend#218, ww-mobile-app#317). The count is
+photos as the user sees them; with the raw BMP on, the app doubles it for op5. A running
+camera keeps its old values until its next deployment start. Ranges and the cost note live in
+`frontend/src/lib/burstCapture.ts`.
 
 Observation provenance fields (`source_type`, `review_status`, `reviewer_id`, `annotator_id`,
 `classification_method`) are written through one helper, `frontend/src/lib/observations.ts`, so
