@@ -10,7 +10,7 @@ spec, and validation roadmap live in the
 | Layer | Technical name | User-facing name | What it is |
 |---|---|---|---|
 | On-device inference | **Edge AI** | **Camera AI** | Custom int8 TFLite classifier (Edge Impulse), Vela-compiled for the Ethos-U55 NPU, running on the WW500's Himax HX6538 |
-| Cloud inference | **Cloud AI** | **Cloud AI** | SpeciesNet ensemble + optional BioCLIP second opinion, auto-run on upload ([04-AI-PIPELINE](../onboarding/04-AI-PIPELINE.md)) |
+| Cloud inference | **Cloud AI** | **Cloud AI** | SpeciesNet ensemble + optional BioCLIP second opinion, auto-run on upload ([04-AI-PIPELINE](../onboarding/04-AI-PIPELINE.md)). The flag-gated **Gemini presence filter** (a hosted VLM asked "is there an animal?" per frame, `FF_GEMINI_PRESENCE_ENABLED`) is part of this layer: its rows are `ai_origin='cloud'` with `source_model_version` = the Gemini model id, so they sit beside SpeciesNet's, never over them |
 | Embedding intelligence | **Wildlife Brain** | **Wildlife Brain** | DINOv3 embeddings → clustering → active learning / QA / conservation intelligence |
 
 - **Species Brain** *(user-facing)* = one deployed edge model version (an `ai_models`
