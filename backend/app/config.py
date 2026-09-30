@@ -6,7 +6,7 @@ All environment variables are declared here with sensible defaults.
 Validated at startup — the app refuses to boot if required vars are missing.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings
@@ -83,6 +83,60 @@ class Settings(BaseSettings):
     FF_ACTIVE_LEARNING_ENABLED: bool = Field(False, description="Enable active-learning review queue scoring")
     FF_INTELLIGENCE_ENABLED: bool = Field(False, description="Enable conservation intelligence endpoints (health, alerts, shift)")
     FF_LOCAL_EMBEDDING_ENABLED: bool = Field(False, description="Accept client-computed (WebGPU) embedding vectors")
+
+    # ── Species Brain training ("Create species ID model" on the Annotations page) ──
+    FF_MODEL_TRAINING_ENABLED: bool = Field(
+        False,
+        description=(
+            "Enable POST /api/models/train: build a labelled dataset from selected annotated images, "
+            "train an int8 image classifier through Edge Impulse, compile it with Vela and register it "
+            "as a Species Brain (ai_models row). Without Edge Impulse credentials the endpoint still "
+            "works in export-only mode (an Edge Impulse-ready dataset ZIP)."
+        ),
+    )
+    EDGE_IMPULSE_API_KEY: str = Field("", description="Edge Impulse *project* API key (ei_…) for the training-bench project")
+    EDGE_IMPULSE_PROJECT_ID: int = Field(0, description="Edge Impulse project ID the trainer uploads to and trains in (0 = not configured)")
+    EDGE_IMPULSE_STUDIO_URL: str = Field("https://studio.edgeimpulse.com/v1", description="Edge Impulse Studio API base URL")
+    EDGE_IMPULSE_INGESTION_URL: str = Field("https://ingestion.edgeimpulse.com", description="Edge Impulse ingestion API base URL")
+    EDGE_IMPULSE_DEPLOY_FORMAT: str = Field(
+        "custom",
+        description="Deployment target `format` to build and download (the 'Custom' zip carries trained.tflite + model-parameters/)",
+    )
+    EDGE_IMPULSE_TRANSFER_MODEL: str = Field(
+        "transfer_mobilenetv2_a35",
+        description="Keras visual layer type for the transfer-learning block (MobileNetV2 0.35, the recipe used for the rat model)",
+    )
+    EDGE_IMPULSE_JOB_TIMEOUT_S: int = Field(1800, ge=60, description="Max seconds to wait for one Edge Impulse job (features, training, build)")
+    MODEL_TRAINING_MIN_IMAGES_PER_CLASS: int = Field(20, ge=2, description="Refuse to train a class with fewer samples than this")
+    MODEL_TRAINING_RECOMMENDED_IMAGES_PER_CLASS: int = Field(100, ge=1, description="Below this the UI warns (guide: 100 to 1000 per class)")
+    MODEL_TRAINING_MAX_IMAGES: int = Field(3000, ge=10, description="Max samples in one training run")
+    MODEL_TRAINING_MAX_CLASSES: int = Field(16, ge=2, le=16, description="Device MAX_CLASSES (firmware result buffer), never raise above 16")
+    MODEL_ARENA_BYTES: int = Field(
+        512 * 1024,
+        ge=1,
+        description=(
+            "Tensor arena the ww500_md firmware reserves (ww500_md.ld: `. = . + 512K;`). services/vela.py refuses any model "
+            "whose Vela SRAM estimate exceeds it, whatever its source (upload, Edge Impulse, gcp trainer)"
+        ),
+    )
+
+    # ── Native Species Brain training on Google Cloud (MODEL_TRAINER=gcp) ──
+    # Report: documentation/development reports/2026-09_gcp-native-model-training. The job
+    # runs on the ARQ worker, so set these there as well as on the API.
+    FF_NATIVE_TRAINING_ENABLED: bool = Field(False, description="Allow MODEL_TRAINER=gcp; off = POST /api/models/train behaves as without it")
+    MODEL_TRAINER: Literal["edge_impulse", "gcp"] = Field(
+        "edge_impulse",
+        description="Trainer behind POST /api/models/train: 'edge_impulse' or 'gcp' (the Cloud Run job built from backend/training/)",
+    )
+    # GOOGLE_CLOUD_PROJECT and CLOUD_RUN_JOB_REGION are the names the Google Cloud migration plan
+    # (2026-09_gcp-pilot-and-migration, §8) uses for the ML-worker job; the trainer shares them.
+    # Credentials are Application Default Credentials (the worker's runtime identity), no key.
+    GOOGLE_CLOUD_PROJECT: str = Field("", description="Google Cloud project of the Cloud Run jobs (ww-pilot-dev, later ww-dev / ww-prod)")
+    CLOUD_RUN_JOB_REGION: str = Field("asia-southeast1", description="Region of the Cloud Run jobs (Singapore: no Cloud Run L4 in Australia)")
+    GCS_TRAINING_BUCKET: str = Field("", description="Bucket for runs/<run_key>/dataset (manifest + images) and runs/<run_key>/output (artefacts)")
+    TRAINING_JOB_NAME: str = Field("ww-species-trainer", description="Cloud Run job built from backend/training/Dockerfile")
+    TRAINING_POLL_INTERVAL_S: float = Field(15.0, ge=1.0, description="Seconds between Cloud Run execution polls")
+    TRAINING_RUN_TIMEOUT_S: int = Field(3600, ge=60, le=3600, description="Max seconds per training run; Cloud Run caps GPU job tasks at 1 hour")
 
     # ── Motion ROI (SpeciesNet-free crop fallback) ───────────────────
     FF_MOTION_ROI_FALLBACK_ENABLED: bool = Field(

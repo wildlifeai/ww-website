@@ -152,6 +152,8 @@ Architecture: [AI Model Pipeline](./ai-model-pipeline.md). Prefix `/api/models`.
 | `GET /api/models/pretrained/catalog` | None | Built-in pretrained registry (architectures, resolutions, labels) |
 | `GET /api/models/sscma/catalog` | None | SSCMA model catalog (cached 1 h) |
 | `GET /api/models/managed-orgs` | JWT | Orgs where the user is `organisation_manager` |
+| `GET /api/models/train/status` | JWT | Whether training is on (`FF_MODEL_TRAINING_ENABLED`), the trainer `mode` (`edge_impulse` \| `export_only`) and the dataset limits the UI validates against |
+| `POST /api/models/train` | JWT (verified) · org-manager, 10/min | Train a Species Brain from an Annotations selection. Body `{ media_ids, model_name, classes: [{ label, scientific_name, … }], include_background?, background_label?, image_size? (96\|160), colour?, epochs?, organisation_id? }` → `{ job_id, model_id, mode, poll_url }`. Every image must be in a deployment the caller can read. See [species-brain-training-spec](../development%20reports/species-brain-training-spec.md) |
 
 ---
 

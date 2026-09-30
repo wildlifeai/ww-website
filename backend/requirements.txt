@@ -7,7 +7,7 @@ python-multipart>=0.0.12
 supabase>=2.27.0
 gotrue>=2.0
 httpx>=0.28.0
-ethos-u-vela>=3.10
+ethos-u-vela==5.2.0               # Ethos-U55 compiler, pinned: every model source (upload, Edge Impulse, gcp trainer) compiles here
 structlog>=24.0
 sentry-sdk[fastapi]>=2.0
 slowapi>=0.1.9

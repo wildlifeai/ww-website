@@ -33,6 +33,17 @@ per image derived from `review_status` (`lib/observations.ts`):
 | ⧗ Processing (grey) | no observations yet — still working through the pipeline |
 | ✕ Issue (red) | explicit pipeline error (reserved; see `StatusBadge.tsx`) |
 
+### Selection actions
+
+Click selects, double-click opens. Once something is selected the **Actions** menu
+(`components/data/MediaBulkActions.tsx`) offers: *Label as…* (one human observation on every
+selected image), *Find similar images* (single selection, Wildlife Brain), *Upload to iNaturalist*,
+*Remove images* (soft delete with undo), *Run AI (re-classify)* and *Create species ID model…*.
+The last one trains a Camera AI model (a Species Brain) from the selected labelled images through
+the Edge Impulse recipe (`TrainModelModal.tsx`, `POST /api/models/train`, behind
+`FF_MODEL_TRAINING_ENABLED`); camera-produced labels are never used as training data. See
+[species-brain-training-spec](../development%20reports/species-brain-training-spec.md).
+
 ## The full-screen labeling modal
 
 Selecting a photo opens a **full-screen modal** (`MediaDetail.tsx`):

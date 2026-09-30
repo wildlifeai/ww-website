@@ -13,10 +13,10 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useDemoGuard } from '../common/DemoGuard'
 
-export type BulkAction = 'inat' | 'delete' | 'ai' | 'similar' | 'label'
+export type BulkAction = 'inat' | 'delete' | 'ai' | 'similar' | 'label' | 'train'
 
 // Actions that write/mutate (blocked for the read-only demo). 'similar' is a read.
-const DEMO_BLOCKED: BulkAction[] = ['inat', 'delete', 'ai', 'label']
+const DEMO_BLOCKED: BulkAction[] = ['inat', 'delete', 'ai', 'label', 'train']
 
 interface Props {
   selectedCount: number
@@ -203,6 +203,18 @@ export function MediaBulkActions({
             >
               <span>🧠</span>
               <span>Run AI (re-classify)</span>
+            </button>
+
+            {/* Train a camera model (a Species Brain) from the selected, labelled images. */}
+            <button
+              style={item}
+              onMouseEnter={e => (e.currentTarget.style.background = itemHover)}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+              onClick={() => run('train')}
+              title="Train an on-device species ID model from the selected labelled images"
+            >
+              <span>🧬</span>
+              <span>Create species ID model…</span>
             </button>
           </div>,
           document.body,
