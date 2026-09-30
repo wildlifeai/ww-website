@@ -537,6 +537,13 @@ async def auto_annotate_deployments(
 
             try:
                 logger.info("auto_annotate_start", deployment_id=dep_id, steps=[s.value for s in steps])
+                # Reflect the camera's own EXIF scores as edge observations before the
+                # pipeline, as the upload job does, so the Camera AI result exists when
+                # the cloud steps run and feeds the detection notifications below (#161).
+                # Self-gated on FF_EDGE_REFLECT_ENABLED; best-effort (never raises).
+                from app.domain.edge_reflection import reflect_edge_deployment
+
+                await reflect_edge_deployment(dep_id)
                 await run_pipeline(
                     deployment_id=dep_id,
                     steps=steps,
@@ -545,13 +552,6 @@ async def auto_annotate_deployments(
                     force=force,
                     media_ids=media_ids,
                 )
-                # Reflect the camera's own EXIF scores as edge observations so the
-                # Camera AI result sits beside the Cloud AI result (and feeds the
-                # detection notifications below). Self-gated on FF_EDGE_REFLECT_ENABLED;
-                # best-effort (never raises).
-                from app.domain.edge_reflection import reflect_edge_deployment
-
-                await reflect_edge_deployment(dep_id)
                 await emit_detection_notifications(dep_id)
                 # Chain DINOv3 embedding + clustering so "Group by Cluster" has data
                 # without a manual per-deployment trigger. Needs the animal crops the
@@ -1020,7 +1020,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             # Reflect the camera's own verdict (the EXIF UserComment scores) as Camera AI
             # observations now that the rows exist: the camera decided in the field, so
             # its result should not wait for the cloud pipeline (minutes on CPU) and must
-            # not depend on the run_ai opt-out. Idempotent, so the post-pipeline call in
+            # not depend on the run_ai opt-out. Idempotent, so the call in
             # auto_annotate_deployments stays harmless. Best-effort (never raises).
             from app.domain.edge_reflection import reflect_edge_deployment  # noqa: PLC0415
 

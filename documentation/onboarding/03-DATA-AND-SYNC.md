@@ -232,7 +232,7 @@ so key rotation can't take down both.
   `media.file_hash` **or** `gdrive://` path (no duplicate rows), and **back-fills a `media` row for
   any image that's in Drive but has no DB row yet** — so re-uploading recovers stranded images.
 - **Guard 2 — annotate only un-annotated media:** the auto-trigger runs `only_unannotated=true`, so
-  it processes only images without an AI observation (see [04-AI-PIPELINE](./04-AI-PIPELINE.md)).
+  it processes only images without a Cloud AI observation (see [04-AI-PIPELINE](./04-AI-PIPELINE.md)).
 
 > **Local dev gotcha:** the Drive credential file is mounted by the **dev** compose, so always start
 > the API with both files: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`.

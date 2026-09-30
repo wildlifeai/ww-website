@@ -312,6 +312,17 @@ def build_speciesnet_observations(
     return [_make_row(obs_type, max(dets, key=lambda d: d.confidence), len(dets)) for obs_type, dets in by_type.items()]
 
 
+def cloud_annotated_media_ids(ai_rows: list[dict]) -> set[str]:
+    """Media the cloud pipeline has already annotated, from ``source_type='ai'`` rows.
+
+    Camera AI rows (``ai_origin='edge'``) are ``source_type='ai'`` too, and they are
+    written before the pipeline runs, so counting them would skip exactly the frames
+    the camera flagged (#161). A NULL ``ai_origin`` is a cloud row from before the
+    column existed.
+    """
+    return {r["media_id"] for r in ai_rows if r.get("ai_origin") != "edge"}
+
+
 def delete_superseded_ai_observations(svc, media_ids, model_version: str) -> None:
     """Delete prior *machine* observations for these media + model version.
 
@@ -936,7 +947,7 @@ async def run_pipeline(
         if only_unannotated:
             ai = (
                 svc.table("observations")
-                .select("media_id")
+                .select("media_id, ai_origin")
                 .eq("deployment_id", deployment_id)
                 .eq("source_type", "ai")
                 .not_.is_("media_id", "null")
@@ -944,7 +955,7 @@ async def run_pipeline(
                 .data
                 or []
             )
-            skip |= {o["media_id"] for o in ai}
+            skip |= cloud_annotated_media_ids(ai)
         return [m for m in rows if m["id"] not in skip]
 
     media = await asyncio.to_thread(_fetch_media)
