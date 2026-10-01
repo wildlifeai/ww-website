@@ -58,9 +58,10 @@ run one locally, follow the instructions in its header.
   sentence.
 - **This repo does not own the database.** Schema, RLS policies **and** table GRANTs live in
   [`ww-backend`](https://github.com/wildlifeai/wildlife-watcher-backend) under
-  `supabase/schemas/`. Never create or alter tables, columns or functions from here. Add a
-  `ww-backend` migration, then consume it. Verify column names against that repo rather than
-  guessing.
+  `supabase/schemas/`. Never create or alter tables, columns or functions from here, and never
+  edit `ww-backend` from website work: file an issue there with the exact change, then consume
+  it once merged. No live database is changed by hand, not even to repair drift. Verify column
+  names against that repo rather than guessing.
 - **Backend layering is `routers → domain → services`.** No FastAPI or HTTP imports in
   `domain/`; no business logic in `routers/`.
 - **The service-role key is backend-only.** Never expose it to frontend code, never commit

@@ -25,6 +25,8 @@ import { MediaGroup } from './MediaGroup'
 import { useMultiClusters, useConfirmCluster, useSimilarImages } from '../../hooks/useBrain'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { useJobsList } from '../../hooks/useJobs'
+import { useBusyDeployments } from '../../hooks/useBusyDeployments'
+import { isThumbnailStuck } from '../../lib/thumbnailRetry'
 import { MediaBulkActions, type BulkAction } from './MediaBulkActions'
 import { DeleteConfirmModal, AiModelPickerModal, PipelineLogModal } from './BulkActionModals'
 import { TrainModelModal } from './TrainModelModal'
@@ -295,6 +297,11 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   // Media whose thumbnail failed to load — shown as "processing" (the rendition
   // is likely still generating). Reset on every (re)load so they re-attempt.
   const [failedThumbs, setFailedThumbs] = useState<Set<string>>(new Set())
+  // When the current page of media arrived: the "now" for deciding a missing thumbnail is
+  // stuck rather than still on its way (#208), kept out of render so it stays pure.
+  const [loadedAt, setLoadedAt] = useState(0)
+  // Deployments whose thumbnail backfill this page started, until the job list shows it.
+  const [retryRequested, setRetryRequested] = useState<Set<string>>(new Set())
   const [media, setMedia]         = useState<MediaRecord[]>([])
   // "Find similar" mode: anchor media id + the resolved, similarity-ranked records.
   const [similarToId, setSimilarToId]     = useState<string | null>(null)
@@ -544,6 +551,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
         setMedia((data || []) as unknown as MediaRecord[])
         setTotalCount(count ?? null)
         setFailedThumbs(new Set())  // re-attempt thumbnails (renditions may now exist)
+        setLoadedAt(Date.now())
         setLoading(false)
       })
 
@@ -558,6 +566,25 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     const t = setInterval(() => setReloadKey(k => k + 1), 4000)
     return () => { clearInterval(t); setReloadKey(k => k + 1) }
   }, [uploadActive])
+
+  // Deployments with a queued or running job. When one finishes, reload so the
+  // thumbnails and labels it produced appear without a manual refresh.
+  const busy = useBusyDeployments(() => {
+    setRetryRequested(new Set())
+    setReloadKey(k => k + 1)
+  })
+
+  const retryThumbnails = useCallback(async (deploymentId: string) => {
+    setRetryRequested(s => new Set(s).add(deploymentId))
+    try {
+      await apiClient.post(`/api/media/thumbnails/${deploymentId}`, {})
+      await qc.invalidateQueries({ queryKey: ['jobs'] })
+    } catch (e) {
+      setRetryRequested(s => { const n = new Set(s); n.delete(deploymentId); return n })
+      setNotice(`Couldn't start the thumbnails: ${e instanceof Error ? e.message : String(e)}`)
+      window.setTimeout(() => setNotice(null), 4000)
+    }
+  }, [qc])
 
   // Refresh iNaturalist badges whenever the loaded media set changes.
   useEffect(() => { loadInatStates(media.map(m => m.id)) }, [media, loadInatStates])
@@ -1031,6 +1058,20 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               onError={() => setFailedThumbs(s => new Set(s).add(m.id))}
             />
+          ) : imgUrl && !retryRequested.has(m.deployment_id) && isThumbnailStuck(m, loadedAt, busy) ? (
+            // Old enough that the thumbnail should exist, and nothing is making it.
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
+              <span style={{ opacity: 0.5 }}>No thumbnail</span>
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ fontSize: '0.72rem', padding: '0.15rem 0.6rem' }}
+                title="Make the missing thumbnails for this deployment"
+                onClick={e => { e.stopPropagation(); retryThumbnails(m.deployment_id) }}
+              >
+                Retry
+              </button>
+            </div>
           ) : imgUrl ? (
             // Thumbnail not ready yet (rendition still generating / resolving).
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', opacity: 0.5, fontSize: '0.72rem' }}>

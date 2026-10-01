@@ -258,7 +258,7 @@ endpoints are gated by `FF_MEDIA_REGISTRY_ENABLED`. All return the standard `Api
 | `GET /api/media/{media_id}/image` | Serve/proxy a media image (`?size=thumb\|full`); resolves public files / signed URLs |
 | `GET /api/media/{media_id}/resolve` | Resolve a media id to a displayable URL (rendition or signed original) |
 | `GET /api/media/registry/{deployment_id}` | Rendition status for a deployment's media |
-| `POST /api/media/thumbnails/{deployment_id}` | Enqueue a thumbnail/preview backfill (async job) |
+| `POST /api/media/thumbnails/{deployment_id}` | Make the missing thumbnails/previews for a deployment (async job, in the caller's job list, progress per 25 photos). The grid's Retry on a "No thumbnail" card calls it |
 | `DELETE /api/media/batch` | Soft-delete media by id list — body `{ "media_ids": [...] }` |
 | `POST /api/media/run-selected` | Run the AI pipeline on a media subset — body `{ "media_ids": [...], "steps": [...] }` |
 

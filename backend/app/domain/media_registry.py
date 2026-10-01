@@ -19,7 +19,7 @@ No FastAPI imports.
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 import structlog
 
@@ -28,6 +28,15 @@ logger = structlog.get_logger()
 THUMBNAIL_MAX = 300  # px, longest edge
 PREVIEW_MAX = 800
 CROP_PADDING = 0.1
+
+_PREP_ATTEMPTS = 3
+_PREP_BACKOFF_SECONDS = 1.0  # waits 1 s, then 2 s
+_FETCH_PAGE = 1000
+_PROGRESS_EVERY = 25
+
+
+class RenditionUploadError(RuntimeError):
+    """A rendition could not be written to storage."""
 
 
 # ── URL resolution (pure) ────────────────────────────────────────────
@@ -118,6 +127,9 @@ async def prepare_media_assets(media_row: dict) -> dict:
     width, height, thumb, preview = await asyncio.to_thread(_renditions)
 
     thumb_url = await upload_rendition(f"thumbnails/{deployment_id}/{media_id}.jpg", thumb)
+    if not thumb_url:
+        # upload_rendition already logged why; raise so the caller can retry.
+        raise RenditionUploadError(f"thumbnail upload failed for media {media_id}")
     preview_url = await upload_rendition(f"previews/{deployment_id}/{media_id}.jpg", preview)
 
     # NOTE: storage_provider/storage_key describe the *original* file's location and must
@@ -133,6 +145,28 @@ async def prepare_media_assets(media_row: dict) -> dict:
     }
     await _upsert_media_assets(patch)
     return patch
+
+
+def is_permission_error(exc: BaseException) -> bool:
+    """True when the database refused the write (Postgres 42501), which no retry can fix."""
+    return getattr(exc, "code", None) == "42501" or "42501" in str(exc) or "permission denied" in str(exc).lower()
+
+
+async def prepare_media_assets_with_retry(media_row: dict, attempts: int = _PREP_ATTEMPTS) -> dict:
+    """:func:`prepare_media_assets`, retried with a short backoff on transient errors.
+
+    A permission error is raised at once: it is the same for every attempt and every
+    photo, so callers stop instead of hammering the database.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            return await prepare_media_assets(media_row)
+        except Exception as exc:
+            if is_permission_error(exc) or attempt == attempts:
+                raise
+            logger.info("media_prep_retry", media_id=media_row.get("id"), attempt=attempt, error=str(exc))
+            await asyncio.sleep(_PREP_BACKOFF_SECONDS * attempt)
+    return {}  # unreachable: the loop returns or raises
 
 
 async def generate_observation_crops(media_id: str) -> Optional[str]:
@@ -283,8 +317,15 @@ async def generate_motion_roi_crops(
     return crops_created
 
 
-async def backfill_thumbnails(deployment_id: str) -> int:
+async def backfill_thumbnails(
+    deployment_id: str,
+    progress: Optional[Callable[[int, int], Awaitable[None]]] = None,
+) -> int:
     """Generate thumbnails/previews for deployment media that lack them.
+
+    Each photo gets :func:`prepare_media_assets_with_retry`. A permission error
+    aborts the whole run, since every other photo would be refused the same way.
+    ``progress(done, total)`` is awaited every ``_PROGRESS_EVERY`` photos.
 
     Returns the number of media rows for which a thumbnail was produced.
     """
@@ -293,25 +334,47 @@ async def backfill_thumbnails(deployment_id: str) -> int:
     svc = create_service_client()
 
     def _fetch():
-        resp = (
-            svc.table("media")
-            .select("id, deployment_id, file_path, media_assets(thumbnail_url)")
-            .eq("deployment_id", deployment_id)
-            .is_("deleted_at", "null")
-            .execute()
-        )
-        return resp.data or []
+        # PostgREST caps a response at 1,000 rows, so page through.
+        rows: list[dict] = []
+        while True:
+            resp = (
+                svc.table("media")
+                .select("id, deployment_id, file_path, media_assets(thumbnail_url)")
+                .eq("deployment_id", deployment_id)
+                .is_("deleted_at", "null")
+                .order("id")
+                .range(len(rows), len(rows) + _FETCH_PAGE - 1)
+                .execute()
+            )
+            page = resp.data or []
+            rows.extend(page)
+            if len(page) < _FETCH_PAGE:
+                return rows
 
     rows = await asyncio.to_thread(_fetch)
-    generated = 0
-    for row in rows:
-        if _assets(row).get("thumbnail_url"):
-            continue
+    missing = [r for r in rows if not _assets(r).get("thumbnail_url")]
+    generated = failed = 0
+    for done, row in enumerate(missing, start=1):
         try:
-            patch = await prepare_media_assets(row)
+            patch = await prepare_media_assets_with_retry(row)
             if patch.get("thumbnail_url"):
                 generated += 1
+            else:
+                failed += 1
         except Exception as exc:
+            if is_permission_error(exc):
+                logger.error("backfill_thumbnails_refused", deployment_id=deployment_id, media_id=row.get("id"), error=str(exc))
+                raise
+            failed += 1
             logger.warning("backfill_thumbnail_failed", media_id=row.get("id"), error=str(exc))
-    logger.info("backfill_thumbnails_complete", deployment_id=deployment_id, generated=generated, total=len(rows))
+        if progress and (done % _PROGRESS_EVERY == 0 or done == len(missing)):
+            await progress(done, len(missing))
+    logger.info(
+        "backfill_thumbnails_complete",
+        deployment_id=deployment_id,
+        generated=generated,
+        failed=failed,
+        missing=len(missing),
+        total=len(rows),
+    )
     return generated

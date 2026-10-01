@@ -109,14 +109,19 @@ class MediaPreparationStep(PipelineStep):
         deployment_id: str,
         config: dict[str, Any],
     ) -> PipelineStepResult:
-        from app.domain.media_registry import prepare_media_assets
+        from app.domain.media_registry import is_permission_error, prepare_media_assets_with_retry
 
         start = time.monotonic()
         errors = 0
-        for m in media:
+        for i, m in enumerate(media):
             try:
-                await prepare_media_assets(m)
+                await prepare_media_assets_with_retry(m)
             except Exception as exc:
+                if is_permission_error(exc):
+                    # Every remaining photo would be refused the same way; say so once and stop.
+                    logger.error("media_prep_refused", deployment_id=deployment_id, media_id=m.get("id"), error=str(exc))
+                    errors += len(media) - i
+                    break
                 logger.warning("media_prep_error", media_id=m.get("id"), error=str(exc))
                 errors += 1
 
