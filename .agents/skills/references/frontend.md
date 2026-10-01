@@ -25,5 +25,8 @@ Rules:
 * Prefer hooks for complex state management
 * Avoid direct `fetch()` calls when `apiClient` already provides the functionality
 * Avoid duplicating API response parsing logic
+* `useAuth` keeps one `user` object per signed-in person (`lib/authUser.ts`): Supabase re-sends
+  the session on every token refresh, and a new object reset every effect keyed on `user`
+  (#154). Keep that guard, and key new effects on `user?.id` where the object is not needed.
 
 Frontend should focus on presentation and user interaction rather than business logic.
