@@ -310,11 +310,11 @@ export function UploadFlow() {
 
     // Images always sync to Google Drive (long-term storage is the default).
     // startUpload copies what it needs before its first await, so the page can
-    // drop its staged selection straight away (and with it the unload guard).
-    startUpload(
-      files, filePaths, true, deployments,
-      undefined, resolvedDeploymentIds, allPending, sessionAssignments, runAi,
-    )
+    // drop its staged selection straight away; UploadProvider guards the tab
+    // while the batches are still sending.
+    startUpload(files, filePaths, true, deployments, {
+      resolvedDeploymentIds, pending: allPending, sessionAssignments, runAi,
+    })
     clearSelection()
 
     // Land the user on Annotations, filtered to every deployment this upload touched, so they
