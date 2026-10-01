@@ -3,14 +3,19 @@
 //
 // ProjectDefaultsPanel — per-project capture + AI defaults (Settings).
 // Sets projects.capture_method_id (default triggering method), projects.model_id
-// (default AI model) and the burst, projects.photos_per_trigger and photo_interval_milliseconds
-// (lib/burstCapture.ts). Writes are gated by RLS to project admins (a non-admin save
-// surfaces an inline message).
+// (default AI model), the burst, projects.photos_per_trigger and photo_interval_milliseconds
+// (lib/burstCapture.ts), and the capture flash, projects.flash_* (lib/flashSettings.ts).
+// Writes are gated by RLS to project admins. RLS turns a refused update into 0 rows with no
+// error, so a save asks for the row back and shows what the database holds.
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../config/supabase'
 import { burstCostNote, formatInterval, photoCountOptions, photoIntervalOptions } from '../../lib/burstCapture'
+import {
+  defaultWindow, describeUtc, FLASH_LEDS, FLASH_MODES, localOffsetMinutes, windowFromLocal, windowToLocal,
+  type FlashLed, type FlashMode, type FlashWindow,
+} from '../../lib/flashSettings'
 
 interface Project {
   id: string
@@ -19,6 +24,23 @@ interface Project {
   model_id: string | null
   photos_per_trigger: number
   photo_interval_milliseconds: number
+  flash_mode: FlashMode
+  flash_led: FlashLed
+  flash_window_start_minutes_utc: number | null
+  flash_window_minutes: number | null
+}
+
+// Read once: calling Intl during render made the React compiler lint skip this component.
+const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+const PROJECT_COLUMNS =
+  'id, name, capture_method_id, model_id, photos_per_trigger, photo_interval_milliseconds, ' +
+  'flash_mode, flash_led, flash_window_start_minutes_utc, flash_window_minutes'
+
+function storedWindow(p: Project): FlashWindow | null {
+  return p.flash_window_start_minutes_utc == null || p.flash_window_minutes == null
+    ? null
+    : { startUtc: p.flash_window_start_minutes_utc, minutes: p.flash_window_minutes }
 }
 interface CaptureMethod { id: number; value: string; description: string | null }
 interface AiModel { id: string; name: string; version: string | null }
@@ -41,7 +63,7 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
     let cancelled = false
     setLoading(true)
     // Scope to one project when opened as a per-project action; otherwise list all.
-    let projQuery = supabase.from('projects').select('id, name, capture_method_id, model_id, photos_per_trigger, photo_interval_milliseconds').order('name')
+    let projQuery = supabase.from('projects').select(PROJECT_COLUMNS).order('name')
     if (projectId) projQuery = projQuery.eq('id', projectId)
     Promise.all([
       projQuery,
@@ -60,10 +82,30 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
   }, [user, projectId])
 
   const save = async (id: string, patch: Partial<Project>) => {
-    setProjects(prev => prev.map(p => p.id === id ? { ...p, ...patch } : p))
-    const { error } = await supabase.from('projects').update(patch).eq('id', id)
-    setMsg(m => ({ ...m, [id]: error ? 'You need the Project Admin role to change this.' : 'Saved ✓' }))
+    const { data, error } = await supabase.from('projects').update(patch).eq('id', id).select(PROJECT_COLUMNS)
+    const saved = (data as Project[] | null)?.[0]
+    if (saved) setProjects(prev => prev.map(p => (p.id === id ? saved : p)))
+    const text = error
+      ? error.code === '23514' ? `That value is not allowed: ${error.message}` : `Not saved: ${error.message}`
+      : saved ? 'Saved ✓' : 'You need the Project Admin role to change this.'
+    setMsg(m => ({ ...m, [id]: text }))
     setTimeout(() => setMsg(m => ({ ...m, [id]: '' })), 2500)
+  }
+
+  const offset = localOffsetMinutes()
+
+  // Leaving Time of day clears the window (the columns are null unless the mode uses them);
+  // choosing it with no window fills in 18:00 to 06:00 local, so no half-set project is saved.
+  const saveFlashMode = (p: Project, mode: FlashMode) => {
+    const w = mode === 'time_of_day' ? storedWindow(p) ?? defaultWindow(offset) : null
+    save(p.id, { flash_mode: mode, flash_window_start_minutes_utc: w?.startUtc ?? null, flash_window_minutes: w?.minutes ?? null })
+  }
+
+  const saveWindow = (p: Project, startLocal: string, endLocal: string) => {
+    const w = windowFromLocal(startLocal, endLocal, offset)
+    const current = storedWindow(p)
+    if (!w || (current && w.startUtc === current.startUtc && w.minutes === current.minutes)) return
+    save(p.id, { flash_window_start_minutes_utc: w.startUtc, flash_window_minutes: w.minutes })
   }
 
   if (loading) return <p style={{ opacity: 0.5 }}>Loading…</p>
@@ -132,6 +174,7 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
           {burstCostNote(p.photos_per_trigger) && (
             <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>{burstCostNote(p.photos_per_trigger)}</div>
           )}
+          <FlashControls p={p} sel={sel} offset={offset} timezone={BROWSER_TIMEZONE} onMode={saveFlashMode} onLed={led => save(p.id, { flash_led: led })} onWindow={saveWindow} />
           {msg[p.id] && (
             <div style={{ fontSize: '0.72rem', marginTop: '0.4rem', color: msg[p.id].startsWith('Saved') ? 'var(--success)' : 'var(--error)' }}>
               {msg[p.id]}
@@ -140,5 +183,63 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
         </div>
       ))}
     </div>
+  )
+}
+
+const FIELD: React.CSSProperties = { fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }
+
+function FlashControls({ p, sel, offset, timezone, onMode, onLed, onWindow }: {
+  p: Project
+  sel: React.CSSProperties
+  offset: number
+  timezone: string
+  onMode: (p: Project, mode: FlashMode) => void
+  onLed: (led: FlashLed) => void
+  onWindow: (p: Project, startLocal: string, endLocal: string) => void
+}) {
+  const w = storedWindow(p)
+  const local = w ? windowToLocal(w, offset) : null
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.85rem' }}>
+        <label style={FIELD}>
+          <span style={{ opacity: 0.7 }}>Capture flash</span>
+          <select value={p.flash_mode} onChange={e => onMode(p, e.target.value as FlashMode)} style={{ ...sel, minWidth: 180 }}>
+            {FLASH_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </label>
+        {p.flash_mode !== 'off' && (
+          <label style={FIELD}>
+            <span style={{ opacity: 0.7 }}>LED</span>
+            <select value={p.flash_led} onChange={e => onLed(e.target.value as FlashLed)} style={{ ...sel, minWidth: 90 }}>
+              {FLASH_LEDS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+            </select>
+          </label>
+        )}
+        {p.flash_mode === 'time_of_day' && w && local && (
+          // Keyed on the stored window so a save, or a refused one, resets the inputs.
+          <div key={`${w.startUtc}-${w.minutes}`} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-end' }}>
+            <label style={FIELD}>
+              <span style={{ opacity: 0.7 }}>From</span>
+              <input type="time" defaultValue={local.start} onBlur={e => onWindow(p, e.target.value, local.end)} style={{ ...sel, minWidth: 0 }} />
+            </label>
+            <label style={FIELD}>
+              <span style={{ opacity: 0.7 }}>To</span>
+              <input type="time" defaultValue={local.end} onBlur={e => onWindow(p, local.start, e.target.value)} style={{ ...sel, minWidth: 0 }} />
+            </label>
+          </div>
+        )}
+      </div>
+      {p.flash_mode === 'time_of_day' && w && (
+        <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>
+          Times are {timezone}. The camera runs on UTC: {describeUtc(w)}.
+        </div>
+      )}
+      {p.flash_mode === 'off' && (
+        <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>
+          Off also turns off the night IR light for motion detection.
+        </div>
+      )}
+    </>
   )
 }

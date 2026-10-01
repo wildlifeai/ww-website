@@ -198,7 +198,7 @@ export function SettingsPage() {
           <button
             style={{ ...NAV_BTN, color: 'var(--text-color)' }}
             onClick={e => { e.stopPropagation(); setPanel({ kind: 'defaults', id: r.id, name: r.name, org_id: r.organisation_id }) }}
-            title="Default triggering method, AI model and photos per trigger (Project Admin)"
+            title="Default triggering method, AI model, photos per trigger and capture flash (Project Admin)"
           >
             ⚙ Defaults
           </button>
@@ -317,7 +317,7 @@ export function SettingsPage() {
             {panel.kind === 'defaults' && (
               <>
                 <p style={{ fontSize: '0.8rem', opacity: 0.65, margin: '0 0 0.875rem 0' }}>
-                  Default triggering method, AI model and photos per trigger for this project's deployments. Cameras pick up changes at their next deployment. Requires the Project Admin role.
+                  Default triggering method, AI model, photos per trigger and capture flash for this project's deployments. Cameras pick up changes at their next deployment. Requires the Project Admin role.
                 </p>
                 <ProjectDefaultsPanel projectId={panel.id} />
               </>
