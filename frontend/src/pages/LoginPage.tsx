@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Auth } from '@supabase/auth-ui-react'
 import { ThemeSupa } from '@supabase/auth-ui-shared'
@@ -6,14 +6,17 @@ import { supabase } from '../config/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { MIN_PASSWORD_LENGTH, signUpMetadata, signUpProblem, type SignUpFields } from '../lib/signUp'
+import { loadGoogleIdentity, newNonce } from '../lib/googleIdentity'
 
 /**
  * Log in (/login) and create an account (/signup), by email or with Google (#116, #187).
  *
- * Google and email-confirmation links return to this site's own origin, which is on each
- * Supabase project's redirect allow-list; anything else falls back to the project's Site URL,
- * which on staging is the app's wildlifewatcher:// link that a desktop browser cannot open.
- * supabase-js completes the session from the returning URL on load. A new account becomes a
+ * Google sign-in uses Google's own button when VITE_GOOGLE_CLIENT_ID is set, so the consent
+ * screen names this site rather than the Supabase project's domain (lib/googleIdentity.ts);
+ * without it, the redirect flow. Redirects and email-confirmation links return to this site's
+ * own origin, which is on each Supabase project's redirect allow-list; anything else falls back
+ * to the project's Site URL, which on staging is the app's wildlifewatcher:// link that a
+ * desktop browser cannot open. supabase-js completes the session from the returning URL. A new account becomes a
  * `users` row in the General organisation (ww-backend `handle_new_user`).
  */
 export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }) {
@@ -53,7 +56,7 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
         </>
       ) : (
         <>
-          <GoogleButton redirectTo={siteUrl + '/'} />
+          <GoogleButton redirectTo={siteUrl + '/'} text={signingUp ? 'signup_with' : 'continue_with'} />
           <Divider />
           {signingUp ? (
             <SignUpForm redirectTo={siteUrl + '/'} />
@@ -93,7 +96,51 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
   )
 }
 
-function GoogleButton({ redirectTo }: { redirectTo: string }) {
+const GOOGLE_CLIENT_ID: string = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
+
+function GoogleButton({ redirectTo, text }: { redirectTo: string; text: 'signup_with' | 'continue_with' }) {
+  return GOOGLE_CLIENT_ID
+    ? <GoogleIdentityButton clientId={GOOGLE_CLIENT_ID} text={text} />
+    : <GoogleRedirectButton redirectTo={redirectTo} />
+}
+
+/** Google's button: the ID token comes straight back here and goes to Supabase. */
+function GoogleIdentityButton({ clientId, text }: { clientId: string; text: 'signup_with' | 'continue_with' }) {
+  const slot = useRef<HTMLDivElement>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([loadGoogleIdentity(), newNonce()])
+      .then(([google, nonce]) => {
+        if (cancelled || !slot.current) return
+        google.initialize({
+          client_id: clientId,
+          nonce: nonce.hashed,
+          ux_mode: 'popup',
+          callback: ({ credential }) => {
+            supabase.auth
+              .signInWithIdToken({ provider: 'google', token: credential, nonce: nonce.raw })
+              .then(({ error: err }) => setError(err ? err.message : null))
+          },
+        })
+        // 336 px fills the card: 400 px wide less 2rem padding each side.
+        google.renderButton(slot.current, { type: 'standard', theme: 'outline', size: 'large', text, shape: 'rectangular', width: 336, logo_alignment: 'center' })
+      })
+      .catch((e: Error) => { if (!cancelled) setError(e.message) })
+    return () => { cancelled = true }
+  }, [clientId, text])
+
+  return (
+    <>
+      <div ref={slot} style={{ display: 'flex', justifyContent: 'center', minHeight: 44 }} />
+      {error && <p role="alert" style={ERROR_TEXT}>{error}</p>}
+    </>
+  )
+}
+
+/** The redirect flow, for an environment without VITE_GOOGLE_CLIENT_ID. */
+function GoogleRedirectButton({ redirectTo }: { redirectTo: string }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
