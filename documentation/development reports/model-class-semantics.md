@@ -108,9 +108,9 @@ a key onto `observations`. Correcting a taxon then fixes every past observation 
   the browser (`supabase.from('ai_models').update({ label_map: map })`). Its only validation
   checks `scientific_name` rather than `taxon_id`, and it does not block Save, so an
   unmapped target saves cleanly. Any rule needs an endpoint or a constraint, not a hint.
-- **`camtrapdp.py:651` writes `gbif_taxon_key`, a column `observations` does not have.**
-  The import survives only because the row dict drops `None` values first; a package that
-  actually carries `taxonID` fails the insert with `42703`.
+- **The CamtrapDP import wrote `gbif_taxon_key`, a column `observations` does not have.**
+  Fixed in #138: `taxonID` is no longer written, and mapping it to `taxon_id` is this
+  report's question.
 
 ## 6. Person detection and GBIF
 
@@ -129,8 +129,6 @@ This also settles #134's labelling without a taxon decision: class 1 is
 - [#135](https://github.com/wildlifeai/ww-website/issues/135) — LM-10: declare what each
   model class predicts, and validate it. Carries the `edge_reflection` observation_type fix
   and the behaviour-model decision.
-- The `camtrapdp.py` phantom `gbif_taxon_key` column is unfiled; it is unrelated to the
-  design question and wants its own issue.
 - Backfilling `gbif_taxon_id` for the 16 `taxa` rows missing one is data work, not code, and
   is only worth doing once the export path exists.
 

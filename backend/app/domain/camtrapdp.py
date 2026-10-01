@@ -207,6 +207,75 @@ def _derive_import_provenance(cls_method: Optional[str], annotation_mode: str) -
     return "imported", "unreviewed"
 
 
+_OBS_TYPES = {"animal", "human", "vehicle", "blank", "unknown"}
+_LIFE_STAGES = {"adult", "subadult", "juvenile", "hatchling", "unknown"}
+_SEXES = {"male", "female", "unknown"}
+_CLASSIFICATION_METHODS = {"human", "machine"}
+
+
+def _observation_row(o: dict, ww_dep_id: str, ww_media_id: Optional[str], ww_event_id: Optional[str], annotation_mode: str) -> dict:
+    """One CamtrapDP observation as an ``observations`` insert row, None values dropped.
+
+    ``taxonID`` is not mapped: ``observations`` links a taxon through ``taxon_id`` (a ``taxa``
+    uuid), and resolving a CamtrapDP taxonID to one is #135. It used to be written to a
+    ``gbif_taxon_key`` column that does not exist, which failed the whole batch (#138).
+    """
+    obs_type = _str(o.get("observationType"))
+    if obs_type and obs_type not in _OBS_TYPES:
+        obs_type = "unknown"
+    life_stage = _str(o.get("lifeStage"))
+    if life_stage and life_stage not in _LIFE_STAGES:
+        life_stage = None
+    sex = _str(o.get("sex"))
+    if sex and sex not in _SEXES:
+        sex = None
+    cls_method = _str(o.get("classificationMethod"))
+    if cls_method and cls_method not in _CLASSIFICATION_METHODS:
+        cls_method = None
+
+    source_type, review_status = _derive_import_provenance(cls_method, annotation_mode)
+
+    row = {
+        "id": str(uuid.uuid4()),
+        "deployment_id": ww_dep_id,
+        "media_id": ww_media_id,
+        "observation_event_id": ww_event_id,
+        "observation_level": _str(o.get("observationLevel")) or ("media" if ww_media_id else "event"),
+        "observation_type": obs_type,
+        "scientific_name": _str(o.get("scientificName")),
+        "source_type": source_type,
+        "review_status": review_status,
+        "count": _int(o.get("count")),
+        "life_stage": life_stage,
+        "sex": sex,
+        "behavior": _str(o.get("behavior")),
+        "individual_id": _str(o.get("individualID")),
+        "classification_method": cls_method,
+        "classified_by": _str(o.get("classifiedBy")),
+        "classification_probability": _float(o.get("classificationProbability")),
+        "confidence": _float(o.get("classificationProbability")),
+        "observation_comments": _str(o.get("observationComments")),
+        # CamtrapDP 1.0 bbox fields (camelCase) → WW schema (snake_case)
+        # bboxWidth/bboxHeight in CamtrapDP ↔ bbox_w/bbox_h in our DB
+        "bbox_x": _float(o.get("bboxX")),
+        "bbox_y": _float(o.get("bboxY")),
+        "bbox_w": _float(o.get("bboxWidth")),
+        "bbox_h": _float(o.get("bboxHeight")),
+    }
+    return {k: v for k, v in row.items() if v is not None}
+
+
+def _insert_observations(svc, batch: list[dict], warnings: list[str], what: str = "observations") -> int:
+    """Insert one batch; on failure add a warning that says how many rows were lost. Returns rows inserted."""
+    try:
+        svc.table("observations").insert(batch).execute()
+        return len(batch)
+    except Exception as e:
+        logger.warning("camtrapdp_import_observation_batch_failed", rows=len(batch), error=str(e))
+        warnings.append(f"{len(batch)} {what} were not imported: {e}")
+        return 0
+
+
 def import_package(
     pkg: CamtrapPackage,
     user_id: str,
@@ -601,80 +670,22 @@ def import_package(
         cdp_media_id = o.get("mediaID", "").strip()
         ww_media_id = media_id_map.get(cdp_media_id) if cdp_media_id else None
 
-        obs_type = _str(o.get("observationType"))
-        valid_obs_types = {"animal", "human", "vehicle", "blank", "unknown"}
-        if obs_type and obs_type not in valid_obs_types:
-            obs_type = "unknown"
-
-        life_stage = _str(o.get("lifeStage"))
-        valid_life_stages = {"adult", "subadult", "juvenile", "hatchling", "unknown"}
-        if life_stage and life_stage not in valid_life_stages:
-            life_stage = None
-
-        sex = _str(o.get("sex"))
-        valid_sexes = {"male", "female", "unknown"}
-        if sex and sex not in valid_sexes:
-            sex = None
-
-        cls_method = _str(o.get("classificationMethod"))
-        valid_cls = {"human", "machine"}
-        if cls_method and cls_method not in valid_cls:
-            cls_method = None
-
         cdp_event_id = _str(o.get("eventID"))
         ww_event_id = event_id_map.get((cdp_event_id, ww_dep_id)) if cdp_event_id else None
 
         if ww_media_id:
             media_with_obs.add(ww_media_id)
 
-        source_type, review_status = _derive_import_provenance(cls_method, annotation_mode)
-
-        row = {
-            "id": str(uuid.uuid4()),
-            "deployment_id": ww_dep_id,
-            "media_id": ww_media_id,
-            "observation_event_id": ww_event_id,
-            "observation_level": _str(o.get("observationLevel")) or ("media" if ww_media_id else "event"),
-            "observation_type": obs_type,
-            "scientific_name": _str(o.get("scientificName")),
-            "source_type": source_type,
-            "review_status": review_status,
-            "count": _int(o.get("count")),
-            "life_stage": life_stage,
-            "sex": sex,
-            "behavior": _str(o.get("behavior")),
-            "individual_id": _str(o.get("individualID")),
-            "classification_method": cls_method,
-            "classified_by": _str(o.get("classifiedBy")),
-            "classification_probability": _float(o.get("classificationProbability")),
-            "confidence": _float(o.get("classificationProbability")),
-            "gbif_taxon_key": _int(o.get("taxonID")),
-            "observation_comments": _str(o.get("observationComments")),
-            # CamtrapDP 1.0 bbox fields (camelCase) → WW schema (snake_case)
-            # bboxWidth/bboxHeight in CamtrapDP ↔ bbox_w/bbox_h in our DB
-            "bbox_x": _float(o.get("bboxX")),
-            "bbox_y": _float(o.get("bboxY")),
-            "bbox_w": _float(o.get("bboxWidth")),
-            "bbox_h": _float(o.get("bboxHeight")),
-        }
-        row = {k: v for k, v in row.items() if v is not None}
+        row = _observation_row(o, ww_dep_id, ww_media_id, ww_event_id, annotation_mode)
         obs_batch.append(row)
 
         if len(obs_batch) >= BULK_CHUNK:
-            try:
-                svc.table("observations").insert(obs_batch).execute()
-                obs_inserted += len(obs_batch)
-            except Exception as e:
-                warnings.append(f"Failed to insert observation batch: {e}")
+            obs_inserted += _insert_observations(svc, obs_batch, warnings)
             obs_batch = []
 
     # Flush remaining observations
     if obs_batch:
-        try:
-            svc.table("observations").insert(obs_batch).execute()
-            obs_inserted += len(obs_batch)
-        except Exception as e:
-            warnings.append(f"Failed to insert observation batch: {e}")
+        obs_inserted += _insert_observations(svc, obs_batch, warnings)
 
     # ── Synthesize "confirmed empty" rows for media with no observations ──
     # In 'final' mode the package is a finished dataset: a media item with no
@@ -696,12 +707,7 @@ def import_package(
             if mid not in media_with_obs and mid in inserted_media_ids
         ]
         for i in range(0, len(empty_batch), BULK_CHUNK):
-            chunk = empty_batch[i : i + BULK_CHUNK]
-            try:
-                svc.table("observations").insert(chunk).execute()
-                obs_inserted += len(chunk)
-            except Exception as e:
-                warnings.append(f"Failed to insert empty-media observation batch: {e}")
+            obs_inserted += _insert_observations(svc, empty_batch[i : i + BULK_CHUNK], warnings, what="empty-media observations")
         if empty_batch:
             logger.info("camtrapdp_import_empty_media_marked", count=len(empty_batch))
 
