@@ -377,6 +377,11 @@ us-central1, 4 / 16:       0.0002907  USD/s  (US$1.047 per hour)
 cost per photo = 0.00034884 x (t_photo + t_cold / N)
 ```
 
+`t_photo` comes from the run's logs (#171): `pipeline_complete.seconds_per_frame` for the whole
+pipeline, `pipeline_step_timing` per step (`gpu_model` marks SpeciesNet and BioCLIP), and
+`auto_embed_complete.seconds_per_frame` for the DINOv3 embedding. Every step counts, not only the
+GPU models, because the job is billed for each second it runs.
+
 Inference only, at the T4's 1 to 2 s per image (L4 speed *unverified* until step 10):
 
 | Seconds per photo | USD per photo | NZD per photo | NZD per 1,000 photos |
