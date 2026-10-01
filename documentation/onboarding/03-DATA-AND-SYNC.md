@@ -96,6 +96,7 @@ every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./
 | `SUPABASE_URL` | `VITE_SUPABASE_URL` |
 | `SUPABASE_ANON_KEY` | `VITE_SUPABASE_ANON_KEY` |
 | `VITE_API_BASE_URL` | `VITE_API_BASE_URL` |
+| `VITE_GOOGLE_CLIENT_ID` | `VITE_GOOGLE_CLIENT_ID` (public web OAuth client ID; set in Cloudflare Pages too) |
 
 The **service-role key is never exposed to the browser** — it stays in the backend.
 

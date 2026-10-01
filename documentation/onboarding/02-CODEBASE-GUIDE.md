@@ -58,9 +58,12 @@ when the user has an active deployment.
 `/guides/:slug` (both lazy-loaded); `/support` redirects to `/faq`.
 
 `/login` and `/signup` are one `LoginPage`: email sign-in (Supabase Auth UI), an email sign-up form
-that sends `given_name` and `family_name` (`lib/signUp.ts`), and Continue with Google on both. Google
-and confirmation links return to the site's own origin, which must be on the Supabase project's
-redirect allow-list (#187). A new account lands in the General organisation via ww-backend's
+that sends `given_name` and `family_name` (`lib/signUp.ts`), and Google sign-in on both. With
+`VITE_GOOGLE_CLIENT_ID` set that is Google's own button (`lib/googleIdentity.ts`): the ID token
+comes back to the page and goes to `signInWithIdToken`, so Google's consent screen names this site,
+not `<ref>.supabase.co`; each site origin must be an Authorised JavaScript origin of that client.
+Without it, the redirect flow. Redirects and confirmation links return to the site's own origin,
+which must be on the Supabase project's redirect allow-list (#187). A new account lands in the General organisation via ww-backend's
 `handle_new_user`; a Google-only account has no password until it uses Forgot password.
 
 **Protected (`RequireAuth`)**
