@@ -3,6 +3,7 @@
  * dashboard and the chart builder. Kept component-free so both can import it.
  */
 import { VEGA_CONFIG } from '../ui/VegaChart'
+import { withBarLabels } from '../../lib/vegaSpec'
 import type { Observation } from './ObservationReports'
 
 export type ChartType = 'bar_h' | 'bar_v' | 'arc' | 'line'
@@ -94,19 +95,19 @@ export function buildVegaSpec(chart: UserChartDef, data: EnrichedObs[]): Record<
 
   switch (chart.chartType) {
     case 'bar_h':
-      return {
+      return withBarLabels({
         ...base,
         height: 280,
         mark: { type: 'bar', cornerRadiusEnd: 3 },
         encoding: { y: { ...dimEncoding, sort: '-x', title: null }, x: countEnc, color: colorEnc, tooltip },
-      }
+      }, 'h')
     case 'bar_v':
-      return {
+      return withBarLabels({
         ...base,
         height: 280,
         mark: { type: 'bar', cornerRadiusTopLeft: 3, cornerRadiusTopRight: 3 },
         encoding: { x: { ...dimEncoding, sort: '-y', title: null, axis: { ...(dimEncoding as { axis?: object }).axis, labelAngle: -35 } }, y: countEnc, color: colorEnc, tooltip },
-      }
+      }, 'v')
     case 'arc':
       return {
         ...base,

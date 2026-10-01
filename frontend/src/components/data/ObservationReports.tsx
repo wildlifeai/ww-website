@@ -9,6 +9,7 @@
  */
 import { useMemo } from 'react'
 import { VegaChart, VEGA_CONFIG } from '../ui/VegaChart'
+import { withBarLabels } from '../../lib/vegaSpec'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types (exported so the reports dashboard / chartSpec can reuse)
@@ -40,7 +41,7 @@ interface ObservationReportsProps {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function speciesBarSpec(observations: Observation[]) {
-  return {
+  return withBarLabels({
     $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
     width: 'container',
     height: 280,
@@ -83,7 +84,7 @@ function speciesBarSpec(observations: Observation[]) {
       ],
     },
     config: VEGA_CONFIG,
-  }
+  }, 'h')
 }
 
 function typeArcSpec(observations: Observation[]) {
@@ -120,7 +121,7 @@ function typeArcSpec(observations: Observation[]) {
 }
 
 function deploymentBarSpec(enriched: Array<Observation & { location_name: string }>) {
-  return {
+  return withBarLabels({
     $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
     width: 'container',
     height: 220,
@@ -157,7 +158,7 @@ function deploymentBarSpec(enriched: Array<Observation & { location_name: string
       ],
     },
     config: VEGA_CONFIG,
-  }
+  }, 'v')
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -32,6 +32,11 @@ body {
   min-height: 100vh;
 }
 
+/* Chart tooltips (vega-tooltip): the default 11px is hard to read (#191). */
+#vg-tooltip-element {
+  font-size: 13px;
+}
+
 #root {
   display: flex;
   flex-direction: column;
