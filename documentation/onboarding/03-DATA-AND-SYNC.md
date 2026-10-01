@@ -75,6 +75,14 @@ photos as the user sees them; with the raw BMP on, the app doubles it for op5. A
 camera keeps its old values until its next deployment start. Ranges and the cost note live in
 `frontend/src/lib/burstCapture.ts`.
 
+The same panel edits the capture flash (ww-backend#168, written as op34, op13, op35 and op36 by
+ww-mobile-app#282): `flash_mode` (default `off`, which also turns off the night IR for motion
+detection), `flash_led`, and for `time_of_day` a window stored as UTC minutes
+(`flash_window_start_minutes_utc`, `flash_window_minutes`, null for any other mode). The panel
+shows the window in the browser's timezone beside the UTC the camera runs on; the conversion is
+`frontend/src/lib/flashSettings.ts`. A save asks for the row back, because RLS turns a
+non-admin's update into 0 rows with no error.
+
 Observation provenance fields (`source_type`, `review_status`, `reviewer_id`, `annotator_id`,
 `classification_method`) are written through one helper, `frontend/src/lib/observations.ts`, so
 every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md).
