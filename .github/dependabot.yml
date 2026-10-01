@@ -15,5 +15,5 @@ updates:
         patterns:
           - '*'
     ignore:
-      # Paired with the CLI version pinned in react-doctor.yml; bump both by hand.
+      # Paired with the CLI version pinned in react-doctor.yml (v2.2.9 + 0.9.12); bump both by hand.
       - dependency-name: millionco/react-doctor
