@@ -1,0 +1,2 @@
+# What `gcloud builds submit backend/` leaves out of the upload: the same as the Docker build.
+#!include:.dockerignore

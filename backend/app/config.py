@@ -138,6 +138,18 @@ class Settings(BaseSettings):
     TRAINING_POLL_INTERVAL_S: float = Field(15.0, ge=1.0, description="Seconds between Cloud Run execution polls")
     TRAINING_RUN_TIMEOUT_S: int = Field(3600, ge=60, le=3600, description="Max seconds per training run; Cloud Run caps GPU job tasks at 1 hour")
 
+    # ── ML worker as a Cloud Run job (Google Cloud pilot, report §2 and §8) ──
+    # Set on the API. With CLOUD_RUN_JOB_NAME set, jobs/dispatch.py starts one execution of the
+    # job per enqueued job (python -m app.jobs.cloudrun_entry <job> <json>) before trying Redis.
+    CLOUD_RUN_JOB_NAME: str = Field("", description="Cloud Run job that runs ML jobs (ww-ml-worker-dev); empty = off")
+    CLOUD_RUN_TRIGGER_SA_JSON: str = Field(
+        "",
+        description=(
+            "Service account allowed to start CLOUD_RUN_JOB_NAME (ww-job-trigger@), as a path to its "
+            "JSON key or the inline JSON; empty = Application Default Credentials"
+        ),
+    )
+
     # ── Motion ROI (SpeciesNet-free crop fallback) ───────────────────
     FF_MOTION_ROI_FALLBACK_ENABLED: bool = Field(
         False,
@@ -267,6 +279,11 @@ class Settings(BaseSettings):
     ACS_CONNECTION_STRING: str = Field("")
 
     model_config = {"env_file": ("../.env", ".env"), "env_file_encoding": "utf-8", "extra": "ignore"}
+
+    @property
+    def job_offload_configured(self) -> bool:
+        """True when ML jobs leave this process: a Redis worker or the Cloud Run job."""
+        return bool(self.REDIS_URL or self.CLOUD_RUN_JOB_NAME)
 
     @property
     def cors_origins(self) -> list[str]:

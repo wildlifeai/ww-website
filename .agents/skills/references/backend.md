@@ -71,7 +71,10 @@ Never import FastAPI inside domain modules.
 
 ## Current State
 
-Job dispatch has **two paths**, chosen at runtime by `REDIS_URL` in `backend/app/jobs/dispatch.py`:
+Job dispatch in `backend/app/jobs/dispatch.py` takes the first route that is configured:
+`CLOUD_RUN_JOB_NAME` starts one Cloud Run job execution (`python -m app.jobs.cloudrun_entry`,
+the Google Cloud pilot), then `REDIS_URL` enqueues to the ARQ worker, then the job runs in
+process. A route that fails falls through to the next. The two older routes:
 
 ```text
 REDIS_URL set             REDIS_URL empty
@@ -94,7 +97,11 @@ Where each runs, as of 2026-07:
 
 Rules:
 
-* **Both paths must keep working.** Never remove the in-process fallback.
+* **Every route must keep working.** Never remove the in-process fallback.
+* To ask whether AI leaves this process, use `settings.job_offload_configured` (Cloud Run job or
+  Redis), never `settings.REDIS_URL` alone, or the upload job runs the AI on the lean API image.
+* A job must be in `definitions.JOBS` (the ARQ worker and `cloudrun_entry` run only those), and
+  its arguments must be JSON-serialisable: the Cloud Run route sends them as JSON.
 * Heavy ML (SpeciesNet, BioCLIP, DINOv3) belongs in the worker, the lean `--target api` image has no
   ML deps, so importing torch at API module scope breaks production.
 * Feature flags gating ML must be set on the **worker**, not just the API.
