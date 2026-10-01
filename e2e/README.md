@@ -37,7 +37,8 @@ retained on failure — `npm run report`).
 
 `.github/workflows/e2e.yml` runs on every successful Cloudflare Pages deployment except
 production (Cloudflare posts a GitHub deployment per branch build, and the workflow takes the
-preview URL from it), and by hand with a base URL and a suite.
+preview URL from it), on a pull request that changes `e2e/` or the workflow (against the dev
+preview, since the specs are what changed), and by hand with a base URL and a suite.
 
 - **E2E Smoke** runs `01-smoke` and `02-demo` against the preview, signed in as
   `E2E_EMAIL` (a repository variable, `tui@ww.org` by default) with the `SEED_USER_PASSWORD`

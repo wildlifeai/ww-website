@@ -9,9 +9,11 @@ name: E2E (Playwright)
 # in this workflow builds the frontend: the Pages build is the one users get.
 # Production deployments are skipped: the seeded account lives on dev only.
 #
-# By hand: `workflow_dispatch` with a base URL (default: the dev preview) and
-# a suite. `full` adds the upload and LoRaWAN specs, which write to the dev
-# database and storage: never point it at production.
+# A pull request that changes e2e/ or this file runs the smoke against the
+# dev preview (the merged frontend), since the specs themselves are what
+# changed. By hand: `workflow_dispatch` with a base URL (default: the dev
+# preview) and a suite. `full` adds the upload and LoRaWAN specs, which write
+# to the dev database and storage: never point it at production.
 #
 # What a green smoke proves: the bundle Cloudflare built from this commit
 # renders every public page, the seeded user signs in and reaches every
@@ -20,6 +22,11 @@ name: E2E (Playwright)
 
 on:
   deployment_status:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'e2e/**'
+      - '.github/workflows/e2e.yml'
   workflow_dispatch:
     inputs:
       base_url:
@@ -41,13 +48,13 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  E2E_BASE_URL: ${{ inputs.base_url || github.event.deployment_status.environment_url }}
+  E2E_BASE_URL: ${{ inputs.base_url || github.event.deployment_status.environment_url || 'https://dev.ww-website.pages.dev' }}
   E2E_API_URL: ${{ inputs.api_url || vars.E2E_API_URL || 'https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io' }}
 
 jobs:
   smoke:
     name: E2E Smoke
-    if: github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
     runs-on: ubuntu-latest
     # The seeded account's password and the dev service-role key live here
     environment: dev
@@ -125,7 +132,7 @@ jobs:
 
   a11y:
     name: A11y of public pages (advisory)
-    if: github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
