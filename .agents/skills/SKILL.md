@@ -68,7 +68,10 @@ The `ww-website` repository is a multi-service platform consisting of:
 ## The five that apply to almost any change
 
 1. **This repo does not own the database.** Schema, RLS policies and table GRANTs live in
-   `ww-backend`. Add a migration there, then consume it.
+   `ww-backend`, which website work does not edit: file an issue there with the exact change,
+   then consume it once merged. Never change a live database by hand,
+   not even to repair drift; production SQL from here is read-only diagnosis
+   ([references/database-and-cross-repo.md](references/database-and-cross-repo.md)).
 2. **Backend layering is `routers` to `domain` to `services`.** No FastAPI or HTTP imports in
    `domain/`, no business logic in `routers/`.
 3. **The service-role key is backend-only.** Never expose it to frontend code.
