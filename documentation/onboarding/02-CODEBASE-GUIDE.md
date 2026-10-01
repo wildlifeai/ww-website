@@ -54,8 +54,14 @@ when the user has an active deployment.
 
 ### Routes
 
-**Public**: `/`, `/login`, `/reset-password`, `/privacy`, `/terms`, `/resources`, `/faq`, `/guides`,
+**Public**: `/`, `/login`, `/signup`, `/reset-password`, `/privacy`, `/terms`, `/resources`, `/faq`, `/guides`,
 `/guides/:slug` (both lazy-loaded); `/support` redirects to `/faq`.
+
+`/login` and `/signup` are one `LoginPage`: email sign-in (Supabase Auth UI), an email sign-up form
+that sends `given_name` and `family_name` (`lib/signUp.ts`), and Continue with Google on both. Google
+and confirmation links return to the site's own origin, which must be on the Supabase project's
+redirect allow-list (#187). A new account lands in the General organisation via ww-backend's
+`handle_new_user`; a Google-only account has no password until it uses Forgot password.
 
 **Protected (`RequireAuth`)**
 
