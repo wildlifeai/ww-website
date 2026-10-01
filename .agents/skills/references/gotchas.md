@@ -71,6 +71,16 @@ When a `ww-backend` change touches roles, invitations or RLS, run
 
 ---
 
+## A PostgREST read stops at 1,000 rows without saying so
+
+Supabase caps every response at 1,000 rows, and a query without `.range()` just gets the first
+1,000 with no error. A deployment can hold more photos than that: the thumbnail backfill read
+1,000 of "Sunset test 2"'s 1,101 and never saw the rest (#208). Any backend loop over a whole
+deployment pages with `.order()` plus `.range()` until a short page, as
+`media_registry.backfill_thumbnails` does.
+
+---
+
 ## Shared Model Lists
 
 Do not invent model names.

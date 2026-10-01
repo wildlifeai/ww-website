@@ -255,3 +255,127 @@ async def test_generate_observation_crops_no_detections_noops(monkeypatch):
     assert await generate_observation_crops("m1") is None
     assert crop_updates == {}
     assert upserts == []
+
+
+# ── Thumbnail retry and backfill (#208) ───────────────────────────────
+
+
+class _Refused(Exception):
+    """Stands in for postgrest's APIError on a refused write."""
+
+    code = "42501"
+
+
+def _prep_fakes(monkeypatch, upload_results):
+    """Fake I/O for prepare_media_assets; ``upload_results`` feeds thumbnail uploads in order."""
+    calls = {"upload": 0}
+    upserts: list[dict] = []
+
+    async def fake_resolve(file_path, size="full"):
+        return _frame_bytes(), "image/jpeg"
+
+    async def fake_upload(path, data):
+        if path.startswith("previews/"):
+            return f"cdn/{path}"
+        calls["upload"] += 1
+        result = upload_results.pop(0) if upload_results else "ok"
+        if isinstance(result, Exception):
+            raise result
+        return f"cdn/{path}" if result == "ok" else None
+
+    async def fake_upsert(patch):
+        upserts.append(patch)
+
+    monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)
+    monkeypatch.setattr("app.services.storage.upload_rendition", fake_upload)
+    monkeypatch.setattr(media_registry, "_upsert_media_assets", fake_upsert)
+    monkeypatch.setattr(media_registry, "_PREP_BACKOFF_SECONDS", 0)
+    return calls, upserts
+
+
+async def test_prepare_retries_a_failed_upload(monkeypatch):
+    calls, upserts = _prep_fakes(monkeypatch, [None, "ok"])
+
+    patch = await media_registry.prepare_media_assets_with_retry({"id": "m1", "deployment_id": "dep1", "file_path": "gdrive://m1"})
+
+    assert calls["upload"] == 2
+    assert patch["thumbnail_url"] == "cdn/thumbnails/dep1/m1.jpg"
+    assert len(upserts) == 1  # the failed attempt wrote nothing
+
+
+async def test_prepare_gives_up_after_the_last_attempt(monkeypatch):
+    calls, upserts = _prep_fakes(monkeypatch, [None, None, None])
+
+    try:
+        await media_registry.prepare_media_assets_with_retry({"id": "m1", "deployment_id": "dep1", "file_path": "gdrive://m1"})
+        raise AssertionError("expected RenditionUploadError")
+    except media_registry.RenditionUploadError:
+        pass
+    assert calls["upload"] == media_registry._PREP_ATTEMPTS
+    assert upserts == []
+
+
+async def test_prepare_does_not_retry_a_permission_error(monkeypatch):
+    calls, _ = _prep_fakes(monkeypatch, [_Refused("permission denied for table media_assets")])
+
+    try:
+        await media_registry.prepare_media_assets_with_retry({"id": "m1", "deployment_id": "dep1", "file_path": "gdrive://m1"})
+        raise AssertionError("expected the permission error")
+    except _Refused:
+        pass
+    assert calls["upload"] == 1
+
+
+def test_is_permission_error():
+    assert media_registry.is_permission_error(_Refused("x"))
+    assert media_registry.is_permission_error(Exception("permission denied for table media_assets"))
+    assert not media_registry.is_permission_error(Exception("timed out"))
+
+
+def _media_svc(rows):
+    """Mock service client whose media query honours .range(start, end)."""
+    svc = MagicMock()
+    t = MagicMock()
+    for m in ("select", "eq", "is_", "order"):
+        getattr(t, m).return_value = t
+
+    def _range(start, end):
+        return MagicMock(execute=lambda: MagicMock(data=rows[start : end + 1]))
+
+    t.range.side_effect = _range
+    svc.table.return_value = t
+    return svc
+
+
+async def test_backfill_pages_and_only_touches_missing_thumbnails(monkeypatch):
+    rows = [
+        {"id": "a", "deployment_id": "dep1", "file_path": "gdrive://a", "media_assets": {"thumbnail_url": "cdn/a"}},
+        {"id": "b", "deployment_id": "dep1", "file_path": "gdrive://b", "media_assets": None},
+        {"id": "c", "deployment_id": "dep1", "file_path": "gdrive://c", "media_assets": []},
+    ]
+    _, upserts = _prep_fakes(monkeypatch, [])
+    monkeypatch.setattr("app.services.supabase_client.create_service_client", lambda: _media_svc(rows))
+    monkeypatch.setattr(media_registry, "_FETCH_PAGE", 2)  # three rows → two pages
+    seen: list[tuple[int, int]] = []
+
+    async def progress(done, total):
+        seen.append((done, total))
+
+    generated = await media_registry.backfill_thumbnails("dep1", progress=progress)
+
+    assert generated == 2
+    assert sorted(u["media_id"] for u in upserts) == ["b", "c"]
+    assert seen[-1] == (2, 2)
+
+
+async def test_backfill_stops_on_a_permission_error(monkeypatch):
+    rows = [{"id": i, "deployment_id": "dep1", "file_path": f"gdrive://{i}", "media_assets": None} for i in ("a", "b", "c")]
+    calls, _ = _prep_fakes(monkeypatch, [_Refused("permission denied")])
+    monkeypatch.setattr("app.services.supabase_client.create_service_client", lambda: _media_svc(rows))
+
+    try:
+        await media_registry.backfill_thumbnails("dep1")
+        raise AssertionError("expected the permission error")
+    except _Refused:
+        pass
+    assert calls["upload"] == 1  # stopped at the first photo
