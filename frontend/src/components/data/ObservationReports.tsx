@@ -8,8 +8,8 @@
  * dashboard (ReportsDashboard) reuses these types and the shared chartSpec.
  */
 import { useMemo } from 'react'
-import { VegaChart, VEGA_CONFIG } from '../ui/VegaChart'
-import { withBarLabels } from '../../lib/vegaSpec'
+import { VegaChart } from '../ui/VegaChart'
+import { VEGA_CONFIG, withBarLabels } from '../../lib/vegaSpec'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types (exported so the reports dashboard / chartSpec can reuse)

@@ -2,8 +2,7 @@
  * chartSpec — shared Vega-Lite spec builder + option metadata for the Reports
  * dashboard and the chart builder. Kept component-free so both can import it.
  */
-import { VEGA_CONFIG } from '../ui/VegaChart'
-import { withBarLabels } from '../../lib/vegaSpec'
+import { VEGA_CONFIG, withBarLabels } from '../../lib/vegaSpec'
 import type { Observation } from './ObservationReports'
 
 export type ChartType = 'bar_h' | 'bar_v' | 'arc' | 'line'

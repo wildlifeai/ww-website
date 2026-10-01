@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 /**
  * VegaChart — thin React wrapper around vega-embed.
  *
@@ -20,28 +19,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react'
 import embed from 'vega-embed'
 import { themed, type Spec } from '../../lib/vegaSpec'
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared Vega config: sizes here, colours from the theme at embed time (themed)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const VEGA_CONFIG = {
-  background: 'transparent',
-  padding: 4,
-  view: { stroke: 'transparent', fill: 'transparent' },
-  axis: {
-    labelFontSize: 13,
-    titleFontSize: 13,
-    tickColor: 'transparent',
-  },
-  legend: {
-    labelFontSize: 12,
-    titleFontSize: 12,
-  },
-  text: { fontSize: 12, fontWeight: 600 },
-  mark: { tooltip: true },
-  arc: {},
-} as const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component

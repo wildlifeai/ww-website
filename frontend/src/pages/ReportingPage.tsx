@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { VegaChart, VEGA_CONFIG } from '../components/ui/VegaChart'
+import { VegaChart } from '../components/ui/VegaChart'
+import { VEGA_CONFIG } from '../lib/vegaSpec'
 import { supabase } from '../config/supabase'
 
 // ─────────────────────────────────────────────────────────────────────────────

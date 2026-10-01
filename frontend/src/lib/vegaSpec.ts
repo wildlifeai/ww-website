@@ -3,6 +3,28 @@
  * Kept out of the component file so it only exports components (fast refresh).
  */
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared Vega config: sizes here, colours from the theme at embed time (themed)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const VEGA_CONFIG = {
+  background: 'transparent',
+  padding: 4,
+  view: { stroke: 'transparent', fill: 'transparent' },
+  axis: {
+    labelFontSize: 13,
+    titleFontSize: 13,
+    tickColor: 'transparent',
+  },
+  legend: {
+    labelFontSize: 12,
+    titleFontSize: 12,
+  },
+  text: { fontSize: 12, fontWeight: 600 },
+  mark: { tooltip: true },
+  arc: {},
+} as const
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type Spec = Record<string, any>
 

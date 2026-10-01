@@ -13,5 +13,6 @@ export type { DataTableProps, Column } from './DataTable'
 export { StatusBadge, deriveAnnotationStatus } from './StatusBadge'
 export type { StatusBadgeProps, AnnotationStatus } from './StatusBadge'
 
-export { VegaChart, VEGA_CONFIG } from './VegaChart'
+export { VegaChart } from './VegaChart'
+export { VEGA_CONFIG } from '../../lib/vegaSpec'
 export type { VegaChartProps } from './VegaChart'
