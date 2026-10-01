@@ -96,7 +96,10 @@ jobs:
         env:
           CI: 'true'
           E2E_EMAIL: ${{ vars.E2E_EMAIL || 'tui@ww.org' }}
-          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.SEED_USER_PASSWORD }}
+          # Every seeded user shares ww-backend's SEED_USER_PASSWORD, and the dev
+          # environment already holds it as DEMO_PASSWORD for the backend deploy
+          # (deploy-backend.yml). E2E_PASSWORD overrides it for a dedicated account.
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.DEMO_PASSWORD }}
           # The full suite only: the LoRaWAN spec inserts and deletes synthetic rows
           E2E_SUPABASE_URL: ${{ inputs.suite == 'full' && secrets.SUPABASE_URL || '' }}
           E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ inputs.suite == 'full' && secrets.SUPABASE_SERVICE_ROLE_KEY || '' }}
@@ -114,10 +117,10 @@ jobs:
       - name: Fail if the account is not configured
         if: always()
         env:
-          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.SEED_USER_PASSWORD }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.DEMO_PASSWORD }}
         run: |
           if [ -z "$E2E_PASSWORD" ]; then
-            echo "::error::no password for the seeded account: add E2E_PASSWORD (or SEED_USER_PASSWORD) to the dev environment's secrets, see e2e/README.md"
+            echo "::error::no password for the seeded account: the dev environment needs E2E_PASSWORD, or the DEMO_PASSWORD the backend deploy already uses, see e2e/README.md"
             exit 1
           fi
 

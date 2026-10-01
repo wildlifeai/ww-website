@@ -41,9 +41,10 @@ preview URL from it), on a pull request that changes `e2e/` or the workflow (aga
 preview, since the specs are what changed), and by hand with a base URL and a suite.
 
 - **E2E Smoke** runs `01-smoke` and `02-demo` against the preview, signed in as
-  `E2E_EMAIL` (a repository variable, `tui@ww.org` by default) with the `E2E_PASSWORD` secret
-  of the `dev` environment, or `SEED_USER_PASSWORD` when that is the one set. The job stops
-  with a clear message when neither is. The `full` suite, by hand only, adds `03` and `04`, which
+  `E2E_EMAIL` (a repository variable, `tui@ww.org` by default) with the `dev` environment's
+  `E2E_PASSWORD` secret, falling back to its `DEMO_PASSWORD`: every seeded user shares
+  ww-backend's seed password, which the backend deploy already keeps there for the demo
+  account. The job stops with a clear message when neither is set. The `full` suite, by hand only, adds `03` and `04`, which
   write to the dev database and storage; the LoRaWAN spec takes the `dev` environment's
   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 - **A11y of public pages (advisory)** runs `05-a11y` with no account. It stays advisory, and
