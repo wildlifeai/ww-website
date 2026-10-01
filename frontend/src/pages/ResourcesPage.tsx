@@ -86,7 +86,7 @@ export function ResourcesPage() {
     <div>
       <div style={{ marginBottom: '2rem' }}>
         <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📚 Resources & How-To Guides</h1>
-        <p style={{ opacity: 0.7, maxWidth: '640px', lineHeight: 1.6 }}>
+        <p style={{ color: 'var(--text-muted)', maxWidth: '640px', lineHeight: 1.6 }}>
           Everything you need to set up, monitor, and analyse data from your Wildlife Watcher camera.
           From unboxing to AI-powered species identification — all in one place.
         </p>
@@ -101,7 +101,7 @@ export function ResourcesPage() {
           borderRadius: 'var(--radius)', padding: '0.75rem',
           display: 'flex', flexDirection: 'column', gap: '0.25rem',
         }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.5, padding: '0.25rem 1rem 0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contents</div>
+          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0.25rem 1rem 0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contents</div>
           {sections.map(s => (
             <SidebarLink key={s.id} id={s.id} label={s.label} active={active === s.id} onClick={() => scrollTo(s.id)} />
           ))}

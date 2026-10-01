@@ -429,12 +429,11 @@ function Layout({ children }: { children: React.ReactNode }) {
         borderTop: '1px solid var(--border)',
         padding: '2.5rem 0',
         backgroundColor: 'var(--surface)',
-        color: 'var(--text-color)',
+        color: 'var(--text-muted)',
         textAlign: 'center',
-        opacity: 0.9,
       }}>
         <div className="container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ opacity: 0.7, fontSize: '0.875rem' }}>
+          <div style={{ fontSize: '0.875rem' }}>
             &copy; {new Date().getFullYear()} Wildlife.ai
             {' | '}
             <Link to="/faq" style={{ color: 'inherit', textDecoration: 'underline' }}>FAQ</Link>

@@ -123,7 +123,7 @@ function Dashboard() {
         <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.75rem' }}>
           Welcome back, {firstName} 👋
         </h2>
-        <p style={{ margin: 0, opacity: 0.65, fontSize: '0.9375rem' }}>
+        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9375rem' }}>
           Your three-step workflow to go from SD card to results.
         </p>
       </div>
@@ -158,7 +158,7 @@ function Dashboard() {
         }}>
           <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📷</div>
           <h3 style={{ marginTop: 0 }}>No projects yet</h3>
-          <p style={{ opacity: 0.7, fontSize: '0.9rem', maxWidth: '400px', margin: '0 auto 1.5rem' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: '400px', margin: '0 auto 1.5rem' }}>
             Create your first project to start managing deployments and reviewing results.
             You can also manage projects from the{' '}
             <a href={APP_STORE_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>Wildlife Watcher mobile app</a>.
@@ -212,7 +212,7 @@ function MarketingHero() {
           small animals that traditional camera traps miss. On-device AI flags your target
           species in the field, and an open-source website makes analysis and reporting easy.
         </p>
-        <p style={{ fontSize: '0.9375rem', opacity: 0.6, marginBottom: '2rem', fontWeight: 600, letterSpacing: '0.01em' }}>
+        <p style={{ fontSize: '0.9375rem', color: 'var(--text-muted)', marginBottom: '2rem', fontWeight: 600, letterSpacing: '0.01em' }}>
           Smart monitoring of small animals · on-device AI · open-source web analysis
         </p>
         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -247,7 +247,7 @@ function MarketingHero() {
               </a>
             </div>
             <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-              <QRCodeSVG value={APP_STORE_URL} size={150} />
+              <QRCodeSVG value={APP_STORE_URL} size={150} title="QR code linking to the Wildlife Watcher app on the App Store" />
             </div>
           </div>
           <div style={{ textAlign: 'center' }}>
@@ -257,7 +257,7 @@ function MarketingHero() {
               </a>
             </div>
             <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-              <QRCodeSVG value={PLAY_STORE_URL} size={150} />
+              <QRCodeSVG value={PLAY_STORE_URL} size={150} title="QR code linking to the Wildlife Watcher app on Google Play" />
             </div>
           </div>
         </div>
@@ -317,7 +317,7 @@ function MarketingHero() {
             <li>LoRaWAN telemetry (in development) will send battery and SD-card status back to the dashboard.</li>
             <li>Fully open hardware — schematics and firmware published on GitHub.</li>
           </ul>
-          <p style={{ opacity: 0.7, fontSize: '0.9rem', lineHeight: 1.6, marginBottom: '1rem' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: '1rem' }}>
             Wildlife Watcher is currently in a prototype phase — devices are available to Beta
             testers. <Link to="/faq#buy" style={{ color: 'var(--primary)' }}>How to get one →</Link>
           </p>
