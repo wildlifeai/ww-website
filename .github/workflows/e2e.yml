@@ -91,17 +91,6 @@ jobs:
           echo "api:      $E2E_API_URL"
           test -n "$E2E_BASE_URL" || { echo "::error::no frontend URL: the deployment carried no environment_url"; exit 1; }
 
-      # The specs skip the signed-in checks when the password is missing, and a
-      # skip must not read as a pass: say what is missing and stop.
-      - name: Check the account is configured
-        env:
-          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.SEED_USER_PASSWORD }}
-        run: |
-          if [ -z "$E2E_PASSWORD" ]; then
-            echo "::error::no password for the seeded account: add E2E_PASSWORD (or SEED_USER_PASSWORD) to the dev environment's secrets, see e2e/README.md"
-            exit 1
-          fi
-
       - name: Run the flows
         working-directory: e2e
         env:
@@ -116,6 +105,20 @@ jobs:
             npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts specs/03-upload-exif.spec.ts specs/04-lorawan-realtime.spec.ts
           else
             npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts
+          fi
+
+      # The specs skip the signed-in checks when the password is missing, and a
+      # skip must not read as a pass. After the run, not before, so the public
+      # pages and the demo still report every time (run 36938521947 stopped
+      # here with nothing else to show).
+      - name: Fail if the account is not configured
+        if: always()
+        env:
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.SEED_USER_PASSWORD }}
+        run: |
+          if [ -z "$E2E_PASSWORD" ]; then
+            echo "::error::no password for the seeded account: add E2E_PASSWORD (or SEED_USER_PASSWORD) to the dev environment's secrets, see e2e/README.md"
+            exit 1
           fi
 
       # The specs skip themselves when their env is missing, so a run with a
