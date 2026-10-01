@@ -371,7 +371,7 @@ function MarketingHero() {
           </p>
           <ThreeStepGuide steps={DEFAULT_MARKETING_STEPS} />
           <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-            <Link to="/login" className="btn" style={{ textDecoration: 'none', padding: '0.75rem 2.5rem', fontSize: '1rem' }}>
+            <Link to="/signup" className="btn" style={{ textDecoration: 'none', padding: '0.75rem 2.5rem', fontSize: '1rem' }}>
               Get started — it's free
             </Link>
           </div>

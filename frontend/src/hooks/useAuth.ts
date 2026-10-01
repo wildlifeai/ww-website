@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../config/supabase'
 import { apiClient } from '../lib/apiClient'
+import { nextAuthUser } from '../lib/authUser'
 import type { User } from '@supabase/supabase-js'
 
 /** Mint a session for the shared read-only demo account and sign in.
@@ -24,12 +25,13 @@ export function useAuth() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
+      setUser(prev => nextAuthUser(prev, session?.user ?? null))
       setLoading(false)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
+    // Token refreshes re-send the same user; keep the object so effects keyed on it stay put (#154).
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(prev => nextAuthUser(prev, session?.user ?? null, event))
     })
 
     return () => subscription.unsubscribe()

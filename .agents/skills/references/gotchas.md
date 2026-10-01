@@ -187,3 +187,14 @@ them.
 A per-run password such as `` `pw-${crypto.randomUUID()}` `` trips the Generic Password
 detector (#159). Generate test passwords with no literal part (`crypto.randomUUID()`), and mark
 a genuine false positive in the GitGuardian dashboard rather than ignoring a path.
+
+---
+
+## The React compiler lint can skip a whole component without a word
+
+The `react-hooks` compiler rules (`set-state-in-effect`, `refs`, `purity`) silently skip a
+component they cannot analyse: one carrying an `eslint-disable` for `exhaustive-deps`, or one
+calling `Intl.DateTimeFormat()` during render. Removing that disable in `MediaDetail` surfaced
+three errors it had hidden (#184); the `Intl` call hid `ProjectDefaultsPanel` (#137). The symptom
+is a `react-hooks/*` disable directive reported as unused. Keep such calls at module scope, and
+treat that warning as a component that stopped being checked, not a line to delete.

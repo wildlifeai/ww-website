@@ -4,11 +4,10 @@ on:
   pull_request:
     branches: [dev, main]
   workflow_dispatch:
-    inputs:
-      verbose:
-        description: 'Show file details per rule'
-        type: boolean
-        default: true
+
+permissions:
+  contents: read
+  pull-requests: write     # the sticky summary comment on the pull request
 
 jobs:
   react-doctor:
@@ -18,6 +17,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # 'changed' compares the PR against its base; a shallow clone cannot reach the
+          # base and falls back to reporting every issue in the changed files.
+          fetch-depth: 0
 
       - name: Run React Doctor
         id: doctor
@@ -26,17 +29,25 @@ jobs:
         # (broke 2026-06-11: @main passed --scope, which stable 0.5.1 rejects).
         # Bump both together, by hand: Dependabot ignores this action (dependabot.yml),
         # because it can only move the tag and a lone tag bump breaks the scan.
-        uses: millionco/react-doctor@v2.1.0
+        # Rules switched off for this repo live in frontend/doctor.config.json (#181).
+        uses: millionco/react-doctor@v2.2.9
         with:
           directory: 'frontend'
-          verbose: ${{ github.event.inputs.verbose || 'true' }}
-          node-version: '20'
-          version: '0.5.1'
+          node-version: '24'          # 0.9.12's dependencies need Node 22 or later
+          version: '0.9.12'
+          scope: 'changed'            # only issues the PR introduces
+          # The gate: a PR fails when it introduces a warning or an error. The 0.9.12 score
+          # is not "100 minus what the PR added" (a PR with no new issues can score 86), so
+          # it is reported below but no longer gates. A manual run scans the whole project
+          # and only reports.
+          blocking: ${{ github.event_name == 'pull_request' && 'warning' || 'none' }}
+          review-comments: 'false'
+          commit-status: 'false'
 
-      - name: Report score
+      - name: Report
+        if: always()
         run: |
-          echo "## 🩺 React Doctor Score: ${{ steps.doctor.outputs.score }}" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ steps.doctor.outputs.score }}" -lt 99 ]; then
-            echo "::error::React Doctor score (${{ steps.doctor.outputs.score }}) is below the required threshold of 99."
-            exit 1
-          fi
+          {
+            echo "## 🩺 React Doctor"
+            echo "Issues introduced: ${{ steps.doctor.outputs.total-issues || 'n/a' }} (errors ${{ steps.doctor.outputs.error-count || 'n/a' }}, warnings ${{ steps.doctor.outputs.warning-count || 'n/a' }}); fixed: ${{ steps.doctor.outputs.fixed-issues || 'n/a' }}; score ${{ steps.doctor.outputs.score || 'n/a' }}"
+          } >> "$GITHUB_STEP_SUMMARY"

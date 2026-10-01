@@ -471,6 +471,7 @@ export default function App() {
               {/* Public */}
               <Route path="/"               element={<HomePage />} />
               <Route path="/login"          element={<LoginPage />} />
+              <Route path="/signup"         element={<LoginPage mode="sign_up" />} />
               <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/privacy"        element={<PrivacyPolicyPage />} />
               {/* Support page merged into /faq + /resources; redirect old bookmarks */}

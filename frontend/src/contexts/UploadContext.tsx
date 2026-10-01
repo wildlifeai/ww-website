@@ -51,6 +51,24 @@ export interface UploadDeployment {
   deployment_start: string | null
 }
 
+/** The browser's "leave site?" prompt while batches are still sending. */
+function warnWhileSending(e: BeforeUnloadEvent) {
+  e.preventDefault()
+}
+
+export interface StartUploadOptions {
+  /** Precise deployment ids the images belong to (for the annotations filter/redirect). */
+  resolvedDeploymentIds?: string[]
+  /** Per-file → deployment mapping, for the optimistic Annotations grid before DB rows exist. */
+  pending?: PendingUpload[]
+  /** Capture-session bindings from the triage step, one deployment per group of files. Files
+   *  are ordered so each batch carries a single deployment, because assigned_deployment_id is
+   *  one value per request. This is the only source of a deployment assignment. */
+  sessionAssignments?: { deploymentId: string; indices: number[] }[]
+  /** Run the AI pipeline + Wildlife Brain after upload (the server's default is true). */
+  runAi?: boolean
+}
+
 interface UploadContextValue {
   // ── Pipeline ───────────────────────────────────────────────────────────────
   pipelineState: PipelineState
@@ -65,16 +83,7 @@ interface UploadContextValue {
     paths: string[],
     uploadToDrive: boolean,
     deployments: UploadDeployment[],
-    /** Deployment the user manually assigned unresolved/no-id photos to (see UploadFlow). */
-    assignedDeploymentId?: string,
-    /** Precise deployment ids the images belong to (for the annotations filter/redirect). */
-    resolvedDeploymentIds?: string[],
-    /** Per-file → deployment mapping, for the optimistic Annotations grid before DB rows exist. */
-    pending?: PendingUpload[],
-    /** Capture-session bindings from the triage step, one deployment per group of files. */
-    sessionAssignments?: { deploymentId: string; indices: number[] }[],
-    /** Run the AI pipeline + Wildlife Brain after upload (the server's default is true). */
-    runAi?: boolean,
+    options?: StartUploadOptions,
   ) => Promise<void>
   clearUpload: () => void
 
@@ -310,17 +319,15 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
       paths: string[],
       uploadToDrive: boolean,
       deployments: UploadDeployment[],
-      assignedDeploymentId?: string,
-      resolvedDeploymentIds?: string[],
-      pending?: PendingUpload[],
-      /** Per-capture-session bindings from the triage step (see UnassignedTriage).
-       *  Files are ordered so each batch carries a single deployment, because
-       *  assigned_deployment_id is one value per request. */
-      sessionAssignments?: { deploymentId: string; indices: number[] }[],
-      runAi = true,
+      { resolvedDeploymentIds, pending, sessionAssignments, runAi = true }: StartUploadOptions = {},
     ): Promise<void> => {
       if (busyRef.current) return
       busyRef.current = true
+      // A reload or tab close while the batch loop runs drops every batch not yet sent. The
+      // upload page guards only its staged selection and unmounts long before the loop ends, so
+      // the loop guards the tab itself until its last batch (#143). Server-side processing
+      // carries on without the tab, so it is not guarded.
+      window.addEventListener('beforeunload', warnWhileSending)
 
       // Order files by session so a batch never mixes deployments, and remember
       // which deployment each position belongs to.
@@ -391,10 +398,8 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
           for (const p of chunkPaths) formData.append('paths', p)
           if (uploadToDrive) formData.append('upload_to_drive', 'true')
           formData.append('run_ai', String(runAi))
-          // Every file in this batch shares one deployment by construction
-          // (see batchPlan); fall back to the single page-level assignment.
-          const batchAssigned = plan.assigned ?? assignedDeploymentId
-          if (batchAssigned) formData.append('assigned_deployment_id', batchAssigned)
+          // Every file in this batch shares one deployment by construction (see batchPlan).
+          if (plan.assigned) formData.append('assigned_deployment_id', plan.assigned)
 
           try {
             const response = await apiClient.upload('/api/exif/parse', formData)
@@ -553,6 +558,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
         }
       } finally {
         busyRef.current = false
+        window.removeEventListener('beforeunload', warnWhileSending)
       }
     },
     [],

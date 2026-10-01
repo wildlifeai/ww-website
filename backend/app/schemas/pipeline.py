@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 # ── Pipeline Schemas ─────────────────────────────────────────────────
 
@@ -71,6 +71,16 @@ class PipelineStepResult(BaseModel):
     # Step-specific tallies (evidence fusion: bursts, consensus_animal, consensus_blank,
     # evidence_rows, ...); empty for steps that have none.
     counts: dict[str, int] = Field(default_factory=dict)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def seconds_per_frame(self) -> Optional[float]:
+        """Wall-clock seconds per frame for this step, None when it processed nothing (#171).
+
+        On the Cloud Run GPU job every second of every step is billed, so this, not only the
+        GPU models' share, is what the cost per photo is built from.
+        """
+        return round(self.duration_seconds / self.media_processed, 3) if self.media_processed else None
 
 
 class PipelineRunResult(BaseModel):

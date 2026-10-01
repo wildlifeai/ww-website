@@ -32,7 +32,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check the ww-backend read token is set
         env:
@@ -44,7 +44,7 @@ jobs:
           fi
 
       - name: Check out ww-backend
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: wildlifeai/ww-backend
           ref: dev

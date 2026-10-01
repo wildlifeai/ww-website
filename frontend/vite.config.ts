@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
     || env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || ''
   const apiBaseUrl = env.VITE_API_BASE_URL || process.env.VITE_API_BASE_URL
     || 'http://localhost:8000'
+  // Public: the web OAuth client ID that Google's sign-in button runs under (LoginPage).
+  const googleClientId = env.VITE_GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || ''
 
   return {
     plugins: [react()],
@@ -20,7 +22,8 @@ export default defineConfig(({ mode }) => {
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseAnonKey),
-      'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBaseUrl)
+      'import.meta.env.VITE_API_BASE_URL': JSON.stringify(apiBaseUrl),
+      'import.meta.env.VITE_GOOGLE_CLIENT_ID': JSON.stringify(googleClientId),
     }
   }
 })
