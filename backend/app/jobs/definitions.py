@@ -803,12 +803,18 @@ async def auto_embed_deployment(deployment_id: str, user_id: str | None = None) 
     try:
         from app.domain.wildlife_brain import embed_and_cluster_deployment
 
+        t0 = time.monotonic()
         result = await embed_and_cluster_deployment(deployment_id, created_by=user_id)
+        duration = time.monotonic() - t0
+        images = result.get("image_count") or 0
         logger.info(
             "auto_embed_complete",
             deployment_id=deployment_id,
-            images=result.get("image_count"),
+            images=images,
             clusters=result.get("clusters"),
+            # DINOv3 runs on the GPU outside the pipeline steps; its time per frame too (#171).
+            duration_seconds=round(duration, 2),
+            seconds_per_frame=round(duration / images, 3) if images else None,
         )
     except Exception as exc:
         logger.warning("auto_embed_failed", deployment_id=deployment_id, error=str(exc))

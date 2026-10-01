@@ -32,6 +32,10 @@ from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 
+# Steps that run a model on the GPU (SpeciesNet's detector and classifier, BioCLIP). The others
+# run on the CPU or call an API, but on the Cloud Run GPU job their seconds are billed too.
+GPU_MODEL_STEPS = frozenset({PipelineStepType.SPECIESNET, PipelineStepType.BIOCLIP})
+
 
 # ── Cloud-model registry IDs ─────────────────────────────────────────
 # annotation_runs.chk_annotation_run_provenance requires every ai_inference run to
@@ -1519,6 +1523,16 @@ async def run_pipeline(
         result = await step.run(media, deployment_id, config)
         step_results.append(result)
         total_observations += result.observations_created
+        # One line per step with its time per frame, for the cost per photo (#171).
+        logger.info(
+            "pipeline_step_timing",
+            step=step_type.value,
+            deployment_id=deployment_id,
+            media_processed=result.media_processed,
+            duration_seconds=result.duration_seconds,
+            seconds_per_frame=result.seconds_per_frame,
+            gpu_model=step_type in GPU_MODEL_STEPS,
+        )
 
     overall_duration = time.monotonic() - overall_start
 
@@ -1568,6 +1582,8 @@ async def run_pipeline(
         total_media=len(media),
         total_observations=total_observations,
         duration_seconds=round(overall_duration, 2),
+        # What the GPU job bills per frame: the whole run, every step, divided by its frames.
+        seconds_per_frame=round(overall_duration / len(media), 3),
     )
 
     return PipelineRunResult(
