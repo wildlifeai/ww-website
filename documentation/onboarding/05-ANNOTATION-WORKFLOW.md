@@ -33,6 +33,12 @@ per image derived from `review_status` (`lib/observations.ts`):
 | ⧗ Processing (grey) | no observations yet — still working through the pipeline |
 | ✕ Issue (red) | explicit pipeline error (reserved; see `StatusBadge.tsx`) |
 
+A card with no thumbnail yet shows **Processing…** while its deployment has a queued or running
+job, or for 10 minutes after the photo was registered. After that it shows **No thumbnail** and a
+**Retry** button, which runs the thumbnail backfill for the whole deployment (#208). The grid
+reloads when a job on a deployment in view finishes (`hooks/useBusyDeployments.ts`,
+`lib/thumbnailRetry.ts`).
+
 ### Selection actions
 
 Click selects, double-click opens. Once something is selected the **Actions** menu

@@ -1542,10 +1542,14 @@ async def backfill_thumbnails_job(job_id: str, deployment_id: str):
     """Generate thumbnail/preview renditions for a deployment's media (Media Registry)."""
     logger.info("job_start", job_type="backfill_thumbnails", job_id=job_id, deployment_id=deployment_id)
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1, message="Generating thumbnails…")
+
+    async def _progress(done: int, total: int):
+        await update_job(job_id, progress=0.1 + 0.9 * done / total, message=f"Generating thumbnails, {done} of {total}")
+
     try:
         from app.domain.media_registry import backfill_thumbnails
 
-        count = await backfill_thumbnails(deployment_id)
+        count = await backfill_thumbnails(deployment_id, progress=_progress)
         await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message=f"Generated {count} thumbnails")
     except Exception as e:
         logger.error("job_failed", job_type="backfill_thumbnails", job_id=job_id, error=str(e))
