@@ -1,5 +1,5 @@
 import { test, expect } from '../helpers/test'
-import { login, expectHealthyRender, warmApi, API_URL, CREDS } from '../helpers/session'
+import { login, expectHealthyRender, warmApi, API_URL, HAS_CREDS } from '../helpers/session'
 
 /**
  * Smoke: the dev website is up, the API answers, public pages render,
@@ -27,7 +27,7 @@ test('public pages render without errors', async ({ page }) => {
 })
 
 test('seeded user can sign in and reach all authed pages', async ({ page }) => {
-  test.skip(!CREDS.email, 'E2E_EMAIL/E2E_PASSWORD not set')
+  test.skip(!HAS_CREDS, 'E2E_EMAIL/E2E_PASSWORD not set')
   await login(page)
   for (const path of ['/toolkit', '/field', '/annotations', '/insights', '/settings']) {
     // Navigate in-SPA (nav links) — full reloads drop the session in this app.

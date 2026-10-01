@@ -25,6 +25,9 @@ export async function warmApi(request: APIRequestContext, maxMs = 180_000): Prom
   }
 }
 
+/** Both halves of the account, so a missing password skips the signed-in specs instead of failing them. */
+export const HAS_CREDS = !!(CREDS.email && CREDS.password)
+
 /** UI login with the seeded test user (tui@ww.org on a freshly seeded dev DB). */
 export async function login(page: Page): Promise<void> {
   await page.goto('/login')
