@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../helpers/test'
 import { createClient } from '@supabase/supabase-js'
 import { login, CREDS } from '../helpers/session'
 

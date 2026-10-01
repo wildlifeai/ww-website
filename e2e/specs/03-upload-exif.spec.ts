@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../helpers/test'
 import { login, CREDS } from '../helpers/session'
 import * as path from 'path'
 import * as fs from 'fs'

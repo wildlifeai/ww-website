@@ -76,6 +76,7 @@ Ordered roughly by how likely you are to need them. Descriptions live in the
 
 | Report | Status |
 |---|---|
+| [2026-10_e2e-in-ci](2026-10_e2e-in-ci.md) | 🔧 Active, 2026-10-01: the Playwright flows run on every Cloudflare Pages preview deployment; first run pending |
 | [species-brain-training-spec](species-brain-training-spec.md) | 🔧 Active: built behind `FF_MODEL_TRAINING_ENABLED`; first live Edge Impulse run and a load on a camera still to do |
 | [2026-09_evidence-pipeline-architecture](2026-09_evidence-pipeline-architecture/README.md) | 📋 Proposal, 2026-09-29: evidence score, consensus row and `media_evidence` contract; items 1 to 3 built in #155, the rest tracked in its section 17 |
 | [2026-09_false-negatives-and-vlm-audit](2026-09_false-negatives-and-vlm-audit/README.md) | 🔧 Active. Gemini presence step, labeller and eval script implemented behind `FF_GEMINI_PRESENCE_ENABLED`; interim prompt v1 results on 962 labelled frames in section 6; the prompt v2 benchmark is pending |

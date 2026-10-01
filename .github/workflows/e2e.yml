@@ -1,0 +1,173 @@
+name: E2E (Playwright)
+
+# Browser checks against a deployed frontend, from e2e/ (see e2e/README.md).
+#
+# Trigger: Cloudflare Pages posts a GitHub deployment for every branch it
+# builds ("Preview" for a branch, "Production" for main). When that deployment
+# succeeds, this runs the smoke and demo specs against its URL, so a pull
+# request gets its own preview exercised with the dev API behind it. Nothing
+# in this workflow builds the frontend: the Pages build is the one users get.
+# Production deployments are skipped: the seeded account lives on dev only.
+#
+# By hand: `workflow_dispatch` with a base URL (default: the dev preview) and
+# a suite. `full` adds the upload and LoRaWAN specs, which write to the dev
+# database and storage: never point it at production.
+#
+# What a green smoke proves: the bundle Cloudflare built from this commit
+# renders every public page, the seeded user signs in and reaches every
+# authed page, and the demo session is read-only. What it does not prove: the
+# backend half of the same pull request, which still deploys from `dev`.
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Frontend under test'
+        default: 'https://dev.ww-website.pages.dev'
+        required: true
+      api_url:
+        description: 'FastAPI backend (dev container app)'
+        default: 'https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io'
+        required: true
+      suite:
+        description: 'smoke: public pages, sign-in, demo. full: also upload and LoRaWAN (writes to dev)'
+        type: choice
+        options: [smoke, full]
+        default: smoke
+
+concurrency:
+  group: e2e-${{ github.event.deployment.sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  E2E_BASE_URL: ${{ inputs.base_url || github.event.deployment_status.environment_url }}
+  E2E_API_URL: ${{ inputs.api_url || vars.E2E_API_URL || 'https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io' }}
+
+jobs:
+  smoke:
+    name: E2E Smoke
+    if: github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    runs-on: ubuntu-latest
+    # The seeded account's password and the dev service-role key live here
+    environment: dev
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.deployment.sha || github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install
+        working-directory: e2e
+        run: npm ci
+
+      - name: Cache Playwright's Chromium
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Which target
+        run: |
+          echo "frontend: $E2E_BASE_URL"
+          echo "api:      $E2E_API_URL"
+          test -n "$E2E_BASE_URL" || { echo "::error::no frontend URL: the deployment carried no environment_url"; exit 1; }
+
+      - name: Run the flows
+        working-directory: e2e
+        env:
+          CI: 'true'
+          E2E_EMAIL: ${{ vars.E2E_EMAIL || 'tui@ww.org' }}
+          E2E_PASSWORD: ${{ secrets.SEED_USER_PASSWORD }}
+          # The full suite only: the LoRaWAN spec inserts and deletes synthetic rows
+          E2E_SUPABASE_URL: ${{ inputs.suite == 'full' && secrets.SUPABASE_URL || '' }}
+          E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ inputs.suite == 'full' && secrets.SUPABASE_SERVICE_ROLE_KEY || '' }}
+        run: |
+          if [ "${{ inputs.suite }}" = "full" ]; then
+            npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts specs/03-upload-exif.spec.ts specs/04-lorawan-realtime.spec.ts
+          else
+            npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts
+          fi
+
+      # The specs skip themselves when their env is missing, so a run with a
+      # missing secret can "pass" having tested nothing. Count what ran.
+      - name: Fail if nothing actually ran
+        if: always()
+        working-directory: e2e
+        run: |
+          total=$(grep -c '<testcase' results.xml 2>/dev/null || echo 0)
+          skipped=$(grep -c '<skipped' results.xml 2>/dev/null || echo 0)
+          echo "test cases: $total, skipped: $skipped"
+          test "$total" -gt "$skipped"
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-smoke-${{ github.event.deployment.sha || github.sha }}
+          path: |
+            e2e/results.xml
+            e2e/test-results/
+            e2e/playwright-report/
+          retention-days: 7
+          if-no-files-found: warn
+
+  a11y:
+    name: A11y of public pages (advisory)
+    if: github.event_name == 'workflow_dispatch' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.deployment.sha || github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install
+        working-directory: e2e
+        run: npm ci
+
+      - name: Cache Playwright's Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      # No account: the public pages only. Advisory until they are clean, and
+      # the job name says so; a red run here is a list of violations to fix.
+      - name: axe-core on the public pages
+        working-directory: e2e
+        env:
+          CI: 'true'
+        run: npx playwright test specs/05-a11y.spec.ts
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-a11y-${{ github.event.deployment.sha || github.sha }}
+          path: |
+            e2e/results.xml
+            e2e/playwright-report/
+          retention-days: 7
+          if-no-files-found: warn

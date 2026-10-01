@@ -294,9 +294,10 @@ HF model, put a token in `HF_TOKEN` (SpeciesNet/BioCLIP need none). Architecture
 ```bash
 cd backend && python -m pytest tests/ -v          # backend unit/domain tests
 cd frontend && npm run lint && npx tsc -b --noEmit # frontend lint + type check (-b: the root tsconfig is references-only)
+cd e2e && npm run e2e:smoke                        # browser checks against a running site, see e2e/README.md
 ```
 
-See the [Testing Guide](./documentation/resources/testing-with-seed-users.md) for seed users and role-based validation.
+See the [Testing Guide](./documentation/resources/testing-with-seed-users.md) for seed users and role-based validation, and [`e2e/README.md`](./e2e/README.md) for the Playwright flows and what CI runs them against.
 
 ## Additional Commands
 

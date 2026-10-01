@@ -1,4 +1,4 @@
-import { Page, expect } from '@playwright/test'
+import { APIRequestContext, Page, expect } from '@playwright/test'
 
 export const CREDS = {
   email: process.env.E2E_EMAIL || '',
@@ -6,6 +6,24 @@ export const CREDS = {
 }
 
 export const API_URL = process.env.E2E_API_URL || 'http://localhost:8000'
+
+/**
+ * Wake the backend before the first spec: the dev API scales to zero and takes
+ * about a minute to answer its first request. Polls GET /docs (unauthenticated)
+ * until it is 200, for up to `maxMs`. Returns the time it took.
+ */
+export async function warmApi(request: APIRequestContext, maxMs = 180_000): Promise<number> {
+  const started = Date.now()
+  for (;;) {
+    const ok = await request
+      .get(`${API_URL}/docs`, { timeout: 30_000 })
+      .then((r) => r.status() === 200)
+      .catch(() => false)
+    if (ok) return Date.now() - started
+    if (Date.now() - started > maxMs) throw new Error(`API at ${API_URL} did not answer within ${maxMs / 1000}s`)
+    await new Promise((r) => setTimeout(r, 5_000))
+  }
+}
 
 /** UI login with the seeded test user (tui@ww.org on a freshly seeded dev DB). */
 export async function login(page: Page): Promise<void> {

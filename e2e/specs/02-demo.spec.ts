@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../helpers/test'
 
 /**
  * Demo flow: "Try the demo" signs the visitor into the shared read-only
