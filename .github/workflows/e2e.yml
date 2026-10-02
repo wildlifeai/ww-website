@@ -152,11 +152,6 @@ jobs:
     name: A11y of public pages (advisory)
     if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
     runs-on: ubuntu-latest
-    # Advisory until #213 (the colour-contrast fix for #212) is deployed to dev:
-    # a failed step still prints every violation into the log and the summary,
-    # but the job and the E2E workflow stay green. Remove this line to make
-    # the job blocking.
-    continue-on-error: true
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
@@ -183,13 +178,23 @@ jobs:
         working-directory: e2e
         run: npx playwright install --with-deps chromium
 
-      # No account: the public pages only. Advisory until they are clean, and
-      # the job name says so; a red run here is a list of violations to fix.
+      # No account: the public pages only. Advisory until #213 (the
+      # colour-contrast fix for #212) is deployed to dev: the step's failure
+      # prints every violation into the log and becomes a warning, and the job
+      # stays green. continue-on-error has to sit on the step, not the job: on
+      # the job it keeps the workflow run green but leaves the job's own check
+      # red in the pull request. Remove it to make the job blocking.
       - name: axe-core on the public pages
+        id: axe
         working-directory: e2e
+        continue-on-error: true
         env:
           CI: 'true'
         run: npx playwright test specs/05-a11y.spec.ts
+
+      - name: Warn when the pages are not clean
+        if: steps.axe.outcome == 'failure'
+        run: echo "::warning::axe found serious or critical violations on the public pages (advisory, #212): see the step above for every node"
 
       - name: Upload report
         if: always()
