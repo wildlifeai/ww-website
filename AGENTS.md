@@ -41,6 +41,11 @@ cd frontend && npm run lint && npx tsc -b --noEmit && npm run build
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
 
+The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
+(`.github/workflows/e2e.yml`); what they prove and how to read a failure is in
+[`e2e/README.md`](e2e/README.md). They need a running site, so they are not part of the
+local gates above.
+
 Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 (`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
 ww-backend runs them against its own schema PRs, so a red run can come from either side. To

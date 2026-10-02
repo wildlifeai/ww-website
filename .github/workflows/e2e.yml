@@ -1,0 +1,209 @@
+name: E2E (Playwright)
+
+# Browser checks against a deployed frontend, from e2e/ (see e2e/README.md).
+#
+# Trigger: Cloudflare Pages posts a GitHub deployment for every branch it
+# builds ("Preview" for a branch, "Production" for main). When that deployment
+# succeeds, this runs the smoke and demo specs against its URL, so a pull
+# request gets its own preview exercised with the dev API behind it. Nothing
+# in this workflow builds the frontend: the Pages build is the one users get.
+# Production deployments are skipped: the seeded account lives on dev only.
+#
+# A pull request that changes e2e/ or this file runs the smoke against the
+# dev preview (the merged frontend), since the specs themselves are what
+# changed. By hand: `workflow_dispatch` with a base URL (default: the dev
+# preview) and a suite. `full` adds the upload and LoRaWAN specs, which write
+# to the dev database and storage: never point it at production.
+#
+# What a green smoke proves: the bundle Cloudflare built from this commit
+# renders every public page, the seeded user signs in and reaches every
+# authed page, and the demo session is read-only. What it does not prove: the
+# backend half of the same pull request, which still deploys from `dev`.
+
+on:
+  deployment_status:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'e2e/**'
+      - '.github/workflows/e2e.yml'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Frontend under test'
+        default: 'https://dev.ww-website.pages.dev'
+        required: true
+      api_url:
+        description: 'FastAPI backend (dev container app)'
+        default: 'https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io'
+        required: true
+      suite:
+        description: 'smoke: public pages, sign-in, demo. full: also upload and LoRaWAN (writes to dev)'
+        type: choice
+        options: [smoke, full]
+        default: smoke
+
+concurrency:
+  group: e2e-${{ github.event.deployment.sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  E2E_BASE_URL: ${{ inputs.base_url || github.event.deployment_status.environment_url || 'https://dev.ww-website.pages.dev' }}
+  E2E_API_URL: ${{ inputs.api_url || vars.E2E_API_URL || 'https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io' }}
+
+jobs:
+  smoke:
+    name: E2E Smoke
+    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    runs-on: ubuntu-latest
+    # The seeded account's password and the dev service-role key live here
+    environment: dev
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.deployment.sha || github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install
+        working-directory: e2e
+        run: npm ci
+
+      - name: Cache Playwright's Chromium
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Which target
+        run: |
+          echo "frontend: $E2E_BASE_URL"
+          echo "api:      $E2E_API_URL"
+          test -n "$E2E_BASE_URL" || { echo "::error::no frontend URL: the deployment carried no environment_url"; exit 1; }
+
+      - name: Run the flows
+        working-directory: e2e
+        env:
+          CI: 'true'
+          E2E_EMAIL: ${{ vars.E2E_EMAIL || 'tui@ww.org' }}
+          # Every seeded user shares ww-backend's SEED_USER_PASSWORD, and the dev
+          # environment already holds it as DEMO_PASSWORD for the backend deploy
+          # (deploy-backend.yml). E2E_PASSWORD overrides it for a dedicated account.
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.DEMO_PASSWORD }}
+          # The full suite only: the LoRaWAN spec inserts and deletes synthetic rows
+          E2E_SUPABASE_URL: ${{ inputs.suite == 'full' && secrets.SUPABASE_URL || '' }}
+          E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ inputs.suite == 'full' && secrets.SUPABASE_SERVICE_ROLE_KEY || '' }}
+        run: |
+          if [ "${{ inputs.suite }}" = "full" ]; then
+            npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts specs/03-upload-exif.spec.ts specs/04-lorawan-realtime.spec.ts
+          else
+            npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts
+          fi
+
+      # The specs skip the signed-in checks when the password is missing, and a
+      # skip must not read as a pass. After the run, not before, so the public
+      # pages and the demo still report every time (run 36938521947 stopped
+      # here with nothing else to show).
+      - name: Fail if the account is not configured
+        if: always()
+        env:
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.DEMO_PASSWORD }}
+        run: |
+          if [ -z "$E2E_PASSWORD" ]; then
+            echo "::error::no password for the seeded account: the dev environment needs E2E_PASSWORD, or the DEMO_PASSWORD the backend deploy already uses, see e2e/README.md"
+            exit 1
+          fi
+
+      # The specs skip themselves when their env is missing, so a run with a
+      # missing secret can "pass" having tested nothing. Count what ran.
+      - name: Fail if nothing actually ran
+        if: always()
+        working-directory: e2e
+        run: |
+          # grep -c prints 0 itself (and exits 1) when nothing matches
+          total=$(grep -c '<testcase' results.xml 2>/dev/null || true)
+          skipped=$(grep -c '<skipped' results.xml 2>/dev/null || true)
+          echo "test cases: ${total:-0}, skipped: ${skipped:-0}"
+          test "${total:-0}" -gt "${skipped:-0}"
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-smoke-${{ github.event.deployment.sha || github.sha }}
+          path: |
+            e2e/results.xml
+            e2e/test-results/
+            e2e/playwright-report/
+          retention-days: 7
+          if-no-files-found: warn
+
+  a11y:
+    name: A11y of public pages (advisory)
+    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.deployment.sha || github.sha }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install
+        working-directory: e2e
+        run: npm ci
+
+      - name: Cache Playwright's Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      # No account: the public pages only. Advisory until #213 (the
+      # colour-contrast fix for #212) is deployed to dev: the step's failure
+      # prints every violation into the log and becomes a warning, and the job
+      # stays green. continue-on-error has to sit on the step, not the job: on
+      # the job it keeps the workflow run green but leaves the job's own check
+      # red in the pull request. Remove it to make the job blocking.
+      - name: axe-core on the public pages
+        id: axe
+        working-directory: e2e
+        continue-on-error: true
+        env:
+          CI: 'true'
+        run: npx playwright test specs/05-a11y.spec.ts
+
+      - name: Warn when the pages are not clean
+        if: steps.axe.outcome == 'failure'
+        # No "#" in the message: YAML reads " #" as a comment and cuts the line.
+        run: echo "::warning::axe found serious or critical violations on the public pages (advisory, issue 212). The step above lists every node."
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-a11y-${{ github.event.deployment.sha || github.sha }}
+          path: |
+            e2e/results.xml
+            e2e/playwright-report/
+          retention-days: 7
+          if-no-files-found: warn

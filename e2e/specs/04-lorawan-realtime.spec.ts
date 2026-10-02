@@ -1,6 +1,6 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../helpers/test'
 import { createClient } from '@supabase/supabase-js'
-import { login, CREDS } from '../helpers/session'
+import { login, HAS_CREDS } from '../helpers/session'
 
 /**
  * LoRaWAN live telemetry (#94): with the Field page open, a new
@@ -19,7 +19,7 @@ const DEPLOYMENT_ID = process.env.E2E_LORAWAN_DEPLOYMENT_ID || 'e0000000-0000-00
 const BATTERY = 87 // distinctive value to assert on
 
 test.describe('LoRaWAN realtime telemetry', () => {
-  test.skip(!CREDS.email, 'E2E_EMAIL/E2E_PASSWORD not set')
+  test.skip(!HAS_CREDS, 'E2E_EMAIL/E2E_PASSWORD not set')
   test.skip(!SB_URL || !SB_KEY, 'E2E_SUPABASE_URL / E2E_SUPABASE_SERVICE_ROLE_KEY not set')
 
   test('new telemetry appears on the Field page without reload', async ({ page }) => {
