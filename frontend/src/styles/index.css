@@ -4,6 +4,10 @@
   --bg-color: #ffffff;
   --text-color: #333333;
   --surface: #f9fafb;
+  /* Secondary text. Use it instead of opacity on text: axe measures the
+     blended colour, and #333 under opacity 0.7 is already below the 4.5:1
+     WCAG AA minimum on --surface (#212). 5.8:1 on --surface, 6:1 on --bg-color. */
+  --text-muted: #5f6368;
   --border: #e2e8f0;
   --error: #ef4444;
   --success: #10b981;
@@ -23,6 +27,7 @@
     --bg-color: #121212;
     --text-color: #f3f4f6;
     --surface: #1e1e1e;
+    --text-muted: #a3a9b3;
     --border: #334155;
   }
 }
