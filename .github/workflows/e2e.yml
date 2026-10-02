@@ -194,7 +194,8 @@ jobs:
 
       - name: Warn when the pages are not clean
         if: steps.axe.outcome == 'failure'
-        run: echo "::warning::axe found serious or critical violations on the public pages (advisory, #212): see the step above for every node"
+        # No "#" in the message: YAML reads " #" as a comment and cuts the line.
+        run: echo "::warning::axe found serious or critical violations on the public pages (advisory, issue 212). The step above lists every node."
 
       - name: Upload report
         if: always()
