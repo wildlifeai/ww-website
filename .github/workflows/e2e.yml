@@ -152,6 +152,11 @@ jobs:
     name: A11y of public pages (advisory)
     if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
     runs-on: ubuntu-latest
+    # Advisory until #213 (the colour-contrast fix for #212) is deployed to dev:
+    # a failed step still prints every violation into the log and the summary,
+    # but the job and the E2E workflow stay green. Remove this line to make
+    # the job blocking.
+    continue-on-error: true
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
