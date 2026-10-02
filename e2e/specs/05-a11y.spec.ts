@@ -4,8 +4,7 @@ import { test, expect } from '../helpers/test'
 /**
  * Accessibility of the public pages, with axe-core: WCAG 2.0/2.1 A and AA
  * rules, failing on serious and critical violations only. Needs no account.
- * Runs as its own advisory job in CI until the pages are clean; the job's
- * name says so, so a red run is read as a list of things to fix, not noise.
+ * Runs as its own job in CI, blocking since #213 made the pages clean.
  */
 
 const PUBLIC_PAGES = ['/', '/login', '/signup', '/guides', '/faq', '/resources']

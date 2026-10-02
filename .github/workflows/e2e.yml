@@ -149,7 +149,7 @@ jobs:
           if-no-files-found: warn
 
   a11y:
-    name: A11y of public pages (advisory)
+    name: A11y of public pages
     if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -178,24 +178,13 @@ jobs:
         working-directory: e2e
         run: npx playwright install --with-deps chromium
 
-      # No account: the public pages only. Advisory until #213 (the
-      # colour-contrast fix for #212) is deployed to dev: the step's failure
-      # prints every violation into the log and becomes a warning, and the job
-      # stays green. continue-on-error has to sit on the step, not the job: on
-      # the job it keeps the workflow run green but leaves the job's own check
-      # red in the pull request. Remove it to make the job blocking.
+      # No account: the public pages only. Blocking since #213 made them clean:
+      # a serious or critical axe violation on a public page fails the job.
       - name: axe-core on the public pages
-        id: axe
         working-directory: e2e
-        continue-on-error: true
         env:
           CI: 'true'
         run: npx playwright test specs/05-a11y.spec.ts
-
-      - name: Warn when the pages are not clean
-        if: steps.axe.outcome == 'failure'
-        # No "#" in the message: YAML reads " #" as a comment and cuts the line.
-        run: echo "::warning::axe found serious or critical violations on the public pages (advisory, issue 212). The step above lists every node."
 
       - name: Upload report
         if: always()

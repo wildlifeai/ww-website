@@ -47,10 +47,8 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   account. The job stops with a clear message when neither is set. The `full` suite, by hand only, adds `03` and `04`, which
   write to the dev database and storage; the LoRaWAN spec takes the `dev` environment's
   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
-- **A11y of public pages (advisory)** runs `05-a11y` with no account. Its axe step runs with
-  `continue-on-error`, so a failure prints the violations and a warning without turning the
-  job red, until the pages are clean (#212, fixed in #213); remove that line to make it
-  blocking.
+- **A11y of public pages** runs `05-a11y` with no account and fails on a serious or critical
+  violation. It was advisory until #213 cleared the colour-contrast findings (#212).
 
 Both fail when the junit report holds nothing but skipped tests: the specs skip themselves
 when their env is missing, so a missing secret would otherwise read as a pass. The dev API
