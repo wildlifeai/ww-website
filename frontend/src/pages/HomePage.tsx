@@ -7,9 +7,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS, DEFAULT_MARKETING_STEPS } from '../components/common/ThreeStepGuide'
 import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { PrototypeBanner } from '../components/common/PrototypeBanner'
-
-const APP_STORE_URL = 'https://apps.apple.com/app/id6480342929'
-const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.wildlife.wildlifewatcher&pcampaignid=web_share'
+import { StoreBadges, APP_STORE_URL, PLAY_STORE_URL } from '../components/common/StoreBadges'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -239,26 +237,13 @@ function MarketingHero() {
       {/* ── Get the Mobile App ──────────────────────────────────────────── */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem 0' }}>
         <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', fontWeight: 600 }}>Get the Mobile App</h2>
+        <StoreBadges style={{ marginBottom: '1.5rem' }} />
         <div style={{ display: 'flex', justifyContent: 'center', gap: '4rem', flexWrap: 'wrap' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <a href={APP_STORE_URL} target="_blank" rel="noreferrer">
-                <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store" style={{ height: '40px' }} />
-              </a>
-            </div>
-            <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-              <QRCodeSVG value={APP_STORE_URL} size={150} title="QR code linking to the Wildlife Watcher app on the App Store" />
-            </div>
+          <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+            <QRCodeSVG value={APP_STORE_URL} size={150} title="QR code linking to the Wildlife Watcher app on the App Store" />
           </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <a href={PLAY_STORE_URL} target="_blank" rel="noreferrer">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Get it on Google Play" style={{ height: '40px' }} />
-              </a>
-            </div>
-            <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-              <QRCodeSVG value={PLAY_STORE_URL} size={150} title="QR code linking to the Wildlife Watcher app on Google Play" />
-            </div>
+          <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
+            <QRCodeSVG value={PLAY_STORE_URL} size={150} title="QR code linking to the Wildlife Watcher app on Google Play" />
           </div>
         </div>
       </div>
@@ -349,15 +334,7 @@ function MarketingHero() {
             <li>Pair and provision Wildlife Watcher devices over Bluetooth, with a live preview while monitoring.</li>
             <li>Remote battery and SD-card telemetry over LoRaWAN is in development.</li>
           </ul>
-          {/* Reuse app-store badges inline */}
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <a href={APP_STORE_URL} target="_blank" rel="noreferrer">
-              <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store" style={{ height: '36px' }} />
-            </a>
-            <a href={PLAY_STORE_URL} target="_blank" rel="noreferrer">
-              <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Get it on Google Play" style={{ height: '36px' }} />
-            </a>
-          </div>
+          <StoreBadges height={36} style={{ justifyContent: 'flex-start' }} />
         </div>
       </div>
 
