@@ -58,9 +58,12 @@ jobs:
           pip install -r backend/requirements.txt
           pip install -r backend/requirements-dev.txt
 
-      - name: Run tests
+      # The floor is a ratchet, not a target: set just under the measured figure
+      # so it can only move up. 52% of app/ statements on 2026-10-05, floor 50.
+      # Raise it by hand when coverage has genuinely climbed (#226).
+      - name: Run tests with a coverage floor
         working-directory: backend
-        run: python -m pytest tests/ -x -q --tb=short
+        run: python -m pytest tests/ -x -q --tb=short --cov=app --cov-report=term --cov-fail-under=50
 
   # ── Backend: the image the deploy ships ──────────────────────────────
   # deploy-backend.yml builds `--target api` on a push to dev or main, so a
