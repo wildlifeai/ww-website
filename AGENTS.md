@@ -46,6 +46,10 @@ The browser flows in `e2e/` run in CI against every Cloudflare Pages preview dep
 [`e2e/README.md`](e2e/README.md). They need a running site, so they are not part of the
 local gates above.
 
+The backend lint job also runs pyright in basic mode, advisory: it prints the error count by
+rule and the job stays green until the backlog (1,823 errors on 2026-10-05) is down.
+`backend/pyrightconfig.json` holds the mode and the excluded folders.
+
 Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 (`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
 ww-backend runs them against its own schema PRs, so a red run can come from either side. To

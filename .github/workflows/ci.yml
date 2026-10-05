@@ -29,6 +29,37 @@ jobs:
       - name: Ruff format check
         run: ruff format --check backend/app/ backend/tests/
 
+      # Advisory until the backlog is down: basic mode reported 1,823 errors
+      # in 102 files on 2026-10-05, most of them attribute and index access on
+      # untyped Supabase responses. The step prints the count and the first
+      # pages of findings, and the job stays green. Drop the continue-on-error
+      # to make it blocking once the count is at zero or the noisy modules are
+      # excluded in backend/pyrightconfig.json (#225).
+      - name: pyright (advisory)
+        id: pyright
+        working-directory: backend
+        continue-on-error: true
+        run: |
+          pip install pyright
+          pyright --outputjson > pyright.json || true
+          python - <<'PY'
+          import json, collections, sys
+          d = json.load(open("pyright.json"))
+          s = d["summary"]
+          errs = [x for x in d["generalDiagnostics"] if x["severity"] == "error"]
+          rules = collections.Counter(x.get("rule", "?") for x in errs).most_common(6)
+          print(f"pyright: {s['errorCount']} errors, {s['warningCount']} warnings in {s['filesAnalyzed']} files")
+          for r, n in rules: print(f"  {n:5d}  {r}")
+          for x in errs[:40]:
+              r = x["range"]["start"]
+              print(f"{x['file']}:{r['line']+1}:{r['character']+1}: {x['message'].splitlines()[0]}")
+          if s["errorCount"]: print(f"... {max(0, s['errorCount'] - 40)} more"); sys.exit(1)
+          PY
+
+      - name: Warn when pyright found errors
+        if: steps.pyright.outcome == 'failure'
+        run: echo "::warning::pyright reports type errors in backend/app (advisory, #225). The step above has the count by rule and the first 40."
+
   backend-tests:
     name: Backend Tests (pytest)
     runs-on: ubuntu-latest
