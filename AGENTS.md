@@ -51,6 +51,11 @@ Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 ww-backend runs them against its own schema PRs, so a red run can come from either side. To
 run one locally, follow the instructions in its header.
 
+`node scripts/validate-docs.js` checks that every repository path and relative link in the
+docs resolves, and CI runs it on each pull request (the `Docs Links` job). Run it after a
+rename or a move; archived reports and the prose of development reports are exempt because
+they describe the tree of their day.
+
 ## Non-negotiables
 
 - **Ask the maintainer before committing or pushing** to any shared branch.
@@ -89,7 +94,7 @@ run one locally, follow the instructions in its header.
 
 | | |
 |---|---|
-| Start here, in order | [`documentation/onboarding/00`–`05`](documentation/onboarding/) |
+| Start here, in order | the six guides in [`documentation/onboarding/`](documentation/onboarding/), numbered 00 to 05 |
 | Doc index, what's living vs frozen | [`documentation/README.md`](documentation/README.md) |
 | Deep agent rules | [`.agents/skills/SKILL.md`](.agents/skills/SKILL.md) |
 | UI design system | [`.agents/DESIGN.md`](.agents/DESIGN.md) |
