@@ -62,6 +62,13 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/ -x -q --tb=short
 
+      # backend/openapi.json is the committed schema. A pull request that
+      # changes the API has to regenerate it (python scripts/export_openapi.py)
+      # so the frontend side can be reviewed with it (#218).
+      - name: OpenAPI snapshot is current
+        working-directory: backend
+        run: python scripts/export_openapi.py --check
+
   # ── Frontend: TypeScript lint + build check ─────────────────────────
   frontend-lint:
     name: Frontend Lint (ESLint)

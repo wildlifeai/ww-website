@@ -1,0 +1,4250 @@
+{
+  "components": {
+    "schemas": {
+      "ApiError": {
+        "description": "Structured error payload.",
+        "properties": {
+          "code": {
+            "description": "Machine-readable error code",
+            "title": "Code",
+            "type": "string"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extra diagnostic info",
+            "title": "Details"
+          },
+          "message": {
+            "description": "Human-readable error message",
+            "title": "Message",
+            "type": "string"
+          },
+          "retryable": {
+            "default": false,
+            "description": "Whether the client should retry",
+            "title": "Retryable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ApiError",
+        "type": "object"
+      },
+      "ApiKeyCreate": {
+        "description": "Request to create a new API key.",
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO timestamp \u2014 key expires after this time",
+            "title": "Expires At"
+          },
+          "name": {
+            "description": "Human-readable key name",
+            "maxLength": 100,
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "Permission scopes (e.g. 'deployments:read')",
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "ApiKeyCreate",
+        "type": "object"
+      },
+      "ApiMeta": {
+        "description": "Response metadata.",
+        "properties": {
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "title": "ApiMeta",
+        "type": "object"
+      },
+      "ApiResponse": {
+        "description": "Standard response envelope wrapping all API responses.",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "ApiResponse",
+        "type": "object"
+      },
+      "BatchDeleteRequest": {
+        "description": "Soft-delete multiple media records.",
+        "properties": {
+          "media_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Media Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "media_ids"
+        ],
+        "title": "BatchDeleteRequest",
+        "type": "object"
+      },
+      "BatchDeploymentIdsRequest": {
+        "properties": {
+          "deployment_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deployment Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deployment_ids"
+        ],
+        "title": "BatchDeploymentIdsRequest",
+        "type": "object"
+      },
+      "Body_analyze_images_api_clustering_analyze_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "max_hamming": {
+            "default": 10,
+            "title": "Max Hamming",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_analyze_images_api_clustering_analyze_post",
+        "type": "object"
+      },
+      "Body_analyze_images_csv_api_clustering_analyze_csv_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "max_hamming": {
+            "default": 10,
+            "title": "Max Hamming",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_analyze_images_csv_api_clustering_analyze_csv_post",
+        "type": "object"
+      },
+      "Body_convert_model_api_models_convert_post": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "model_name": {
+            "title": "Model Name",
+            "type": "string"
+          },
+          "organisation_id": {
+            "default": "",
+            "title": "Organisation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file",
+          "model_name"
+        ],
+        "title": "Body_convert_model_api_models_convert_post",
+        "type": "object"
+      },
+      "Body_import_camtrapdp_api_camtrapdp_import_post": {
+        "properties": {
+          "annotation_mode": {
+            "default": "final",
+            "title": "Annotation Mode",
+            "type": "string"
+          },
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "run_ai": {
+            "default": false,
+            "title": "Run Ai",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_camtrapdp_api_camtrapdp_import_post",
+        "type": "object"
+      },
+      "Body_inat_set_token_api_inat_token_post": {
+        "properties": {
+          "api_token": {
+            "description": "Personal iNaturalist API JWT from /users/api_token",
+            "title": "Api Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "api_token"
+        ],
+        "title": "Body_inat_set_token_api_inat_token_post",
+        "type": "object"
+      },
+      "Body_parse_exif_api_exif_parse_post": {
+        "properties": {
+          "assigned_deployment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Deployment Id"
+          },
+          "auto_create_deployment": {
+            "default": false,
+            "title": "Auto Create Deployment",
+            "type": "boolean"
+          },
+          "deployment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Id"
+          },
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "paths": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "run_ai": {
+            "default": true,
+            "title": "Run Ai",
+            "type": "boolean"
+          },
+          "upload_to_drive": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": false,
+            "title": "Upload To Drive"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_parse_exif_api_exif_parse_post",
+        "type": "object"
+      },
+      "CamtrapDPExportRequest": {
+        "description": "Request to generate a CamtrapDP data package.",
+        "properties": {
+          "date_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start date (ISO)",
+            "title": "Date From"
+          },
+          "date_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End date (ISO)",
+            "title": "Date To"
+          },
+          "deployment_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Specific deployments to include",
+            "title": "Deployment Ids"
+          },
+          "include_observations": {
+            "default": true,
+            "description": "Include AI detection observations",
+            "title": "Include Observations",
+            "type": "boolean"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filter by project",
+            "title": "Project Id"
+          }
+        },
+        "title": "CamtrapDPExportRequest",
+        "type": "object"
+      },
+      "ChirpstackDeviceInfo": {
+        "properties": {
+          "applicationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicationid"
+          },
+          "applicationName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Applicationname"
+          },
+          "devEui": {
+            "title": "Deveui",
+            "type": "string"
+          },
+          "deviceName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Devicename"
+          }
+        },
+        "required": [
+          "devEui"
+        ],
+        "title": "ChirpstackDeviceInfo",
+        "type": "object"
+      },
+      "ChirpstackUplink": {
+        "description": "Chirpstack v4 uplink webhook payload.",
+        "properties": {
+          "data": {
+            "description": "Base64-encoded payload",
+            "title": "Data",
+            "type": "string"
+          },
+          "deviceInfo": {
+            "$ref": "#/components/schemas/ChirpstackDeviceInfo"
+          },
+          "fPort": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fport"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time"
+          }
+        },
+        "required": [
+          "deviceInfo",
+          "data"
+        ],
+        "title": "ChirpstackUplink",
+        "type": "object"
+      },
+      "CreateDeploymentRequest": {
+        "properties": {
+          "deployment_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment End"
+          },
+          "deployment_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployment Start"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "location_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Name"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "name"
+        ],
+        "title": "CreateDeploymentRequest",
+        "type": "object"
+      },
+      "CreateProjectRequest": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "CreateProjectRequest",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "INatAddTaxonBody": {
+        "description": "Request body to add a taxon from iNaturalist to the local database.",
+        "properties": {
+          "taxon_id": {
+            "description": "The iNaturalist taxon ID",
+            "title": "Taxon Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "taxon_id"
+        ],
+        "title": "INatAddTaxonBody",
+        "type": "object"
+      },
+      "INatBatchPollRequest": {
+        "description": "Request to poll multiple observation IDs.",
+        "properties": {
+          "observation_ids": {
+            "description": "Up to 200 observation IDs",
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 200,
+            "title": "Observation Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "observation_ids"
+        ],
+        "title": "INatBatchPollRequest",
+        "type": "object"
+      },
+      "INatCreateObservation": {
+        "description": "Request to create an iNaturalist observation.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "geoprivacy": {
+            "default": "obscured",
+            "description": "'open', 'obscured', or 'private'",
+            "title": "Geoprivacy",
+            "type": "string"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "observed_on": {
+            "description": "Date observed (YYYY-MM-DD)",
+            "title": "Observed On",
+            "type": "string"
+          },
+          "species_guess": {
+            "description": "Initial species ID from AI model",
+            "title": "Species Guess",
+            "type": "string"
+          }
+        },
+        "required": [
+          "species_guess",
+          "latitude",
+          "longitude",
+          "observed_on"
+        ],
+        "title": "INatCreateObservation",
+        "type": "object"
+      },
+      "INatPublishRequest": {
+        "description": "Request to publish selected WW media to the user's iNaturalist account.",
+        "properties": {
+          "gap_seconds": {
+            "default": 60,
+            "description": "Temporal gap to consolidate images into observation bursts (one iNat observation per burst).",
+            "maximum": 3600.0,
+            "minimum": 1.0,
+            "title": "Gap Seconds",
+            "type": "integer"
+          },
+          "geoprivacy": {
+            "default": "obscured",
+            "description": "'open', 'obscured', or 'private'",
+            "title": "Geoprivacy",
+            "type": "string"
+          },
+          "media_ids": {
+            "description": "WW media ids to publish",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Media Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "media_ids"
+        ],
+        "title": "INatPublishRequest",
+        "type": "object"
+      },
+      "ManifestRequest": {
+        "description": "Request to generate a MANIFEST.zip firmware package.",
+        "properties": {
+          "camera_type": {
+            "default": "Grove Vision AI V2",
+            "description": "Camera config key",
+            "title": "Camera Type",
+            "type": "string"
+          },
+          "github_branch": {
+            "default": "main",
+            "description": "Branch of wildlifeai/Seeed_Grove_Vision_AI_Module_V2 for firmware files",
+            "title": "Github Branch",
+            "type": "string"
+          },
+          "himax_firmware_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Supabase firmware.id for the Himax coprocessor firmware",
+            "title": "Himax Firmware Id"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Firmware OP14 model ID",
+            "title": "Model Id"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable model name",
+            "title": "Model Name"
+          },
+          "model_source": {
+            "default": "default",
+            "description": "'My Project' | 'Pre-trained Model' | 'SenseCap Models' | 'My Organization Models' | 'No Model'",
+            "title": "Model Source",
+            "type": "string"
+          },
+          "model_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model name from registry",
+            "title": "Model Type"
+          },
+          "model_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Firmware OP15 model version",
+            "title": "Model Version"
+          },
+          "org_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Supabase ai_models.id",
+            "title": "Org Model Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Supabase projects.id \u2014 triggers project-based resolution of model + firmware IDs",
+            "title": "Project Id"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "e.g. '192x192'",
+            "title": "Resolution"
+          },
+          "sscma_model_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SSCMA model UUID/slug",
+            "title": "Sscma Model Id"
+          }
+        },
+        "title": "ManifestRequest",
+        "type": "object"
+      },
+      "PretrainedModelRequest": {
+        "properties": {
+          "architecture": {
+            "default": "",
+            "title": "Architecture",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "model_name": {
+            "default": "",
+            "title": "Model Name",
+            "type": "string"
+          },
+          "organisation_id": {
+            "default": "",
+            "title": "Organisation Id",
+            "type": "string"
+          },
+          "resolution": {
+            "default": "",
+            "title": "Resolution",
+            "type": "string"
+          },
+          "source_type": {
+            "default": "sscma",
+            "title": "Source Type",
+            "type": "string"
+          },
+          "sscma_uuid": {
+            "default": "",
+            "title": "Sscma Uuid",
+            "type": "string"
+          }
+        },
+        "title": "PretrainedModelRequest",
+        "type": "object"
+      },
+      "RestoreDeploymentsRequest": {
+        "properties": {
+          "deleted_at": {
+            "title": "Deleted At",
+            "type": "string"
+          },
+          "deployment_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deployment Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deployment_ids",
+          "deleted_at"
+        ],
+        "title": "RestoreDeploymentsRequest",
+        "type": "object"
+      },
+      "RestoreMediaRequest": {
+        "description": "Undo a media soft-delete.",
+        "properties": {
+          "deleted_at": {
+            "title": "Deleted At",
+            "type": "string"
+          },
+          "media_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Media Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "media_ids",
+          "deleted_at"
+        ],
+        "title": "RestoreMediaRequest",
+        "type": "object"
+      },
+      "RestoreProjectRequest": {
+        "properties": {
+          "deleted_at": {
+            "title": "Deleted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deleted_at"
+        ],
+        "title": "RestoreProjectRequest",
+        "type": "object"
+      },
+      "RunSelectedRequest": {
+        "description": "Queue a pipeline run for specific media IDs.",
+        "properties": {
+          "confidence_threshold": {
+            "default": 0.2,
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence Threshold",
+            "type": "number"
+          },
+          "media_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Media Ids",
+            "type": "array"
+          },
+          "steps": {
+            "default": [
+              "speciesnet"
+            ],
+            "description": "Pipeline step types to run",
+            "items": {
+              "type": "string"
+            },
+            "title": "Steps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "media_ids"
+        ],
+        "title": "RunSelectedRequest",
+        "type": "object"
+      },
+      "TTNEndDeviceIds": {
+        "properties": {
+          "application_ids": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Application Ids",
+            "type": "object"
+          },
+          "dev_eui": {
+            "title": "Dev Eui",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "device_id",
+          "dev_eui"
+        ],
+        "title": "TTNEndDeviceIds",
+        "type": "object"
+      },
+      "TTNUplink": {
+        "description": "The Things Network v3 uplink webhook payload.",
+        "properties": {
+          "end_device_ids": {
+            "$ref": "#/components/schemas/TTNEndDeviceIds"
+          },
+          "received_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Received At"
+          },
+          "uplink_message": {
+            "$ref": "#/components/schemas/TTNUplinkMessage"
+          }
+        },
+        "required": [
+          "end_device_ids",
+          "uplink_message"
+        ],
+        "title": "TTNUplink",
+        "type": "object"
+      },
+      "TTNUplinkMessage": {
+        "properties": {
+          "f_port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "F Port"
+          },
+          "frm_payload": {
+            "description": "Base64-encoded frame payload",
+            "title": "Frm Payload",
+            "type": "string"
+          },
+          "rx_metadata": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rx Metadata"
+          },
+          "settings": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Settings"
+          }
+        },
+        "required": [
+          "frm_payload"
+        ],
+        "title": "TTNUplinkMessage",
+        "type": "object"
+      },
+      "TrainClassSpec": {
+        "description": "One output class of the model to train.\n\n``scientific_name`` is what the selected images' observations are matched on\n(observations carry free-text ``scientific_name``; most have no taxon link).\n``label`` is the device-facing class name written to ``labels.txt``; it is\nsanitised server-side (letters, digits, spaces, ``_`` and ``-`` only, max 32).",
+        "properties": {
+          "label": {
+            "description": "Device class label (one line of labels.txt)",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "scientific_name": {
+            "description": "Observation scientific_name that maps to this class",
+            "minLength": 1,
+            "title": "Scientific Name",
+            "type": "string"
+          },
+          "taxon_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Taxon UUID when the observations carry one",
+            "title": "Taxon Id"
+          },
+          "vernacular_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vernacular Name"
+          }
+        },
+        "required": [
+          "label",
+          "scientific_name"
+        ],
+        "title": "TrainClassSpec",
+        "type": "object"
+      },
+      "TrainModelRequest": {
+        "description": "Train an on-device species classifier (a Species Brain) from selected images.\n\nEvery selected image contributes one sample per non-edge observation: a\ntarget class when its ``scientific_name`` matches one of ``classes``, the\nbackground class when it is a blank or an unlisted species (only if\n``include_background``), and nothing otherwise. Class order on the device is\nbackground first, then ``classes`` in the order given, because the firmware reports\nclass index 1 as \"the target\" for a two-class model.",
+        "properties": {
+          "background_label": {
+            "default": "",
+            "description": "Background class label; default 'not <target>' or 'other'",
+            "maxLength": 64,
+            "title": "Background Label",
+            "type": "string"
+          },
+          "classes": {
+            "description": "Target classes (device MAX_CLASSES 16, background included)",
+            "items": {
+              "$ref": "#/components/schemas/TrainClassSpec"
+            },
+            "maxItems": 15,
+            "minItems": 1,
+            "title": "Classes",
+            "type": "array"
+          },
+          "colour": {
+            "default": "grayscale",
+            "description": "Input channels; grayscale is the recipe used for the rat model",
+            "enum": [
+              "grayscale",
+              "rgb"
+            ],
+            "title": "Colour",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 500,
+            "title": "Description",
+            "type": "string"
+          },
+          "epochs": {
+            "default": 30,
+            "description": "Training cycles (guide: 30 to 50)",
+            "maximum": 100.0,
+            "minimum": 5.0,
+            "title": "Epochs",
+            "type": "integer"
+          },
+          "image_size": {
+            "default": 96,
+            "description": "Model input size (96 recommended for the HX6538)",
+            "enum": [
+              96,
+              160
+            ],
+            "title": "Image Size",
+            "type": "integer"
+          },
+          "include_background": {
+            "default": true,
+            "description": "Turn blanks and unlisted species in the selection into a background class",
+            "title": "Include Background",
+            "type": "boolean"
+          },
+          "learning_rate": {
+            "default": 0.001,
+            "exclusiveMinimum": 0.0,
+            "maximum": 0.1,
+            "title": "Learning Rate",
+            "type": "number"
+          },
+          "media_ids": {
+            "description": "Selected media UUIDs from the Annotations page",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5000,
+            "minItems": 2,
+            "title": "Media Ids",
+            "type": "array"
+          },
+          "model_name": {
+            "maxLength": 60,
+            "minLength": 2,
+            "title": "Model Name",
+            "type": "string"
+          },
+          "organisation_id": {
+            "default": "",
+            "description": "Managed organisation that owns the model (required when the user manages several)",
+            "title": "Organisation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "media_ids",
+          "model_name",
+          "classes"
+        ],
+        "title": "TrainModelRequest",
+        "type": "object"
+      },
+      "ValidateDeploymentsRequest": {
+        "properties": {
+          "deployment_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Deployment Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deployment_ids"
+        ],
+        "title": "ValidateDeploymentsRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "V2 backend \u2014 async job system, LoRaWAN ingestion, model conversion",
+    "title": "Wildlife Watcher API",
+    "version": "2.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/auth/demo-session": {
+      "post": {
+        "description": "Mint a session for the shared demo account.\n\nUnauthenticated by design \u2014 this is the \"Try the demo\" button. The\nendpoint self-disables when DEMO_EMAIL/DEMO_PASSWORD are not configured.",
+        "operationId": "create_demo_session_api_auth_demo_session_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Create Demo Session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/camtrapdp/import": {
+      "post": {
+        "description": "Import a CamtrapDP v1.0 ZIP package.\n\nCreates a new project, placeholder devices for each unique cameraID,\nand inserts all deployments, media, and observations from the package.\n\nThe authenticated user becomes project admin of the new project.\nPlaceholder devices are named '[imported] <cameraID>' and are linked\nto the user's primary organisation.",
+        "operationId": "import_camtrapdp_api_camtrapdp_import_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_camtrapdp_api_camtrapdp_import_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Camtrapdp",
+        "tags": [
+          "camtrapdp"
+        ]
+      }
+    },
+    "/api/clustering/analyze": {
+      "post": {
+        "description": "Cluster uploaded images by visual similarity.\n\nAccepts uploaded JPEG/PNG images and returns cluster assignments\nwith representative selections (sharpest image per cluster).\n\nParameters\n----------\nfiles : List[UploadFile]\n    Images to cluster (JPEG, PNG, WebP).\nmax_hamming : int, optional\n    Similarity threshold (0-20). Lower = stricter. Default 10.\n\nReturns\n-------\nCluster summary with assignments and representative filenames.",
+        "operationId": "analyze_images_api_clustering_analyze_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_images_api_clustering_analyze_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Images",
+        "tags": [
+          "clustering"
+        ]
+      }
+    },
+    "/api/clustering/analyze/csv": {
+      "post": {
+        "description": "Cluster images and return results as a downloadable CSV.\n\nSame logic as /analyze but returns a CSV file with one row per image.",
+        "operationId": "analyze_images_csv_api_clustering_analyze_csv_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_analyze_images_csv_api_clustering_analyze_csv_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Analyze Images Csv",
+        "tags": [
+          "clustering"
+        ]
+      }
+    },
+    "/api/deployments": {
+      "post": {
+        "description": "Create a deployment in a project the caller can access (manual upload assignment).\n\nGuarded by project access \u2014 a caller with no role on the project gets 404 (so other tenants'\nproject IDs can't be probed). Auto-creates a placeholder device because deployments require a\nnon-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the\n``(deployment_start, device_id)`` unique index.",
+        "operationId": "create_deployment_api_deployments_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDeploymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Deployment Api Deployments Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Deployment",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/api/deployments/backfill-timezones": {
+      "post": {
+        "description": "Resolve and persist ``deployments.timezone`` for deployments that lack it.\n\nIdempotent maintenance task: for every deployment with coordinates but no\ntimezone, derive the IANA zone from latitude/longitude (timezonefinder) and\nstore it so the UI can render capture times in local time. Run once after the\ntimezone column is deployed; new CamtrapDP imports populate it automatically.",
+        "operationId": "backfill_timezones_api_deployments_backfill_timezones_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "title": "Response Backfill Timezones Api Deployments Backfill Timezones Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Backfill Timezones",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/api/deployments/batch": {
+      "delete": {
+        "description": "Soft-delete deployments (and cascade to their media + observations).\n\nRequires write access (project_admin/member, org-manager, or system) on **every** project the\nselected deployments belong to. Deployments the caller can't write are refused (404). Returns\nthe shared ``deleted_at`` so the client can offer an Undo.",
+        "operationId": "batch_delete_deployments_api_deployments_batch_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchDeploymentIdsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Delete Deployments Api Deployments Batch Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Delete Deployments",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/api/deployments/batch/restore": {
+      "post": {
+        "description": "Undo a deployment delete \u2014 clears ``deleted_at`` (== the given timestamp) on the deployments\nand the media/observations that were deleted with them.",
+        "operationId": "batch_restore_deployments_api_deployments_batch_restore_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreDeploymentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Batch Restore Deployments Api Deployments Batch Restore Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Restore Deployments",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/api/deployments/validate": {
+      "post": {
+        "description": "Given a list of deployment IDs (or 8-char folder prefixes), determine their state:\n- 'valid': exists and user has access\n- 'no_access': exists but user does not belong to project\n- 'not_found': does not exist\n\nReturned inside the standard ``{data, error, meta}`` envelope (``data`` is the\n``{id: status}`` map). The frontend pre-upload banner reads ``response.data``.",
+        "operationId": "validate_deployments_api_deployments_validate_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateDeploymentsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Deployments",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/api/exif/parse": {
+      "post": {
+        "description": "Parse EXIF metadata from one or more uploaded JPEG files.\n\nOptionally uploads images to Supabase Storage and enqueues an\nasync Google Drive upload job.\n\nForm fields\n-----------\nfiles : List[UploadFile]\n    JPEG image files to analyse.\npaths : List[str], optional\n    Relative paths from folder upload (e.g. ``MEDIA/655BC4E5/IMAGES.000/file.JPG``).\n    Used to extract deployment IDs from the SD card folder hierarchy.\nproject_id : str, optional\n    User-selected project ID for Drive folder organisation.\ndeployment_id : str, optional\n    User-selected deployment ID for Drive subfolder organisation.\nupload_to_drive : bool, optional\n    Whether to enqueue a Drive upload job (default ``False``).\nrun_ai : bool, optional\n    Whether to run the AI pipeline + Wildlife Brain after upload (default ``True``).\n    ``False`` uploads/archives only \u2014 no SpeciesNet/embedding.",
+        "operationId": "parse_exif_api_exif_parse_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_parse_exif_api_exif_parse_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Parse Exif",
+        "tags": [
+          "exif"
+        ]
+      }
+    },
+    "/api/inat/auth": {
+      "get": {
+        "description": "Start the iNat OAuth flow. Returns a URL to redirect the user to.",
+        "operationId": "inat_auth_api_inat_auth_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inat Auth",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/callback": {
+      "get": {
+        "description": "Handle the OAuth redirect from iNaturalist.\n\nExchanges the authorization code for tokens, stores them encrypted,\nand redirects the user back to the web app.",
+        "operationId": "inat_callback_api_inat_callback_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "title": "Code",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "title": "State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inat Callback",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/disconnect": {
+      "post": {
+        "description": "Disconnect from iNaturalist (revoke stored token).",
+        "operationId": "inat_disconnect_api_inat_disconnect_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inat Disconnect",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/observations": {
+      "post": {
+        "description": "Create an iNaturalist observation.\n\nUses the Wildlife Watcher AI model's prediction as the species_guess.\nDefault geoprivacy is 'obscured' to protect sensitive locations.",
+        "operationId": "create_inat_observation_api_inat_observations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/INatCreateObservation"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Inat Observation",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/observations/poll": {
+      "post": {
+        "description": "Batch poll identification status for multiple observations.",
+        "operationId": "batch_poll_inat_observations_api_inat_observations_poll_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/INatBatchPollRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Poll Inat Observations",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/observations/{observation_id}/status": {
+      "get": {
+        "description": "Poll identification status for an iNat observation.\n\nThis is a public query \u2014 no auth required for public observations.",
+        "operationId": "get_inat_observation_status_api_inat_observations__observation_id__status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "observation_id",
+            "required": true,
+            "schema": {
+              "title": "Observation Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Inat Observation Status",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/publish": {
+      "post": {
+        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (human/vehicle/blank), uploads\neach photo through the backend proxy (bypassing browser CORS), and records\nthe mapping in inat_observations / inat_observation_media for status tracking.",
+        "operationId": "publish_to_inat_api_inat_publish_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/INatPublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Publish To Inat",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/status": {
+      "get": {
+        "description": "Check if the current user is connected to iNaturalist.",
+        "operationId": "inat_status_api_inat_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inat Status",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/sync": {
+      "post": {
+        "description": "Pull community identifications from iNaturalist back into Wildlife Watcher.\n\nPolls the public iNat API for the taxon + quality_grade of this user's\npublished observations, updates the inat_observations sync state (drives the\nthumbnail badge), and writes the community taxon back into WW observations as\nsource_type='consensus'. A scheduled job can call the same domain function\nwith no user filter to sync everyone.",
+        "operationId": "sync_inat_api_inat_sync_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync Inat",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/taxa": {
+      "post": {
+        "description": "Fetch complete taxonomic lineage from iNat and register in local taxa table.",
+        "operationId": "add_inat_taxon_api_inat_taxa_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/INatAddTaxonBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Add Inat Taxon",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/taxa/search": {
+      "get": {
+        "description": "Search for taxa on the public iNaturalist API.",
+        "operationId": "search_inat_taxa_api_inat_taxa_search_get",
+        "parameters": [
+          {
+            "description": "Taxon search query",
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "description": "Taxon search query",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Search Inat Taxa",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/inat/token": {
+      "post": {
+        "description": "Connect via a manually-pasted personal API token (Pathway 2 \u2014 no OAuth app).\n\nThe user copies their JWT from https://www.inaturalist.org/users/api_token and\npastes it here. We validate it against iNat, then store it like any other token\nbundle so publish/sync work unchanged. The JWT is ~24h-lived, so reconnecting is\njust re-pasting a fresh one.",
+        "operationId": "inat_set_token_api_inat_token_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_inat_set_token_api_inat_token_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Inat Set Token",
+        "tags": [
+          "inaturalist"
+        ]
+      }
+    },
+    "/api/jobs": {
+      "get": {
+        "description": "List the authenticated user's recent processing jobs (newest first).\n\nPowers the avatar-menu \"Processing history\" view so a user can see whether a\npast upload / AI run finished or failed after the live dock has gone away.\nScoped to the caller \u2014 only jobs stamped with their ``user_id`` are returned.",
+        "operationId": "list_user_jobs_api_jobs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List User Jobs",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "description": "Poll the current status of an async job (scoped to the caller).",
+        "operationId": "get_job_status_api_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job Status",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/result": {
+      "get": {
+        "description": "Get the result of a completed job (download URL or streamed file).",
+        "operationId": "get_job_result_api_jobs__job_id__result_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Job Result",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/lorawan/messages": {
+      "get": {
+        "description": "List LoRaWAN messages for the authenticated user's org/project.\n\nTODO: Implement with Supabase RLS query scoped to user's org.",
+        "operationId": "list_messages_api_lorawan_messages_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Messages",
+        "tags": [
+          "lorawan"
+        ]
+      }
+    },
+    "/api/lorawan/messages/{device_eui}/latest": {
+      "get": {
+        "description": "Get the latest parsed LoRaWAN message for a device.\n\nTODO: Query lorawan_parsed_messages with RLS.",
+        "operationId": "latest_message_api_lorawan_messages__device_eui__latest_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_eui",
+            "required": true,
+            "schema": {
+              "title": "Device Eui",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Latest Message",
+        "tags": [
+          "lorawan"
+        ]
+      }
+    },
+    "/api/lorawan/webhook/chirpstack": {
+      "post": {
+        "description": "Receive a Chirpstack v4 uplink webhook.",
+        "operationId": "receive_chirpstack_webhook_api_lorawan_webhook_chirpstack_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Webhook-Secret",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Webhook-Secret",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChirpstackUplink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Receive Chirpstack Webhook",
+        "tags": [
+          "lorawan"
+        ]
+      }
+    },
+    "/api/lorawan/webhook/ttn": {
+      "post": {
+        "description": "Receive a TTN v3 uplink webhook.",
+        "operationId": "receive_ttn_webhook_api_lorawan_webhook_ttn_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Webhook-Secret",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Webhook-Secret",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TTNUplink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Receive Ttn Webhook",
+        "tags": [
+          "lorawan"
+        ]
+      }
+    },
+    "/api/manifest/branches": {
+      "get": {
+        "description": "Return available branches from the Grove Vision AI firmware repo.\n\nProxied through the backend to avoid CORS issues on the frontend.",
+        "operationId": "get_firmware_branches_api_manifest_branches_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Firmware Branches",
+        "tags": [
+          "manifest"
+        ]
+      }
+    },
+    "/api/manifest/generate": {
+      "post": {
+        "description": "Enqueue a MANIFEST.zip generation job.\n\nReturns a job_id for polling via GET /api/jobs/{id}.",
+        "operationId": "generate_manifest_api_manifest_generate_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManifestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Generate Manifest",
+        "tags": [
+          "manifest"
+        ]
+      }
+    },
+    "/api/media/batch": {
+      "delete": {
+        "description": "Soft-delete multiple media records (sets deleted_at).\n\nIdempotent: already-deleted media are silently skipped. Runs as the\nrequesting user (not the service role) so RLS restricts the update to\nmedia in projects where they hold project_member \u2014 IDs outside their\nprojects are silently ignored, never deleted.",
+        "operationId": "batch_delete_media_api_media_batch_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Delete Media",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/media/batch/restore": {
+      "post": {
+        "description": "Undo a media delete \u2014 clears ``deleted_at`` where it equals the given timestamp. Runs as the\nuser so RLS keeps it to their own projects; scoping by the exact timestamp restores only the\nphotos removed in that delete.",
+        "operationId": "batch_restore_media_api_media_batch_restore_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreMediaRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Batch Restore Media",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/media/registry/{deployment_id}": {
+      "get": {
+        "description": "Paginated media list with pre-resolved URLs \u2014 primary source for the grid.",
+        "operationId": "media_registry_api_media_registry__deployment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Media Registry",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/media/run-selected": {
+      "post": {
+        "description": "Queue a pipeline run for specific media IDs (not the full deployment).\n\nLooks up the deployment_id from the first media record, then runs the\npipeline with a media_ids filter. The lookup runs as the requesting user\nso RLS limits it to media in their own projects.",
+        "operationId": "run_pipeline_selected_api_media_run_selected_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunSelectedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Pipeline Selected",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/media/thumbnails/{deployment_id}": {
+      "post": {
+        "description": "Enqueue an async job to generate thumbnails/previews for existing media.",
+        "operationId": "enqueue_thumbnail_backfill_api_media_thumbnails__deployment_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Enqueue Thumbnail Backfill",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/media/{media_id}/image": {
+      "get": {
+        "description": "Serve a media image by resolving its file_path through the provider registry.\n\n- ``size=thumb``: fast low-res preview for the thumbnail grid\n- ``size=full``: high-res download for the detail panel (on-demand)\n\nUses the authenticated user's Supabase client so RLS enforces\nproject membership \u2014 users can only view media they have access to.",
+        "operationId": "get_media_image_api_media__media_id__image_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "title": "Media Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Image size: thumb (grid) or full (detail)",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": "thumb",
+              "description": "Image size: thumb (grid) or full (detail)",
+              "enum": [
+                "thumb",
+                "full"
+              ],
+              "title": "Size",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Media Image",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/media/{media_id}/resolve": {
+      "get": {
+        "description": "Return a display URL for a media item regardless of storage provider.",
+        "operationId": "resolve_media_url_api_media__media_id__resolve_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "title": "Media Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": "thumbnail",
+              "enum": [
+                "thumbnail",
+                "preview",
+                "original"
+              ],
+              "title": "Size",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Media Url",
+        "tags": [
+          "media"
+        ]
+      }
+    },
+    "/api/models/convert": {
+      "post": {
+        "description": "Upload a model and enqueue conversion/registration job.\n\n1. Validates input\n2. Determines user's organisation via user_roles.scope_id\n3. Auto-versions the model by name within the org\n4. Inserts an ai_models row\n5. Stores the file in blob store and enqueues the worker job",
+        "operationId": "convert_model_api_models_convert_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_convert_model_api_models_convert_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Convert Model",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/models/managed-orgs": {
+      "get": {
+        "description": "Return organisations where the current user is an organisation_manager.",
+        "operationId": "get_managed_orgs_api_models_managed_orgs_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Managed Orgs",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/models/pretrained": {
+      "post": {
+        "description": "Download, package, and register a pre-trained model (SSCMA or built-in).",
+        "operationId": "download_pretrained_api_models_pretrained_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PretrainedModelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Pretrained",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/models/pretrained/catalog": {
+      "get": {
+        "description": "Return the built-in pretrained models the device can run.\n\nAllows the frontend to dynamically render the architecture/resolution\ndropdowns without hardcoding the model list. Registry entries marked\n``blocked`` (the detection models, see ``model_registry.py``) are omitted so\nthey cannot be selected.",
+        "operationId": "pretrained_catalog_api_models_pretrained_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Pretrained Catalog",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/models/sscma/catalog": {
+      "get": {
+        "description": "Return cached SSCMA model zoo catalog.\n\nUses Redis cache with 1-hour TTL to avoid hitting GitHub on every request.",
+        "operationId": "sscma_catalog_api_models_sscma_catalog_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Sscma Catalog",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/models/train": {
+      "post": {
+        "description": "Train a Species Brain from an Annotations selection (async; ``train_species_brain_job``).\n\nChecks, in order: the feature flag; that the caller manages the organisation that\nwill own the model; that every selected image still exists and sits in a deployment\nthe caller may read. With a trainer configured an ``ai_models`` row is created up\nfront (status ``uploading`` \u2192 ``validated`` | ``failed``, like an upload); without\none the job only packages the dataset. Poll ``GET /api/jobs/{job_id}``.",
+        "operationId": "train_model_api_models_train_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrainModelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Train Model",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/models/train/status": {
+      "get": {
+        "description": "What the Annotations action needs before it opens: is training on, which trainer\nruns it (``edge_impulse``, ``gcp`` or ``export_only``), and the dataset limits to validate against.",
+        "operationId": "train_status_api_models_train_status_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Train Status",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/projects": {
+      "post": {
+        "description": "Create a project in the caller's organisation.\n\nThe caller becomes ``project_admin`` automatically via the ``handle_new_project`` DB trigger\n(which reads ``created_by``), mirroring the CamtrapDP import. Requires the user to belong to\nan organisation. ``get_verified_user`` blocks the demo/unverified accounts.",
+        "operationId": "create_project_api_projects_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Project Api Projects Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{project_id}": {
+      "delete": {
+        "description": "Soft-delete a project and cascade to its deployments \u2192 media \u2192 observations.\n\nAdmin-only: requires ``project_admin`` on the project (or org-manager / system). A member or\nviewer is refused (404). Returns the shared ``deleted_at`` so the client can offer an Undo.",
+        "operationId": "delete_project_api_projects__project_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Project Api Projects  Project Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/restore": {
+      "post": {
+        "description": "Undo a project delete \u2014 clears ``deleted_at`` (== the given timestamp) on the project and the\ndeployments/media/observations that were deleted with it.",
+        "operationId": "restore_project_endpoint_api_projects__project_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreProjectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Restore Project Endpoint Api Projects  Project Id  Restore Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Project Endpoint",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/v1/api-keys": {
+      "get": {
+        "description": "List active API keys for the user's organisation.",
+        "operationId": "list_keys_api_v1_api_keys_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Keys",
+        "tags": [
+          "public-api"
+        ]
+      },
+      "post": {
+        "description": "Create a new API key for the user's organisation.\n\nOnly organisation admins can create keys. The raw key is returned\nonce \u2014 it cannot be retrieved again.",
+        "operationId": "create_key_api_v1_api_keys_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Key",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/api-keys/{key_id}": {
+      "delete": {
+        "description": "Revoke an API key.",
+        "operationId": "revoke_key_api_v1_api_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Key",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/deployments": {
+      "get": {
+        "description": "List deployments for the organisation attached to the API key.",
+        "operationId": "api_list_deployments_api_v1_deployments_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": true,
+            "schema": {
+              "title": "X-Api-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Deployments",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/deployments/{deployment_id}": {
+      "get": {
+        "description": "Get a single deployment by ID.",
+        "operationId": "api_get_deployment_api_v1_deployments__deployment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": true,
+            "schema": {
+              "title": "X-Api-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Get Deployment",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/devices": {
+      "get": {
+        "description": "List devices for the organisation.",
+        "operationId": "api_list_devices_api_v1_devices_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": true,
+            "schema": {
+              "title": "X-Api-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Devices",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/devices/{device_eui}/telemetry": {
+      "get": {
+        "description": "Get telemetry time-series for a specific device.",
+        "operationId": "api_device_telemetry_api_v1_devices__device_eui__telemetry_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "device_eui",
+            "required": true,
+            "schema": {
+              "title": "Device Eui",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": true,
+            "schema": {
+              "title": "X-Api-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Device Telemetry",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/export/camtrapdp": {
+      "post": {
+        "description": "Export deployment data as a CamtrapDP package (async job).",
+        "operationId": "api_export_camtrapdp_api_v1_export_camtrapdp_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": true,
+            "schema": {
+              "title": "X-Api-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CamtrapDPExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Export Camtrapdp",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/observations": {
+      "get": {
+        "description": "List AI detection observations.",
+        "operationId": "api_list_observations_api_v1_observations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "deployment_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Deployment Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-API-Key",
+            "required": true,
+            "schema": {
+              "title": "X-Api-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api List Observations",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Simple health probe for Docker/Render health checks.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}
