@@ -49,8 +49,14 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 - **A11y of public pages** runs `05-a11y` with no account and fails on a serious or critical
   violation. It was advisory until #213 cleared the colour-contrast findings (#212).
+- **Lighthouse of public pages** audits `/`, `/login`, `/guides`, `/faq` and `/resources` three
+  times each on the desktop preset, against the budgets in `lighthouserc.json`: performance 80,
+  accessibility 95, best practices 90, SEO 90. Advisory for now (#228): a page under budget is a
+  warning annotation on the run and the HTML reports are in the `lighthouse-<sha>` artifact,
+  with the performance audits naming what to fix (the main chunk first). Blocking once the pages
+  meet the budgets, the way the a11y job went.
 
-Both fail when the junit report holds nothing but skipped tests: the specs skip themselves
+The two Playwright jobs fail when the junit report holds nothing but skipped tests: the specs skip themselves
 when their env is missing, so a missing secret would otherwise read as a pass. The dev API
 scales to zero, so the first smoke test polls `/docs` for up to three minutes and reports how
 long the cold start took.
