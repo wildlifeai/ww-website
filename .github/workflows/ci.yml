@@ -113,3 +113,11 @@ jobs:
       - name: TypeScript check + Vite build
         working-directory: frontend
         run: npm run build
+
+      # Budgets in frontend/package.json ("size-limit"), brotli-compressed as
+      # Cloudflare serves it: the main chunk is 489 kB today against 500 kB. A pull request that
+      # pushes a chunk over its limit fails here with the delta; raising a
+      # limit is a visible change in the same pull request (#227).
+      - name: Bundle size budget
+        working-directory: frontend
+        run: npm run size

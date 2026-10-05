@@ -46,6 +46,10 @@ The browser flows in `e2e/` run in CI against every Cloudflare Pages preview dep
 [`e2e/README.md`](e2e/README.md). They need a running site, so they are not part of the
 local gates above.
 
+The frontend build job ends with `npm run size` (size-limit): brotli-compressed budgets for the main chunk,
+the lazy guide page and the stylesheet live in `frontend/package.json` under `size-limit`, set
+just above today's figures. Raising one is a deliberate change in the pull request that needs it.
+
 Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 (`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
 ww-backend runs them against its own schema PRs, so a red run can come from either side. To
