@@ -65,6 +65,13 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/ -x -q --tb=short --cov=app --cov-report=term --cov-fail-under=50
 
+      # backend/openapi.json is the committed schema. A pull request that
+      # changes the API has to regenerate it (python scripts/export_openapi.py)
+      # so the frontend side can be reviewed with it (#218).
+      - name: OpenAPI snapshot is current
+        working-directory: backend
+        run: python scripts/export_openapi.py --check
+
   # ── Backend: the image the deploy ships ──────────────────────────────
   # deploy-backend.yml builds `--target api` on a push to dev or main, so a
   # Dockerfile or requirements change that breaks the image used to be found
@@ -112,13 +119,6 @@ jobs:
           echo "::error::the api image started but /docs did not answer within 30 s"
           docker logs api
           exit 1
-
-      # backend/openapi.json is the committed schema. A pull request that
-      # changes the API has to regenerate it (python scripts/export_openapi.py)
-      # so the frontend side can be reviewed with it (#218).
-      - name: OpenAPI snapshot is current
-        working-directory: backend
-        run: python scripts/export_openapi.py --check
 
   # ── Frontend: TypeScript lint + build check ─────────────────────────
   frontend-lint:
