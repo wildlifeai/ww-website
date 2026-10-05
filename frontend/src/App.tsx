@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation, useParams } from 'react-router-dom'
+import { ChartLine, RadioTower, Tags, Upload, Wrench, type LucideIcon } from 'lucide-react'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from './lib/queryClient'
 import { useAuth } from './hooks/useAuth'
@@ -255,7 +256,8 @@ function UploadNavButton() {
       className="btn"
       style={{ padding: '0.375rem 0.875rem', fontSize: '0.875rem', fontWeight: 600, flexShrink: 0, textDecoration: 'none' }}
     >
-      ⬆ Upload
+      <Upload size={15} aria-hidden="true" style={{ verticalAlign: '-2px', marginRight: '0.375rem' }} />
+      Upload
     </Link>
   )
 }
@@ -264,16 +266,29 @@ function UploadNavButton() {
 // Layout
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Lifecycle order: prepare (Toolkit) → collect (Annotations) → analyse (Insights).
-// The conditional 📡 Field tab is inserted between Toolkit and Annotations in a later
-// phase, only for users with an active deployment.
+// Lifecycle order: prepare (Toolkit) → collect (Review) → analyse (Insights).
+// The conditional Realtime tab is inserted between Toolkit and Review, only
+// for users with an active deployment.
+//
+// The labels are the words the home dashboard's three steps use (upload,
+// review, insights), so the nav and the steps are one vocabulary. The routes
+// keep their names: /annotations is the Review tab.
+function tabLabel(Icon: LucideIcon, text: string) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+      <Icon size={15} aria-hidden="true" />
+      {text}
+    </span>
+  )
+}
+
 const USER_TABS = [
-  { id: 'toolkit',     label: '🧰 Toolkit',     to: '/toolkit' },
-  // Phase 3: a conditional { id: 'field', label: '📡 Field', to: '/field' } tab is
-  // inserted here when the user has active deployments reporting LoRaWAN heartbeats.
-  // Held back until the LoRaWAN pipeline is live; the /field route renders a placeholder.
-  { id: 'annotations', label: '🏷️ Annotations', to: '/annotations' },
-  { id: 'insights',    label: '📈 Insights',    to: '/insights' },
+  { id: 'toolkit',     label: tabLabel(Wrench, 'Toolkit'),     to: '/toolkit' },
+  // Phase 3: a conditional Realtime tab is inserted here when the user has active
+  // deployments reporting LoRaWAN heartbeats. Held back until the LoRaWAN
+  // pipeline is live; the /field route renders a placeholder.
+  { id: 'annotations', label: tabLabel(Tags, 'Review'),        to: '/annotations' },
+  { id: 'insights',    label: tabLabel(ChartLine, 'Insights'), to: '/insights' },
 ] as const
 
 function Layout({ children }: { children: React.ReactNode }) {
@@ -299,7 +314,7 @@ function Layout({ children }: { children: React.ReactNode }) {
   const hasField = useHasActiveDeployments()
   const { unreadCount, items: notifications } = useNotifications()
   const navTabs = hasField
-    ? [USER_TABS[0], { id: 'field', label: '📡 Realtime', to: '/field' }, ...USER_TABS.slice(1)]
+    ? [USER_TABS[0], { id: 'field', label: tabLabel(RadioTower, 'Realtime'), to: '/field' }, ...USER_TABS.slice(1)]
     : [...USER_TABS]
 
   // Resolve which top-level tab is active (handles nested routes too)
