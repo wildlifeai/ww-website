@@ -17,7 +17,7 @@ it with this frontmatter:
 ```markdown
 ---
 title: Machine Learning Models
-description: One-line summary shown on the guides index.
+description: One-line summary shown on the guides index, and the page's meta description in search results and link previews.
 category: Analysis
 order: 10
 updated: 2026-06-12

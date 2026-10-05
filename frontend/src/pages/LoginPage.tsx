@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth'
 import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { MIN_PASSWORD_LENGTH, signUpMetadata, signUpProblem, type SignUpFields } from '../lib/signUp'
 import { loadGoogleIdentity, newNonce } from '../lib/googleIdentity'
+import { usePageMeta } from '../lib/pageMeta'
 
 /**
  * Log in (/login) and create an account (/signup), by email or with Google (#116, #187).
@@ -31,6 +32,11 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
   const siteUrl = window.location.origin
   const signingUp = mode === 'sign_up'
   const title = forgotten ? 'Reset your password' : signingUp ? 'Create your Wildlife Watcher account' : 'Log in to Wildlife Watcher'
+  usePageMeta({
+    title: forgotten ? 'Reset your password' : signingUp ? 'Create an account' : 'Log in',
+    description: 'Log in to Wildlife Watcher to upload, review and analyse your camera-trap photos, or explore the demo with sample data.',
+    path: signingUp ? '/signup' : '/login',
+  })
 
   return (
     <div style={{ maxWidth: '400px', margin: '4rem auto', padding: '2rem', backgroundColor: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--border)' }}>

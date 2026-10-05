@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../config/supabase'
+import { usePageMeta } from '../lib/pageMeta'
 
 export function ResetPasswordPage() {
+  usePageMeta({ title: 'Reset your password' })
   const navigate = useNavigate()
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')

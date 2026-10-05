@@ -9,6 +9,7 @@ import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { PrototypeBanner } from '../components/common/PrototypeBanner'
 import { StoreBadges, APP_STORE_URL } from '../components/common/StoreBadges'
 import { Camera, Globe, Smartphone } from 'lucide-react'
+import { usePageMeta } from '../lib/pageMeta'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -81,6 +82,7 @@ function ProjectCardTile({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Dashboard() {
+  usePageMeta({ title: 'Home' })
   const { user } = useAuth()
   const navigate = useNavigate()
   // `projects` changes when the shared list reloads (e.g. an accepted
@@ -195,6 +197,7 @@ const SECTION_HEADING: React.CSSProperties = {
 }
 
 function MarketingHero() {
+  usePageMeta({ description: 'The Wildlife Watcher is a compact open-source AI camera for invertebrates and small animals, with a mobile app for the field and a website for review, analysis and reporting.' })
   return (
     <div>
       <div style={{ maxWidth: '800px', margin: '0 auto 2rem' }}>
