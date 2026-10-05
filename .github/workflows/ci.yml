@@ -58,7 +58,7 @@ jobs:
 
       - name: Warn when pyright found errors
         if: steps.pyright.outcome == 'failure'
-        run: echo "::warning::pyright reports type errors in backend/app (advisory, #225). The step above has the count by rule and the first 40."
+        run: echo "::warning::pyright reports type errors in backend/app (advisory, issue 225). The step above has the count by rule and the first 40."
 
   backend-tests:
     name: Backend Tests (pytest)
