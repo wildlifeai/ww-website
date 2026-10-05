@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Link } from 'react-router-dom'
+import { ChartColumn, ChartLine, FolderUp, Tags, type LucideIcon } from 'lucide-react'
 
 export interface GuideStep {
-  icon: string
+  icon: LucideIcon
   title: string
   description: string
   /** React-Router `to` path */
@@ -19,7 +20,7 @@ export interface ThreeStepGuideProps {
 // Default steps used across the app — callers can override per context.
 export const DEFAULT_SIGNED_IN_STEPS: GuideStep[] = [
   {
-    icon: '📂',
+    icon: FolderUp,
     title: '1. Upload photos',
     description:
       'Drop a Wildlife Watcher SD card folder or a CamtrapDP ZIP. The system auto-detects deployments and routes images through the analysis pipeline.',
@@ -27,7 +28,7 @@ export const DEFAULT_SIGNED_IN_STEPS: GuideStep[] = [
     linkLabel: 'Upload now →',
   },
   {
-    icon: '🏷️',
+    icon: Tags,
     title: '2. Review annotations',
     description:
       'Browse ML detections, correct species labels, confirm clusters, and work through the active-learning review queue.',
@@ -35,7 +36,7 @@ export const DEFAULT_SIGNED_IN_STEPS: GuideStep[] = [
     linkLabel: 'Go to Annotations →',
   },
   {
-    icon: '📈',
+    icon: ChartLine,
     title: '3. See & share insights',
     description:
       'Explore charts, maps, and deployment tables. Export a CamtrapDP package for R or share the report with your team.',
@@ -46,7 +47,7 @@ export const DEFAULT_SIGNED_IN_STEPS: GuideStep[] = [
 
 export const DEFAULT_MARKETING_STEPS: GuideStep[] = [
   {
-    icon: '📂',
+    icon: FolderUp,
     title: '1. Upload photos',
     description:
       'Drop a Wildlife Watcher SD card folder or a CamtrapDP ZIP. The system auto-detects deployments and routes images through the analysis pipeline.',
@@ -54,7 +55,7 @@ export const DEFAULT_MARKETING_STEPS: GuideStep[] = [
     linkLabel: 'Sign in to upload →',
   },
   {
-    icon: '🏷️',
+    icon: Tags,
     title: '2. Review annotations',
     description:
       'Browse ML detections, correct species labels, confirm clusters, and work through the active-learning review queue.',
@@ -62,7 +63,7 @@ export const DEFAULT_MARKETING_STEPS: GuideStep[] = [
     linkLabel: 'Sign in to review →',
   },
   {
-    icon: '📊',
+    icon: ChartColumn,
     title: '3. See & share results',
     description:
       'Explore charts, maps, and deployment tables. Export a CamtrapDP package for R or share the report with your team.',
@@ -112,10 +113,10 @@ export function ThreeStepGuide({ steps, heading }: ThreeStepGuideProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '1.5rem',
+              color: 'var(--primary)',
               flexShrink: 0,
             }}>
-              {step.icon}
+              <step.icon size={24} aria-hidden="true" />
             </div>
 
             {/* Title */}

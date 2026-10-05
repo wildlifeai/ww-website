@@ -5,6 +5,7 @@
  * pushing past the defaults (custom models, novel device setups).
  */
 import { Link } from 'react-router-dom'
+import { BookOpen } from 'lucide-react'
 import { guidesByCategory } from '../lib/guides'
 
 export function GuidesPage() {
@@ -13,7 +14,10 @@ export function GuidesPage() {
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
       <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📖 Advanced Guides</h1>
+        <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <BookOpen size={32} color="var(--primary)" aria-hidden="true" />
+          Advanced Guides
+        </h1>
         <p style={{ color: 'var(--text-muted)', maxWidth: '640px', lineHeight: 1.6 }}>
           Guidance and best practices from the Wildlife Watcher team for taking the platform
           further — developing and training your own AI models, and setting up devices in novel

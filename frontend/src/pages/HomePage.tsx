@@ -7,6 +7,7 @@ import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS, DEFAULT_MARKETING_STEPS } from
 import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { PrototypeBanner } from '../components/common/PrototypeBanner'
 import { StoreBadges, APP_STORE_URL } from '../components/common/StoreBadges'
+import { Camera, Globe, Smartphone } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -241,9 +242,9 @@ function MarketingHero() {
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.75rem' }}>
             {[
-              { icon: '📷', title: 'The hardware', body: 'Compact, weatherproof AI cameras built for small wildlife, auto-tagging images with deployment metadata.', anchor: '#watchers' },
-              { icon: '📱', title: 'The app',      body: 'Configure devices and manage projects from the field on iOS or Android.',               anchor: '#app' },
-              { icon: '🌐', title: 'The web',      body: 'Upload images, review AI detections, group look-alikes, and export publication-ready reports.', anchor: '#web' },
+              { icon: Camera, title: 'The hardware', body: 'Compact, weatherproof AI cameras built for small wildlife, auto-tagging images with deployment metadata.', anchor: '#watchers' },
+              { icon: Smartphone, title: 'The app',      body: 'Configure devices and manage projects from the field on iOS or Android.',               anchor: '#app' },
+              { icon: Globe, title: 'The web',      body: 'Upload images, review AI detections, group look-alikes, and export publication-ready reports.', anchor: '#web' },
             ].map(item => (
               <a key={item.anchor} href={item.anchor} style={{ textDecoration: 'none', color: 'inherit' }}>
                 <div style={{
@@ -254,7 +255,7 @@ function MarketingHero() {
                   onMouseEnter={e => ((e.currentTarget as HTMLElement).style.borderColor = 'var(--primary)')}
                   onMouseLeave={e => ((e.currentTarget as HTMLElement).style.borderColor = 'var(--border)')}
                 >
-                  <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>{item.icon}</div>
+                  <div style={{ marginBottom: '0.625rem', color: 'var(--primary)' }}><item.icon size={26} aria-hidden="true" /></div>
                   <div style={{ fontWeight: 600, marginBottom: '0.375rem' }}>{item.title}</div>
                   <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.7, lineHeight: 1.5 }}>{item.body}</p>
                   <div style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: 'var(--primary)', fontWeight: 500 }}>
