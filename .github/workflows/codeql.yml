@@ -1,0 +1,55 @@
+# Static analysis for the classes nothing else here looks for: injection
+# through untrusted input, path traversal in the upload and export endpoints,
+# unsafe deserialization, SSRF in anything that fetches a URL, unsafe regular
+# expressions. GitGuardian scans for secrets, ruff for Python style, React
+# Doctor for React patterns; this is the security leg (#229).
+#
+# Advisory: findings go to the Security tab as code scanning alerts and the
+# job passes whatever it finds. Make it a required check once the first runs
+# have been read and the alerts that matter are fixed or dismissed.
+name: CodeQL
+
+on:
+  pull_request:
+    branches: [dev, main]
+  push:
+    branches: [dev]
+  schedule:
+    - cron: '47 5 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # Fixtures and the ML training code would only add noise.
+          config: |
+            paths-ignore:
+              - test-fixtures
+              - backend/training
+              - '**/*.test.ts'
+              - '**/*.test.tsx'
+              - '**/tests/**'
+
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
