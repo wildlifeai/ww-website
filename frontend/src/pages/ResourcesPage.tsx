@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
 import { BookOpen, Camera, Lightbulb, Microscope, Package, Rocket, Smartphone, TriangleAlert, Wrench, type LucideIcon } from 'lucide-react'
 import { usePageMeta } from '../lib/pageMeta'
 
@@ -85,7 +86,16 @@ function Ul({ items }: { items: string[] }) {
 
 export function ResourcesPage() {
   usePageMeta({ title: 'Resources and How-To Guides', description: 'Set up your Wildlife Watcher camera: what is in the box, batteries and SD card, mounting, the mobile app, your first monitoring session, image annotation, maintenance and troubleshooting.' })
-  const [active, setActive] = useState('whats-in-box')
+  const { hash } = useLocation()
+  const hashId = hash.slice(1)
+  const [active, setActive] = useState(() => (sections.some(s => s.id === hashId) ? hashId : 'whats-in-box'))
+
+  // React Router does not scroll to a hash, and the FAQ links here by
+  // section (/resources#maintenance, /resources#deployment).
+  useEffect(() => {
+    if (!hashId) return
+    document.getElementById(hashId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [hashId])
 
   const scrollTo = (id: string) => {
     setActive(id)
@@ -97,11 +107,13 @@ export function ResourcesPage() {
       <div style={{ marginBottom: '2rem' }}>
         <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <BookOpen size={32} color="var(--primary)" aria-hidden="true" />
-          Resources & How-To Guides
+          Get started with your Wildlife Watcher
         </h1>
         <p style={{ color: 'var(--text-muted)', maxWidth: '640px', lineHeight: 1.6 }}>
-          Everything you need to set up, monitor, and analyse data from your Wildlife Watcher camera.
-          From unboxing to AI-powered species identification — all in one place.
+          From the box to your first results, in order: what you need, setting up the camera,
+          the mobile app, your first monitoring session, reviewing the photos, and keeping the
+          camera going. Quick answers are in the <Link to="/faq" style={{ color: 'var(--primary)' }}>FAQ</Link>;
+          going further than the defaults is in the <Link to="/guides" style={{ color: 'var(--primary)' }}>guides</Link>.
         </p>
       </div>
 
@@ -186,7 +198,7 @@ export function ResourcesPage() {
             <H3>Before your first monitoring session</H3>
             <Ul items={[
               'Check the batteries — ensure fresh premium alkaline or lithium AA batteries are installed.',
-              'Check SD card available space — a FAT32-formatted microSD card, 32–64 GB (Class 10 or higher), is recommended.',
+              'Check the microSD card has space (the card itself: see What you will need, above).',
               'Test the camera preview to verify field of view.',
             ]} />
             <Note>Always test the camera before heading into the field to avoid wasted trips.</Note>
@@ -271,7 +283,7 @@ export function ResourcesPage() {
                 },
                 {
                   issue: 'App not connecting via Bluetooth',
-                  fix: 'Restart the mobile app. Make sure Bluetooth is enabled on your phone and you physically tap the button at the bottom of the device to activate Bluetooth advertising.',
+                  fix: 'Press the button at the bottom of the camera and check the blue light is flashing: that is the camera advertising. Make sure Bluetooth is on and the phone is within a few metres. If the app scans and finds nothing, close it completely and reopen it; if that fails, restart both the camera and the phone.',
                 },
                 {
                   issue: 'Blurred or dark images',
@@ -293,8 +305,8 @@ export function ResourcesPage() {
 
             <H3>Still need help?</H3>
             <p style={{ lineHeight: 1.7 }}>
-              Check the <a href="/faq" style={{ color: 'var(--primary)' }}>FAQ</a> for common questions,
-              browse our <a href="/guides" style={{ color: 'var(--primary)' }}>advanced guides</a>,
+              Check the <Link to="/faq" style={{ color: 'var(--primary)' }}>FAQ</Link> for quick answers,
+              the <Link to="/guides" style={{ color: 'var(--primary)' }}>guides</Link> for going further,
               or contact us at <a href="mailto:contact@wildlife.ai" style={{ color: 'var(--primary)' }}>contact@wildlife.ai</a>.
               Our support team is available Monday to Friday, New Zealand time (UTC+12, UTC+13 in summer).
             </p>
