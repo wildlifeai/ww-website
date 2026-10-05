@@ -437,11 +437,11 @@ function Layout({ children }: { children: React.ReactNode }) {
           <div style={{ fontSize: '0.875rem' }}>
             &copy; {new Date().getFullYear()} Wildlife.ai
             {' | '}
+            <Link to="/resources" style={{ color: 'inherit', textDecoration: 'underline' }}>Get started</Link>
+            {' | '}
+            <Link to="/guides" style={{ color: 'inherit', textDecoration: 'underline' }}>Guides</Link>
+            {' | '}
             <Link to="/faq" style={{ color: 'inherit', textDecoration: 'underline' }}>FAQ</Link>
-            {' | '}
-            <Link to="/resources" style={{ color: 'inherit', textDecoration: 'underline' }}>Resources</Link>
-            {' | '}
-            <Link to="/guides" style={{ color: 'inherit', textDecoration: 'underline' }}>Advanced Guides</Link>
             {' | '}
             <Link to="/privacy" style={{ color: 'inherit', textDecoration: 'underline' }}>Privacy Policy</Link>
             {' | '}
