@@ -1,0 +1,84 @@
+# Known vulnerabilities in what the site and the API install. Dependabot
+# proposes version bumps; this is the check that says whether what is
+# installed today carries a published advisory, which no other job does.
+#
+# Advisory on a pull request: a failing audit becomes a warning and the run
+# stays green. The weekly run fails outright, so an advisory published
+# against an unchanged lockfile still gets seen. Make the pull-request run
+# blocking too (drop the continue-on-error expressions) once today's
+# findings are cleared.
+name: Dependency Audit
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+      - 'e2e/package.json'
+      - 'e2e/package-lock.json'
+      - 'backend/requirements*.txt'
+      - '.github/workflows/dependency-audit.yml'
+  schedule:
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  npm-audit:
+    name: npm audit (frontend and e2e)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      # Both read their package-lock.json; no install needed. Dev dependencies
+      # are left out of the frontend audit: they never reach the browser. The
+      # e2e package is all dev dependencies by nature, so it is audited whole.
+      - name: npm audit, frontend production dependencies
+        id: frontend
+        working-directory: frontend
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: npm audit, e2e
+        id: e2e
+        working-directory: e2e
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: npm audit --audit-level=high
+
+      - name: Warn when an audit found something
+        if: steps.frontend.outcome == 'failure' || steps.e2e.outcome == 'failure'
+        run: echo "::warning::npm audit found high or critical advisories (advisory on pull requests). The steps above list them."
+
+  pip-audit:
+    name: pip-audit (backend)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      # The requirements files are ranges, not a lock, so this audits what
+      # pip would resolve today, which is also what the deploy installs.
+      - name: pip-audit
+        id: audit
+        working-directory: backend
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        run: pip-audit -r requirements.txt -r requirements-dev.txt
+
+      - name: Warn when the audit found something
+        if: steps.audit.outcome == 'failure'
+        run: echo "::warning::pip-audit found advisories in the backend's dependencies (advisory on pull requests). The step above lists them."
