@@ -328,7 +328,7 @@ function MarketingHero() {
             className="btn"
             style={{ textDecoration: 'none', display: 'inline-block' }}
           >
-            Learn more →
+            The Wildlife Watcher at wildlife.ai
           </a>
         </div>
       </div>

@@ -172,3 +172,11 @@ body {
   background-color: var(--surface);
   opacity: 1;
 }
+
+/* A link that opens a new tab says so. Text links only: a badge or a logo
+   that links out carries its own meaning, and an arrow after an image is noise.
+   The alternative text is what a screen reader gets instead of the arrow. */
+a[target="_blank"]:not(:has(img))::after {
+  content: " \2197" / " (opens in a new tab)";
+  font-size: 0.8em;
+}

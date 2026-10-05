@@ -281,7 +281,7 @@ export function ResourcesPage() {
               Check the <a href="/faq" style={{ color: 'var(--primary)' }}>FAQ</a> for common questions,
               browse our <a href="/guides" style={{ color: 'var(--primary)' }}>advanced guides</a>,
               or contact us at <a href="mailto:contact@wildlife.ai" style={{ color: 'var(--primary)' }}>contact@wildlife.ai</a>.
-              Our support team is available Monday through Friday during standard New Zealand business hours.
+              Our support team is available Monday to Friday, New Zealand time (UTC+12, UTC+13 in summer).
             </p>
           </Section>
 
