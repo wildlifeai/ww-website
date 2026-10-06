@@ -15,8 +15,8 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
-    "@playwright/test": "^1.49.0",
-    "@supabase/supabase-js": "^2.47.0",
+    "@playwright/test": "^1.63.0",
+    "@supabase/supabase-js": "^2.117.2",
     "dotenv": "^16.4.5"
   }
 }
