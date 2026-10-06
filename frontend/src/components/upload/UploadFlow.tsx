@@ -270,6 +270,22 @@ export function UploadFlow() {
     }
   }
 
+  const uploadMode: 'idle' | 'images' | 'camtrapdp' =
+    zipFile ? 'camtrapdp' : files.length > 0 ? 'images' : 'idle'
+
+  // Files whose deployment cannot be resolved from their EXIF id or the card's
+  // folder structure. These are the ones the backend would silently drop (no
+  // deployment_id -> not stored -> no media row), so they go through triage.
+  const unresolvedIndices = useMemo(
+    () => (uploadMode === 'images' ? unresolvedFileIndices(files, filePaths, exifIds, deployments) : []),
+    [files, filePaths, exifIds, deployments, uploadMode],
+  )
+
+  const triageSessions = useMemo(
+    () => (unresolvedIndices.length ? buildSessions(files, filePaths, unresolvedIndices, exifIds) : []),
+    [files, filePaths, unresolvedIndices, exifIds],
+  )
+
   const handleUpload = async (
     sessionAssignments?: { deploymentId: string; indices: number[] }[],
   ) => {
@@ -328,9 +344,6 @@ export function UploadFlow() {
   // ── Derived stats ──────────────────────────────────────────────────────────
   const { isDragging, bind } = useDragAndDrop(processFiles)
 
-  const uploadMode: 'idle' | 'images' | 'camtrapdp' =
-    zipFile ? 'camtrapdp' : files.length > 0 ? 'images' : 'idle'
-
   // Per-file deployment resolution, EXIF first (exact id), folder prefix second.
   // Returns undefined when neither names a deployment the user can see.
   const resolveDeploymentId = (i: number): string | undefined => {
@@ -361,18 +374,6 @@ export function UploadFlow() {
     .filter(([, s]) => s === 'no_access')
     .map(([id]) => id)
 
-  // Files whose deployment cannot be resolved from their EXIF id or the card's
-  // folder structure. These are the ones the backend would silently drop (no
-  // deployment_id -> not stored -> no media row), so they go through triage.
-  const unresolvedIndices = useMemo(
-    () => (uploadMode === 'images' ? unresolvedFileIndices(files, filePaths, exifIds, deployments) : []),
-    [files, filePaths, exifIds, deployments, uploadMode],
-  )
-
-  const triageSessions = useMemo(
-    () => (unresolvedIndices.length ? buildSessions(files, filePaths, unresolvedIndices, exifIds) : []),
-    [files, filePaths, unresolvedIndices, exifIds],
-  )
   // Per-deployment fate of the selection, shown before Upload and carried into
   // triage so the photos that already matched are named there too.
   const breakdown = useMemo(

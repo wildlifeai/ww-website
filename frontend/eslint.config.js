@@ -21,6 +21,10 @@ export default defineConfig([
     },
     rules: {
       '@typescript-eslint/no-explicit-any': 'warn',
+      // An error in react-hooks 7.1's recommended set. The 14 sites are mostly
+      // fetch-in-effect loading flags; they move to React Query in #268, and
+      // this line goes when they have.
+      'react-hooks/set-state-in-effect': 'warn',
     },
   },
 ])
