@@ -35,11 +35,30 @@ Setup detail, env reference and a verification checklist:
 
 ```bash
 cd backend  && ruff check . && ruff format --check . && pytest
-cd frontend && npm run lint && npx tsc -b --noEmit && npm run build
+cd frontend && npm run lint && npx tsc -b --noEmit && npm run build && npm run size
+node scripts/validate-docs.js
 ```
 
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
+
+`ci.yml` runs the same gates on every pull request and adds three that only run there: pytest
+with a statement-coverage floor, a build of the backend's `api` Docker stage that is started and
+asked for `/docs`, and a check that `backend/openapi.json` matches the app (regenerate it with
+`python scripts/export_openapi.py` in `backend/` when a route or a model changes). The coverage
+floor and the `size-limit` budgets in `frontend/package.json` are ratchets set just under today's
+figures: raising one is a deliberate change in the pull request that needs it. The comment above
+each job in `ci.yml` says what it proves. `codeql.yml` scans JavaScript, TypeScript and Python on
+pull requests, on pushes to dev and weekly; its findings are code scanning alerts in the Security
+tab, and it is advisory until it is made a required check (#229). `dependency-audit.yml` runs
+`npm audit` on the frontend and `e2e/` and `pip-audit` on the backend, advisory on a pull request
+that changes a lockfile or a requirements file and blocking on its Monday run; Dependabot opens
+the grouped bump PRs.
+
+The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
+(`.github/workflows/e2e.yml`); what they prove and how to read a failure is in
+[`e2e/README.md`](e2e/README.md). They need a running site, so they are not part of the
+local gates above.
 
 Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 (`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
@@ -84,7 +103,7 @@ run one locally, follow the instructions in its header.
 
 | | |
 |---|---|
-| Start here, in order | [`documentation/onboarding/00`–`05`](documentation/onboarding/) |
+| Start here, in order | the six guides in [`documentation/onboarding/`](documentation/onboarding/), numbered 00 to 05 |
 | Doc index, what's living vs frozen | [`documentation/README.md`](documentation/README.md) |
 | Deep agent rules | [`.agents/skills/SKILL.md`](.agents/skills/SKILL.md) |
 | UI design system | [`.agents/DESIGN.md`](.agents/DESIGN.md) |

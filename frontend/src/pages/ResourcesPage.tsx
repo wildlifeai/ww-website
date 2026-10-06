@@ -1,36 +1,42 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link, useLocation } from 'react-router-dom'
+import { BookOpen, Camera, Lightbulb, Microscope, Package, Rocket, Smartphone, TriangleAlert, Wrench, type LucideIcon } from 'lucide-react'
+import { usePageMeta } from '../lib/pageMeta'
 
-const sections = [
-  { id: 'whats-in-box',   label: "📦 What's in the Box",   emoji: '📦' },
-  { id: 'camera-setup',   label: '📷 Camera Setup',         emoji: '📷' },
-  { id: 'mobile-app',     label: '📱 Mobile App',           emoji: '📱' },
-  { id: 'deployment',     label: '🚀 Start Monitoring',     emoji: '🚀' },
-  { id: 'image-analysis', label: '🔬 Image Annotation',     emoji: '🔬' },
-  { id: 'maintenance',    label: '🔧 Maintenance',           emoji: '🔧' },
+const sections: { id: string; label: string; icon: LucideIcon }[] = [
+  { id: 'whats-in-box',   label: "What's in the Box", icon: Package },
+  { id: 'camera-setup',   label: 'Camera Setup',      icon: Camera },
+  { id: 'mobile-app',     label: 'Mobile App',        icon: Smartphone },
+  { id: 'deployment',     label: 'Start Monitoring',  icon: Rocket },
+  { id: 'image-analysis', label: 'Image Annotation',  icon: Microscope },
+  { id: 'maintenance',    label: 'Maintenance',       icon: Wrench },
 ]
 
-function SidebarLink({ label, active, onClick }: { id: string; label: string; active: boolean; onClick: () => void }) {
+function SidebarLink({ label, icon: Icon, active, onClick }: { id: string; label: string; icon: LucideIcon; active: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
+      className="resources-toc-link"
       style={{
-        display: 'block', width: '100%', textAlign: 'left',
         padding: '0.6rem 1rem', border: 'none', borderRadius: 'var(--radius)',
         background: active ? 'var(--primary)' : 'transparent',
         color: active ? '#fff' : 'var(--text-color)',
         cursor: 'pointer', fontSize: '0.875rem', fontWeight: active ? 600 : 400,
         transition: 'background 0.15s',
+        display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
       }}
     >
+      <Icon size={15} aria-hidden="true" />
       {label}
     </button>
   )
 }
 
-function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+function Section({ id, title, icon: Icon, children }: { id: string; title: string; icon: LucideIcon; children: React.ReactNode }) {
   return (
     <section id={id} style={{ marginBottom: '3rem' }}>
-      <h2 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '2px solid var(--primary)' }}>
+      <h2 style={{ fontSize: '1.5rem', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '2px solid var(--primary)', display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+        <Icon size={24} color="var(--primary)" aria-hidden="true" />
         {title}
       </h2>
       {children}
@@ -58,7 +64,11 @@ function Note({ children }: { children: React.ReactNode }) {
       padding: '0.75rem 1rem', borderLeft: '3px solid var(--primary)',
       background: 'var(--surface)', borderRadius: '0 var(--radius) var(--radius) 0',
       fontSize: '0.875rem', margin: '1rem 0', lineHeight: 1.6,
-    }}>{children}</div>
+      display: 'flex', gap: '0.625rem', alignItems: 'flex-start',
+    }}>
+      <Lightbulb size={18} color="var(--primary)" aria-hidden="true" style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+      <div>{children}</div>
+    </div>
   )
 }
 
@@ -75,7 +85,17 @@ function Ul({ items }: { items: string[] }) {
 }
 
 export function ResourcesPage() {
-  const [active, setActive] = useState('whats-in-box')
+  usePageMeta({ title: 'Get started', description: 'Set up your Wildlife Watcher camera: what is in the box, batteries and SD card, mounting, the mobile app, your first monitoring session, image annotation, maintenance and troubleshooting.' })
+  const { hash } = useLocation()
+  const hashId = hash.slice(1)
+  const [active, setActive] = useState(() => (sections.some(s => s.id === hashId) ? hashId : 'whats-in-box'))
+
+  // React Router does not scroll to a hash, and the FAQ links here by
+  // section (/resources#maintenance, /resources#deployment).
+  useEffect(() => {
+    if (!hashId) return
+    document.getElementById(hashId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [hashId])
 
   const scrollTo = (id: string) => {
     setActive(id)
@@ -85,32 +105,37 @@ export function ResourcesPage() {
   return (
     <div>
       <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📚 Resources & How-To Guides</h1>
-        <p style={{ opacity: 0.7, maxWidth: '640px', lineHeight: 1.6 }}>
-          Everything you need to set up, monitor, and analyse data from your Wildlife Watcher camera.
-          From unboxing to AI-powered species identification — all in one place.
+        <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <BookOpen size={32} color="var(--primary)" aria-hidden="true" />
+          Get started with your Wildlife Watcher
+        </h1>
+        <p style={{ color: 'var(--text-muted)', maxWidth: '640px', lineHeight: 1.6 }}>
+          From the box to your first results, in order: what you need, setting up the camera,
+          the mobile app, your first monitoring session, reviewing the photos, and keeping the
+          camera going. Quick answers are in the <Link to="/faq" style={{ color: 'var(--primary)' }}>FAQ</Link>;
+          going further than the defaults is in the <Link to="/guides" style={{ color: 'var(--primary)' }}>guides</Link>.
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: '2rem', alignItems: 'start' }}>
+      {/* Two columns on a desktop, the contents list above the text on a phone:
+          the breakpoint and the chip layout live in index.css (.resources-*). */}
+      <div className="resources-layout">
 
         {/* Sidebar */}
-        <aside style={{
-          position: 'sticky', top: '1rem',
+        <aside className="resources-toc" aria-label="Contents" style={{
           background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius)', padding: '0.75rem',
-          display: 'flex', flexDirection: 'column', gap: '0.25rem',
         }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 700, opacity: 0.5, padding: '0.25rem 1rem 0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contents</div>
+          <div className="resources-toc-title" style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0.25rem 1rem 0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contents</div>
           {sections.map(s => (
-            <SidebarLink key={s.id} id={s.id} label={s.label} active={active === s.id} onClick={() => scrollTo(s.id)} />
+            <SidebarLink key={s.id} id={s.id} label={s.label} icon={s.icon} active={active === s.id} onClick={() => scrollTo(s.id)} />
           ))}
         </aside>
 
         {/* Content */}
         <div style={{ minWidth: 0 }}>
 
-          <Section id="whats-in-box" title="📦 What's in the Box">
+          <Section id="whats-in-box" title="What's in the Box" icon={Package}>
             <p style={{ lineHeight: 1.7, marginBottom: '1rem' }}>
               Your Wildlife Watcher package includes everything needed to get started monitoring wildlife straight away.
             </p>
@@ -123,7 +148,7 @@ export function ResourcesPage() {
             ]} />
           </Section>
 
-          <Section id="camera-setup" title="📷 Camera Setup">
+          <Section id="camera-setup" title="Camera Setup" icon={Camera}>
             <H3>1. Powering the camera</H3>
             <p style={{ lineHeight: 1.7, marginBottom: '0.75rem' }}>
               The Wildlife Watcher currently only supports AA battery power. We have not extensively tested rechargeable batteries, though they should work. In the future, we plan to add solar panels and a proprietary battery pack, but currently, only standard AA batteries are supported.
@@ -152,7 +177,7 @@ export function ResourcesPage() {
             </div>
           </Section>
 
-          <Section id="mobile-app" title="📱 Mobile App">
+          <Section id="mobile-app" title="Mobile App" icon={Smartphone}>
             <p style={{ lineHeight: 1.7, marginBottom: '1rem' }}>
               The Wildlife Watcher companion app is the only way to configure, control, and monitor your cameras.
               It connects via Bluetooth and is available for iOS and Android.
@@ -173,13 +198,13 @@ export function ResourcesPage() {
             <H3>Before your first monitoring session</H3>
             <Ul items={[
               'Check the batteries — ensure fresh premium alkaline or lithium AA batteries are installed.',
-              'Check SD card available space — a FAT32-formatted microSD card, 32–64 GB (Class 10 or higher), is recommended.',
+              'Check the microSD card has space (the card itself: see What you will need, above).',
               'Test the camera preview to verify field of view.',
             ]} />
-            <Note>💡 Always test the camera before heading into the field to avoid wasted trips.</Note>
+            <Note>Always test the camera before heading into the field to avoid wasted trips.</Note>
           </Section>
 
-          <Section id="deployment" title="🚀 Start Monitoring">
+          <Section id="deployment" title="Start Monitoring" icon={Rocket}>
             <p style={{ lineHeight: 1.7, marginBottom: '1rem' }}>
               Monitoring is a camera recording session linked to a specific project and location.
               All images captured during the session are stored locally and can be reviewed in the app.
@@ -223,7 +248,7 @@ export function ResourcesPage() {
             </Step>
           </Section>
 
-          <Section id="image-analysis" title="🔬 Wildlife Watcher Image Annotation">
+          <Section id="image-analysis" title="Wildlife Watcher Image Annotation" icon={Microscope}>
             <p style={{ lineHeight: 1.7, marginBottom: '1rem' }}>
               Instead of external software, users analyze images directly through the Wildlife Watcher Website.
             </p>
@@ -236,11 +261,11 @@ export function ResourcesPage() {
             <Step n={5}>Once completed, you can visualize all animal observations and data distributions directly on the platform.</Step>
 
             <Note>
-              💡 Images recorded by Wildlife Watchers follow the CamTrapDP standards and remain fully compatible with other major camera trap software pipelines.
+              Images recorded by Wildlife Watchers follow the CamTrapDP standards and remain fully compatible with other major camera trap software pipelines.
             </Note>
           </Section>
 
-          <Section id="maintenance" title="🔧 Maintenance & Troubleshooting">
+          <Section id="maintenance" title="Maintenance & Troubleshooting" icon={Wrench}>
             <H3>Regular maintenance</H3>
             <Ul items={[
               'Clean the lens and sensor area regularly with a soft, dry cloth.',
@@ -258,7 +283,7 @@ export function ResourcesPage() {
                 },
                 {
                   issue: 'App not connecting via Bluetooth',
-                  fix: 'Restart the mobile app. Make sure Bluetooth is enabled on your phone and you physically tap the button at the bottom of the device to activate Bluetooth advertising.',
+                  fix: 'Press the button at the bottom of the camera and check the blue light is flashing: that is the camera advertising. Make sure Bluetooth is on and the phone is within a few metres. If the app scans and finds nothing, close it completely and reopen it; if that fails, restart both the camera and the phone.',
                 },
                 {
                   issue: 'Blurred or dark images',
@@ -270,7 +295,9 @@ export function ResourcesPage() {
                 },
               ].map(({ issue, fix }) => (
                 <div key={issue} style={{ padding: '1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
-                  <strong style={{ color: 'var(--primary)', display: 'block', marginBottom: '0.35rem' }}>⚠️ {issue}</strong>
+                  <strong style={{ color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
+                    <TriangleAlert size={16} aria-hidden="true" />{issue}
+                  </strong>
                   <span style={{ fontSize: '0.875rem', lineHeight: 1.6 }}>{fix}</span>
                 </div>
               ))}
@@ -278,10 +305,10 @@ export function ResourcesPage() {
 
             <H3>Still need help?</H3>
             <p style={{ lineHeight: 1.7 }}>
-              Check the <a href="/faq" style={{ color: 'var(--primary)' }}>FAQ</a> for common questions,
-              browse our <a href="/guides" style={{ color: 'var(--primary)' }}>advanced guides</a>,
+              Check the <Link to="/faq" style={{ color: 'var(--primary)' }}>FAQ</Link> for quick answers,
+              the <Link to="/guides" style={{ color: 'var(--primary)' }}>guides</Link> for going further,
               or contact us at <a href="mailto:contact@wildlife.ai" style={{ color: 'var(--primary)' }}>contact@wildlife.ai</a>.
-              Our support team is available Monday through Friday during standard New Zealand business hours.
+              Our support team is available Monday to Friday, New Zealand time (UTC+12, UTC+13 in summer).
             </p>
           </Section>
 

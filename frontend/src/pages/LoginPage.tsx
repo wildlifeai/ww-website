@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth'
 import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { MIN_PASSWORD_LENGTH, signUpMetadata, signUpProblem, type SignUpFields } from '../lib/signUp'
 import { loadGoogleIdentity, newNonce } from '../lib/googleIdentity'
+import { usePageMeta } from '../lib/pageMeta'
 
 /**
  * Log in (/login) and create an account (/signup), by email or with Google (#116, #187).
@@ -31,6 +32,11 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
   const siteUrl = window.location.origin
   const signingUp = mode === 'sign_up'
   const title = forgotten ? 'Reset your password' : signingUp ? 'Create your Wildlife Watcher account' : 'Log in to Wildlife Watcher'
+  usePageMeta({
+    title: forgotten ? 'Reset your password' : signingUp ? 'Create an account' : 'Log in',
+    description: 'Log in to Wildlife Watcher to upload, review and analyse your camera-trap photos, or explore the demo with sample data.',
+    path: signingUp ? '/signup' : '/login',
+  })
 
   return (
     <div style={{ maxWidth: '400px', margin: '4rem auto', padding: '2rem', backgroundColor: 'var(--surface)', borderRadius: '8px', border: '1px solid var(--border)' }}>
@@ -43,7 +49,7 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
           </p>
           <Auth
             supabaseClient={supabase}
-            appearance={{ theme: ThemeSupa }}
+            appearance={AUTH_APPEARANCE}
             theme="light"
             providers={[]}
             redirectTo={siteUrl + '/reset-password'}
@@ -64,7 +70,7 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
             <>
               <Auth
                 supabaseClient={supabase}
-                appearance={{ theme: ThemeSupa }}
+                appearance={AUTH_APPEARANCE}
                 theme="light"
                 providers={[]}
                 redirectTo={siteUrl + '/'}
@@ -86,7 +92,7 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
 
       {!signingUp && !forgotten && (
         <div style={{ textAlign: 'center', marginTop: '1.5rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border)' }}>
-          <div style={{ fontSize: '0.8125rem', opacity: 0.6, marginBottom: '0.625rem' }}>
+          <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)', marginBottom: '0.625rem' }}>
             Or explore with sample data:
           </div>
           <DemoLoginButton />
@@ -223,7 +229,7 @@ function SignUpForm({ redirectTo }: { redirectTo: string }) {
       <label style={FIELD}>
         Password
         <input type="password" {...field('password')} autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} style={INPUT} />
-        <span style={{ fontSize: '0.75rem', opacity: 0.65 }}>At least {MIN_PASSWORD_LENGTH} characters.</span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>At least {MIN_PASSWORD_LENGTH} characters.</span>
       </label>
       {error && <p role="alert" style={ERROR_TEXT}>{error}</p>}
       <button type="submit" className="btn" disabled={busy} style={{ padding: '0.6rem 1rem' }}>
@@ -235,12 +241,32 @@ function SignUpForm({ redirectTo }: { redirectTo: string }) {
 
 function Divider() {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '1.25rem 0', fontSize: '0.8125rem', opacity: 0.6 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: '1.25rem 0', fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
       <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
       or
       <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
     </div>
   )
+}
+
+/**
+ * ThemeSupa's defaults fail WCAG AA on this page: white on its #3fcf8e brand
+ * button is 2:1 and its #7e7e7e labels 3.9:1 on --surface (#212). The brand
+ * takes the site's light-mode primary (6.5:1 with white text) and the labels
+ * the muted text colour. Hex values, not var(): the Auth UI renders
+ * theme="light" whatever the OS scheme, so the dark-mode tokens would not fit.
+ */
+const AUTH_APPEARANCE = {
+  theme: ThemeSupa,
+  variables: {
+    default: {
+      colors: {
+        brand: '#006e1c',
+        brandAccent: '#005a17',
+        inputLabelText: '#5f6368',
+      },
+    },
+  },
 }
 
 const LINK_BUTTON: React.CSSProperties = {

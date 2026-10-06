@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { login, CREDS } from '../helpers/session'
+import { test, expect } from '../helpers/test'
+import { login, HAS_CREDS } from '../helpers/session'
 import * as path from 'path'
 import * as fs from 'fs'
 
@@ -19,7 +19,7 @@ const SDCARD = path.resolve(__dirname, '../../test-fixtures/camera-trap/sdcard/d
 const DEPLOYMENTS = path.resolve(__dirname, '../../test-fixtures/camera-trap/deployments.json')
 
 test.describe('SD-card upload with EXIF deployment binding', () => {
-  test.skip(!CREDS.email, 'E2E_EMAIL/E2E_PASSWORD not set')
+  test.skip(!HAS_CREDS, 'E2E_EMAIL/E2E_PASSWORD not set')
   test.skip(!fs.existsSync(SDCARD), `fixture folder missing: ${SDCARD} (run test-fixtures/camera-trap/prepare.py)`)
 
   test('upload fixture SD card; all media bound to deployments', async ({ page }) => {

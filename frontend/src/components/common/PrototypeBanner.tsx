@@ -30,8 +30,8 @@ export function PrototypeBanner() {
         <span style={{ fontSize: '0.875rem', opacity: 0.75 }}>
           Features are changing week to week and you may hit rough edges. Keep your
           own copy of anything important, and tell us what breaks —{' '}
-          <a href="mailto:info@wildlife.ai?subject=Wildlife%20Watcher%20feedback">
-            info@wildlife.ai
+          <a href="mailto:contact@wildlife.ai?subject=Wildlife%20Watcher%20feedback">
+            contact@wildlife.ai
           </a>
           .
         </span>

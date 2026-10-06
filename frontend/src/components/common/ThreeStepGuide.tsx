@@ -1,8 +1,8 @@
-/* eslint-disable react-refresh/only-export-components */
 import { Link } from 'react-router-dom'
+import type { LucideIcon } from 'lucide-react'
 
 export interface GuideStep {
-  icon: string
+  icon: LucideIcon
   title: string
   description: string
   /** React-Router `to` path */
@@ -15,61 +15,6 @@ export interface ThreeStepGuideProps {
   /** Optional heading rendered above the cards */
   heading?: string
 }
-
-// Default steps used across the app — callers can override per context.
-export const DEFAULT_SIGNED_IN_STEPS: GuideStep[] = [
-  {
-    icon: '📂',
-    title: '1. Upload photos',
-    description:
-      'Drop a Wildlife Watcher SD card folder or a CamtrapDP ZIP. The system auto-detects deployments and routes images through the analysis pipeline.',
-    linkTo: '/upload-data',
-    linkLabel: 'Upload now →',
-  },
-  {
-    icon: '🏷️',
-    title: '2. Review annotations',
-    description:
-      'Browse ML detections, correct species labels, confirm clusters, and work through the active-learning review queue.',
-    linkTo: '/annotations',
-    linkLabel: 'Go to Annotations →',
-  },
-  {
-    icon: '📈',
-    title: '3. See & share insights',
-    description:
-      'Explore charts, maps, and deployment tables. Export a CamtrapDP package for R or share the report with your team.',
-    linkTo: '/insights',
-    linkLabel: 'Go to Insights →',
-  },
-]
-
-export const DEFAULT_MARKETING_STEPS: GuideStep[] = [
-  {
-    icon: '📂',
-    title: '1. Upload photos',
-    description:
-      'Drop a Wildlife Watcher SD card folder or a CamtrapDP ZIP. The system auto-detects deployments and routes images through the analysis pipeline.',
-    linkTo: '/login',
-    linkLabel: 'Sign in to upload →',
-  },
-  {
-    icon: '🏷️',
-    title: '2. Review annotations',
-    description:
-      'Browse ML detections, correct species labels, confirm clusters, and work through the active-learning review queue.',
-    linkTo: '/login',
-    linkLabel: 'Sign in to review →',
-  },
-  {
-    icon: '📊',
-    title: '3. See & share results',
-    description:
-      'Explore charts, maps, and deployment tables. Export a CamtrapDP package for R or share the report with your team.',
-    linkTo: '/login',
-    linkLabel: 'Sign in to see results →',
-  },
-]
 
 export function ThreeStepGuide({ steps, heading }: ThreeStepGuideProps) {
   return (
@@ -112,10 +57,10 @@ export function ThreeStepGuide({ steps, heading }: ThreeStepGuideProps) {
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '1.5rem',
+              color: 'var(--primary)',
               flexShrink: 0,
             }}>
-              {step.icon}
+              <step.icon size={24} aria-hidden="true" />
             </div>
 
             {/* Title */}

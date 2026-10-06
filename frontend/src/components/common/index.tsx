@@ -1,4 +1,4 @@
-export { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS, DEFAULT_MARKETING_STEPS } from './ThreeStepGuide'
+export { ThreeStepGuide } from './ThreeStepGuide'
 export type { ThreeStepGuideProps, GuideStep } from './ThreeStepGuide'
 
 import { useJob } from '../../hooks/useJob'

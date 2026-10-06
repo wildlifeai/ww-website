@@ -53,7 +53,7 @@ export function DemoLoginButton({ style }: { style?: React.CSSProperties }) {
         {busy ? (slow ? 'Waking the server…' : 'Opening demo…') : '🔍 Try the demo'}
       </button>
       {busy && slow && (
-        <span style={{ fontSize: '0.78rem', opacity: 0.6 }}>First load can take up to a minute (server waking up).</span>
+        <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>First load can take up to a minute (server waking up).</span>
       )}
       {error && <span style={{ fontSize: '0.8125rem', color: 'var(--error, #f44336)' }}>{error}</span>}
     </span>

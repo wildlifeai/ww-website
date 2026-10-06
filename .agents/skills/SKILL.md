@@ -58,10 +58,8 @@ The `ww-website` repository is a multi-service platform consisting of:
   `AGENTS.md`, this file or a reference file wrong, missing or redundant, and fix it in the
   same commit. The three questions are in
   [references/documentation.md](references/documentation.md).
-- Before you claim work is done, run the gates:
-  `cd backend && ruff check . && ruff format --check . && pytest`, then
-  `cd frontend && npm run lint && npx tsc -b --noEmit && npm run build` (`tsc -b`: plain
-  `tsc --noEmit` checks nothing here, see `AGENTS.md`).
+- Before you claim work is done, run the gates in `AGENTS.md`, "Validate before committing"
+  (`tsc -b`, never plain `tsc --noEmit`, which checks nothing here).
 - **Verify against the code, not the docs**, and against `ww-backend` for anything about the
   database. Column names guessed from memory are a recurring source of failures here.
 
