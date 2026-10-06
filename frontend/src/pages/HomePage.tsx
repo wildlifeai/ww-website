@@ -3,11 +3,10 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { supabase } from '../config/supabase'
-import { QRCodeSVG } from 'qrcode.react'
 import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS, DEFAULT_MARKETING_STEPS } from '../components/common/ThreeStepGuide'
 import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { PrototypeBanner } from '../components/common/PrototypeBanner'
-import { StoreBadges, APP_STORE_URL, PLAY_STORE_URL } from '../components/common/StoreBadges'
+import { StoreBadges, APP_STORE_URL } from '../components/common/StoreBadges'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -205,13 +204,10 @@ function MarketingHero() {
         <h1 style={{ fontSize: '3rem', color: 'var(--primary)', marginBottom: '1rem' }}>
           Smart monitoring of small animals
         </h1>
-        <p style={{ fontSize: '1.25rem', opacity: 0.8, marginBottom: '1rem' }}>
+        <p style={{ fontSize: '1.25rem', opacity: 0.8, marginBottom: '2rem' }}>
           The Wildlife Watcher is a compact camera designed to monitor invertebrates and
           small animals that traditional camera traps miss. On-device AI flags your target
           species in the field, and an open-source website makes analysis and reporting easy.
-        </p>
-        <p style={{ fontSize: '0.9375rem', color: 'var(--text-muted)', marginBottom: '2rem', fontWeight: 600, letterSpacing: '0.01em' }}>
-          Smart monitoring of small animals · on-device AI · open-source web analysis
         </p>
         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <Link
@@ -231,20 +227,6 @@ function MarketingHero() {
             Log in to get started
           </Link>
           <DemoLoginButton style={{ padding: '0.875rem 2.5rem', fontSize: '1.125rem' }} />
-        </div>
-      </div>
-
-      {/* ── Get the Mobile App ──────────────────────────────────────────── */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem 0' }}>
-        <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', fontWeight: 600 }}>Get the Mobile App</h2>
-        <StoreBadges style={{ marginBottom: '1.5rem' }} />
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '4rem', flexWrap: 'wrap' }}>
-          <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-            <QRCodeSVG value={APP_STORE_URL} size={150} title="QR code linking to the Wildlife Watcher app on the App Store" />
-          </div>
-          <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-            <QRCodeSVG value={PLAY_STORE_URL} size={150} title="QR code linking to the Wildlife Watcher app on Google Play" />
-          </div>
         </div>
       </div>
 
@@ -318,7 +300,10 @@ function MarketingHero() {
         </div>
       </div>
 
-      {/* ── Section 3: The Wildlife Watcher App ─────────────────────────── */}
+      {/* ── Section 3: The Wildlife Watcher App. The store badges live here, once,
+          after the reader knows what the app is for; the QR codes that used to sit
+          under the hero went with them (a phone taps the badge, a desktop reads
+          this section first). */}
       <div id="app" style={SECTION_STYLE}>
         <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 1rem' }}>
           <h2 style={SECTION_HEADING}>The Wildlife Watcher App</h2>
