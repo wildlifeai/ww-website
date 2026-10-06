@@ -207,4 +207,7 @@ component they cannot analyse: one carrying an `eslint-disable` for `exhaustive-
 calling `Intl.DateTimeFormat()` during render. Removing that disable in `MediaDetail` surfaced
 three errors it had hidden (#184); the `Intl` call hid `ProjectDefaultsPanel` (#137). The symptom
 is a `react-hooks/*` disable directive reported as unused. Keep such calls at module scope, and
-treat that warning as a component that stopped being checked, not a line to delete.
+treat that warning as a component that stopped being checked, not a line to delete. One skip is
+loud: a callback that reads a `useMemo` declared further down the component is an error,
+`preserve-manual-memoization`, and the fix is to declare the memo, and what it reads, above the
+callback (`UploadFlow`'s upload handler, #269).
