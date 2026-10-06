@@ -4,7 +4,7 @@ pydantic>=2.0
 pydantic-settings>=2.0
 python-dotenv>=1.0
 python-multipart>=0.0.12
-supabase>=2.27.0
+supabase>=2.32.0
 gotrue>=2.0
 httpx>=0.28.0
 ethos-u-vela==5.2.0               # Ethos-U55 compiler, pinned: every model source (upload, Edge Impulse, gcp trainer) compiles here
