@@ -13,6 +13,7 @@
   --success: #10b981;
   
   --radius: 8px;
+  /* Inter is loaded in main.tsx (@fontsource/inter, latin, 400 to 700). */
   font-family: 'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;

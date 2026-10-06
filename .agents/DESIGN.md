@@ -42,7 +42,7 @@ colors:
 typography:
   family: "'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif"
   base-line-height: 1.5
-  weights: [400, 500, 700]
+  weights: [400, 500, 600, 700]
   scale:
     micro: "0.625rem"     # badge overlays
     caption: "0.75rem"    # table cells, metadata (very common)
@@ -118,9 +118,10 @@ body size, `0.75rem` for table cells and metadata, `0.875rem` for prominent
 body text. Section titles sit at `1.5rem`; only the logged-out hero uses
 `3rem`. Line-height 1.5 (1.7 in long-form guide content).
 
-> **Known gap:** Inter is declared in `index.css` but no webfont is loaded in
-> `index.html`, so the app currently renders in the system fallback. Designs
-> should assume Inter; fixing the font loading is a separate task.
+Inter is self-hosted: `main.tsx` imports the latin subset of `@fontsource/inter`
+in weights 400, 500, 600 and 700 (`font-display: swap`), so the face the
+tokens describe is the one the browser renders. Until October 2026 nothing
+loaded it and the site rendered in the system fallback.
 
 ## Components
 
