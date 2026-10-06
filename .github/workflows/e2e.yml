@@ -196,3 +196,38 @@ jobs:
             e2e/playwright-report/
           retention-days: 7
           if-no-files-found: warn
+
+  # Lighthouse on the public pages: performance (largest contentful paint, total
+  # blocking time, the size of the main chunk), best practices and SEO, with its
+  # accessibility audits as a second opinion to axe. Budgets in e2e/lighthouserc.json.
+  # Advisory while the pages are brought up to them (#228): the step fails, the
+  # job stays green with a warning annotation, the reports are an artifact.
+  lighthouse:
+    name: Lighthouse of public pages
+    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.deployment.sha || github.sha }}
+
+      - name: Lighthouse CI
+        id: lhci
+        continue-on-error: true
+        uses: treosh/lighthouse-ci-action@v12
+        with:
+          urls: |
+            ${{ env.E2E_BASE_URL }}/
+            ${{ env.E2E_BASE_URL }}/login
+            ${{ env.E2E_BASE_URL }}/guides
+            ${{ env.E2E_BASE_URL }}/faq
+            ${{ env.E2E_BASE_URL }}/resources
+          configPath: e2e/lighthouserc.json
+          uploadArtifacts: true
+          artifactName: lighthouse-${{ github.event.deployment.sha || github.sha }}
+          temporaryPublicStorage: false
+
+      - name: Warn when a page misses its budget
+        if: steps.lhci.outcome == 'failure'
+        run: echo "::warning::Lighthouse found a public page under its budget (advisory, issue 228). The lighthouse artifact has the reports, e2e/lighthouserc.json the budgets."
