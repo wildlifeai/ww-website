@@ -13,11 +13,11 @@ export const DEFAULT_SIGNED_IN_STEPS: GuideStep[] = [
   },
   {
     icon: Tags,
-    title: '2. Review annotations',
+    title: '2. Review',
     description:
       'Browse ML detections, correct species labels, confirm clusters, and work through the active-learning review queue.',
     linkTo: '/annotations',
-    linkLabel: 'Go to Annotations →',
+    linkLabel: 'Go to Review →',
   },
   {
     icon: ChartLine,

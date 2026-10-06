@@ -10,7 +10,7 @@ import { guidesByCategory } from '../lib/guides'
 import { usePageMeta } from '../lib/pageMeta'
 
 export function GuidesPage() {
-  usePageMeta({ title: 'Advanced Guides', description: 'Guides from the Wildlife Watcher team on training your own AI models, focusing the camera, LoRaWAN telemetry and setting up devices for your monitoring goals.' })
+  usePageMeta({ title: 'Guides', description: 'Guides from the Wildlife Watcher team on training your own AI models, focusing the camera, LoRaWAN telemetry and setting up devices for your monitoring goals.' })
   const grouped = guidesByCategory()
 
   return (
@@ -18,13 +18,12 @@ export function GuidesPage() {
       <div style={{ marginBottom: '2rem' }}>
         <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <BookOpen size={32} color="var(--primary)" aria-hidden="true" />
-          Advanced Guides
+          Guides
         </h1>
         <p style={{ color: 'var(--text-muted)', maxWidth: '640px', lineHeight: 1.6 }}>
-          Guidance and best practices from the Wildlife Watcher team for taking the platform
-          further — developing and training your own AI models, and setting up devices in novel
-          ways for your monitoring goals. Looking for the basics? Start with{' '}
-          <Link to="/resources" style={{ color: 'var(--primary)' }}>Resources</Link>.
+          For going further than the defaults: how the AIs fit together, focusing the camera for
+          your platform, LoRaWAN, training your own models. Setting up for the first time?{' '}
+          <Link to="/resources" style={{ color: 'var(--primary)' }}>Get started</Link> is the place.
         </p>
       </div>
 

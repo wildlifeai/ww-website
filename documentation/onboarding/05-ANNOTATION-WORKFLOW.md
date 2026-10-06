@@ -3,7 +3,7 @@
 How reviewers validate AI labels and create new ones in the web app. This is the surface most users
 spend their time in.
 
-## Entry point: the Annotations tab
+## Entry point: the Review tab (`/annotations`)
 
 `/annotations` → `AnnotationsPage` → `MediaBrowser`. The page has **no title text** — the
 highlighted nav tab already signals where you are.
