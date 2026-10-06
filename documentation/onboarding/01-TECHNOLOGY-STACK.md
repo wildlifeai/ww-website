@@ -8,7 +8,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 
 | Area | Package | Version | Notes |
 |------|---------|---------|-------|
-| Framework | `react` / `react-dom` | 19.2 | Function components + hooks only |
+| Framework | `react` / `react-dom` | 19.3 | Function components + hooks only |
 | Build | `vite` | 8 | Dev server + `tsc -b && vite build` |
 | Language | `typescript` | ~6.0 | `strict` mode; `tsc -b --noEmit` gate (plain `tsc --noEmit` checks nothing here) |
 | Routing | `react-router-dom` | 7.14 | `useSearchParams`, `NavLink`, nested routes |
