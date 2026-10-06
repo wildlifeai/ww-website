@@ -23,8 +23,10 @@ async function openDemo(page: Page): Promise<void> {
 
 test('demo button opens a signed-in read-only session', async ({ page }) => {
   await openDemo(page)
-  // Signed in: the authed navigation is there and the login form is not.
-  await expect(page.getByRole('link', { name: /annotations/i }).first()).toBeVisible()
+  // Signed in: the authed navigation is there and the login form is not. The
+  // tab is matched by its route, not its label: it read Annotations until #248
+  // renamed it Review, and the route is the part that does not move.
+  await expect(page.locator('a[href="/annotations"]').first()).toBeVisible()
   await expect(page.locator('form input[type="password"]')).toHaveCount(0)
 })
 
