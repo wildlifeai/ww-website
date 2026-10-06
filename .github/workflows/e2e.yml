@@ -114,12 +114,23 @@ jobs:
       # skip must not read as a pass. After the run, not before, so the public
       # pages and the demo still report every time (run 36938521947 stopped
       # here with nothing else to show).
+      #
+      # Except on a Dependabot pull request. Its run sees only Dependabot
+      # secrets, and handing it the seed password would hand it to the very
+      # package versions the PR is bumping. The sign-in check is skipped there
+      # on purpose, and still runs on dev: the preview deployment that follows
+      # the merge triggers this workflow as Cloudflare, with the secret.
       - name: Fail if the account is not configured
         if: always()
         env:
           E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.DEMO_PASSWORD }}
+          ACTOR: ${{ github.actor }}
         run: |
           if [ -z "$E2E_PASSWORD" ]; then
+            if [ "$ACTOR" = "dependabot[bot]" ]; then
+              echo "::notice::Dependabot run: the sign-in check is skipped by design and runs on dev after the merge, see e2e/README.md"
+              exit 0
+            fi
             echo "::error::no password for the seeded account: the dev environment needs E2E_PASSWORD, or the DEMO_PASSWORD the backend deploy already uses, see e2e/README.md"
             exit 1
           fi
