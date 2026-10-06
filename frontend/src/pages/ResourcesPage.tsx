@@ -85,7 +85,7 @@ function Ul({ items }: { items: string[] }) {
 }
 
 export function ResourcesPage() {
-  usePageMeta({ title: 'Resources and How-To Guides', description: 'Set up your Wildlife Watcher camera: what is in the box, batteries and SD card, mounting, the mobile app, your first monitoring session, image annotation, maintenance and troubleshooting.' })
+  usePageMeta({ title: 'Get started', description: 'Set up your Wildlife Watcher camera: what is in the box, batteries and SD card, mounting, the mobile app, your first monitoring session, image annotation, maintenance and troubleshooting.' })
   const { hash } = useLocation()
   const hashId = hash.slice(1)
   const [active, setActive] = useState(() => (sections.some(s => s.id === hashId) ? hashId : 'whats-in-box'))

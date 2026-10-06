@@ -10,7 +10,7 @@ import { guidesByCategory } from '../lib/guides'
 import { usePageMeta } from '../lib/pageMeta'
 
 export function GuidesPage() {
-  usePageMeta({ title: 'Advanced Guides', description: 'Guides from the Wildlife Watcher team on training your own AI models, focusing the camera, LoRaWAN telemetry and setting up devices for your monitoring goals.' })
+  usePageMeta({ title: 'Guides', description: 'Guides from the Wildlife Watcher team on training your own AI models, focusing the camera, LoRaWAN telemetry and setting up devices for your monitoring goals.' })
   const grouped = guidesByCategory()
 
   return (
