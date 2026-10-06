@@ -370,7 +370,8 @@ function Layout({ children }: { children: React.ReactNode }) {
 
           {/* Right-side controls */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem', flexShrink: 0 }}>
-            {!user && (
+            {/* Not on the login pages themselves: a Login button beside a login form is noise. */}
+            {!user && !['/login', '/signup', '/reset-password'].includes(location.pathname) && (
               <Link to="/login" className="btn" style={{ padding: '0.375rem 0.875rem', textDecoration: 'none', fontSize: '0.875rem' }}>
                 Login
               </Link>
