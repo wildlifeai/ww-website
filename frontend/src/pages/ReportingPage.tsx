@@ -163,7 +163,10 @@ function ChartsTab({ deploymentId }: { deploymentId: string }) {
       })
   }, [deploymentId])
 
-  const allSpecies = [...new Set(rows.map((r) => r.scientific_name!).filter(Boolean))].sort()
+  const allSpecies = useMemo(
+    () => [...new Set(rows.flatMap((r) => (r.scientific_name ? [r.scientific_name] : [])))].sort(),
+    [rows],
+  )
 
   useEffect(() => {
     if (allSpecies.length > 0 && selectedSpecies.size === 0) {
@@ -172,7 +175,10 @@ function ChartsTab({ deploymentId }: { deploymentId: string }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allSpecies.join(',')])
 
-  const activeSpecies = allSpecies.filter((s) => selectedSpecies.has(s))
+  const activeSpecies = useMemo(
+    () => allSpecies.filter((s) => selectedSpecies.has(s)),
+    [allSpecies, selectedSpecies],
+  )
 
   const toggleSpecies = (sp: string) =>
     setSelectedSpecies((prev) => {
@@ -184,15 +190,13 @@ function ChartsTab({ deploymentId }: { deploymentId: string }) {
   // Filtered rows for the chart (only active species)
   const filteredRows = useMemo(
     () => rows.filter((r) => r.scientific_name && activeSpecies.includes(r.scientific_name)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, activeSpecies.join(',')],
+    [rows, activeSpecies],
   )
 
   // Vega-Lite spec — rebuilds only when data, active species, or chart type changes
   const spec = useMemo(
     () => buildObsSpec(filteredRows, activeSpecies, chartType),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredRows, activeSpecies.join(','), chartType],
+    [filteredRows, activeSpecies, chartType],
   )
 
   const downloadCsv = () => {

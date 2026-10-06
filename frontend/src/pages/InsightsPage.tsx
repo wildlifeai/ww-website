@@ -227,14 +227,16 @@ export function InsightsPage() {
 
   // Default map focus: the most recently *finished* deployment of the selected project(s),
   // so the map opens on the latest completed survey rather than the whole-world centroid.
+  // "Finished" is judged against the time the page opened: reading the clock during
+  // render would give a different answer on every re-render.
+  const [openedAt] = useState(Date.now)
   const defaultFocusId = useMemo(() => {
-    const now = Date.now()
     const finished = deployments
       .filter(d => d.latitude != null && d.longitude != null && d.deployment_end &&
-        new Date(d.deployment_end).getTime() <= now)
+        new Date(d.deployment_end).getTime() <= openedAt)
       .sort((a, b) => new Date(b.deployment_end!).getTime() - new Date(a.deployment_end!).getTime())
     return finished[0]?.id ?? null
-  }, [deployments])
+  }, [deployments, openedAt])
 
   const filteredObservations = useMemo(() => {
     let obs = observations
