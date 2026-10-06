@@ -1,6 +1,6 @@
 # Keeps GitHub Actions pins current via PRs. Workflow dependencies are pinned
 # (actions to release tags, CLIs to exact versions) so upstream releases can't
-# silently break CI — this config is how those pins get bumped deliberately.
+# silently break CI; this config is how those pins get bumped deliberately.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -28,6 +28,20 @@ updates:
     target-branch: dev
     open-pull-requests-limit: 5
     groups:
+      # Packages that peer-depend on each other's major move together, majors
+      # included: eslint 10 alone, or @size-limit/file 14 alone, fails npm ci.
+      # A package goes to the first group it matches, so these sit first.
+      lint:
+        patterns:
+          - eslint
+          - '@eslint/*'
+          - eslint-plugin-*
+          - typescript-eslint
+          - globals
+      size-limit:
+        patterns:
+          - size-limit
+          - '@size-limit/*'
       frontend-minor-and-patch:
         update-types:
           - minor
@@ -49,6 +63,10 @@ updates:
       interval: weekly
     target-branch: dev
     open-pull-requests-limit: 5
+    # The requirements are floors (>=) with no lockfile, so a PR that only
+    # raises a floor changes nothing that gets installed. Only move a
+    # requirement when the new release falls outside it, such as a == pin.
+    versioning-strategy: increase-if-necessary
     groups:
       backend-minor-and-patch:
         update-types:

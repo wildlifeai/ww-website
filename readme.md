@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0">
-  <img src="https://img.shields.io/badge/node-20%20LTS-339933?logo=node.js&logoColor=white" alt="Node 20 LTS">
+  <img src="https://img.shields.io/badge/node-22%20LTS-339933?logo=node.js&logoColor=white" alt="Node 22 LTS">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/frontend-React%2019%20%2B%20Vite-61DAFB?logo=react&logoColor=white" alt="React 19 + Vite">
 </p>
