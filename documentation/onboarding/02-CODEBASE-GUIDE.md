@@ -20,7 +20,7 @@ ww-website/
 
 ```
 src/
-├── App.tsx                 # Router, signed-in Layout (Toolkit·Annotations·Insights nav), auth guard, UploadProvider
+├── App.tsx                 # Router, signed-in Layout (Toolkit·Review·Insights nav), auth guard, UploadProvider
 ├── main.tsx                # React entry
 ├── pages/                  # route-level components
 ├── components/
