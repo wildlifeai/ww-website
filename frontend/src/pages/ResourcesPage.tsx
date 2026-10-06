@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { BookOpen, Camera, Lightbulb, Microscope, Package, Rocket, Smartphone, TriangleAlert, Wrench, type LucideIcon } from 'lucide-react'
+import { usePageMeta } from '../lib/pageMeta'
 
 const sections: { id: string; label: string; icon: LucideIcon }[] = [
   { id: 'whats-in-box',   label: "What's in the Box", icon: Package },
@@ -83,6 +84,7 @@ function Ul({ items }: { items: string[] }) {
 }
 
 export function ResourcesPage() {
+  usePageMeta({ title: 'Resources and How-To Guides', description: 'Set up your Wildlife Watcher camera: what is in the box, batteries and SD card, mounting, the mobile app, your first monitoring session, image annotation, maintenance and troubleshooting.' })
   const [active, setActive] = useState('whats-in-box')
 
   const scrollTo = (id: string) => {

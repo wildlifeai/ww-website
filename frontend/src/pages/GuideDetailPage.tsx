@@ -8,10 +8,12 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Link, useParams } from 'react-router-dom'
 import { getGuide } from '../lib/guides'
+import { usePageMeta } from '../lib/pageMeta'
 
 export function GuideDetailPage() {
   const { slug } = useParams<{ slug: string }>()
   const guide = slug ? getGuide(slug) : undefined
+  usePageMeta({ title: guide?.title ?? 'Guide not found', description: guide?.description })
 
   if (!guide) {
     return (

@@ -10,8 +10,10 @@
 import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { FaqItem } from '../components/common/FaqItem'
+import { usePageMeta } from '../lib/pageMeta'
 
 export function FaqPage() {
+  usePageMeta({ title: 'FAQ', description: 'What makes the Wildlife Watcher different from other camera traps, how its AI works, battery life, SD cards, exports, and how to get a device.' })
   const { hash } = useLocation()
 
   // React Router doesn't scroll to hashes, and a <details> target stays
