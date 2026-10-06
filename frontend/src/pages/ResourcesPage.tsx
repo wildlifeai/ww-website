@@ -13,8 +13,8 @@ function SidebarLink({ label, active, onClick }: { id: string; label: string; ac
   return (
     <button
       onClick={onClick}
+      className="resources-toc-link"
       style={{
-        display: 'block', width: '100%', textAlign: 'left',
         padding: '0.6rem 1rem', border: 'none', borderRadius: 'var(--radius)',
         background: active ? 'var(--primary)' : 'transparent',
         color: active ? '#fff' : 'var(--text-color)',
@@ -92,16 +92,16 @@ export function ResourcesPage() {
         </p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: '2rem', alignItems: 'start' }}>
+      {/* Two columns on a desktop, the contents list above the text on a phone:
+          the breakpoint and the chip layout live in index.css (.resources-*). */}
+      <div className="resources-layout">
 
         {/* Sidebar */}
-        <aside style={{
-          position: 'sticky', top: '1rem',
+        <aside className="resources-toc" aria-label="Contents" style={{
           background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius)', padding: '0.75rem',
-          display: 'flex', flexDirection: 'column', gap: '0.25rem',
         }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0.25rem 1rem 0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contents</div>
+          <div className="resources-toc-title" style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)', padding: '0.25rem 1rem 0.5rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contents</div>
           {sections.map(s => (
             <SidebarLink key={s.id} id={s.id} label={s.label} active={active === s.id} onClick={() => scrollTo(s.id)} />
           ))}
