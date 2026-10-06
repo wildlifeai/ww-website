@@ -17,3 +17,40 @@ updates:
     ignore:
       # Paired with the CLI version pinned in react-doctor.yml (v2.2.9 + 0.9.12); bump both by hand.
       - dependency-name: millionco/react-doctor
+
+  # The site, the browser flows and the API. One grouped PR a week per
+  # ecosystem and update type, into dev like everything else; security
+  # updates ignore the grouping and open on their own.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    target-branch: dev
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+    target-branch: dev
+    open-pull-requests-limit: 3
+    groups:
+      e2e-minor-and-patch:
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    target-branch: dev
+    open-pull-requests-limit: 5
+    groups:
+      backend-minor-and-patch:
+        update-types:
+          - minor
+          - patch

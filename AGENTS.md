@@ -50,7 +50,10 @@ floor and the `size-limit` budgets in `frontend/package.json` are ratchets set j
 figures: raising one is a deliberate change in the pull request that needs it. The comment above
 each job in `ci.yml` says what it proves. `codeql.yml` scans JavaScript, TypeScript and Python on
 pull requests, on pushes to dev and weekly; its findings are code scanning alerts in the Security
-tab, and it is advisory until it is made a required check (#229).
+tab, and it is advisory until it is made a required check (#229). `dependency-audit.yml` runs
+`npm audit` on the frontend and `e2e/` and `pip-audit` on the backend, advisory on a pull request
+that changes a lockfile or a requirements file and blocking on its Monday run; Dependabot opens
+the grouped bump PRs.
 
 The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
 (`.github/workflows/e2e.yml`); what they prove and how to read a failure is in
