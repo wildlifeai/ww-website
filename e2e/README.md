@@ -44,9 +44,11 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   `E2E_EMAIL` (a repository variable, `tui@ww.org` by default) with the `dev` environment's
   `E2E_PASSWORD` secret, falling back to its `DEMO_PASSWORD`: every seeded user shares
   ww-backend's seed password, which the backend deploy already keeps there for the demo
-  account. The job stops with a clear message when neither is set, and on a Dependabot pull
-  request that is the usual cause: a run Dependabot triggers sees only the repository's
-  Dependabot secrets, so `E2E_PASSWORD` has to be set there too. The `full` suite, by hand only, adds `03` and `04`, which
+  account. The job stops with a clear message when neither is set, except on a Dependabot pull
+  request: a run Dependabot triggers sees only Dependabot secrets, and the seed password stays
+  out of them because that run executes the package versions being bumped. There the sign-in
+  check is skipped with a notice, the other smoke and demo checks still gate the bump, and the
+  sign-in check runs on dev once the merge deploys. The `full` suite, by hand only, adds `03` and `04`, which
   write to the dev database and storage; the LoRaWAN spec takes the `dev` environment's
   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
 - **A11y of public pages** runs `05-a11y` with no account and fails on a serious or critical
