@@ -164,7 +164,7 @@ function ChartsTab({ deploymentId }: { deploymentId: string }) {
   }, [deploymentId])
 
   const allSpecies = useMemo(
-    () => [...new Set(rows.map((r) => r.scientific_name!).filter(Boolean))].sort(),
+    () => [...new Set(rows.flatMap((r) => (r.scientific_name ? [r.scientific_name] : [])))].sort(),
     [rows],
   )
 
