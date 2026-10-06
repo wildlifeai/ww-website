@@ -13,7 +13,7 @@ This file is only the quickstart.
 ## Run it
 
 Both services share **one `.env` at the repo root** (`frontend/vite.config.ts` loads `../`;
-the backend reads `../.env` before `backend/.env`). Node 20+, Python 3.11+.
+the backend reads `../.env` before `backend/.env`). Node 22+, Python 3.11+.
 
 ```bash
 cd backend  && python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -53,7 +53,10 @@ pull requests, on pushes to dev and weekly; its findings are code scanning alert
 tab, and it is advisory until it is made a required check (#229). `dependency-audit.yml` runs
 `npm audit` on the frontend and `e2e/` and `pip-audit` on the backend, advisory on a pull request
 that changes a lockfile or a requirements file and blocking on its Monday run; Dependabot opens
-the grouped bump PRs.
+the grouped bump PRs. The lint toolchain and `size-limit` each come as one group, majors included,
+because their packages peer-depend on each other's version and cannot install one at a time. A
+Dependabot run sees only Dependabot secrets, so E2E Smoke on a bump PR needs `E2E_PASSWORD` set
+there as well as in Actions.
 
 The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
 (`.github/workflows/e2e.yml`); what they prove and how to read a failure is in

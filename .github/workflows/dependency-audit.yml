@@ -36,7 +36,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       # Both read their package-lock.json; no install needed. Dev dependencies
       # are left out of the frontend audit: they never reach the browser. The

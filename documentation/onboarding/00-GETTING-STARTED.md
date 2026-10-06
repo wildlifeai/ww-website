@@ -18,7 +18,7 @@ FastAPI ──▶ Azure Blob (temp image buffer) ──▶ async job ──▶ G
 
 ## Prerequisites
 
-- Node.js 20 (LTS) or higher
+- Node.js 22 (LTS) or higher
 - Python 3.11+
 - A Supabase project with the Wildlife Watcher schema (owned by `ww-backend`)
 - _(optional)_ Docker + Docker Compose
