@@ -1,6 +1,15 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { supabase } from '../config/supabase'
 import { useAuth } from './useAuth'
+import {
+  EMPTY_SELECTION,
+  clearProjects,
+  projectQuery,
+  selectAllProjects,
+  selectionAfterLoad,
+  toggleProjectSelection,
+  type SelectionState,
+} from '../lib/projectSelection'
 
 export interface Project {
   id: string
@@ -11,6 +20,13 @@ interface ProjectSelectionContextType {
   projects: Project[]
   selectedProjectIds: string[]
   isLoading: boolean
+  /**
+   * The project ids a page queries, or null while the list loads or when nothing is selected.
+   * Never query without a project filter: an empty selection means none, not all (#214).
+   */
+  queryProjectIds: string[] | null
+  /** The list has loaded and nothing is ticked: show `NoProjectSelected` and query nothing. */
+  noProjectSelected: boolean
   toggleProject: (id: string) => void
   selectAll: () => void
   clearAll: () => void
@@ -22,19 +38,17 @@ const ProjectSelectionContext = createContext<ProjectSelectionContextType | unde
 
 export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useAuth()
-  const [projects, setProjects] = useState<Project[]>([])
-  const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([])
+  const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION)
   const [isLoading, setIsLoading] = useState(true)
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     if (!user) {
-      setTimeout(() => {
-        setProjects([])
-        setSelectedProjectIds([])
+      const timer = setTimeout(() => {
+        setSelection(EMPTY_SELECTION)
         setIsLoading(false)
       }, 0)
-      return
+      return () => clearTimeout(timer)
     }
 
     let isMounted = true
@@ -47,9 +61,8 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
         .order('name')
       
       if (isMounted) {
-        if (!error && data) {
-          setProjects(data)
-        }
+        // Select every project on load, so an empty selection only ever means none.
+        setSelection(prev => selectionAfterLoad(prev, user.id, error ? null : data))
         setIsLoading(false)
       }
     }
@@ -58,20 +71,22 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
     return () => { isMounted = false }
   }, [user, reloadKey])
 
-  const toggleProject = (id: string) => {
-    setSelectedProjectIds(prev => 
-      prev.includes(id) ? prev.filter(pId => pId !== id) : [...prev, id]
-    )
-  }
+  const { projects, selectedProjectIds } = selection
+  // Until the list for this user has loaded, the empty selection is not a choice the user made.
+  const listLoading = isLoading || (!!user && selection.userId !== user.id)
 
-  const selectAll = () => setSelectedProjectIds(projects.map(p => p.id))
-  const clearAll = () => setSelectedProjectIds([])
+  const toggleProject = (id: string) => setSelection(prev => toggleProjectSelection(prev, id))
+  const selectAll = () => setSelection(selectAllProjects)
+  const clearAll = () => setSelection(clearProjects)
   const reloadProjects = () => setReloadKey(k => k + 1)
+  const { ids: queryProjectIds, none: noProjectSelected } = projectQuery(selectedProjectIds, listLoading)
 
   const value = {
     projects,
     selectedProjectIds,
-    isLoading,
+    isLoading: listLoading,
+    queryProjectIds,
+    noProjectSelected,
     toggleProject,
     selectAll,
     clearAll,
