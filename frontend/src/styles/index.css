@@ -161,6 +161,31 @@ body {
   .ribbon-stats { display: none; }
 }
 
+/* Review grid cards (#283): a click opens the photo, the circle selects it. The circle shows on
+   hover and keyboard focus, always on a touch screen (no hover there), and on every card while a
+   selection is active (set inline). Its hit area is wider than the 18px dot. */
+.media-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.media-card-select {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.media-card:hover .media-card-select,
+.media-card:focus-within .media-card-select,
+.media-card-select[aria-pressed="true"] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .media-card-select { opacity: 1; }
+}
+.media-card-select::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+
 /* Outline variant — .btn alone paints white text (fine on the filled primary
    background), so a transparent .btn needs its own text colour or it turns
    white-on-white in light mode. Every "ghost" button should carry this class. */

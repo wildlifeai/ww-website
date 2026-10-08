@@ -44,7 +44,9 @@ time (#286).
 
 ### Selection actions
 
-Click selects, double-click opens. Once something is selected the **Actions** menu
+A click (or Enter) opens a photo, even while others are selected, and the selection survives the
+viewer. The circle at a card's bottom-left, Ctrl/Cmd-click or Space selects; Shift-click selects
+the range from the last selected card (`lib/cardSelection.ts`, #283). Once something is selected the **Actions** menu
 (`components/data/MediaBulkActions.tsx`) offers: *Label as…* (one human observation on every
 selected image), *Find similar images* (single selection, Wildlife Brain), *Upload to iNaturalist*,
 *Remove images* (soft delete with undo), *Run AI (re-classify)* and *Create species ID model…*.
@@ -55,7 +57,7 @@ the Edge Impulse recipe (`TrainModelModal.tsx`, `POST /api/models/train`, behind
 
 ## The full-screen labeling modal
 
-Selecting a photo opens a **full-screen modal** (`MediaDetail.tsx`):
+Clicking a photo opens a **full-screen modal** (`MediaDetail.tsx`):
 
 - **Left** — the image at up to 92vh with **bounding-box overlays** and draw/redraw/delete; ‹/›
   arrows and ←/→ keys step between images; Esc cancels a draw or closes; click the backdrop to close.
