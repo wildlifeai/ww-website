@@ -13,7 +13,7 @@ import { Ribbon } from '../ui/Ribbon'
 import { StatusBadge, deriveAnnotationStatus } from '../ui/StatusBadge'
 import type { AnnotationStatus } from '../ui/StatusBadge'
 import { Modal } from '../ui/Modal'
-import { isHumanReviewed, isAiLabel, humanCreateFields } from '../../lib/observations'
+import { isHumanReviewed, isAiLabel, humanCreateFields, photoVerdict } from '../../lib/observations'
 import { getLocalPreview } from '../../lib/localPreviewStore'
 import { apiClient } from '../../lib/apiClient'
 import { showUndoToast } from '../common/undoToastBus'
@@ -1035,14 +1035,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
       hasAi:       m.observations.some(isAiLabel),
     })
 
-    // Top label: human-reviewed first, then AI
-    const sortedObs = [...m.observations].sort((a, b) => {
-      const ar = isHumanReviewed(a) ? 1 : 0
-      const br = isHumanReviewed(b) ? 1 : 0
-      return br - ar
-    })
-    const topObs = sortedObs[0] || null
-    const isEmpty = !!topObs && !topObs.scientific_name && topObs.observation_type === 'blank'
+    // Top label: a human verdict, then the consensus row, then the first row (#170)
+    const { labelObs: topObs, isEmpty } = photoVerdict(m.observations)
     const label  = topObs?.scientific_name || (isEmpty ? 'Empty' : null)
     const conf   = topObs?.classification_probability ?? null
     const aiConfs = m.observations
