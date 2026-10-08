@@ -16,6 +16,7 @@ import asyncio
 import time
 import uuid
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
@@ -460,6 +461,7 @@ def build_consensus_observation(
     threshold: float,
     signals: dict[str, Any],
     timestamp: str,
+    cutoffs: str = "",
 ) -> dict:
     """The consensus row for one media (pure; report section 7).
 
@@ -475,6 +477,7 @@ def build_consensus_observation(
     on the per-model rows. ``source_model_version`` is what
     ``delete_superseded_ai_observations`` keys on for the replace-not-append
     contract; ``classified_by`` carries the same value for readers.
+    ``cutoffs`` (the run's SpeciesNet box cutoffs) ends the audit comment.
     """
     from app.domain.burst_evidence import audit_line, consensus_type
 
@@ -491,7 +494,7 @@ def build_consensus_observation(
         "classification_method": "machine",
         "classified_by": EVIDENCE_FUSION_VERSION,
         "classification_timestamp": timestamp,
-        "observation_comments": audit_line(score, threshold, signals, EVIDENCE_FUSION_VERSION)[:500],
+        "observation_comments": audit_line(score, threshold, signals, EVIDENCE_FUSION_VERSION, cutoffs)[:500],
     }
 
 
@@ -541,6 +544,7 @@ class EvidenceFusionStep(PipelineStep):
     Gated on ``FF_EVIDENCE_FUSION_ENABLED`` (set on the ARQ worker). Config
     overrides: ``evidence_threshold``, ``burst_gap_seconds``,
     ``confidence_threshold`` (the SpeciesNet cutoff used for near_threshold).
+    The audit comment ends with the run's SpeciesNet cutoffs (``DetectionCutoffs``).
     """
 
     step_type = PipelineStepType.EVIDENCE_FUSION
@@ -569,6 +573,7 @@ class EvidenceFusionStep(PipelineStep):
         threshold = float(config.get("evidence_threshold", settings.EVIDENCE_FUSION_THRESHOLD))
         gap = float(config.get("burst_gap_seconds", settings.BURST_GAP_SECONDS))
         det_threshold = float(config.get("confidence_threshold", 0.2))
+        cutoffs = f"det={det_threshold:.2f} {DetectionCutoffs.from_config(config).audit()}"
         svc = create_service_client()
         media_ids = [m["id"] for m in media]
         errors = 0
@@ -624,7 +629,7 @@ class EvidenceFusionStep(PipelineStep):
             fracs = await _motion(burst)
             for m, signals in zip(burst, burst_signals(burst, obs_by_media, fracs, max_conf, det_threshold)):
                 score, _contributions = evidence_score(signals)
-                consensus.append(build_consensus_observation(m, deployment_id, score, threshold, signals, timestamp))
+                consensus.append(build_consensus_observation(m, deployment_id, score, threshold, signals, timestamp, cutoffs))
                 bands[band_of(score, threshold, SUSPICIOUS_V1)] += 1
                 camera_shift += bool(signals.get("camera_shift"))
                 for source, values in fusion_evidence_signals(signals, score, threshold).items():
@@ -725,6 +730,56 @@ def rollup_taxon(
     return fallback_scientific, fallback_vernacular
 
 
+@dataclass(frozen=True)
+class DetectionCutoffs:
+    """The SpeciesNet box filters applied beside ``confidence_threshold`` (#285).
+
+    A box covering more than ``whole_frame_area`` of the frame is dropped below
+    ``whole_frame_min_confidence``, whatever its class: the detector reacting to
+    the scene, not an object. With ``drop_vehicles`` every vehicle box is dropped:
+    vehicles never matter to a deployment, and on night IR the detector calls the
+    scene a vehicle at up to 0.95. The defaults here filter nothing; the pipeline
+    builds the live values with :meth:`from_config` (run config, then settings).
+    """
+
+    whole_frame_area: float = 1.0
+    whole_frame_min_confidence: float = 0.0
+    drop_vehicles: bool = False
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "DetectionCutoffs":
+        from app.config import settings
+
+        return cls(
+            whole_frame_area=float(config.get("whole_frame_area", settings.SPECIESNET_WHOLE_FRAME_AREA)),
+            whole_frame_min_confidence=float(config.get("whole_frame_min_confidence", settings.SPECIESNET_WHOLE_FRAME_MIN_CONFIDENCE)),
+            drop_vehicles=bool(config.get("drop_vehicles", settings.SPECIESNET_DROP_VEHICLES)),
+        )
+
+    def as_config(self) -> dict[str, Any]:
+        """The cutoffs under their run-config keys, for ``annotation_runs.config``."""
+        return {
+            "whole_frame_area": self.whole_frame_area,
+            "whole_frame_min_confidence": self.whole_frame_min_confidence,
+            "drop_vehicles": self.drop_vehicles,
+        }
+
+    def drop_reason(self, detection) -> Optional[str]:
+        """``whole_frame`` or ``vehicle`` when a rule drops the detection, None when it stays."""
+        confidence = float(detection.confidence)
+        bbox = getattr(detection, "bbox", None)
+        if bbox is not None and bbox[2] * bbox[3] > self.whole_frame_area and confidence < self.whole_frame_min_confidence:
+            return "whole_frame"
+        if self.drop_vehicles and getattr(detection, "observation_type", None) == "vehicle":
+            return "vehicle"
+        return None
+
+    def audit(self) -> str:
+        """The cutoffs as they appear in the evidence fusion audit line."""
+        vehicle = "dropped" if self.drop_vehicles else "kept"
+        return f"frame_area={self.whole_frame_area:.2f} frame_conf={self.whole_frame_min_confidence:.2f} vehicle={vehicle}"
+
+
 def build_speciesnet_observations(
     media: dict,
     deployment_id: str,
@@ -733,10 +788,12 @@ def build_speciesnet_observations(
     timestamp: str,
     confidence_threshold: float = 0.0,
     per_detection: bool = False,
+    cutoffs: Optional[DetectionCutoffs] = None,
 ) -> list[dict]:
     """Map a SpeciesNet ImagePrediction to CamtrapDP observation rows (pure).
 
-    Detections below ``confidence_threshold`` are dropped; an image with no kept
+    Detections below ``confidence_threshold`` or dropped by ``cutoffs`` (the
+    whole-frame and vehicle rules) are left out; an image with no kept
     detections yields a single ``blank`` observation.
 
     SpeciesNet classifies **one species per image** but may emit several detection
@@ -769,7 +826,8 @@ def build_speciesnet_observations(
         "classification_timestamp": timestamp,
     }
 
-    kept = [d for d in prediction.detections if d.confidence >= confidence_threshold]
+    cutoffs = cutoffs or DetectionCutoffs()
+    kept = [d for d in prediction.detections if d.confidence >= confidence_threshold and cutoffs.drop_reason(d) is None]
     if not kept:
         return [{**base, "id": str(uuid.uuid4()), "observation_type": "blank"}]
 
@@ -809,9 +867,15 @@ def build_speciesnet_observations(
     return [_make_row(obs_type, max(dets, key=lambda d: d.confidence), len(dets)) for obs_type, dets in by_type.items()]
 
 
-def speciesnet_evidence_signals(prediction, rows: list[dict]) -> dict[str, Any]:
-    """``speciesnet_presence`` (a kept non-blank row) and ``speciesnet_max_conf`` over ALL detections (pure)."""
-    detections = list(getattr(prediction, "detections", None) or [])
+def speciesnet_evidence_signals(prediction, rows: list[dict], cutoffs: Optional[DetectionCutoffs] = None) -> dict[str, Any]:
+    """``speciesnet_presence`` (a kept non-blank row) and ``speciesnet_max_conf`` (pure).
+
+    ``speciesnet_max_conf`` covers the sub-threshold boxes too (that is what
+    near_threshold measures) but not the boxes ``cutoffs`` drop, so a whole-frame
+    scene box or a vehicle adds nothing to the evidence score.
+    """
+    cutoffs = cutoffs or DetectionCutoffs()
+    detections = [d for d in (getattr(prediction, "detections", None) or []) if cutoffs.drop_reason(d) is None]
     max_conf = max((float(d.confidence) for d in detections), default=0.0)
     presence = any(r.get("observation_type") in ("animal", "human", "vehicle", "unknown") for r in rows)
     return {"speciesnet_presence": 1.0 if presence else 0.0, "speciesnet_max_conf": min(1.0, max(0.0, max_conf))}
@@ -949,7 +1013,10 @@ class SpeciesNetStep(PipelineStep):
     Downloads each media item to a temp file (via the media resolver), runs the
     SpeciesNet ensemble, and writes media-level observations with bounding boxes,
     detection confidence, and a species guess. Images with no kept detection yield
-    a single ``blank`` observation.
+    a single ``blank`` observation. Besides ``confidence_threshold`` the run's
+    ``DetectionCutoffs`` drop low-confidence whole-frame boxes and vehicles
+    (config overrides ``whole_frame_area``, ``whole_frame_min_confidence``,
+    ``drop_vehicles``; settings otherwise).
     """
 
     step_type = PipelineStepType.SPECIESNET
@@ -971,6 +1038,8 @@ class SpeciesNetStep(PipelineStep):
 
         start = time.monotonic()
         threshold = config.get("confidence_threshold", 0.2)
+        cutoffs = DetectionCutoffs.from_config(config)
+        dropped = {"dropped_whole_frame": 0, "dropped_vehicle": 0}
         svc = create_service_client()
         errors = 0
         observations_created = 0
@@ -1016,16 +1085,21 @@ class SpeciesNetStep(PipelineStep):
                     timestamp,
                     threshold,
                     per_detection=per_detection,
+                    cutoffs=cutoffs,
                 )
                 obs_batch.extend(rows)
+                for det in pred.detections:
+                    reason = cutoffs.drop_reason(det) if det.confidence >= threshold else None
+                    if reason:
+                        dropped[f"dropped_{reason}"] += 1
                 # Evidence signals (report section 6.1): the detector's best confidence over
-                # ALL boxes, before the threshold filter drops the sub-threshold ones, so the
-                # fusion step can compute near_threshold. The observation rows are unchanged.
+                # the boxes the cutoffs keep, before the threshold filter drops the sub-threshold
+                # ones, so the fusion step can compute near_threshold.
                 evidence.extend(
                     signal_rows(
                         m["id"],
                         deployment_id,
-                        speciesnet_evidence_signals(pred, rows),
+                        speciesnet_evidence_signals(pred, rows, cutoffs),
                         source="speciesnet",
                         source_version=self.model_version,
                         computed_at=timestamp,
@@ -1068,6 +1142,8 @@ class SpeciesNetStep(PipelineStep):
             evidence_rows=evidence_written,
             errors=errors,
             duration_seconds=round(duration, 2),
+            cutoffs=cutoffs.audit(),
+            **dropped,
         )
         return PipelineStepResult(
             step=self.step_type,
@@ -1076,7 +1152,7 @@ class SpeciesNetStep(PipelineStep):
             errors=errors,
             duration_seconds=round(duration, 2),
             model_version=self.model_version,
-            counts={"evidence_rows": evidence_written},
+            counts={"evidence_rows": evidence_written, **dropped},
         )
 
 
@@ -1568,6 +1644,9 @@ async def _run_pipeline_held(
     run_started_at = datetime.now(timezone.utc)
     config = config or {}
     config["confidence_threshold"] = confidence_threshold
+    # The effective SpeciesNet box cutoffs (#285): every step reads the same values,
+    # and the annotation_runs row below records them.
+    config.update(DetectionCutoffs.from_config(config).as_config())
     # Set here, never taken from the caller's config: it decides whether a step may
     # write beside a human verdict (without_human_verdicts).
     config["force"] = force

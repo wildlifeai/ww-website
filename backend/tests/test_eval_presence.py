@@ -278,6 +278,35 @@ def test_speciesnet_outcomes_from_dump(tmp_path):
     assert outcomes[1].predicted is None  # frame missing from the dump
 
 
+def test_speciesnet_box_rules_recompute_the_dump(tmp_path):
+    """#285: the rules row comes from the dumped detections, not the dumped has_animal."""
+    from app.domain.pipeline import DetectionCutoffs
+
+    frames = _write_frames(tmp_path, 3)
+    whole = [0.0, 0.0, 1.0, 1.0]
+    dump = tmp_path / "sn.json"
+    frames_json = {
+        # an animal filling the frame at 0.4: dropped by the whole-frame rule
+        frames[0].path: {"has_animal": True, "confidence": 0.4, "detections": [{"type": "animal", "confidence": 0.4, "bbox": whole}]},
+        # a small animal beside a whole-frame vehicle: the animal stays
+        frames[1].path: {
+            "has_animal": True,
+            "confidence": 0.3,
+            "detections": [
+                {"type": "vehicle", "confidence": 0.45, "bbox": whole},
+                {"type": "animal", "confidence": 0.3, "bbox": [0.1, 0.1, 0.1, 0.1]},
+            ],
+        },
+        # an older dump without detections is left as it was
+        frames[2].path: {"has_animal": True, "confidence": 0.9},
+    }
+    dump.write_text(json.dumps({"model": "speciesnet-v4.0.1a", "threshold": 0.2, "frames": frames_json}), encoding="utf-8")
+    cutoffs = DetectionCutoffs(whole_frame_area=0.9, whole_frame_min_confidence=0.5, drop_vehicles=True)
+    outcomes = ev.speciesnet_outcomes(frames, str(dump), cutoffs)
+    assert [(o.predicted, o.confidence) for o in outcomes] == [(False, None), (True, 0.3), (True, 0.9)]
+    assert [o.predicted for o in ev.speciesnet_outcomes(frames, str(dump))] == [True, True, True]
+
+
 def test_jpeg_helper_roundtrip():
     buf = io.BytesIO()
     Image.new("RGB", (4, 4)).save(buf, format="JPEG")

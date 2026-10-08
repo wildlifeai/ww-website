@@ -220,7 +220,7 @@ def _speciesnet(monkeypatch, db, during_predict=None):
         async def predict(self, paths):
             if during_predict:
                 during_predict()
-            box = Detection(category="3", observation_type="vehicle", confidence=0.9, bbox=(0.1, 0.1, 0.2, 0.2))
+            box = Detection(category="1", observation_type="animal", confidence=0.9, bbox=(0.1, 0.1, 0.2, 0.2))
             return [ImagePrediction(filepath=p, detections=[box], scientific_name=None, common_name=None, classification_score=None) for p in paths]
 
     monkeypatch.setattr(pipeline, "create_service_client", lambda: db)
@@ -240,7 +240,7 @@ async def test_review_after_the_run_started_gets_no_ai_row(monkeypatch):
 
     assert result.total_media == 2  # both were unreviewed when the run started
     assert db.obs("m0001") == [reviewed]  # only the verdict, no machine row beside it
-    assert [(o["review_status"], o["observation_type"]) for o in db.obs("m0002")] == [("ai_reviewed", "vehicle")]
+    assert [(o["review_status"], o["observation_type"]) for o in db.obs("m0002")] == [("ai_reviewed", "animal")]
     assert any(e["event"] == "pipeline_rows_held_for_human_verdict" and e["media"] == 1 for e in logs)
 
 

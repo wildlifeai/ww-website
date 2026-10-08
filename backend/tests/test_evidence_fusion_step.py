@@ -273,6 +273,7 @@ async def test_step_writes_one_consensus_row_per_media_and_recovers_a_burst_neig
     assert (
         rows["a"]["observation_comments"]
         == "evidence_fusion_v1 score=0.87 threshold=0.50 speciesnet=0 gemini=0.80 neighbour=1 motion=1 edge=absent near=0.70"
+        " det=0.20 frame_area=0.90 frame_conf=0.50 vehicle=dropped"
     )
     # c: singleton, both blank, near 0.15: score 0.015, confirmed blank, neighbour absent.
     assert rows["c"]["observation_type"] == "blank" and rows["c"]["confidence"] == 0.015
