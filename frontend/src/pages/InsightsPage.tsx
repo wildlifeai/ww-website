@@ -14,6 +14,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { supabase } from '../config/supabase'
+import { fetchLiveObservations } from '../lib/liveObservations'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { FilterSelect } from '../components/ui/ControlBar'
 import { Ribbon, type RibbonGroupDef } from '../components/ui/Ribbon'
@@ -182,11 +183,10 @@ export function InsightsPage() {
     const background = key === obsKeyRef.current
     obsKeyRef.current = key
     if (!background) setObsLoading(true)
-    supabase
-      .from('observations')
-      .select('id, deployment_id, scientific_name, observation_type, created_at')
-      .in('deployment_id', deployments.map(d => d.id))
-      .is('deleted_at', null)
+    fetchLiveObservations<Observation>(supabase, {
+      columns: 'id, deployment_id, scientific_name, observation_type, created_at',
+      filter: q => q.in('deployment_id', deployments.map(d => d.id)),
+    })
       .then(({ data, error: err }) => {
         if (cancelled) return
         if (!err) setObservations(data || [])

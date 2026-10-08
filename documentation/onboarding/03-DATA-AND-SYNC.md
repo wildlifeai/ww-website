@@ -87,6 +87,12 @@ Observation provenance fields (`source_type`, `review_status`, `reviewer_id`, `a
 `classification_method`) are written through one helper, `frontend/src/lib/observations.ts`, so
 every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md).
 
+Deleting photos soft-deletes their `media` rows only; their observations stay readable, because
+the `observations` read policy checks the deployment, not the photo. Every read that counts or
+lists observations (Insights, My Data, Reporting, Field, the upload summary) goes through
+`frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
+with no photo unless asked not to, and pages past the 1,000-row cap (#198).
+
 ## Frontend ⇄ backend env mapping
 
 `frontend/vite.config.ts` loads the **root** `.env` and exposes a subset to the browser:

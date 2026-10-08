@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../config/supabase'
+import { fetchLiveObservations } from '../lib/liveObservations'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { DeploymentMap } from '../components/data/DeploymentMap'
@@ -253,11 +254,10 @@ export function MyDataPage() {
     setObsLoading(true)
 
     const depIds = deployments.map(d => d.id)
-    supabase
-      .from('observations')
-      .select('id, deployment_id, scientific_name, observation_type, created_at')
-      .in('deployment_id', depIds)
-      .is('deleted_at', null)
+    fetchLiveObservations<Observation>(supabase, {
+      columns: 'id, deployment_id, scientific_name, observation_type, created_at',
+      filter: q => q.in('deployment_id', depIds),
+    })
       .then(({ data, error: err }) => {
         if (!err) setObservations(data || [])
         setObsLoading(false)
