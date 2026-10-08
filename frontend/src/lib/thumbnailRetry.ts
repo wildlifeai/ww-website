@@ -33,3 +33,11 @@ export function busyDeployments(
   }
   return busy
 }
+
+/** How often the grid refetches its page while a job runs on a deployment in view (#286). */
+export const GRID_REFRESH_MS = 30_000
+
+/** True when any deployment the grid shows has a queued or running job. */
+export function showsBusyDeployment(shownDeploymentIds: ReadonlyArray<string>, busyDeploymentIds: ReadonlySet<string>): boolean {
+  return shownDeploymentIds.some(id => busyDeploymentIds.has(id))
+}

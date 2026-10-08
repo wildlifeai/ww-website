@@ -791,6 +791,7 @@ async def auto_annotate_deployments(
         "bioclip": "Identifying species",
         "evidence_fusion": "Combining the evidence per frame",
     }
+    step_names = [s.value for s in steps]
 
     started = False
 
@@ -822,6 +823,16 @@ async def auto_annotate_deployments(
                 label = step_labels.get(step_name, step_name)
                 await update_job(job_id, progress=min(0.99, frac), message=f"🔬 {label} — deployment {_i + 1}/{total}")
 
+            # Within a step that reports it (media preparation), so the bar moves during the
+            # thumbnails instead of sitting at the step's start (#286).
+            async def _on_progress(step_name: str, done: int, step_media: int, _i: int = i) -> None:
+                if not job_id or not step_media or not total:
+                    return
+                step_idx = step_names.index(step_name)
+                frac = (_i + (step_idx + done / step_media) / len(steps)) / total
+                label = step_labels.get(step_name, step_name)
+                await update_job(job_id, progress=min(0.99, frac), message=f"🔬 {label}, {done} of {step_media}, deployment {_i + 1}/{total}")
+
             try:
                 logger.info("auto_annotate_start", deployment_id=dep_id, steps=[s.value for s in steps])
                 # Reflect the camera's own EXIF scores as edge observations before the
@@ -836,6 +847,7 @@ async def auto_annotate_deployments(
                     steps=steps,
                     user_id=user_id,
                     on_step=_on_step if job_id else None,
+                    on_progress=_on_progress if job_id else None,
                     on_start=_on_start,
                     force=force,
                     media_ids=media_ids,

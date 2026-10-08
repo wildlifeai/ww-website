@@ -10,6 +10,7 @@ import { AiOriginBadge } from '../ui/AiOriginBadge'
 import { cameraModel, cameraScores } from '../../lib/cameraScores'
 import { formatCaptureTime } from '../../lib/time'
 import { canEditObservations, deleteObservation as deleteObservationRow } from '../../lib/observationWrites'
+import { usePrefetchNeighbours } from '../../hooks/usePrefetchNeighbours'
 
 interface Props {
   media: MediaRecord
@@ -414,6 +415,7 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
   }, [media.id, focusObsId])
 
   const idx = useMemo(() => mediaList?.findIndex(m => m.id === media.id) ?? -1, [mediaList, media.id])
+  usePrefetchNeighbours(mediaList, idx)
   const prevMedia = idx > 0 ? mediaList?.[idx - 1] : undefined
   const prevUrl = prevMedia ? resolveImageUrl(prevMedia, 'full') : null
 

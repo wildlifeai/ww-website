@@ -26,6 +26,7 @@ import { useMultiClusters, useConfirmCluster, useSimilarImages } from '../../hoo
 import { useUploadStore } from '../../contexts/UploadContext'
 import { useJobsList } from '../../hooks/useJobs'
 import { useBusyDeployments } from '../../hooks/useBusyDeployments'
+import { useRefreshWhileBusy } from '../../hooks/useRefreshWhileBusy'
 import { isThumbnailStuck } from '../../lib/thumbnailRetry'
 import { MediaBulkActions, type BulkAction } from './MediaBulkActions'
 import { DeleteConfirmModal, AiModelPickerModal, PipelineLogModal } from './BulkActionModals'
@@ -294,6 +295,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   const qc = useQueryClient()
   const { isActive: uploadActive, pendingUploads, pendingSince } = useUploadStore()
   const [reloadKey, setReloadKey] = useState(0)
+  // Set by the background refresh during a job: that fetch keeps the cards on screen (#286).
+  const silentReload = useRef(false)
   // Media whose thumbnail failed to load — shown as "processing" (the rendition
   // is likely still generating). Reset on every (re)load so they re-attempt.
   const [failedThumbs, setFailedThumbs] = useState<Set<string>>(new Set())
@@ -519,6 +522,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
 
   // ── Fetch media (with pagination) ─────────────────────────────────────────
   useEffect(() => {
+    const silent = silentReload.current
+    silentReload.current = false
     if (!user) return
 
     const deploymentIds = filterDeployments.length
@@ -532,7 +537,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     }
 
     let cancelled = false
-    setLoading(true)
+    if (!silent) setLoading(true)
     setError(null)
 
     const from = page * PAGE_SIZE
@@ -784,6 +789,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     if (filterDeployments.length) return filterDeployments
     return deployments.map(d => d.id)
   }, [deployments, filterDeployments])
+  // While a job runs on a deployment in view, refetch the page so its thumbnails appear (#286).
+  useRefreshWhileBusy(activeDeploymentIds, busy, () => { silentReload.current = true; setReloadKey(k => k + 1) })
   const clustersQ = useMultiClusters(
     groupBy === 'cluster' ? activeDeploymentIds : [],
     clusterThreshold,
