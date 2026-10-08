@@ -98,11 +98,15 @@ async def test_photos_in_flight_finish_but_no_new_ones_start_after_a_refusal(mon
 
 async def test_run_pipeline_hands_each_step_its_progress_callback(monkeypatch):
     class _Query:
+        def __init__(self, table):
+            self.table = table
+
         def __getattr__(self, name):
             return self if name == "not_" else (lambda *a, **k: self)
 
         def execute(self):
-            return type("Result", (), {"data": _media(2)})()
+            # Only the media read returns rows; observation reads (human verdicts) find none.
+            return type("Result", (), {"data": _media(2) if self.table == "media" else []})()
 
     class _Step:
         on_progress = None
@@ -115,7 +119,7 @@ async def test_run_pipeline_hands_each_step_its_progress_callback(monkeypatch):
                 await self.on_progress(1, len(media))
             return PipelineStepResult(step=self.step_type, media_processed=len(media), duration_seconds=0.1)
 
-    monkeypatch.setattr(pipeline, "create_service_client", lambda: type("Svc", (), {"table": lambda self, name: _Query()})())
+    monkeypatch.setattr(pipeline, "create_service_client", lambda: type("Svc", (), {"table": lambda self, name: _Query(name)})())
     monkeypatch.setattr(pipeline, "get_step", _Step)
     seen: list[tuple[str, int, int]] = []
 

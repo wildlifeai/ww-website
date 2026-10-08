@@ -238,7 +238,7 @@ Run inference + ecological event/effort computation on a deployment. Gated by `F
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/pipeline/run` | Run the pipeline — body `{ deployment_id, steps?, confidence_threshold?, config?, only_unannotated? }`. Steps: `media_prep`, `speciesnet`, `animal_crop`, `bioclip`. Returns per-step + aggregate counts and records an `annotation_run` |
+| `POST /api/pipeline/run` | Run the pipeline, body `{ deployment_id, steps?, confidence_threshold?, config?, only_unannotated? }`. Steps: `media_prep`, `speciesnet`, `animal_crop`, `bioclip`. Returns per-step + aggregate counts and records an `annotation_run`. Error `PIPELINE_BUSY` (retryable) when another run holds the deployment; the request does not wait |
 | `POST /api/pipeline/events/cluster` | Group observations into ecological events by temporal gap — body `{ deployment_id, gap_minutes?, min_images? }` |
 | `POST /api/pipeline/effort/{deployment_id}` | Compute + store effort (trap-nights, uptime, false-trigger rate) |
 | `GET /api/pipeline/effort/{deployment_id}` | Retrieve cached effort stats |

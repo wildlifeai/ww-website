@@ -134,12 +134,24 @@ async def test_get_job_does_not_clobber_newer_memory(monkeypatch):
 # ── Coalescing lookup ─────────────────────────────────────────────────────────
 
 
-async def test_find_queued_ai_jobs(monkeypatch):
-    rows = {"a": {"job_data": {"kind": "ai_pipeline", "deployment_ids": ["d1", "d2"]}}}
-    monkeypatch.setattr(store, "create_service_client", lambda: _db_client(rows))
+async def test_find_active_ai_jobs_returns_queued_and_processing_with_status(monkeypatch):
+    rows = {
+        "a": {"status": "queued", "job_data": {"kind": "ai_pipeline", "deployment_ids": ["d1", "d2"]}},
+        "b": {"status": "processing", "job_data": {"kind": "ai_pipeline", "deployment_ids": ["d3"]}},
+    }
+    client = _db_client(rows)
+    tables: list = []
+    make_table = client.table.side_effect
+    client.table.side_effect = lambda name: tables.append(make_table(name)) or tables[-1]
+    monkeypatch.setattr(store, "create_service_client", lambda: client)
 
-    jobs = await store.find_queued_ai_jobs()
-    assert jobs == [{"job_id": "a", "deployment_ids": ["d1", "d2"]}]
+    jobs = await store.find_active_ai_jobs()
+    assert jobs == [
+        {"job_id": "a", "status": "queued", "deployment_ids": ["d1", "d2"]},
+        {"job_id": "b", "status": "processing", "deployment_ids": ["d3"]},
+    ]
+    # Processing jobs are read too, so the upload can queue one follow-up behind them (#284).
+    tables[0].in_.assert_called_once_with("status", ["queued", "processing"])
 
 
 # ── Reaper ────────────────────────────────────────────────────────────────────
