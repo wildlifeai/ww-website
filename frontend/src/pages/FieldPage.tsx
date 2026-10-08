@@ -13,6 +13,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { supabase } from '../config/supabase'
+import { fetchLiveObservations } from '../lib/liveObservations'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { DeploymentMap } from '../components/data/DeploymentMap'
 import { NoProjectSelected } from '../components/common/NoProjectSelected'
@@ -181,13 +182,10 @@ export function FieldPage() {
 
     // Detections in the last 48h.
     const since = new Date(Date.now() - 48 * 3_600_000).toISOString()
-    supabase
-      .from('observations')
-      .select('deployment_id, scientific_name, created_at')
-      .in('deployment_id', depIds)
-      .eq('observation_type', 'animal')
-      .gte('created_at', since)
-      .is('deleted_at', null)
+    fetchLiveObservations(supabase, {
+      columns: 'deployment_id, scientific_name, created_at',
+      filter: q => q.in('deployment_id', depIds).eq('observation_type', 'animal').gte('created_at', since),
+    })
       .then(({ data }) => {
         if (cancelled) return
         const d: Record<string, { count: number; latest: string | null; top: string | null }> = {}

@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { VegaChart } from '../components/ui/VegaChart'
 import { VEGA_CONFIG } from '../lib/vegaSpec'
 import { supabase } from '../config/supabase'
+import { fetchLiveObservations } from '../lib/liveObservations'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -117,13 +118,11 @@ function ChartsTab({ deploymentId }: { deploymentId: string }) {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      supabase
-        .from('observations')
-        .select('created_at, scientific_name, observation_type')
-        .eq('deployment_id', deploymentId)
-        .is('deleted_at', null)
-        .not('scientific_name', 'is', null)
-        .order('created_at'),
+      fetchLiveObservations<ObsRow>(supabase, {
+        columns: 'created_at, scientific_name, observation_type',
+        filter: q => q.eq('deployment_id', deploymentId).not('scientific_name', 'is', null),
+        order: { column: 'created_at' },
+      }),
       supabase
         .from('deployments')
         .select('deployment_start, deployment_end')

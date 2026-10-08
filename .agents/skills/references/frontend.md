@@ -31,6 +31,9 @@ Rules:
 * A page filtered by the top-bar project picker reads `queryProjectIds` and `noProjectSelected`
   from `useProjectSelection` and renders `NoProjectSelected` when nothing is ticked. An empty
   selection means none, never all; the rule lives in `lib/projectSelection.ts` (#214).
+* Read observations for a count, chart or species list through `fetchLiveObservations`
+  (`lib/liveObservations.ts`), never a bare `from('observations')`: a deleted photo leaves its
+  observations behind ([03-DATA-AND-SYNC](../../../documentation/onboarding/03-DATA-AND-SYNC.md), #198).
 * React Doctor fails a PR that introduces any warning (`react-doctor.yml`, `blocking: warning`,
   scope `changed`). Check before pushing, from `frontend/`:
   `npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes`. Rules
