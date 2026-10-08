@@ -133,6 +133,12 @@ used, and a box these rules drop adds nothing to the fusion score. The distincti
 Blanks are excluded from species charts but counted in the observation-type breakdown and the
 deployment **false-trigger rate**.
 
+**Which verdict a photo shows (#170).** The Annotations card's Empty or species label and the
+detection notifications read a human verdict first, then the evidence fusion consensus row
+(`source_type='consensus'`), then the per-model rows as before: `photoVerdict` in
+`frontend/src/lib/observations.ts` and `photo_detections` in `backend/app/services/notifications_service.py`.
+A consensus animal no model named is notified as "Unidentified animal".
+
 ## Wildlife Brain (embeddings → clustering → active learning)
 
 A second, deeper track (`domain/wildlife_brain.py`, `embedding_lifecycle.py`, `clustering.py`,
