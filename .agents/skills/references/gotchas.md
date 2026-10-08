@@ -169,6 +169,16 @@ detection's box beside SpeciesNet's (#162).
 
 ---
 
+## A pipeline step writes nothing beside a human verdict
+
+A run picks its photos when it starts and a reviewer can label one while the model works, so a
+step that inserts `observations` filters its rows through `pipeline.without_human_verdicts` just
+before the insert, and deletes superseded rows only for the photos it kept. Runs on one deployment
+are serialised by `run_pipeline`'s lock (`services/locks.py`); call `run_pipeline` rather than a
+step directly, or two runs pick the same photos again (#284).
+
+---
+
 ## `consensus_approved` means human truth
 
 `active_learning` treats `review_status='consensus_approved'` as a human verdict. Machine rows,

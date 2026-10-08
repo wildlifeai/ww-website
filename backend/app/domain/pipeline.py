@@ -399,14 +399,15 @@ class GeminiPresenceStep(PipelineStep):
                 )
 
         def _persist() -> tuple[int, int]:
-            for i in range(0, len(rows), 50):
-                svc.table("observations").insert(rows[i : i + 50]).execute()
+            keep, _held = without_human_verdicts(svc, rows, model, config.get("force", False))
+            for i in range(0, len(keep), 50):
+                svc.table("observations").insert(keep[i : i + 50]).execute()
             written = 0
             try:
                 written = write_signals(svc, evidence, deployment_id)
             except Exception as exc:  # the observations are already in; evidence is best-effort
                 logger.warning("gemini_presence_evidence_write_failed", error=str(exc))
-            return len(rows), written
+            return len(keep), written
 
         observations_created, evidence_written = await asyncio.to_thread(_persist) if rows else (0, 0)
 
@@ -640,15 +641,16 @@ class EvidenceFusionStep(PipelineStep):
                     )
 
         def _persist() -> tuple[int, int]:
-            delete_superseded_ai_observations(svc, [r["media_id"] for r in consensus], EVIDENCE_FUSION_VERSION)
-            for i in range(0, len(consensus), 50):
-                svc.table("observations").insert(consensus[i : i + 50]).execute()
+            keep, _held = without_human_verdicts(svc, consensus, EVIDENCE_FUSION_VERSION, config.get("force", False))
+            delete_superseded_ai_observations(svc, [r["media_id"] for r in keep], EVIDENCE_FUSION_VERSION)
+            for i in range(0, len(keep), 50):
+                svc.table("observations").insert(keep[i : i + 50]).execute()
             written = 0
             try:
                 written = write_signals(svc, evidence, deployment_id)
             except Exception as exc:
                 logger.warning("evidence_fusion_evidence_write_failed", error=str(exc))
-            return len(consensus), written
+            return len(keep), written
 
         created, evidence_written = await asyncio.to_thread(_persist) if consensus else (0, 0)
         duration = time.monotonic() - start
@@ -890,6 +892,72 @@ def cloud_annotated_media_ids(ai_rows: list[dict]) -> set[str]:
     return {r["media_id"] for r in ai_rows if r.get("ai_origin") != "edge"}
 
 
+# Review states that mean a person has ruled on the photo (the frontend's
+# HUMAN_REVIEWED_STATES; active_learning reads consensus_approved as human truth too).
+HUMAN_VERDICT_STATES = ("human_reviewed", "expert_reviewed", "consensus_approved")
+
+# PostgREST returns at most 1,000 rows per response, so whole-deployment reads page.
+_READ_PAGE = 1000
+
+
+def _read_all(build_query: Callable[[], Any]) -> list[dict]:
+    """Every row of a read, paged past PostgREST's 1,000-row cap.
+
+    ``build_query`` returns the query afresh, ordered on a unique key so that the
+    pages neither skip nor repeat rows (as ``media_registry.backfill_thumbnails``).
+    """
+    rows: list[dict] = []
+    while True:
+        page = build_query().range(len(rows), len(rows) + _READ_PAGE - 1).execute().data or []
+        rows.extend(page)
+        if len(page) < _READ_PAGE:
+            return rows
+
+
+def human_verdict_media_ids(svc, *, deployment_id: str | None = None, media_ids=None, model_version: str | None = None) -> set[str]:
+    """Media that carry a live human verdict, by deployment or by media id.
+
+    With ``model_version``, only verdicts on that model's rows count: a reviewer who
+    corrects a SpeciesNet row leaves it ``source_type='ai'`` with SpeciesNet's version.
+    """
+
+    def _query(ids: list[str] | None):
+        def build():
+            q = svc.table("observations").select("media_id").in_("review_status", list(HUMAN_VERDICT_STATES)).is_("deleted_at", "null")
+            q = q.in_("media_id", ids) if ids is not None else q.eq("deployment_id", deployment_id).not_.is_("media_id", "null")
+            if model_version:
+                q = q.eq("source_model_version", model_version)
+            return q.order("id")
+
+        return build
+
+    if media_ids is None:
+        return {r["media_id"] for r in _read_all(_query(None))}
+    ids = list(media_ids)
+    held: set[str] = set()
+    for i in range(0, len(ids), 100):
+        held |= {r["media_id"] for r in _read_all(_query(ids[i : i + 100]))}
+    return held
+
+
+def without_human_verdicts(svc, rows: list[dict], model_version: str | None, force: bool) -> tuple[list[dict], set[str]]:
+    """Drop the machine rows for photos a person has ruled on, read at write time (#284).
+
+    A run picks its photos when it starts, and a reviewer can label one while the
+    model is still working on it, so each step asks again just before it writes.
+    A normal run adds nothing to a reviewed photo. A ``force`` run still writes
+    there, except that it adds no row of a model whose own row a reviewer ruled on.
+    Returns the rows to write and the media held back. There is no transaction
+    across the read and the insert, so a review landing in that gap still races.
+    """
+    if not rows:
+        return rows, set()
+    held = human_verdict_media_ids(svc, media_ids={r["media_id"] for r in rows}, model_version=model_version if force else None)
+    if held:
+        logger.info("pipeline_rows_held_for_human_verdict", model_version=model_version, media=len(held), force=force)
+    return [r for r in rows if r["media_id"] not in held], held
+
+
 def delete_superseded_ai_observations(svc, media_ids, model_version: str) -> None:
     """Delete prior *machine* observations for these media + model version.
 
@@ -1042,14 +1110,16 @@ class SpeciesNetStep(PipelineStep):
             if obs_batch:
                 # Replace, don't append: clear this model's prior machine rows for the
                 # media we just re-ran, then insert the fresh set. Idempotent under
-                # re-uploads / force reprocess; human-reviewed rows are kept.
+                # re-uploads / force reprocess; human-reviewed rows are kept, and a
+                # photo reviewed since the run started gets no new row at all.
                 resolved_ids = {m["id"] for m in path_to_media.values()}
 
                 def _persist() -> tuple[int, int]:
-                    delete_superseded_ai_observations(svc, resolved_ids, self.model_version)
+                    keep, held = without_human_verdicts(svc, obs_batch, self.model_version, config.get("force", False))
+                    delete_superseded_ai_observations(svc, resolved_ids - held, self.model_version)
                     inserted = 0
-                    for i in range(0, len(obs_batch), 50):
-                        batch = obs_batch[i : i + 50]
+                    for i in range(0, len(keep), 50):
+                        batch = keep[i : i + 50]
                         svc.table("observations").insert(batch).execute()
                         inserted += len(batch)
                     written = 0
@@ -1314,10 +1384,11 @@ class BioCLIPStep(PipelineStep):
                 written_ids = {o["media_id"] for o in obs_batch}
 
                 def _persist():
-                    delete_superseded_ai_observations(svc, written_ids, model_version)
+                    keep, held = without_human_verdicts(svc, obs_batch, model_version, config.get("force", False))
+                    delete_superseded_ai_observations(svc, written_ids - held, model_version)
                     inserted = 0
-                    for i in range(0, len(obs_batch), 50):
-                        batch = obs_batch[i : i + 50]
+                    for i in range(0, len(keep), 50):
+                        batch = keep[i : i + 50]
                         svc.table("observations").insert(batch).execute()
                         inserted += len(batch)
                     return inserted
@@ -1427,10 +1498,11 @@ class BioCLIPStep(PipelineStep):
             def _persist() -> int:
                 # Replace this classifier's prior rows for the media it re-ran (keyed by its
                 # own model version, so the SpeciesNet rows are untouched), then insert.
-                delete_superseded_ai_observations(svc, {o["media_id"] for o in obs_batch}, model_version)
-                for i in range(0, len(obs_batch), 50):
-                    svc.table("observations").insert(obs_batch[i : i + 50]).execute()
-                return len(obs_batch)
+                keep, _held = without_human_verdicts(svc, obs_batch, model_version, config.get("force", False))
+                delete_superseded_ai_observations(svc, {o["media_id"] for o in keep}, model_version)
+                for i in range(0, len(keep), 50):
+                    svc.table("observations").insert(keep[i : i + 50]).execute()
+                return len(keep)
 
             if obs_batch:
                 observations_created = await asyncio.to_thread(_persist)
@@ -1481,6 +1553,19 @@ def get_step(step_type: PipelineStepType) -> PipelineStep:
 # ── Pipeline Orchestrator ────────────────────────────────────────────
 
 
+class PipelineBusyError(RuntimeError):
+    """Another AI run holds this deployment and the caller asked not to wait (#284)."""
+
+    def __init__(self, deployment_id: str):
+        super().__init__(f"An AI run is already in progress on deployment {deployment_id}")
+        self.deployment_id = deployment_id
+
+
+def deployment_lock_name(deployment_id: str) -> str:
+    """The ``services.locks`` name that serialises AI runs on one deployment."""
+    return f"pipeline:deployment:{deployment_id}"
+
+
 async def run_pipeline(
     deployment_id: str,
     steps: list[PipelineStepType],
@@ -1491,13 +1576,16 @@ async def run_pipeline(
     force: bool = False,
     media_ids: list[str] | None = None,
     on_step: Optional[Callable[[str, int, int], Awaitable[None]]] = None,
+    on_start: Optional[Callable[[], Awaitable[None]]] = None,
+    wait: bool = True,
 ) -> PipelineRunResult:
     """Execute a sequence of pipeline steps on a deployment.
 
-    1. Fetches all media for the deployment.
-    2. Runs each step sequentially, passing the full media set.
-    3. Records an annotation_run for provenance.
-    4. Returns aggregate results.
+    1. Takes the deployment's run lock, so two runs on one deployment never overlap.
+    2. Fetches the media for the deployment.
+    3. Runs each step sequentially, passing the full media set.
+    4. Records an annotation_run for provenance.
+    5. Returns aggregate results.
 
     Args:
         deployment_id: UUID of the target deployment.
@@ -1505,6 +1593,12 @@ async def run_pipeline(
         confidence_threshold: Minimum confidence to keep detections.
         config: Step-specific overrides.
         user_id: Authenticated user triggering the pipeline.
+        on_start: Awaited once the run holds the deployment, before it reads the media.
+        wait: Wait for a run already on this deployment (default), or raise
+            ``PipelineBusyError`` at once.
+
+    The lock (``services.locks.exclusive``) spans every process that shares Redis, and
+    this process alone when there is none; its docstring has the exact guarantee.
 
     Returns:
         PipelineRunResult with per-step and aggregate metrics.
@@ -1519,6 +1613,29 @@ async def run_pipeline(
         logger.warning("pipeline_skipped_invalid_deployment_id", deployment_id=deployment_id)
         return PipelineRunResult(deployment_id=str(deployment_id))
 
+    from app.services.locks import LockBusy, exclusive
+
+    try:
+        async with exclusive(deployment_lock_name(deployment_id), wait=wait):
+            if on_start is not None:
+                await on_start()
+            return await _run_pipeline_held(deployment_id, steps, confidence_threshold, config, user_id, only_unannotated, force, media_ids, on_step)
+    except LockBusy as exc:
+        raise PipelineBusyError(deployment_id) from exc
+
+
+async def _run_pipeline_held(
+    deployment_id: str,
+    steps: list[PipelineStepType],
+    confidence_threshold: float,
+    config: dict[str, Any] | None,
+    user_id: str | None,
+    only_unannotated: bool,
+    force: bool,
+    media_ids: list[str] | None,
+    on_step: Optional[Callable[[str, int, int], Awaitable[None]]],
+) -> PipelineRunResult:
+    """The body of :func:`run_pipeline`, run while it holds the deployment."""
     overall_start = time.monotonic()
     # Wall-clock start for the annotation_runs row. Must be set explicitly: if we let
     # started_at fall back to the DB default now(), it is evaluated at INSERT time —
@@ -1530,6 +1647,9 @@ async def run_pipeline(
     # The effective SpeciesNet box cutoffs (#285): every step reads the same values,
     # and the annotation_runs row below records them.
     config.update(DetectionCutoffs.from_config(config).as_config())
+    # Set here, never taken from the caller's config: it decides whether a step may
+    # write beside a human verdict (without_human_verdicts).
+    config["force"] = force
     svc = create_service_client()
 
     # Model versions whose observations this run would (re)create. Used for the
@@ -1549,42 +1669,48 @@ async def run_pipeline(
     #    continuously. ``force=True`` (privileged) is the only true reprocess.
     #  - **Incremental (only_unannotated, the default):** additionally skip any
     #    AI-annotated media, so a normal run only touches NEW images.
+    #  - **Human verdicts (always, unless force):** skip media a person has ruled on.
+    #    Each step checks again just before it writes (without_human_verdicts).
+    # Every read pages past PostgREST's 1,000-row cap; id breaks ordering ties.
     def _fetch_media():
-        q = svc.table("media").select("id, deployment_id, file_path, file_name, file_mediatype, timestamp").eq("deployment_id", deployment_id)
-        # Scope to specific media when given (e.g. a CamtrapDP import runs AI only on the
-        # image-backed rows — not the fileless CSV references that would choke media_prep).
-        if media_ids:
-            q = q.in_("id", media_ids)
-        resp = q.order("timestamp").execute()
-        rows = resp.data or []
+        def _media_query():
+            q = svc.table("media").select("id, deployment_id, file_path, file_name, file_mediatype, timestamp").eq("deployment_id", deployment_id)
+            # Scope to specific media when given (e.g. a CamtrapDP import runs AI only on the
+            # image-backed rows, not the fileless CSV references that would choke media_prep).
+            if media_ids:
+                q = q.in_("id", media_ids)
+            return q.order("timestamp").order("id")
+
+        rows = _read_all(_media_query)
         if force or not rows:
             return rows
 
         skip: set[str] = set()
         if run_versions:
-            done = (
-                svc.table("observations")
-                .select("media_id")
-                .eq("deployment_id", deployment_id)
-                .in_("source_model_version", run_versions)
-                .not_.is_("media_id", "null")
-                .execute()
-                .data
-                or []
+            done = _read_all(
+                lambda: (
+                    svc.table("observations")
+                    .select("media_id")
+                    .eq("deployment_id", deployment_id)
+                    .in_("source_model_version", run_versions)
+                    .not_.is_("media_id", "null")
+                    .order("id")
+                )
             )
             skip |= {o["media_id"] for o in done}
         if only_unannotated:
-            ai = (
-                svc.table("observations")
-                .select("media_id, ai_origin")
-                .eq("deployment_id", deployment_id)
-                .eq("source_type", "ai")
-                .not_.is_("media_id", "null")
-                .execute()
-                .data
-                or []
+            ai = _read_all(
+                lambda: (
+                    svc.table("observations")
+                    .select("media_id, ai_origin")
+                    .eq("deployment_id", deployment_id)
+                    .eq("source_type", "ai")
+                    .not_.is_("media_id", "null")
+                    .order("id")
+                )
             )
             skip |= cloud_annotated_media_ids(ai)
+        skip |= human_verdict_media_ids(svc, deployment_id=deployment_id)
         return [m for m in rows if m["id"] not in skip]
 
     media = await asyncio.to_thread(_fetch_media)

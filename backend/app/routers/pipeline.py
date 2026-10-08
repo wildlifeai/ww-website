@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, Request
 from app.authz import assert_access, require_deployment_access
 from app.dependencies import get_current_user, get_privileged_client, get_verified_user, require_not_demo
 from app.domain.events import cluster_deployment_events, compute_deployment_effort
-from app.domain.pipeline import run_pipeline
+from app.domain.pipeline import PipelineBusyError, run_pipeline
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.schemas.pipeline import ClusterEventsRequest, PipelineRunRequest
@@ -59,9 +59,16 @@ async def run_inference_pipeline(
             config=body.config,
             user_id=user.id,
             only_unannotated=body.only_unannotated,
+            # A request must not hang behind a run that can take an hour: say it is busy.
+            wait=False,
         )
         return ApiResponse(
             data=result.model_dump(),
+            meta=ApiMeta(request_id=req_id),
+        )
+    except PipelineBusyError as e:
+        return ApiResponse(
+            error=ApiError(code="PIPELINE_BUSY", message=f"{e}. Try again when it finishes.", retryable=True),
             meta=ApiMeta(request_id=req_id),
         )
     except ValueError as e:
