@@ -99,7 +99,12 @@ count, `created_by`) for provenance.
 
 A blank frame is a **positive result, not missing data**. When SpeciesNet keeps no detections above
 the confidence threshold, it writes **one observation with `observation_type='blank'`** (no bbox,
-`source_type='ai'`, `review_status='ai_reviewed'`). The distinction:
+`source_type='ai'`, `review_status='ai_reviewed'`). Two more rules drop boxes first, because the
+detector answers empty night scenes with a whole-frame "vehicle" (#285): a box over
+`SPECIESNET_WHOLE_FRAME_AREA` (0.9) of the frame needs `SPECIESNET_WHOLE_FRAME_MIN_CONFIDENCE` (0.5)
+whatever its class, and `SPECIESNET_DROP_VEHICLES` (on) drops every vehicle. The run's config can
+override each; the `annotation_runs` row and the evidence fusion audit comment record the values
+used, and a box these rules drop adds nothing to the fusion score. The distinction:
 
 - **Blank** = processed, no animal → has a `blank` AI observation → shows the teal **AI** badge.
 - **Unprocessed** = no observations at all → shows the neutral grey **⧗ Processing** badge (still

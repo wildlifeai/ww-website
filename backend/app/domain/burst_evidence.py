@@ -385,11 +385,16 @@ def _fmt(value: Optional[float]) -> str:
     return "absent" if value is None else f"{value:g}" if float(value).is_integer() else f"{value:.2f}"
 
 
-def audit_line(score: float, threshold: float, signals: dict[str, Any], version: str = "evidence_fusion_v1") -> str:
-    """The consensus row's comment (section 7): ``evidence_fusion_v1 score=0.91 threshold=0.50 speciesnet=0 gemini=1.0 ...``."""
-    return (
+def audit_line(score: float, threshold: float, signals: dict[str, Any], version: str = "evidence_fusion_v1", cutoffs: str = "") -> str:
+    """The consensus row's comment (section 7): ``evidence_fusion_v1 score=0.91 threshold=0.50 speciesnet=0 gemini=1.0 ...``.
+
+    ``cutoffs``, when given, is appended as is: the SpeciesNet box cutoffs of the run
+    (``det=0.20 frame_area=0.90 frame_conf=0.50 vehicle=dropped``, #285).
+    """
+    line = (
         f"{version} score={score:.2f} threshold={threshold:.2f} "
         f"speciesnet={_fmt(signals.get('speciesnet_presence'))} gemini={_fmt(signals.get('gemini_presence'))} "
         f"neighbour={_fmt(signals.get('neighbour_animal'))} motion={_fmt(signals.get('motion'))} "
         f"edge={_fmt(signals.get('edge_presence'))} near={_fmt(signals.get('near_threshold'))}"
     )
+    return f"{line} {cutoffs}" if cutoffs else line

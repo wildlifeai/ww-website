@@ -177,6 +177,28 @@ class Settings(BaseSettings):
         description="Token-saving variant: 'single' (one downscaled frame per call), 'contact_sheet' (one burst per call), 'batch' (Batch API)",
     )
 
+    # ── SpeciesNet box filters (beside the run's confidence_threshold) ──
+    # MegaDetector inside SpeciesNet answers an empty night scene with a box round the
+    # whole frame, often "vehicle" (#285). These drop such boxes before the photo label
+    # and presence are built; the run's config can override each one, and the evidence
+    # fusion audit line records the values used.
+    SPECIESNET_WHOLE_FRAME_AREA: float = Field(
+        0.9,
+        ge=0.0,
+        le=1.0,
+        description="Box area, as a fraction of the frame, above which a low-confidence detection is dropped (any class)",
+    )
+    SPECIESNET_WHOLE_FRAME_MIN_CONFIDENCE: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="A box larger than SPECIESNET_WHOLE_FRAME_AREA is kept only at or above this confidence (an animal at the lens)",
+    )
+    SPECIESNET_DROP_VEHICLES: bool = Field(
+        True,
+        description="Drop every vehicle detection: vehicles never matter to a deployment, and night IR scenes score up to 0.95 as one",
+    )
+
     # ── Evidence fusion (consensus verdict per frame) ─────────────────
     # Runs after Gemini, SpeciesNet (and BioCLIP): groups the batch into trigger
     # bursts, scores every frame from the rows the other steps wrote plus motion
