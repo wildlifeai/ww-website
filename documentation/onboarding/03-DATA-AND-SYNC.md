@@ -75,6 +75,11 @@ photos as the user sees them; with the raw BMP on, the app doubles it for op5. A
 camera keeps its old values until its next deployment start. Ranges and the cost note live in
 `frontend/src/lib/burstCapture.ts`.
 
+Beside the burst, `detection_threshold_pct` (50 to 99, default 57, the camera's factory setting) is
+how confident the on-device model must be before a photo counts as a detection; the app writes it
+as op16 (ww-backend#246, ww-mobile-app#342). The input clamps to the column's CHECK range, which
+lives in `frontend/src/lib/detectionThreshold.ts`.
+
 The same panel edits the capture flash (ww-backend#168, written as op34, op13, op35 and op36 by
 ww-mobile-app#282): `flash_mode` (default `off`, which also turns off the night IR for motion
 detection), `flash_led`, and for `time_of_day` a window stored as UTC minutes
