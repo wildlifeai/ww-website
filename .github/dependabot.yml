@@ -46,6 +46,15 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # typescript-eslint 8.71 accepts TypeScript below 6.1, so a newer TypeScript fails
+      # lint (#274). Lift this when the typescript-eslint peer range allows it.
+      - dependency-name: typescript
+        versions: ['>=6.1.0']
+      # The types track the Node major the app runs on (CI uses 22); a newer major lets
+      # code call APIs that do not exist at runtime (#278). Bump by hand with the Node version.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: npm
     directory: /e2e
     schedule:
