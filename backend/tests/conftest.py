@@ -72,3 +72,15 @@ def _clear_memory_cache():
     _memory_cache.clear()
     yield
     _memory_cache.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_redis_locks(monkeypatch):
+    """Keep ``services.locks`` in-process: REDIS_URL is set above, but no Redis runs in tests.
+
+    Without this every ``run_pipeline`` would first time out connecting to localhost:6379.
+    Tests of the Redis path patch ``_redis_client`` themselves.
+    """
+    from app.services import locks
+
+    monkeypatch.setattr(locks, "_redis_client", lambda: None)

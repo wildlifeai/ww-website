@@ -89,7 +89,26 @@ re-uploading) a deployment processes only the *new* images. Camera AI rows (`ai_
 don't count: they are reflected before the pipeline runs, on the upload job and in
 `auto_annotate_deployments` alike (#161). The manual endpoint accepts `only_unannotated=false`
 to force a full re-run. Each run records an `annotation_runs` row (steps, threshold, observation
-count, `created_by`) for provenance.
+count, `created_by`) for provenance. Every read pages past PostgREST's 1,000-row cap.
+
+**A human verdict is final (#284).** A photo with a live `human_reviewed`, `expert_reviewed` or
+`consensus_approved` row is skipped by every run except a `force` one, and each step that writes
+rows (Gemini, SpeciesNet, BioCLIP, evidence fusion) checks again just before it writes
+(`without_human_verdicts`), so a photo reviewed while the model was working gets no machine row
+beside the verdict. A `force` run (CamtrapDP import) keeps the verdict and adds no row of the model
+whose own row the reviewer ruled on. Nothing spans the check and the insert, so a review landing in
+those milliseconds can still race.
+
+**One run per deployment at a time (#284).** `run_pipeline` holds a per-deployment lock
+(`services/locks.py`) while it reads the media and runs the steps, so a second run waits and then
+sees what the first one wrote. With `REDIS_URL` set the lock is a Redis key with a renewed 10-minute
+TTL and spans the API workers and every ARQ worker; without Redis, or when Redis is unreachable, it
+is an in-process lock only. `POST /api/pipeline/run` does not wait: it returns `PIPELINE_BUSY`.
+The upload job joins a **queued** `ai_pipeline` job on the deployment (under a lock, so chunks that
+arrive together make one); the job stays queued while it is deferred and while it waits for the
+lock, and turns `processing` only when it reads its media. A deployment whose job is already
+`processing` gets one follow-up job, which later chunks join. A follow-up's wait counts toward the
+ARQ `job_timeout` (1 hour).
 
 > **History:** the earlier `MegaDetectorStep`, `SpeciesNetClassifierStub`, and `EmptyFrameStep`
 > placeholders were **removed** — the SpeciesNet ensemble subsumes detection, classification, and
