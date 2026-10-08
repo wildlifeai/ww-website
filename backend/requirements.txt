@@ -10,7 +10,7 @@ httpx>=0.28.0
 ethos-u-vela==5.2.0               # Ethos-U55 compiler, pinned: every model source (upload, Edge Impulse, gcp trainer) compiles here
 structlog>=24.0
 sentry-sdk[fastapi]>=2.0
-slowapi>=0.1.9
+slowapi>=0.1.10
 tenacity>=9.0
 cryptography>=43.0               # Fernet encryption for iNat tokens
 google-api-python-client>=2.0    # Google Drive API
