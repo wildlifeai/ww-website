@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { THUMBNAIL_GRACE_MS, busyDeployments, isThumbnailStuck } from './thumbnailRetry'
+import { THUMBNAIL_GRACE_MS, busyDeployments, isThumbnailStuck, showsBusyDeployment } from './thumbnailRetry'
 
 const DEP = 'a15e8ed9-daa9-4a03-9823-5283e1cc6ace'
 const NOW = Date.UTC(2026, 9, 2, 9, 0, 0)
@@ -37,5 +37,13 @@ describe('busyDeployments', () => {
 
   it('is empty before the job list has loaded', () => {
     expect(busyDeployments(undefined).size).toBe(0)
+  })
+})
+
+describe('showsBusyDeployment', () => {
+  it('is true only when a deployment in view has a job running', () => {
+    expect(showsBusyDeployment([DEP, 'b'], new Set(['b']))).toBe(true)
+    expect(showsBusyDeployment([DEP], new Set(['b']))).toBe(false)
+    expect(showsBusyDeployment([], new Set(['b']))).toBe(false)
   })
 })

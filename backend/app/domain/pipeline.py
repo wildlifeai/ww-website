@@ -13,6 +13,7 @@ No HTTP or FastAPI imports — this module runs in the domain layer.
 from __future__ import annotations
 
 import asyncio
+import functools
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -69,6 +70,9 @@ class PipelineStep(ABC):
 
     step_type: PipelineStepType
     model_version: Optional[str] = None
+    # Optional ``(done, total)`` callback, set by run_pipeline when its caller asks for progress
+    # within a step. A step that reports none leaves the bar where on_step put it.
+    on_progress: Optional[Callable[[int, int], Awaitable[None]]] = None
 
     @abstractmethod
     async def run(
@@ -92,12 +96,25 @@ class PipelineStep(ABC):
 
 # ── Media Preparation Step (thumbnails + previews) ───────────────────
 
+# Photos prepared at once: each is a Drive download, a resize and two uploads, mostly waiting
+# on the network, and a few at a time stays well inside the container's 2 GiB.
+PREP_CONCURRENCY = 4
+
+
+def newest_first(media: list[dict]) -> list[dict]:
+    """``media`` by ``timestamp``, newest first and undated last, without reordering the input."""
+    dated = sorted((m for m in media if m.get("timestamp")), key=lambda m: m["timestamp"], reverse=True)
+    return dated + [m for m in media if not m.get("timestamp")]
+
 
 class MediaPreparationStep(PipelineStep):
     """Generate thumbnail + preview renditions into media_assets (Azure CDN).
 
     Runs before SpeciesNet so the UI grid and (later) crops have CDN URLs and
     never hit Google Drive on the hot path. Creates no observations.
+
+    Photos are prepared newest first, the Review grid's default order, so the top of its
+    first page fills first, and up to ``PREP_CONCURRENCY`` at a time (#286).
     """
 
     step_type = PipelineStepType.MEDIA_PREP
@@ -109,25 +126,45 @@ class MediaPreparationStep(PipelineStep):
         deployment_id: str,
         config: dict[str, Any],
     ) -> PipelineStepResult:
-        from app.domain.media_registry import is_permission_error, prepare_media_assets_with_retry
+        from app.domain.media_registry import _PROGRESS_EVERY, is_permission_error, prepare_media_assets_with_retry
 
         start = time.monotonic()
-        errors = 0
-        for i, m in enumerate(media):
-            try:
-                await prepare_media_assets_with_retry(m)
-            except Exception as exc:
-                if is_permission_error(exc):
-                    # Every remaining photo would be refused the same way; say so once and stop.
-                    logger.error("media_prep_refused", deployment_id=deployment_id, media_id=m.get("id"), error=str(exc))
-                    errors += len(media) - i
-                    break
-                logger.warning("media_prep_error", media_id=m.get("id"), error=str(exc))
-                errors += 1
+        pending = iter(newest_first(media))
+        total = len(media)
+        taken = done = errors = 0
+        refused = False
+
+        async def _worker() -> None:
+            nonlocal taken, done, errors, refused
+            # One shared iterator, so each photo goes to exactly one worker, and none starts a
+            # new photo once the database has refused one.
+            while not refused and (m := next(pending, None)) is not None:
+                taken += 1
+                try:
+                    await prepare_media_assets_with_retry(m)
+                except Exception as exc:
+                    if is_permission_error(exc):
+                        # Every remaining photo would be refused the same way; say so once and stop.
+                        if not refused:
+                            logger.error("media_prep_refused", deployment_id=deployment_id, media_id=m.get("id"), error=str(exc))
+                        refused = True
+                        errors += 1
+                        return
+                    logger.warning("media_prep_error", media_id=m.get("id"), error=str(exc))
+                    errors += 1
+                if refused:
+                    return
+                done += 1
+                if self.on_progress is not None and (done % _PROGRESS_EVERY == 0 or done == total):
+                    await self.on_progress(done, total)
+
+        await asyncio.gather(*(_worker() for _ in range(min(PREP_CONCURRENCY, total))))
+        if refused:
+            errors += total - taken  # the photos never started count as failed, as before
 
         return PipelineStepResult(
             step=self.step_type,
-            media_processed=len(media),
+            media_processed=total,
             errors=errors,
             duration_seconds=round(time.monotonic() - start, 2),
             model_version=self.model_version,
@@ -1415,6 +1452,7 @@ async def run_pipeline(
     force: bool = False,
     media_ids: list[str] | None = None,
     on_step: Optional[Callable[[str, int, int], Awaitable[None]]] = None,
+    on_progress: Optional[Callable[[str, int, int], Awaitable[None]]] = None,
 ) -> PipelineRunResult:
     """Execute a sequence of pipeline steps on a deployment.
 
@@ -1429,6 +1467,8 @@ async def run_pipeline(
         confidence_threshold: Minimum confidence to keep detections.
         config: Step-specific overrides.
         user_id: Authenticated user triggering the pipeline.
+        on_progress: ``(step, done, total)`` within a step, for the steps that report it
+            (media preparation).
 
     Returns:
         PipelineRunResult with per-step and aggregate metrics.
@@ -1525,6 +1565,8 @@ async def run_pipeline(
             # Report step start so callers (e.g. the upload job) can surface granular
             # AI-pipeline progress + logs instead of a frozen bar.
             await on_step(step_type.value, _idx, len(steps))
+        if on_progress is not None:
+            step.on_progress = functools.partial(on_progress, step_type.value)
         result = await step.run(media, deployment_id, config)
         step_results.append(result)
         total_observations += result.observations_created
