@@ -882,6 +882,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         job_id,
         total=total_files,
         started_at=datetime.now(timezone.utc),
+        test_photos_skipped=int(payload.get("test_photos_skipped") or 0),
     )
     await emit_event(
         job_id,
