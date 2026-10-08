@@ -514,6 +514,7 @@ async def update_summary(
     skipped_inc: int = 0,
     failed_inc: int = 0,
     started_at: Optional[datetime] = None,
+    test_photos_skipped: Optional[int] = None,
 ) -> None:
     lock = _summary_locks.setdefault(job_id, asyncio.Lock())
 
@@ -540,6 +541,8 @@ async def update_summary(
         summary["failed"] += failed_inc
         if started_at is not None:
             summary["started_at"] = started_at.isoformat()
+        if test_photos_skipped is not None:
+            summary["test_photos_skipped"] = test_photos_skipped
 
         data["summary"] = summary
         data["updated_at"] = datetime.now(timezone.utc).isoformat()

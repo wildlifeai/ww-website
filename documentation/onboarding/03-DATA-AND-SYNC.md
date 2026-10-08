@@ -157,7 +157,11 @@ and the Upload button waits for it (the deployment count resolves by card folder
    matches it exactly against the user's deployments. Only when a frame carries no tag does the
    card folder (`MEDIA/<8-hex>/`, a prefix of the same id) decide. The folder can be wrong: it is
    created at boot, before the deployment id is configured, so a frame under `MEDIA/00000000/`
-   can carry the real id in its EXIF (ww-website#140).
+   can carry the real id in its EXIF (ww-website#140). A WW500 frame (EXIF `Make` "Wildlife.ai")
+   with no id, or the all-zero one, is a **test photo** taken before a deployment was set on the
+   camera: it leaves the selection as soon as the EXIF read lands, whatever its folder, and the page
+   says "N test photos skipped" (`withoutTestPhotos`, ww-website#287). A file with no EXIF keeps the
+   folder fallback.
 2. **Triage of unassigned photos** (`UnassignedTriage`). Files that resolve to no deployment are
    grouped into **capture sessions** — same EXIF id, else same card folder, gaps under 6 h
    (`unassignedSessions.ts`) — and shown with sample thumbnails, time-span stats and, when the
@@ -217,7 +221,9 @@ with a fresh Supabase client after an HTTP/2 `ConnectionTerminated` (`routers/ex
 ### On the server
 
 ```
-POST /api/exif/parse  → parse EXIF, bind deployment (EXIF Deployment_ID, else card-folder prefix;
+POST /api/exif/parse  → parse EXIF, drop WW500 test photos (domain/exif.py is_test_photo,
+                        counted as `test_photos_skipped` in the response and the job summary),
+                        bind deployment (EXIF Deployment_ID, else card-folder prefix;
                         `deployment_id_source` says which), buffer bytes to Azure blob store,
                         enqueue upload_drive_images_job
 upload_drive_images_job:

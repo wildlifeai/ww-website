@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSessions, resolutionBreakdown, SESSION_GAP_MS, unresolvedFileIndices } from './unassignedSessions'
+import { buildSessions, resolutionBreakdown, SESSION_GAP_MS, unresolvedFileIndices, withoutTestPhotos } from './unassignedSessions'
 
 const T0 = Date.UTC(2026, 6, 20, 8, 0, 0) // 20 Jul 2026 08:00Z
 
@@ -223,6 +223,42 @@ describe('unresolvedFileIndices', () => {
       { path: 'MEDIA/CEB77C85/B0001.JPG', ms: T0 },
     ])
     expect(unresolvedFileIndices(files, paths, [], deployments)).toEqual([1])
+  })
+})
+
+describe('withoutTestPhotos (ww-website#287)', () => {
+  const REAL = '16bed409-6c1e-4f9b-a3a4-2d1c1e0f9a77'
+  const ZERO = '00000000-0000-0000-0000-000000000000'
+  const WW500 = 'Wildlife.ai'
+
+  it('drops WW500 frames with no id or the zero id, and keeps a real id in MEDIA/00000000/', () => {
+    const { files, paths } = fixture([
+      { path: 'MEDIA/00000000/IMAGES.000/A0001.JPG', ms: T0 }, // test photo, no tag
+      { path: 'MEDIA/16BED409/IMAGES.000/A0002.JPG', ms: T0 }, // zero id, any folder
+      { path: 'MEDIA/00000000/IMAGES.000/A0003.JPG', ms: T0 }, // real tag, stale folder
+      { path: 'MEDIA/00000000/IMAGES.000/A0004.BMP', ms: T0 }, // no EXIF at all
+      { path: 'DCIM/IMG_0005.JPG', ms: T0 }, // another camera
+    ])
+    const out = withoutTestPhotos(files, paths, [
+      { deploymentId: null, make: WW500 },
+      { deploymentId: ZERO, make: WW500 },
+      { deploymentId: REAL, make: WW500 },
+      { deploymentId: null, make: null },
+      { deploymentId: null, make: 'Canon' },
+    ])
+    expect(out.skipped).toBe(2)
+    expect(out.paths).toEqual([
+      'MEDIA/00000000/IMAGES.000/A0003.JPG',
+      'MEDIA/00000000/IMAGES.000/A0004.BMP',
+      'DCIM/IMG_0005.JPG',
+    ])
+    expect(out.files.map((f) => f.name)).toEqual(['A0003.JPG', 'A0004.BMP', 'IMG_0005.JPG'])
+    expect(out.exifIds).toEqual([REAL, null, null])
+  })
+
+  it('keeps everything when nothing is a test photo, and tolerates a short exif array', () => {
+    const { files, paths } = fixture([{ path: 'MEDIA/00000000/A0001.BMP', ms: T0 }])
+    expect(withoutTestPhotos(files, paths, [])).toEqual({ files, paths, exifIds: [null], skipped: 0 })
   })
 })
 

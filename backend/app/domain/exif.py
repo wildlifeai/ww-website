@@ -54,6 +54,11 @@ _TELEMETRY_KEYS = {
 
 TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8}
 
+# The EXIF Make every WW500 writes, and the id a camera with no deployment set
+# could carry. Together they identify a test photo (see is_test_photo).
+WW500_MAKE = "Wildlife.ai"
+ZERO_DEPLOYMENT_ID = "00000000-0000-0000-0000-000000000000"
+
 
 # ── Low-level EXIF parsing ───────────────────────────────────────────
 
@@ -481,6 +486,25 @@ def match_deployment(
     return None
 
 
+def is_test_photo(parsed: Dict[str, Any]) -> bool:
+    """True for a WW500 test photo, which is never uploaded (ww-website#287).
+
+    The firmware writes the ``Deployment_ID`` tag only once a deployment is set,
+    so a frame whose ``Make`` is ``"Wildlife.ai"`` and whose EXIF carries no
+    deployment id, or the all-zero one, was taken on the bench before that. The
+    card folder plays no part: such frames sit in ``MEDIA/00000000/``, but so
+    can real ones taken right after the id was set. A file with no EXIF (a BMP
+    frame, another camera) is not a test photo. ``parsed`` is the output of
+    :func:`parse_exif_from_bytes`. Mirrors ``isTestPhoto`` in
+    ``frontend/src/lib/exifDeploymentId.ts``.
+    """
+    make = parsed.get("Make")
+    if not isinstance(make, str) or make.strip().lower() != WW500_MAKE.lower():
+        return False
+    dep_id = parsed.get("deployment_id")
+    return not dep_id or str(dep_id).lower() == ZERO_DEPLOYMENT_ID
+
+
 def resolve_deployment_source(exif_deployment_id: Optional[str], folder_prefix: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Which deployment id a frame binds to, and where it came from.
 
@@ -489,7 +513,10 @@ def resolve_deployment_source(exif_deployment_id: Optional[str], folder_prefix: 
     of the same id and is created at boot, before the id is configured, so a
     frame can sit under ``MEDIA/00000000/`` while its EXIF names the real
     deployment. The tag therefore wins; the folder fills in only when there is
-    no tag (a BMP frame, or an image from something other than a WW500).
+    no EXIF id at all (a BMP frame, or an image from something other than a
+    WW500). A WW500 frame without the tag is a test photo and never reaches
+    this function: callers drop it first with :func:`is_test_photo`
+    (ww-website#287).
 
     Returns ``(id, source)`` with ``source`` one of ``"exif_tag"``,
     ``"folder_path"`` or ``None`` when neither is present. The id keeps the

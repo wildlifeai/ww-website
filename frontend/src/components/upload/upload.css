@@ -80,6 +80,11 @@
   to { opacity: 1; }
 }
 
+.upload-note {
+  font-size: 0.8125rem;
+  opacity: 0.75;
+}
+
 /* ── Where these photos will go ──────────────────────────────────────────── */
 
 .upload-breakdown {

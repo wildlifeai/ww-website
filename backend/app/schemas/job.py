@@ -89,6 +89,8 @@ class ProgressSummary(BaseModel):
     uploaded: int = 0
     skipped: int = 0
     failed: int = 0
+    # WW500 test photos (no deployment set on the camera) left out before upload (#287).
+    test_photos_skipped: int = 0
     started_at: Optional[datetime] = None
 
 
