@@ -12,6 +12,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { MediaBrowser } from '../components/data/MediaBrowser'
+import { NoProjectSelected } from '../components/common/NoProjectSelected'
 import { supabase } from '../config/supabase'
 
 interface Deployment {
@@ -23,7 +24,7 @@ interface Deployment {
 
 export function AnnotationsPage() {
   const { user } = useAuth()
-  const { selectedProjectIds } = useProjectSelection()
+  const { queryProjectIds, noProjectSelected } = useProjectSelection()
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -33,21 +34,18 @@ export function AnnotationsPage() {
   const initialSpecies = searchParams.get('species') ?? undefined
 
   useEffect(() => {
-    if (!user) return
+    if (!user || !queryProjectIds) return
     let cancelled = false
     setLoading(true)
 
     // Try selecting the timezone column; if it isn't deployed yet, fall back to the
     // base columns so the page keeps working (capture times then use browser-local time).
-    const runQuery = (cols: string) => {
-      let q = supabase
-        .from('deployments')
-        .select(cols)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-      if (selectedProjectIds.length > 0) q = q.in('project_id', selectedProjectIds)
-      return q
-    }
+    const runQuery = (cols: string) => supabase
+      .from('deployments')
+      .select(cols)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .in('project_id', queryProjectIds)
 
     ;(async () => {
       const withTz = await runQuery('id, project_id, location_name, timezone')
@@ -60,7 +58,9 @@ export function AnnotationsPage() {
     })()
 
     return () => { cancelled = true }
-  }, [user, selectedProjectIds])
+  }, [user, queryProjectIds])
+
+  if (noProjectSelected) return <NoProjectSelected />
 
   return (
     <div>

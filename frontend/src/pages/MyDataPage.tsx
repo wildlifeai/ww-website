@@ -6,6 +6,7 @@ import { useProjectSelection } from '../hooks/useProjectSelection'
 import { DeploymentMap } from '../components/data/DeploymentMap'
 import { ObservationReports } from '../components/data/ObservationReports'
 import { MediaBrowser } from '../components/data/MediaBrowser'
+import { NoProjectSelected } from '../components/common/NoProjectSelected'
 import { useClusters } from '../hooks/useBrain'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -177,7 +178,7 @@ type Tab = 'projects' | 'deployments' | 'map' | 'reports' | 'media'
 
 export function MyDataPage() {
   const { user } = useAuth()
-  const { selectedProjectIds, clearAll, toggleProject } = useProjectSelection()
+  const { selectedProjectIds, queryProjectIds, noProjectSelected, clearAll, toggleProject } = useProjectSelection()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('projects')
   const [projects, setProjects] = useState<Project[]>([])
@@ -212,25 +213,24 @@ export function MyDataPage() {
 
   // ── Fetch deployments (with observation counts) ─────────────────────────────
   useEffect(() => {
-    if (!user || tab === 'projects') return
+    if (!user || tab === 'projects' || !queryProjectIds) return
+    let cancelled = false
     setLoading(true)
     setError(null)
 
     // `timezone` may not be deployed yet → retry without it so the page still loads.
     const baseCols = 'id, project_id, location_name, latitude, longitude, deployment_start, deployment_end, created_at, projects(name), devices(name)'
-    const runQuery = (cols: string) => {
-      let q = supabase
-        .from('deployments')
-        .select(cols)
-        .is('deleted_at', null)
-        .order('created_at', { ascending: false })
-      if (selectedProjectIds.length > 0) q = q.in('project_id', selectedProjectIds)
-      return q
-    }
+    const runQuery = (cols: string) => supabase
+      .from('deployments')
+      .select(cols)
+      .is('deleted_at', null)
+      .order('created_at', { ascending: false })
+      .in('project_id', queryProjectIds)
 
     ;(async () => {
       let { data, error: err } = await runQuery(`${baseCols}, timezone`)
-      if (err) ({ data, error: err } = await runQuery(baseCols))
+      if (err && !cancelled) ({ data, error: err } = await runQuery(baseCols))
+      if (cancelled) return
       if (err) { setError(err.message); setLoading(false); return }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rows = (data || []).map((d: any) => ({
@@ -243,11 +243,12 @@ export function MyDataPage() {
       setDeployments(rows)
       setLoading(false)
     })()
-  }, [user, tab, selectedProjectIds])
+    return () => { cancelled = true }
+  }, [user, tab, queryProjectIds])
 
   // ── Fetch observations for Map + Reports tabs ───────────────────────────────
   useEffect(() => {
-    if (!user || (tab !== 'map' && tab !== 'reports')) return
+    if (!user || (tab !== 'map' && tab !== 'reports') || noProjectSelected) return
     if (deployments.length === 0) return
     setObsLoading(true)
 
@@ -261,7 +262,10 @@ export function MyDataPage() {
         if (!err) setObservations(data || [])
         setObsLoading(false)
       })
-  }, [user, tab, deployments])
+  }, [user, tab, noProjectSelected, deployments])
+
+  // The deployment tabs show nothing, and query nothing, while no project is selected.
+  const showNothing = noProjectSelected && tab !== 'projects'
 
   // Enrich deployments with observation counts
   const deploymentsWithCounts = useMemo(() => {
@@ -443,6 +447,7 @@ export function MyDataPage() {
 
       {error && <p style={{ color: 'var(--error)' }}>{error}</p>}
       {loading && tab !== 'map' && tab !== 'reports' && <p>Loading…</p>}
+      {showNothing && <NoProjectSelected />}
 
       {/* ── Projects tab ─────────────────────────────────────────────────── */}
       {tab === 'projects' && !loading && (
@@ -506,7 +511,7 @@ export function MyDataPage() {
       )}
 
       {/* ── Deployments tab ──────────────────────────────────────────────── */}
-      {tab === 'deployments' && !loading && (
+      {tab === 'deployments' && !loading && !showNothing && (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
@@ -550,7 +555,7 @@ export function MyDataPage() {
       )}
 
       {/* ── Map tab ──────────────────────────────────────────────────────── */}
-      {tab === 'map' && (
+      {tab === 'map' && !showNothing && (
         <>
           {loading ? <p>Loading deployments…</p> : (
             <DeploymentMap
@@ -563,7 +568,7 @@ export function MyDataPage() {
       )}
 
       {/* ── Reports tab ──────────────────────────────────────────────────── */}
-      {tab === 'reports' && (
+      {tab === 'reports' && !showNothing && (
         <ObservationReports
           observations={observations}
           deployments={deployments}
@@ -572,7 +577,7 @@ export function MyDataPage() {
       )}
 
       {/* ── Media tab ──────────────────────────────────────────────────────── */}
-      {tab === 'media' && (
+      {tab === 'media' && !showNothing && (
         <MediaBrowser
           deployments={deployments.map(d => ({ id: d.id, location_name: d.location_name, project_id: d.project_id, timezone: d.timezone }))}
         />
