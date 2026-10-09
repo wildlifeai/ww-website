@@ -53,7 +53,7 @@ async def get_media_image(
 
     result = client.table("media").select("file_path").eq("id", media_id).maybe_single().execute()
 
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Media record not found")
 
     file_path = result.data.get("file_path", "")
@@ -103,7 +103,7 @@ async def resolve_media_url(
 
     client = supabase_client.create_anon_client()
     result = client.table("media").select(_REGISTRY_SELECT).eq("id", media_id).maybe_single().execute()
-    if not result.data:
+    if not result or not result.data:
         return ApiResponse(error=ApiError(code="NOT_FOUND", message="Media not found"), meta=ApiMeta(request_id=req_id))
 
     return ApiResponse(

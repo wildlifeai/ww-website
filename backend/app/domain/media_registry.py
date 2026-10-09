@@ -203,7 +203,7 @@ async def generate_observation_crops(media_id: str) -> Optional[str]:
             .order("confidence", desc=True)  # first row → hero
             .execute()
         )
-        return media.data, obs.data
+        return (media.data if media else None), obs.data
 
     media_row, obs_rows = await asyncio.to_thread(_fetch)
     if not media_row or not obs_rows:

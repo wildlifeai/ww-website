@@ -42,6 +42,10 @@ node scripts/validate-docs.js
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
 
+`pyright` in `backend/` (venv active, `requirements-dev.txt` installed) type-checks the backend
+with the `[tool.pyright]` settings in `backend/pyproject.toml`. It is advisory until its backlog
+is cleared (#225): add no new errors in the files you touch.
+
 `ci.yml` runs the same gates on every pull request and adds three that only run there: pytest
 with a statement-coverage floor, a build of the backend's `api` Docker stage that is started and
 asked for `/docs`, and a check that `backend/openapi.json` matches the app (regenerate it with

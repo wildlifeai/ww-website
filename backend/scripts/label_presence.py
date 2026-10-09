@@ -345,7 +345,7 @@ def run_ui(bursts: list[Burst], csv_path: str, labelled_by: str, max_width: int 
         img = Image.open(frame.path).convert("RGB")
         scale = min(1.0, max_width / img.width)
         if scale < 1.0:
-            img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+            img = img.resize((round(img.width * scale), round(img.height * scale)), Image.Resampling.LANCZOS)
         state["photo"] = ImageTk.PhotoImage(img)
         canvas.configure(image=state["photo"])
         done = total - (len(queue) - state["i"])

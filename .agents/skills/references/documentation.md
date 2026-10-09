@@ -45,6 +45,7 @@ Run:
 * Ruff linting
 * Ruff formatting
 * Pytest
+* Pyright, advisory: no new errors in the files you touch (see `AGENTS.md`)
 
 ## Frontend Changes
 

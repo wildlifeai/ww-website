@@ -52,7 +52,7 @@ def resize_to_max(data: bytes, max_size: int, quality: int = 85) -> bytes:
         w, h = img.size
         scale = min(1.0, max_size / max(w, h))
         if scale < 1.0:
-            img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+            img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.LANCZOS)
         out = BytesIO()
         img.save(out, format="JPEG", quality=quality)
         return out.getvalue()

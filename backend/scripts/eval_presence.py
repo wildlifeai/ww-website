@@ -429,7 +429,9 @@ def burst_len_bucket(n: int) -> str:
     return "1" if n <= 1 else ("2" if n == 2 else "3+")
 
 
-def strata_of(frames: list[LabelledFrame], bursts: list[list[LabelledFrame]], read: Callable[[str], bytes] = None) -> dict[str, dict[str, str]]:
+def strata_of(
+    frames: list[LabelledFrame], bursts: list[list[LabelledFrame]], read: Optional[Callable[[str], bytes]] = None
+) -> dict[str, dict[str, str]]:
     """``{stratum family: {path: stratum value}}`` for every frame: ``light``, ``light_source``, ``burst_len``, ``folder``."""
     read = read or (lambda p: open(p, "rb").read())
     sizes: dict[str, int] = {f.path: len(b) for b in bursts for f in b}
