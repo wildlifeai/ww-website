@@ -60,7 +60,9 @@ as the `frontend/.husky/commit-msg` hook does locally; the rules and what trips 
 [`references/documentation.md`](.agents/skills/references/documentation.md#commit-messages).
 
 The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
-(`.github/workflows/e2e.yml`); what they prove and how to read a failure is in
+(`.github/workflows/e2e.yml`), and the smoke and demo also run against a whole stack started on
+the runner from the pull request's own backend and frontend (`e2e-full-stack.yml`); what they
+prove and how to read a failure is in
 [`e2e/README.md`](e2e/README.md). They need a running site, so they are not part of the
 local gates above.
 
