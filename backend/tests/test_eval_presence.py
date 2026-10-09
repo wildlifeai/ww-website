@@ -216,10 +216,13 @@ def test_strata_light_burst_length_and_top_folder(tmp_path):
     assert "**single / m / prompt v2**" in table and "| light | night_ir | 1 | 1 | 0.0% | 1 | n/a |" in table
 
 
-def _ww500_jpeg(maker_note=None, flash=None, rgb=(90, 90, 90)) -> bytes:
-    """A frame with the WW500's EXIF: little-endian, Flash and MakerNote in the Exif sub-IFD."""
+def _ww500_jpeg(maker_note=None, flash=None, rgb=(90, 90, 90), endian="<") -> bytes:
+    """A frame with the WW500's EXIF: Flash and MakerNote in the Exif sub-IFD.
+
+    The firmware writes little-endian; Pillow defaults to big-endian, so the order is set.
+    """
     exif = Image.Exif()
-    exif.endian = "<"  # as the firmware writes it
+    exif.endian = endian
     sub = exif.get_ifd(0x8769)
     if flash is not None:
         sub[0x9209] = flash
@@ -236,6 +239,7 @@ DARK_NOTE = "376, 4, 192, 5, N"  # Colorado, 20:19 local: the AE spending digita
 
 def test_light_flash_fired_is_night_ir_whatever_the_exposure():
     assert ev.light_of(_ww500_jpeg(DAY_NOTE, flash=1)) == ("night_ir", "flash")
+    assert ev.light_of(_ww500_jpeg(DAY_NOTE, flash=1, endian=">")) == ("night_ir", "flash")  # other cameras, #318
     assert ev.light_of(_ww500_jpeg(DAY_NOTE + ", 0, 0, 2")) == ("night_ir", "flash")  # the MakerNote copy (IR = 2)
     # A flash that did not fire decides nothing: the flash can be switched off.
     assert ev.light_of(_ww500_jpeg(DARK_NOTE, flash=0)) == ("night_ir", "exposure")
