@@ -82,7 +82,7 @@ and production, only the instances and scale differ (see the
    │  • Postgres + RLS  │ service│  (Azure Container Apps + ACR)│
    │  • Auth (JWT)      │  role  │  • in-process asyncio jobs   │
    │  • Storage:        │        │  • EXIF, AI pipeline,        │
-   │    media-renditions│        │    LoRaWAN, model convert    │
+   │    media-renditions│        │    model convert             │
    │    (public bucket) │        └──────────────────────────────┘
    │  • api_jobs        │            │        │          │
    └────────────────────┘            │        │          │
@@ -97,7 +97,7 @@ and production, only the instances and scale differ (see the
                           └─────────────┘ └──────────┘ └────────────────┘
 
    iNaturalist ──▶ taxa autocomplete + lineage, observation publish + community-ID sync
-   TTN/Chirpstack ──▶ LoRaWAN uplink webhooks ──▶ FastAPI ──▶ Supabase
+   TTN ──▶ ww-backend lorawan-ingest edge function ──▶ Supabase (the website only reads)
 ```
 
 **One image upload, end to end** (detail in
@@ -204,7 +204,7 @@ self-serve:
 | `GOOGLE_DRIVE_FOLDER_ID` | Also in the fetched `.env`. **No default in code**, each environment archives into its own subfolder of the shared `Data` folder, so an unset value fails loudly rather than writing somewhere unwatched |, |
 | `SEED_USER_PASSWORD` (seed-user login) | GitHub Actions secret in `ww-backend` / `ww-website`; see [Testing with Seed Users](./documentation/resources/testing-with-seed-users.md) | Ask a maintainer |
 | `HF_TOKEN` | Your own HuggingFace token (DINOv3 is a gated model) | Self-serve at huggingface.co |
-| `LORAWAN_*`, `INAT_*`, `SENTRY_DSN` | Optional for local dev, from a maintainer if you work on those integrations |, |
+| `INAT_*`, `SENTRY_DSN` | Optional for local dev, from a maintainer if you work on those integrations |, |
 
 The full env-var reference lives in [`backend/app/config.py`](./backend/app/config.py) (validated
 at boot) and [00-GETTING-STARTED.md](./documentation/onboarding/00-GETTING-STARTED.md). Cloud
@@ -330,7 +330,7 @@ All documentation lives under [`documentation/`](./documentation), see the
 ### Reference Guides & Development Reports
 
 Reference guides, the API reference, deployment + cloud-infrastructure guides, demo account, seed
-users, LoRaWAN setup, CamtrapDP import, the model pipelines, UI components, and the prod GPU-worker
+users, CamtrapDP import, the model pipelines, UI components, and the prod GPU-worker
 runbook, live in [`documentation/resources/`](./documentation/resources). Active engineering specs
 and the frozen point-in-time archive live in
 [`documentation/development reports/`](./documentation/development%20reports). The

@@ -53,7 +53,6 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | **Google Drive** | Permanent image archive (`gdrive://` originals) | `GOOGLE_DRIVE_ENABLED` |
 | **Vector store** | DINOv3 embeddings for the Wildlife Brain (similarity / clustering). **`pgvector` in the Supabase Postgres** — no new vendor; live since 2026-07-09. Vectors live in `media_embeddings.embedding`; the former Qdrant container has been **removed**. See [Deployment Guide → Vector Store](../resources/deployment-guide.md#vector-store--pgvector-supabase) | `FF_WILDLIFE_BRAIN_ENABLED` |
 | **iNaturalist** | Taxa autocomplete + lineage registration, observation publishing + community-ID sync | `FF_INAT_ENABLED` |
-| **TTN / Chirpstack** | LoRaWAN uplink webhooks | `FF_LORAWAN_WEBHOOKS_ENABLED` |
 | **Sentry** | Error tracking | `SENTRY_DSN` |
 | **Edge Impulse** | Trains Species Brains (on-camera classifiers) from an Annotations selection: Studio + ingestion APIs driven by `services/edge_impulse.py`. Without credentials the action packages a dataset ZIP instead | `FF_MODEL_TRAINING_ENABLED` + `EDGE_IMPULSE_API_KEY` / `EDGE_IMPULSE_PROJECT_ID` (set on the **worker** too) |
 
@@ -66,7 +65,6 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_INAT_ENABLED` | `false` | iNaturalist endpoints |
 | `FF_ML_ENABLED` | `false` | ML-assisted classification — **must** be true or `build_pipeline_steps()` returns `[]` |
 | `FF_CLUSTERING_ENABLED` | `false` | ⚠️ **Declared but not wired** — nothing reads it; `/api/clustering` (legacy perceptual-hash) is registered unconditionally in `main.py`. Either gate the router or drop the flag |
-| `FF_LORAWAN_WEBHOOKS_ENABLED` | `true` | LoRaWAN webhook ingestion |
 | `FF_PUBLIC_API_ENABLED` | `false` | Public data API (`/api/v1/*`) |
 | `FF_CAMTRAPDP_IMPORT_ENABLED` | `true` | CamtrapDP package import |
 | `FF_PIPELINE_ENABLED` | `false` | AI pipeline inference endpoints |

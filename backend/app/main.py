@@ -29,7 +29,6 @@ from app.routers import (
     inaturalist,
     intelligence,
     jobs,
-    lorawan,
     manifest,
     media,
     models,
@@ -86,7 +85,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Wildlife Watcher API",
-    description="V2 backend — async job system, LoRaWAN ingestion, model conversion",
+    description="V2 backend — async job system, model conversion",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -152,7 +151,6 @@ app.include_router(jobs.router)
 app.include_router(deployments.router)
 app.include_router(projects.router)
 app.include_router(exif.router)
-app.include_router(lorawan.router)
 app.include_router(manifest.router)
 app.include_router(models.router)
 app.include_router(media.router)
