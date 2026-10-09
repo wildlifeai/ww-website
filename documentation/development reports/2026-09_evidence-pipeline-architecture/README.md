@@ -295,6 +295,12 @@ Replaces the v1 prompt and schema in `services/gemini_presence.py`*; the contact
 the same fields per cell. The JSON schema enumerates every string, so a stray label is a parse
 error.
 
+**Not the default (2026-10-09).** Production stays on v1: on the 632 labelled frames both
+answered, v2 matched v1 on wildlife (98.8% vs 98.1% recall) at about $0.35 vs $0.21 per 1,000
+frames (726 vs 473 tokens per frame) and called 68 of 82 person frames an animal, so v2 stays
+selectable for the eval and v3 is the next try
+([September report §6.5](../2026-09_false-negatives-and-vlm-audit/README.md#65-results)).
+
 ```text
 Examine this camera trap image. It may have been automatically flagged as empty. Inspect
 foliage, shadows, ground textures and the frame borders for wildlife evidence: reflective
@@ -367,7 +373,7 @@ USD. Unknown stays unknown.
 | Stage | Layer | Per 100,000 frames | Status | Source |
 |---|---|---|---|---|
 | Gemini presence, `single`, online, prompt v1 | L4 | **$21.00** ($0.21 per 1,000) | measured 2026-09-28, 600 frames | September report §6.6 |
-| Gemini presence, prompt v2 | L4 | see source | measured on a v2 draft, 2026-09-29 | September report §6.8.7 |
+| Gemini presence, prompt v2 | L4 | **$35** ($0.35 per 1,000) | measured 2026-10-09, 962 frames; not the default | September report §6.5 |
 | Gemini presence, Batch API | L4 | **$10.50** | estimated, published 50% discount | September report §6.3 |
 | Gemini contact sheet | L4 | unknown (7 sheets scored) | unknown | September report §6.6 |
 | SpeciesNet, BioCLIP, DINOv3 on the Azure T4 | L2, L3, L5 | unknown: 1 to 2 s per image, T4 per-second rate not recorded | unknown | [cloud-infrastructure.md](../../resources/cloud-infrastructure.md) |

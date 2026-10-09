@@ -190,7 +190,7 @@ the consensus row included, use `ai_reviewed`.
 
 `GEMINI_API_KEY` in the root `.env` is on the free tier: 15 requests per minute and 500 per
 day per model, and no Batch API. Run `scripts/eval_presence.py` with `--min-interval 4.2` and
-`--cache` (resumable, never pays twice); a full 962-frame run spans two daily windows.
+`--cache` (resumable, never pays twice); a full run of the 700-frame labelled set spans two daily windows, and `--only` runs a subset.
 
 ---
 

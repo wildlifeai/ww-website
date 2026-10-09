@@ -255,11 +255,11 @@ endpoints are gated by `FF_MEDIA_REGISTRY_ENABLED`. All return the standard `Api
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/media/{media_id}/image` | Serve/proxy a media image (`?size=thumb\|full`); resolves public files / signed URLs |
-| `GET /api/media/{media_id}/resolve` | Resolve a media id to a displayable URL (rendition or signed original) |
-| `GET /api/media/registry/{deployment_id}` | Rendition status for a deployment's media |
+| `GET /api/media/{media_id}/image` | Serve/proxy a media image (`?size=thumb\|full`); resolves public files / signed URLs. Needs the Bearer header, so a plain `<img>` cannot load it |
+| `GET /api/media/{media_id}/resolve` | Resolve a media id to a URL an `<img>` can load (`?size=thumbnail\|preview\|original`): a rendition or a public original, `null` when only a private original exists |
+| `GET /api/media/registry/{deployment_id}` | A deployment's media with `thumbnail_url`, `preview_url` and `original_url` resolved as for `/resolve`, each `null` when only a private original exists. Cluster Review and the Review Queue read it |
 | `POST /api/media/thumbnails/{deployment_id}` | Make the missing thumbnails/previews for a deployment (async job, in the caller's job list, progress per 25 photos). The grid's Retry on a "No thumbnail" card calls it |
-| `DELETE /api/media/batch` | Soft-delete media by id list — body `{ "media_ids": [...] }` |
+| `DELETE /api/media/batch` | Soft-delete media by id list, body `{ "media_ids": [...] }`. Runs as the caller, so RLS changes only photos they uploaded (while at least `project_member`) or any photo in a project they administer; other ids are skipped without an error, and `deleted` counts only the rows that changed. `POST /api/media/batch/restore` (body `{ media_ids, deleted_at }`) undoes it under the same rule |
 | `POST /api/media/run-selected` | Run the AI pipeline on a media subset — body `{ "media_ids": [...], "steps": [...] }` |
 
 ---
@@ -273,7 +273,9 @@ Deployment helpers used by the upload flow and Insights. JWT required. Prefix `/
 | `POST /api/deployments` | Create a deployment (+ placeholder device) in a project you can access — body `{ project_id, name?, id?, location_name?, latitude?, longitude?, deployment_start?, deployment_end? }`. Backs the "assign/create a deployment at upload" flow: pass the new id as `assigned_deployment_id` to `/api/exif/parse` to bind photos that carry no valid deployment ID. `id` (a UUID) creates the row under the id the camera stamped into the photos' EXIF, so the phone that configured the camera converges on it when it syncs; `400` if not a UUID, `409` if it already exists |
 | `PATCH /api/deployments/{deployment_id}/location` | Correct a deployment's location as the signed-in user (Insights > Deployments, Edit location). Body `{ location_name, location_description, latitude, longitude, altitude, accuracy }`, every field written, so `null` clears it; `timezone` is recomputed from the coordinates. Runs on the caller's client, so RLS decides: the creator while still a project member, or a project admin. `403` when RLS refuses (0 rows), `404` when the caller cannot see the deployment, `422` for an invalid body. Returns the stored location columns |
 | `POST /api/deployments/validate` | Resolve deployment ids to `valid` / `no_access` / `not_found` — the upload pre-check that drives the warning banners. Accepts full UUIDs (from EXIF `0xF200`) and 8-hex card-folder prefixes. Body `{ "deployment_ids": ["e10f7c43-…", "7785FABB", …] }` |
-| `POST /api/deployments/backfill-timezones` | Derive `deployments.timezone` from GPS for rows missing it (idempotent) |
+| `DELETE /api/deployments/batch` | Soft-delete deployments and their media and observations, body `{ "deployment_ids": [...] }`. The database decides: each id goes through `soft_delete_deployment` as the caller, which allows the deployment's creator while a `project_member`, a `project_admin` of the project, or `ww_admin`. Returns `{ deleted_at, deployment_ids, refused_ids }`; ids the caller cannot see are skipped, and `403` when every visible id was refused. `deleted_at` is shared by the whole batch, for Undo |
+| `POST /api/deployments/batch/restore` | Undo that delete, body `{ deployment_ids, deleted_at }`. Same rule, checked in the API because the database has no restore function. Returns `{ restored, refused_ids }`, `403` when every id was refused |
+| `POST /api/deployments/backfill-timezones` | System admins only (`403` otherwise, demo included). Derive `deployments.timezone` from GPS for rows missing it, across every organisation (idempotent) |
 
 ---
 

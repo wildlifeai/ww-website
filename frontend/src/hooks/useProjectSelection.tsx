@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
+import { createContext, useContext, useState, useEffect, useRef, type ReactNode } from 'react'
 import { supabase } from '../config/supabase'
 import { useAuth } from './useAuth'
 import {
@@ -10,6 +10,7 @@ import {
   toggleProjectSelection,
   type SelectionState,
 } from '../lib/projectSelection'
+import { shouldRefreshOnReturn, subscribeToTabReturn } from '../lib/tabReturnRefresh'
 
 export interface Project {
   id: string
@@ -30,7 +31,7 @@ interface ProjectSelectionContextType {
   toggleProject: (id: string) => void
   selectAll: () => void
   clearAll: () => void
-  /** Refetch the list, e.g. after accepting a project invitation. */
+  /** Refetch the list, e.g. after accepting a project invitation or creating a project. */
   reloadProjects: () => void
 }
 
@@ -41,6 +42,7 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
   const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION)
   const [isLoading, setIsLoading] = useState(true)
   const [reloadKey, setReloadKey] = useState(0)
+  const lastLoadAt = useRef<number | null>(null)
 
   useEffect(() => {
     if (!user) {
@@ -53,7 +55,8 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
 
     let isMounted = true
     const fetchProjects = async () => {
-      setIsLoading(true)
+      // No loading state on a reload: pages keep their data until the list changes.
+      lastLoadAt.current = Date.now()
       const { data, error } = await supabase
         .from('projects')
         .select('id, name')
@@ -70,6 +73,15 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
     
     return () => { isMounted = false }
   }, [user, reloadKey])
+
+  // A project created in the mobile app, or in another tab, shows up on return to this one (#299).
+  const signedIn = !!user
+  useEffect(() => {
+    if (!signedIn) return
+    return subscribeToTabReturn(() => {
+      if (shouldRefreshOnReturn(lastLoadAt.current, Date.now())) setReloadKey(k => k + 1)
+    })
+  }, [signedIn])
 
   const { projects, selectedProjectIds } = selection
   // Until the list for this user has loaded, the empty selection is not a choice the user made.

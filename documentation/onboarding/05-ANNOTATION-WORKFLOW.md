@@ -35,7 +35,14 @@ per image derived from `review_status` (`lib/observations.ts`):
 
 A card with no thumbnail yet shows **Processing…** while its deployment has a queued or running
 job, or for 10 minutes after the photo was registered. After that it shows **No thumbnail** and a
-**Retry** button, which runs the thumbnail backfill for the whole deployment (#208). While a job
+**Retry** button, which runs the thumbnail backfill for the whole deployment (#208). The grid also
+starts that backfill by itself, once per deployment per browser session, the first time it shows a
+deployment's **No thumbnail** card, so a deployment whose thumbnails cannot be made does not loop
+(`hooks/useAutoRetryThumbnails.ts`, #175). A photo with no rendition and a Google Drive original
+has nothing an `<img>` can load, since `/api/media/{id}/image` needs a Bearer header, so the grid
+and the viewer never request it (`lib/mediaImageUrl.ts`, #300). The viewer shows the same states
+as the card, **Processing…** or **No preview yet** with Retry, and its filmstrip a plain tile. Both
+show the user's own copy of a just-uploaded file until its rendition exists. While a job
 runs on a deployment in view the grid quietly refetches its page every 30 s, keeping the cards on
 screen until the new rows arrive, and it reloads once more when
 the job finishes (`hooks/useRefreshWhileBusy.ts`, `hooks/useBusyDeployments.ts`,
@@ -57,7 +64,8 @@ the Edge Impulse recipe (`TrainModelModal.tsx`, `POST /api/models/train`, behind
 
 ## The full-screen labeling modal
 
-Clicking a photo opens a **full-screen modal** (`MediaDetail.tsx`):
+Clicking a photo opens a **full-screen modal** (`MediaDetail.tsx`; its photo area and filmstrip are
+`MediaDetailImage.tsx`):
 
 - **Left** — the image at up to 92vh with **bounding-box overlays** and draw/redraw/delete; ‹/›
   arrows and ←/→ keys step between images; Esc cancels a draw or closes; click the backdrop to close.

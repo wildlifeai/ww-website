@@ -74,14 +74,21 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
     const ids = selectedRows.map(r => r.id)
     setDeleting(true)
     try {
-      const res = await apiClient.del('/api/deployments/batch', { deployment_ids: ids }) as { deleted_at?: string }
+      const res = await apiClient.del('/api/deployments/batch', { deployment_ids: ids }) as {
+        deleted_at?: string; deployment_ids?: string[]; refused_ids?: string[]
+      }
       const deletedAt = res?.deleted_at
+      const deletedIds = res?.deployment_ids ?? ids
+      const refused = res?.refused_ids?.length ?? 0
       setConfirming(false); setOpen(false); onClear(); onDeleted?.()
       if (deletedAt) {
+        const skipped = refused
+          ? `. ${refused} not deleted: only the person who set a deployment up, or a project admin, can delete it`
+          : ''
         showUndoToast({
-          message: `Deleted ${ids.length} deployment${ids.length !== 1 ? 's' : ''} (and their photos)`,
+          message: `Deleted ${deletedIds.length} deployment${deletedIds.length !== 1 ? 's' : ''} (and their photos)${skipped}`,
           onUndo: async () => {
-            await apiClient.post('/api/deployments/batch/restore', { deployment_ids: ids, deleted_at: deletedAt })
+            await apiClient.post('/api/deployments/batch/restore', { deployment_ids: deletedIds, deleted_at: deletedAt })
             onDeleted?.()
           },
         })
