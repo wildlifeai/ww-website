@@ -1,5 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../../lib/apiClient'
+import { useAuth } from '../../hooks/useAuth'
 
 interface INatStatus {
   connected: boolean
@@ -10,65 +12,62 @@ interface INatStatus {
 
 const INAT_TOKEN_URL = 'https://www.inaturalist.org/users/api_token'
 
+/** The panel's error for a failed status check. The first two hide the panel. */
+function statusError(e: { code?: string; message?: string }): string {
+  // User not logged in to WW, and the iNat panel requires auth
+  if (e.code === 'UNAUTHORIZED' || e.message?.includes('401')) return 'login_required'
+  // iNat feature not enabled
+  if (e.message?.includes('404')) return 'not_enabled'
+  return e.message || 'Failed to check iNaturalist status'
+}
+
 export function INaturalistPanel() {
-  const [status, setStatus] = useState<INatStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
+  // The connection is per user, and the panel hides itself when signed out (a 401).
+  const statusKey = ['inat', 'status', user?.id]
+  const statusQuery = useQuery({
+    queryKey: statusKey,
+    queryFn: async (): Promise<INatStatus> => {
+      const res = await apiClient.get('/api/inat/status')
+      return res.data ?? res
+    },
+    // A 401 or 404 is an answer, not a blip: hide the panel without a retry first.
+    retry: false,
+  })
+  const status = statusQuery.data ?? null
+  const loading = statusQuery.isFetching
+  // Errors from the connect and disconnect actions; a failed status check is read from the query.
+  const [actionError, setActionError] = useState<string | null>(null)
+  const error = actionError ?? (statusQuery.isError ? statusError(statusQuery.error) : null)
   // Pathway 2 (pasted personal token) state
   const [showPaste, setShowPaste] = useState(false)
   const [tokenInput, setTokenInput] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const checkStatus = useCallback(async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const res = await apiClient.get('/api/inat/status')
-      setStatus(res.data ?? res)
-    } catch (e: any) {
-      if (e.code === 'UNAUTHORIZED' || e.message?.includes('401')) {
-        // User not logged in to WW — iNat panel requires auth
-        setStatus(null)
-        setError('login_required')
-      } else if (e.message?.includes('404')) {
-        // iNat feature not enabled
-        setStatus(null)
-        setError('not_enabled')
-      } else {
-        setError(e.message || 'Failed to check iNaturalist status')
-      }
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  // Back from the OAuth redirect: clean the URL. The status read on mount sees the new link.
   useEffect(() => {
-    checkStatus()
-
-    // Check if we just came back from OAuth redirect
     const params = new URLSearchParams(window.location.search)
     if (params.get('inat') === 'connected') {
-      // Clean URL and refresh status
       window.history.replaceState({}, '', window.location.pathname)
-      checkStatus()
     }
-  }, [checkStatus])
+  }, [])
 
   // Pathway 2: submit the personal API token the user pasted. No OAuth app /
   // callback URL needed — the token is validated server-side, then stored.
   const handleSubmitToken = async () => {
     const token = tokenInput.trim()
-    if (!token) { setError('Paste your iNaturalist API token first'); return }
+    if (!token) { setActionError('Paste your iNaturalist API token first'); return }
     try {
       setSubmitting(true)
-      setError(null)
+      setActionError(null)
       const res = await apiClient.post('/api/inat/token', { api_token: token })
       const data = res.data ?? res
-      setStatus({ connected: !!data.connected, inat_username: data.inat_username })
+      queryClient.setQueryData<INatStatus>(statusKey, { connected: !!data.connected, inat_username: data.inat_username })
       setTokenInput('')
       setShowPaste(false)
     } catch (e: any) {
-      setError(e.message || 'That token was rejected — make sure you copied the full api_token')
+      setActionError(e.message || 'That token was rejected — make sure you copied the full api_token')
     } finally {
       setSubmitting(false)
     }
@@ -76,11 +75,11 @@ export function INaturalistPanel() {
 
   const handleDisconnect = async () => {
     try {
-      setError(null)
+      setActionError(null)
       await apiClient.post('/api/inat/disconnect')
-      setStatus({ connected: false })
+      queryClient.setQueryData<INatStatus>(statusKey, { connected: false })
     } catch (e: any) {
-      setError(e.message || 'Failed to disconnect')
+      setActionError(e.message || 'Failed to disconnect')
     }
   }
 

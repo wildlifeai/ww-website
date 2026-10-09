@@ -154,10 +154,13 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   // Once the pipeline is terminal every batch has registered its media rows, so the optimistic
-  // grid cards are redundant (the real rows dedup them out) — drop them.
-  useEffect(() => {
+  // grid cards are redundant (the real rows dedup them out): drop them. This runs during render
+  // on the phase change rather than in an effect, so the cards never outlive the terminal render.
+  const [lastPhase, setLastPhase] = useState(phase)
+  if (phase !== lastPhase) {
+    setLastPhase(phase)
     if (phase === 'completed' || phase === 'failed') { setPendingUploads([]); setPendingSince(null) }
-  }, [phase])
+  }
 
   // ── Job polling ────────────────────────────────────────────────────────────
   useEffect(() => {

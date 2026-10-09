@@ -169,6 +169,9 @@ export function EventReviewPage() {
   useEffect(() => {
     async function loadData() {
       setLoading(true)
+      // A fresh deck starts its first event's slideshow at the first frame, unzoomed.
+      setCurrentSlideIndex(0)
+      setZoomLevel(1.0)
       try {
         // Try fetching observation events from database
         const { data, error } = await supabase
@@ -230,11 +233,13 @@ export function EventReviewPage() {
   // Active selected event
   const selectedEvent = events.find(e => e.id === selectedEventId) || events[0]
 
-  // Reset slide index when selected event changes
-  useEffect(() => {
+  // Selecting a different event restarts its burst slideshow at the first frame, unzoomed.
+  const selectEvent = (id: string) => {
+    if (id === selectedEventId) return
+    setSelectedEventId(id)
     setCurrentSlideIndex(0)
     setZoomLevel(1.0)
-  }, [selectedEventId])
+  }
 
   // Sorting & Filtering Logic
   const filteredEvents = events.filter(evt => {
@@ -480,7 +485,7 @@ export function EventReviewPage() {
                 return (
                   <div
                     key={evt.id}
-                    onClick={() => setSelectedEventId(evt.id)}
+                    onClick={() => selectEvent(evt.id)}
                     className="glass-card"
                     style={{
                       padding: '1rem',
