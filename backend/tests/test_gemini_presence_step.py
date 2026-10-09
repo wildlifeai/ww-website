@@ -56,7 +56,8 @@ def test_animal_row_v2_writes_structured_comment_and_derived_confidence():
                 "visual_conditions": ["night_ir", "low_light"],
                 "evidence": ["body_outline"],
             }
-        )
+        ),
+        "v2",
     )
     row = build_gemini_presence_observation({"id": "m1"}, "dep1", v, MODEL, "t")
     assert row["confidence"] == 0.55  # obscured 0.50 + one evidence item; displayed, never a fusion input
@@ -81,7 +82,9 @@ def test_blank_row_has_no_bbox_even_if_model_gave_one():
     assert row["observation_type"] == "blank" and row["classifier_category"] == "blank"
     assert not any(k.startswith("bbox_") for k in row)  # chk_bbox_complete: all four or none
     assert "observation_comments" not in row
-    v2 = gp.PresenceVerdict(has_animal=False, confidence=0.0, description="leaf litter", bbox=(0.1, 0.1, 0.2, 0.2), visual_conditions=("low_light",))
+    v2 = gp.PresenceVerdict(
+        has_animal=False, confidence=0.0, description="leaf litter", bbox=(0.1, 0.1, 0.2, 0.2), visual_conditions=("low_light",), prompt_version="v2"
+    )
     row2 = build_gemini_presence_observation({"id": "m1"}, "dep1", v2, MODEL, "t")
     assert not any(k.startswith("bbox_") for k in row2)
     assert row2["observation_comments"] == "visibility=none; conditions=low_light | leaf litter" and row2["confidence"] == 0.0
@@ -90,11 +93,25 @@ def test_blank_row_has_no_bbox_even_if_model_gave_one():
 def test_gemini_evidence_signals_from_a_verdict():
     from app.domain.pipeline import gemini_evidence_signals
 
-    v = gp.PresenceVerdict(has_animal=True, animal_visibility="clear", animal_size="large")
+    v = gp.PresenceVerdict(has_animal=True, animal_visibility="clear", animal_size="large", prompt_version="v2")
     assert gemini_evidence_signals(v) == {"gemini_presence": 1.0, "gemini_visibility": (1.0, "clear"), "gemini_size": (1.0, "large")}
-    blank = gp.PresenceVerdict(has_animal=False)
+    blank = gp.PresenceVerdict(has_animal=False, prompt_version="v2")
     assert gemini_evidence_signals(blank) == {"gemini_presence": 0.0, "gemini_visibility": (0.0, "none"), "gemini_size": (0.0, "none")}
     assert gemini_evidence_signals(gp.PresenceVerdict(True, 0.9, prompt_version="v1")) == {"gemini_presence": 1.0}
+    assert gemini_evidence_signals(gp.PresenceVerdict(True, 0.9)) == {"gemini_presence": 1.0}  # v1 is the default
+    # v3 asks for visibility but no size, so it records no size signal.
+    v3 = gp.PresenceVerdict(has_animal=True, animal_visibility="partial", prompt_version="v3", has_person=False)
+    assert gemini_evidence_signals(v3) == {"gemini_presence": 1.0, "gemini_visibility": (0.66, "partial")}
+
+
+def test_v3_person_row_is_blank_and_says_person_in_the_comment():
+    v = gp.parse_single_response(
+        json.dumps({"has_person": True, "has_animal": False, "animal_visibility": "none", "description": "a hand near the lens", "bbox": None}), "v3"
+    )
+    row = build_gemini_presence_observation({"id": "m1"}, "dep1", v, MODEL, "t")
+    assert row["observation_type"] == "blank" and row["confidence"] == 0.0
+    assert row["observation_comments"] == "visibility=none; person=yes | a hand near the lens"
+    assert gp.parse_verdict_comment(row["observation_comments"]) == {"visibility": "none", "person": "yes", "description": "a hand near the lens"}
 
 
 def test_speciesnet_evidence_signals_keep_the_sub_threshold_max_conf():
@@ -164,9 +181,11 @@ async def test_step_writes_one_row_per_frame_and_skips_already_labelled(monkeypa
     monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)
 
     called: list[int] = []
+    versions: list[str] = []
 
     def fake_presence(images, variant, model, **kw):
         called.append(len(images))
+        versions.append(kw.get("prompt_version"))
         v = gp.PresenceVerdict(has_animal=True, confidence=0.9, description="cat", bbox=(0.1, 0.1, 0.5, 0.5))
         return gp.PresenceResult(model=model, variant=variant, verdicts=[v], usage=gp.TokenUsage(300, 40, 10, 350), cost_usd=0.0002, latency_s=0.5)
 
@@ -180,6 +199,7 @@ async def test_step_writes_one_row_per_frame_and_skips_already_labelled(monkeypa
     result = await GeminiPresenceStep().run(media, "dep1", {"confidence_threshold": 0.2})
 
     assert called == [1, 1]  # m2 skipped (idempotent), one call per frame
+    assert versions == ["v1", "v1"]  # production asks the v1 prompt unless the run's config says otherwise
     rows = [r for batch in inserted for r in batch]
     assert {r["media_id"] for r in rows} == {"m1", "m3"}
     assert all(r["source_model_version"] == MODEL and r["observation_type"] == "animal" for r in rows)

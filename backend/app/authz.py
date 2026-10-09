@@ -240,10 +240,55 @@ async def _assert_project_role(user_id: str, project_id: str, project_roles: set
         raise HTTPException(status_code=404, detail="Not found")
 
 
-async def assert_project_writer(user_id: str, project_id: str) -> None:
-    """Raise 404 unless the caller can *modify* the project's data (admin/member, org-manager, or
-    system). Gates deployment delete/restore — a project_viewer is refused."""
-    await _assert_project_role(user_id, project_id, {"project_admin", "project_member"})
+def _may_delete_deployment(roles: list[dict], user_id: str, setup_by: Optional[str], project_id: Optional[str]) -> bool:
+    """The database's rule for deleting a deployment (``soft_delete_deployment``, ww-backend #266),
+    restated for the one path with no database function to call: undoing a delete.
+
+    Its creator while they hold ``project_member`` (or ``project_admin``) on the project, any
+    ``project_admin`` of the project, or ``ww_admin``. An organisation manager, a project viewer
+    and any other system-scope role are refused, as ``has_project_role`` refuses them. Pure, so
+    the tests pin it to the database's wording."""
+    now = datetime.now(timezone.utc)
+    for r in roles:
+        if not _role_active(r, now):
+            continue
+        scope = r.get("scope_type")
+        role = r.get("role")
+        if scope == "system" and role == "ww_admin":
+            return True
+        if scope == "project" and project_id and r.get("scope_id") == project_id:
+            if role == "project_admin":
+                return True
+            if role == "project_member" and setup_by and setup_by == user_id:
+                return True
+    return False
+
+
+async def split_deployments_by_delete_right(user_id: str, deployment_ids: list[str]) -> tuple[list[str], list[str]]:
+    """Split deployment ids, deleted or not, into ``(allowed, refused)`` by the database's delete
+    rule (``_may_delete_deployment``). Ids that do not exist are in neither list.
+
+    Restoring a deployment runs with the service role, because the SELECT policy hides a
+    soft-deleted row from its own creator and ww-backend has no restore function yet. This check
+    is what keeps Undo to the people the database lets delete."""
+
+    def _check() -> tuple[list[str], list[str]]:
+        ids = list(dict.fromkeys(deployment_ids))
+        if not ids:
+            return [], []
+        svc = create_service_client()
+        roles = _fetch_active_roles(svc, user_id)
+        resp = svc.table("deployments").select("id, project_id, setup_by").in_("id", ids).execute()
+        allowed: list[str] = []
+        refused: list[str] = []
+        for row in resp.data or []:
+            if _may_delete_deployment(roles, user_id, row.get("setup_by"), row.get("project_id")):
+                allowed.append(row["id"])
+            else:
+                refused.append(row["id"])
+        return allowed, refused
+
+    return await asyncio.to_thread(_check)
 
 
 async def assert_project_admin(user_id: str, project_id: str) -> None:

@@ -14,7 +14,6 @@ import { StatusBadge, deriveAnnotationStatus } from '../ui/StatusBadge'
 import type { AnnotationStatus } from '../ui/StatusBadge'
 import { Modal } from '../ui/Modal'
 import { isHumanReviewed, isAiLabel, humanCreateFields, photoVerdict } from '../../lib/observations'
-import { getLocalPreview } from '../../lib/localPreviewStore'
 import { apiClient } from '../../lib/apiClient'
 import { showUndoToast } from '../common/undoToastBus'
 import { BulkLabelModal } from './BulkLabelModal'
@@ -27,8 +26,10 @@ import { useUploadStore } from '../../contexts/UploadContext'
 import { useJobsList } from '../../hooks/useJobs'
 import { useBusyDeployments } from '../../hooks/useBusyDeployments'
 import { useDeploymentFilterOptions } from '../../hooks/useDeploymentFilterOptions'
+import { useAutoRetryThumbnails } from '../../hooks/useAutoRetryThumbnails'
 import { useRefreshWhileBusy } from '../../hooks/useRefreshWhileBusy'
 import { isThumbnailStuck } from '../../lib/thumbnailRetry'
+import { displayImageUrl } from '../../lib/mediaImageUrl'
 import { applySelectIntent, cardClickIntent, cardKeyIntent, circleClickIntent, type CardIntent } from '../../lib/cardSelection'
 import { MediaBulkActions, type BulkAction } from './MediaBulkActions'
 import { DeleteConfirmModal, AiModelPickerModal, PipelineLogModal } from './BulkActionModals'
@@ -135,11 +136,6 @@ export interface MediaRecord {
   _pending?: boolean
 }
 
-/** Normalise the media_assets embed (PostgREST returns a single object for to-one). */
-function firstAsset(a: MediaAssetRecord | MediaAssetRecord[] | null | undefined): MediaAssetRecord | undefined {
-  return Array.isArray(a) ? a[0] : (a ?? undefined)
-}
-
 export interface ObservationRecord {
   id: string
   deployment_id: string
@@ -200,35 +196,6 @@ const RIBBON_SECTION: React.CSSProperties = {
 function isLabelCard(o: ObservationRecord): boolean {
   return !!o.crop_url || o.source_type === 'human' || isHumanReviewed(o)
 }
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Resolve a media record to a displayable image URL for the grid.
- *
- * - Rendition (MEDIA_PREP) → public Supabase Storage thumbnail/preview, used directly.
- *   This is the primary path: the auth-gated /api/media/{id}/image proxy below cannot
- *   work from a plain <img> tag (no Authorization header), so for gdrive:// originals
- *   the rendition is the ONLY thing that renders.
- * - Public http/https file_path → use directly.
- * - Otherwise → backend proxy (only resolves for public files; gdrive:// without a
- *   rendition will show the placeholder).
- */
-function resolveImageUrl(media: MediaRecord): string | null {
-  const asset = firstAsset(media.media_assets)
-  const rendition = asset?.thumbnail_url || asset?.preview_url
-  if (rendition) return rendition
-  // No server rendition yet — if this is a just-uploaded file, show the user's own
-  // copy instantly (object URL) instead of the "Processing…" placeholder.
-  const localPreview = getLocalPreview(media.file_name)
-  if (localPreview) return localPreview
-  const filePath = media.file_path
-  if (!filePath) return null
-  if (filePath.startsWith('http://') || filePath.startsWith('https://')) return filePath
-  const apiBase = import.meta.env.VITE_API_BASE_URL || ''
-  return `${apiBase}/api/media/${media.id}/image?size=thumb`
-}
-
 
 // ── Processing banner ─────────────────────────────────────────────────────────
 // Explains blank thumbnails / missing labels: when an upload or AI run is still
@@ -568,6 +535,14 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
       window.setTimeout(() => setNotice(null), 4000)
     }
   }, [qc])
+
+  // Start the backfill once by itself for a deployment whose cards say "No thumbnail" (#175).
+  useAutoRetryThumbnails(
+    media.filter(m => !retryRequested.has(m.deployment_id) && (!displayImageUrl(m, 'thumb') || failedThumbs.has(m.id))),
+    loadedAt,
+    busy,
+    retryThumbnails,
+  )
 
   // Refresh iNaturalist badges whenever the loaded media set changes.
   useEffect(() => { loadInatStates(media.map(m => m.id)) }, [media, loadInatStates])
@@ -1009,7 +984,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
 
   // ── Thumbnail card renderer (shared by flat + grouped grids) ──────────────
   const renderThumbCard = (m: MediaRecord) => {
-    const imgUrl = resolveImageUrl(m)
+    const imgUrl = displayImageUrl(m, 'thumb')
 
     // Optimistic (still-uploading) card — display-only, no selection/detail/actions.
     if (m._pending) {
@@ -1081,7 +1056,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               onError={() => setFailedThumbs(s => new Set(s).add(m.id))}
             />
-          ) : imgUrl && !retryRequested.has(m.deployment_id) && isThumbnailStuck(m, loadedAt, busy) ? (
+          ) : !retryRequested.has(m.deployment_id) && isThumbnailStuck(m, loadedAt, busy) ? (
             // Old enough that the thumbnail should exist, and nothing is making it.
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
               <span style={{ opacity: 0.5 }}>No thumbnail</span>
@@ -1095,14 +1070,12 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
                 Retry
               </button>
             </div>
-          ) : imgUrl ? (
+          ) : (
             // Thumbnail not ready yet (rendition still generating / resolving).
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', opacity: 0.5, fontSize: '0.72rem' }}>
               <span style={{ fontSize: '1.4rem' }}>⏳</span>
               <span>Processing…</span>
             </div>
-          ) : (
-            <span style={{ fontSize: '2rem', opacity: 0.3 }}>📷</span>
           )}
 
           {/* WS5-T4: Status badge — top-left overlay */}
@@ -1158,7 +1131,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   // machinery is reused. Falls back to the full frame when a crop is missing.
   const renderCropCard = (m: MediaRecord, obs: ObservationRecord | null, key: string) => {
     const cropUrl = obs?.crop_url || null
-    const imgUrl = cropUrl || resolveImageUrl(m)
+    const imgUrl = cropUrl || displayImageUrl(m, 'thumb')
     const noCrop = !cropUrl
     const sel = selectedIds.has(m.id)
     const isSelected = selectedMediaId === m.id
@@ -1506,6 +1479,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
             onNext={advanceToNext}
             onPrev={advanceToPrev}
             focusObsId={focusObsId}
+            previewStuck={!retryRequested.has(selectedMedia.deployment_id) && isThumbnailStuck(selectedMedia, loadedAt, busy)}
+            onRetryPreview={() => retryThumbnails(selectedMedia.deployment_id)}
           />
         )}
       </div>

@@ -51,7 +51,7 @@ function Section({ title, description, children }: {
 export function SettingsPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const { clearAll, toggleProject } = useProjectSelection()
+  const { clearAll, toggleProject, reloadProjects } = useProjectSelection()
   const { guard } = useDemoGuard()
   const [searchParams] = useSearchParams()
 
@@ -139,12 +139,14 @@ export function SettingsPage() {
       const deletedAt = res?.deleted_at
       setDeleteTarget(null)
       setProjects(prev => prev.filter(p => p.id !== target.id))
+      reloadProjects()
       if (deletedAt) {
         showUndoToast({
           message: `Deleted project "${target.name}"`,
           onUndo: async () => {
             await apiClient.post(`/api/projects/${target.id}/restore`, { deleted_at: deletedAt })
             setProjRefresh(x => x + 1)
+            reloadProjects()
           },
         })
       }
@@ -287,6 +289,8 @@ export function SettingsPage() {
             id: p.id, name: p.name, description: null, organisation_id: '',
             created_at: new Date().toISOString(), deployment_count: 0,
           }, ...prev])
+          // The top-bar and upload pickers read the shared list, not this page's (#299).
+          reloadProjects()
           setCreateOpen(false)
         }}
       />

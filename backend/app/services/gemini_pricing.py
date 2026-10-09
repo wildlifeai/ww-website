@@ -92,9 +92,12 @@ GEMINI3_DEFAULT_MEDIA_RESOLUTION = "high"
 # field and the longer descriptions). v2 (2026-09-29 smoke test, 20 single
 # frames): 93 to 151 per frame, empty frames at the low end (report section
 # 6.8.7); the sheet-cell figure is the frame figure plus the v1 cell overhead.
+# v3 (2026-10-09, 36 single frames): 48 to 76 per frame, empty frames at the
+# low end, so about v1's length; the cell figure adds the v1 cell overhead.
 ASSUMED_OUTPUT_TOKENS: dict[str, tuple[int, int]] = {
     "v1": (60, 90),
     "v2": (120, 150),
+    "v3": (65, 95),
 }
 ASSUMED_OUTPUT_TOKENS_PER_FRAME = ASSUMED_OUTPUT_TOKENS["v1"][0]
 ASSUMED_OUTPUT_TOKENS_PER_SHEET_CELL = ASSUMED_OUTPUT_TOKENS["v1"][1]

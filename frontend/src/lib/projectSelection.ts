@@ -27,10 +27,15 @@ function allTicked(projects: SelectableProject[], selectedProjectIds: string[]):
 
 /**
  * The selection after the project list (re)loads. A first load, or a different user, selects
- * everything. A reload (an accepted invitation) keeps "all" as all, new projects included, and
- * otherwise keeps the user's choice minus any project that has gone. `projects` is null when the
+ * everything. A reload (an accepted invitation, a return to the tab, a project created, deleted
+ * or restored in Settings) keeps "all" as all, new projects included, and otherwise keeps the
+ * user's choice minus any project that has gone. `projects` is null when the
  * load failed: a reload keeps what it had, and a first load records the user with no projects so
  * the list does not read as loading forever.
+ *
+ * A reload that changes nothing returns `prev` itself. The list refetches whenever the user
+ * returns to the tab (#299), and pages key their queries on the selected ids, so a new but equal
+ * array would refetch every page's data each time.
  */
 export function selectionAfterLoad(
   prev: SelectionState,
@@ -41,11 +46,20 @@ export function selectionAfterLoad(
   const ids = projects.map(p => p.id)
   const wasAll = prev.userId !== userId || allTicked(prev.projects, prev.selectedProjectIds)
   const present = new Set(ids)
-  return {
+  const next = {
     userId,
     projects,
     selectedProjectIds: wasAll ? ids : prev.selectedProjectIds.filter(id => present.has(id)),
   }
+  return sameSelection(prev, next) ? prev : next
+}
+
+function sameSelection(a: SelectionState, b: SelectionState): boolean {
+  return a.userId === b.userId
+    && a.projects.length === b.projects.length
+    && a.projects.every((p, i) => p.id === b.projects[i].id && p.name === b.projects[i].name)
+    && a.selectedProjectIds.length === b.selectedProjectIds.length
+    && a.selectedProjectIds.every((id, i) => id === b.selectedProjectIds[i])
 }
 
 export function toggleProjectSelection(state: SelectionState, id: string): SelectionState {
