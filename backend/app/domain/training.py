@@ -38,6 +38,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 import structlog
 
 from app.config import settings
+from app.domain.label_map import BACKGROUND_ROLE, PREDICTS_TAXON, TARGET_ROLE
 from app.schemas.model import TrainModelRequest
 
 logger = structlog.get_logger()
@@ -50,8 +51,6 @@ MEDIA_SELECT = (
     "reviewer_id, annotator_id, classification_probability)"
 )
 
-BACKGROUND_ROLE = "background"
-TARGET_ROLE = "target"
 TEST_FRACTION = 0.2
 FULL_FRAME_MAX_PX = 320  # a full frame is downscaled before upload; the model input is 96 or 160 px
 
@@ -316,8 +315,9 @@ def build_dataset_zip(
 def build_label_map(classes: List[dict], labels: List[str], background_label: str) -> Dict[str, dict]:
     """``ai_models.label_map`` for the trained model, keyed by device label.
 
-    Targets carry the taxon the class was built from, so edge reflection can turn
-    ``rat: 87%`` into a real observation; the background class is marked as such.
+    Targets predict the taxon the class was built from (``predicts: taxon``, LM-10
+    in ``domain/label_map.py``), so edge reflection can turn ``rat: 87%`` into a
+    real observation; the background class is marked as such.
     This is the one path where the mapping is known at creation time instead of
     being asked from the uploader afterwards.
     """
@@ -325,6 +325,7 @@ def build_label_map(classes: List[dict], labels: List[str], background_label: st
     for c in classes:
         by_label[sanitize_label(c["label"])] = {
             "role": TARGET_ROLE,
+            "predicts": PREDICTS_TAXON,
             "taxon_id": c.get("taxon_id"),
             "scientific_name": c.get("scientific_name"),
             "vernacular_name": c.get("vernacular_name"),

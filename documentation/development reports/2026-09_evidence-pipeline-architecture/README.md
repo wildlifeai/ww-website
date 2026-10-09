@@ -149,7 +149,7 @@ All values in [0, 1]. Absent means not computable for the frame: no row, never 0
 | `motion_frac` | Changed-pixel fraction of the 320x240 grayscale mask against the burst's first frame (the first frame against the second), diff threshold 15 | Singleton, or fewer than two frames of the burst resolved |
 | `motion` | `min(1, motion_frac / 0.02)`; `motion_frac > 0.6` (camera shift, light change) gives 0 and a `camera_shift` flag | `motion_frac` absent |
 | `neighbour_animal` | 1 if any other frame in the burst has `speciesnet_presence = 1` or Gemini `has_animal`, else 0 | Singleton |
-| `edge_presence` | 1 if an `ai_origin='edge'` row exists; 0 if EXIF `user_comment_fields` carry NN scores and none cleared | No NN scores in EXIF |
+| `edge_presence` | 1 if an `ai_origin='edge'` animal row exists (`human` and `vehicle` rows from a type class do not count, #135); 0 if EXIF `user_comment_fields` carry NN scores and none cleared | No NN scores in EXIF |
 | `edge_score` | Highest target-label score / 100 | As above |
 
 ### 6.2 Weights, threshold, bands

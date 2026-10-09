@@ -1,7 +1,8 @@
 # Model class semantics: what a label actually asserts
 
-> **Status:** 📋 Design decision needed — LM-1 is fixed and merged-pending; the class
-> semantics question below is open and blocks behaviour models and any GBIF export.
+> **Status:** ✅ Decided 9 Oct 2026, v1 built: a class predicts a taxon or a type, behaviour
+> is rejected (LM-10). Requiring a `taxon_id`, a server-side write gate and the GBIF export
+> are still open, see [Outcome](#outcome).
 
 Started from [#134](https://github.com/wildlifeai/ww-website/issues/134), where a two-class
 person detector shipped with a one-line labels file. Fixing that exposed a larger question
@@ -134,6 +135,28 @@ This also settles #134's labelling without a taxon decision: class 1 is
 
 ## Outcome
 
-Not yet reached. LM-1 is fixed. The class-semantics model above is a proposal, not an agreed
-design, and section 5's second bullet is the question that has to be answered before any of
-it is built.
+Decided on [#135](https://github.com/wildlifeai/ww-website/issues/135) (9 Oct 2026): in v1 a
+model class predicts a **taxon** or a **type** (`predicts: taxon|type`). A behaviour
+prediction is not an observation, so section 5's second bullet resolves to "not an
+observation" and LM-10 rejects `predicts: behavior` for now. Life stage and sex are out of v1
+for the same reason. The rat classifier and the person detector both fit.
+
+Built (website only, no schema change, `predicts` lives inside `label_map`):
+`domain/label_map.py` (LM-10), edge reflection typing each row by what its class predicts
+(`edge_reflection.py:97` no longer hardcodes `animal`), `ModelLabelMapper` offering a type, and
+`GET /api/models/{model_id}/label-map`. The rules and the default for maps saved before
+`predicts` are in [what a class predicts](../resources/ai-model-pipeline.md#what-a-class-predicts-lm-10).
+
+Also decided (9 Oct 2026): a class's `predicts` is set per class, so one model can mix a taxon
+and a type; a Camera AI `human` or `vehicle` row does not count as presence in evidence fusion
+(`burst_evidence.edge_signals`); existing person models are fixed by re-saving the person class
+as a type in the mapper, not by a shipped default.
+
+Still open:
+
+- LM-10 accepts a taxon class with only a `scientific_name`, because `Rat Detection` and
+  every trained model can carry `taxon_id: null`. Requiring a `taxa.id` is what makes the GBIF
+  keys reachable; deferred until those models carry one.
+- No server-side write gate: `ModelLabelMapper` writes `label_map` straight from the browser,
+  and LM-10 is reported, not enforced, on a save
+  ([#324](https://github.com/wildlifeai/ww-website/issues/324)).

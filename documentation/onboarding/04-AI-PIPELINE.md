@@ -192,4 +192,7 @@ Human review is recorded via `frontend/src/lib/observations.ts` — see
 
 Edge Impulse model ZIPs are converted for the camera's Ethos-U NPU via the **Vela** CLI
 (`services/vela.py`, `domain/model.py`, `POST /api/models/convert`) and registered in `ai_models`.
-See [AI Model Pipeline](../resources/ai-model-pipeline.md).
+See [AI Model Pipeline](../resources/ai-model-pipeline.md). Each class in the model's `label_map`
+predicts a taxon or a type (a person class is `human`), which is what its Camera AI rows carry;
+only animal rows count as Camera AI presence in evidence fusion:
+[what a class predicts](../resources/ai-model-pipeline.md#what-a-class-predicts-lm-10).

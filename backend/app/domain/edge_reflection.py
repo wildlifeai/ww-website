@@ -5,8 +5,10 @@ The camera writes per-class NN scores into each JPEG's EXIF UserComment
 ``media.exif_metadata->user_comment_fields`` (see ``domain/exif.py``). This module
 turns those fields into ``observations`` rows tagged ``ai_origin='edge'`` — the
 Camera AI result shown beside the Cloud AI (SpeciesNet) result — using the project
-model's ``ai_models.label_map`` to map labels to taxa and to skip background
-classes (e.g. ``not rat``).
+model's ``ai_models.label_map`` to say what each label asserts and to skip
+background classes (e.g. ``not rat``). A target class predicts a taxon (an
+``animal`` row with the class's taxon) or a type (``person`` → a ``human`` row
+with no taxon); the rules are LM-10 in ``domain/label_map.py``.
 
 Gated on ``FF_EDGE_REFLECT_ENABLED``: requires the ``observations.ai_origin``
 column (ww-backend migration ``dual_ai_v0``). Best-effort by design — a
@@ -22,6 +24,7 @@ from datetime import datetime, timezone
 
 import structlog
 
+from app.domain.label_map import target_observation_fields
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -64,7 +67,9 @@ def build_edge_observations(
     """Map one media row's UserComment scores to edge observation rows (pure).
 
     One row per *target* label at/above its threshold (label_map ``threshold``,
-    else ``DEFAULT_REFLECT_THRESHOLD_PCT``). Background/negative classes and
+    else ``DEFAULT_REFLECT_THRESHOLD_PCT``), typed by what the class predicts
+    (``label_map.target_observation_fields``). Background/negative classes,
+    classes LM-10 rejects (behaviour, a blank type, a target with no value) and
     non-numeric UserComment fields (device telemetry like ``Batt: 87``) are
     skipped. No bbox — the on-device classifier is whole-image.
     """
@@ -80,7 +85,8 @@ def build_edge_observations(
     rows: list[dict] = []
     for label, raw_value in fields.items():
         entry = label_map.get(label)
-        if not entry or entry.get("role") != "target":
+        observed = target_observation_fields(entry) if entry else None
+        if observed is None:
             continue
         pct = _parse_pct(raw_value)
         if pct is None:
@@ -94,10 +100,7 @@ def build_edge_observations(
                 "deployment_id": deployment_id,
                 "media_id": media_row["id"],
                 "observation_level": "media",
-                "observation_type": "animal",
-                "taxon_id": entry.get("taxon_id"),
-                "scientific_name": entry.get("scientific_name"),
-                "vernacular_name": entry.get("vernacular_name"),
+                **observed,
                 "source_type": "ai",
                 "ai_origin": "edge",
                 "source_model_id": model.get("id"),
