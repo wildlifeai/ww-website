@@ -10,6 +10,7 @@ import { PrototypeBanner } from '../components/common/PrototypeBanner'
 import { StoreBadges, APP_STORE_URL } from '../components/common/StoreBadges'
 import { Camera, Globe, Smartphone } from 'lucide-react'
 import { usePageMeta } from '../lib/pageMeta'
+import { mayHaveSession } from '../lib/authUser'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -355,6 +356,7 @@ function MarketingHero() {
 
 export function HomePage() {
   const { user, loading } = useAuth()
-  if (loading) return <div style={{ padding: '3rem', textAlign: 'center', opacity: 0.5 }}>Loading…</div>
+  // A visitor with no session gets the marketing page at once, not a "Loading…" that it replaces.
+  if (loading && mayHaveSession()) return <div style={{ padding: '3rem', textAlign: 'center', opacity: 0.5 }}>Loading…</div>
   return user ? <Dashboard /> : <MarketingHero />
 }

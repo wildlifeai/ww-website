@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { User } from '@supabase/supabase-js'
-import { nextAuthUser } from './authUser'
+import { mayHaveSession, nextAuthUser } from './authUser'
 
 const user = (id: string, email = `${id}@example.test`) => ({ id, email }) as User
 
@@ -23,5 +23,29 @@ describe('nextAuthUser', () => {
   it('takes the new value when the user updates their own record', () => {
     const updated = user('u1', 'new@example.test')
     expect(nextAuthUser(user('u1'), updated, 'USER_UPDATED')).toBe(updated)
+  })
+})
+
+describe('mayHaveSession', () => {
+  const storage = (...keys: string[]) => ({ length: keys.length, key: (i: number) => keys[i] ?? null })
+  const at = (search = '', hash = '') => ({ search, hash })
+
+  it('is false with no stored session and no sign-in redirect', () => {
+    expect(mayHaveSession(storage(), at())).toBe(false)
+    expect(mayHaveSession(storage('ww:groupBy', 'sb-abc-auth-token-code-verifier'), at('?tab=x'))).toBe(false)
+  })
+
+  it('is true with a stored Supabase session', () => {
+    expect(mayHaveSession(storage('ww:groupBy', 'sb-abcdef-auth-token'), at())).toBe(true)
+  })
+
+  it('is true on a sign-in redirect, before the session is stored', () => {
+    expect(mayHaveSession(storage(), at('', '#access_token=t&type=signup'))).toBe(true)
+    expect(mayHaveSession(storage(), at('?code=abc'))).toBe(true)
+  })
+
+  it('is true when storage cannot be read', () => {
+    const blocked = { get length(): number { throw new Error('SecurityError') }, key: () => null }
+    expect(mayHaveSession(blocked, at())).toBe(true)
   })
 })
