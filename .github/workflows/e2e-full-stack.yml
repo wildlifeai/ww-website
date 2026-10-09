@@ -1,0 +1,231 @@
+name: E2E (full stack on the runner)
+
+# The smoke and demo specs from e2e/ against a whole stack started on the
+# runner: a local Supabase from ww-backend's dev migrations and seed, this pull
+# request's backend under uvicorn, and this pull request's frontend from
+# `vite build` + `vite preview`. E2E Smoke (e2e.yml) tests the preview against
+# the dev API, so a backend change is not exercised end to end until it has
+# merged and deployed; this job is the one that tests both halves of a pull
+# request together (#216). It touches no deployed environment and no shared
+# database, so it is the candidate for the first required E2E check.
+#
+# A separate workflow, not a job in backend-integration.yml: that one runs on
+# frontend/src changes only, and its steps are ww-backend's composite action,
+# which ends in the vitest integration tests. The Supabase steps below are
+# copied from that action (ww-backend .github/actions/website-integration-tests),
+# with one change: SEED_USER_PASSWORD is set, so the seeded accounts get a
+# password this job knows. If that action changes how the stack starts or
+# seeds, change it here too. The CLI install is the shared action itself.
+#
+# ww-backend is private, so its checkout needs WW_BACKEND_READ_TOKEN, as in
+# backend-integration.yml. That is the only secret, and the job stops with a
+# clear error without it.
+#
+# Before this check is made required: the paths filter below means a pull
+# request that touches none of them never reports it, and a required check
+# that never reports blocks the merge. Drop the filter then, or skip inside
+# the job instead.
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'e2e/**'
+      - '.github/workflows/e2e-full-stack.yml'
+
+concurrency:
+  group: e2e-full-stack-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-stack:
+    name: E2E Full Stack
+    # A fork's PR gets no secrets, so it cannot check out ww-backend at all.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: 'true'
+      E2E_BASE_URL: http://localhost:4173
+      E2E_API_URL: http://localhost:8000
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the ww-backend read token is set
+        env:
+          TOKEN: ${{ secrets.WW_BACKEND_READ_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::WW_BACKEND_READ_TOKEN is not set, so ww-backend cannot be checked out. See the header of .github/workflows/backend-integration.yml."
+            exit 1
+          fi
+
+      - name: Check out ww-backend
+        uses: actions/checkout@v7
+        with:
+          repository: wildlifeai/ww-backend
+          ref: dev
+          path: ww-backend
+          token: ${{ secrets.WW_BACKEND_READ_TOKEN }}
+          persist-credentials: false
+
+      - uses: ./ww-backend/.github/actions/setup-supabase-cli
+        with:
+          project-dir: ww-backend
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      # Every seeded user, the demo account included, signs in with
+      # SEED_USER_PASSWORD. Without it seed-local.js picks a random one nobody
+      # knows. A fresh value per run: it only ever exists on this runner.
+      - name: Pick a password for the seeded accounts
+        run: |
+          pw="local-$(openssl rand -hex 16)"
+          echo "::add-mask::$pw"
+          echo "SEED_USER_PASSWORD=$pw" >> "$GITHUB_ENV"
+
+      # From website-integration-tests: `supabase start` applies the
+      # migrations but does not seed, and seed-local.js seeds in the order the
+      # cloud dev deploy does. It reads SEED_USER_PASSWORD from the environment.
+      - name: Start and seed the local stack
+        working-directory: ww-backend
+        run: |
+          supabase start
+          node deployment_scripts/seed-local.js
+
+      # Same parsing as website-integration-tests, under names that no other
+      # step reads by accident: each step below maps what it needs, so the
+      # service-role key reaches the backend and nothing else.
+      - name: Read the local stack's URL and keys
+        working-directory: ww-backend
+        run: |
+          supabase status -o env \
+            | sed -n -E 's/^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)="?([^"]*)"?$/LOCAL_SUPABASE_\1=\2/p' > "$RUNNER_TEMP/local-supabase.env"
+          if [ "$(grep -c '=.' "$RUNNER_TEMP/local-supabase.env")" != 3 ]; then
+            echo "::error::supabase status did not give API_URL, ANON_KEY and SERVICE_ROLE_KEY"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/local-supabase.env" >> "$GITHUB_ENV"
+
+      - name: Install the backend
+        run: pip install -r backend/requirements.txt
+
+      # Only the settings config.py requires, plus the two the specs need:
+      # the browser origin for CORS, and the demo account, which ww-backend's
+      # dev seed creates as demo@wildlife.ai with the seed password. Every
+      # feature flag keeps its default, so nothing calls an outside service.
+      - name: Start this pull request's backend
+        working-directory: backend
+        env:
+          SUPABASE_URL: ${{ env.LOCAL_SUPABASE_API_URL }}
+          SUPABASE_ANON_KEY: ${{ env.LOCAL_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ env.LOCAL_SUPABASE_SERVICE_ROLE_KEY }}
+          ALLOWED_ORIGINS: http://localhost:4173,http://127.0.0.1:4173
+          DEMO_EMAIL: demo@wildlife.ai
+          DEMO_PASSWORD: ${{ env.SEED_USER_PASSWORD }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/logs"
+          nohup uvicorn app.main:app --host 127.0.0.1 --port 8000 > "$RUNNER_TEMP/logs/api.log" 2>&1 &
+
+      - name: Install the frontend
+        working-directory: frontend
+        run: npm ci
+
+      # vite.config.ts reads SUPABASE_URL before VITE_SUPABASE_URL, and the
+      # job sets neither, so these are what the bundle gets. No tsc: ci.yml
+      # type-checks the same commit.
+      - name: Build and serve this pull request's frontend
+        working-directory: frontend
+        env:
+          VITE_SUPABASE_URL: ${{ env.LOCAL_SUPABASE_API_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ env.LOCAL_SUPABASE_ANON_KEY }}
+          VITE_API_BASE_URL: ${{ env.E2E_API_URL }}
+        run: |
+          npx vite build
+          nohup npx vite preview --port 4173 --strictPort > "$RUNNER_TEMP/logs/preview.log" 2>&1 &
+
+      - name: Wait for the backend and the frontend
+        run: |
+          wait_for() {
+            for i in $(seq 1 60); do
+              if curl -fsS "$1" >/dev/null; then
+                echo "$1 answered after ${i}s"
+                return 0
+              fi
+              sleep 1
+            done
+            echo "::error::$1 did not answer within 60 s, its log is below"
+            cat "$2"
+            return 1
+          }
+          wait_for "$E2E_API_URL/health" "$RUNNER_TEMP/logs/api.log"
+          wait_for "$E2E_BASE_URL/" "$RUNNER_TEMP/logs/preview.log"
+
+      - name: Install the E2E runner
+        working-directory: e2e
+        run: npm ci
+
+      - name: Cache Playwright's Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - name: Install Chromium
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the smoke and demo flows
+        working-directory: e2e
+        env:
+          E2E_EMAIL: tui@ww.org
+          E2E_PASSWORD: ${{ env.SEED_USER_PASSWORD }}
+        run: npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts
+
+      # Every input is set by this job, so a skipped test here means a spec
+      # lost its env, not a missing secret. Stricter than e2e.yml: none may skip.
+      - name: Fail if any test was skipped
+        if: always()
+        working-directory: e2e
+        run: |
+          # grep -c prints 0 itself (and exits 1) when nothing matches
+          total=$(grep -c '<testcase' results.xml 2>/dev/null || true)
+          skipped=$(grep -c '<skipped' results.xml 2>/dev/null || true)
+          echo "test cases: ${total:-0}, skipped: ${skipped:-0}"
+          test "${total:-0}" -gt 0 && test "${skipped:-0}" -eq 0
+
+      - name: Print the backend log
+        if: failure()
+        run: tail -n 200 "$RUNNER_TEMP/logs/api.log" || true
+
+      - name: Collect the stack logs
+        if: failure()
+        run: cp -r "$RUNNER_TEMP/logs" e2e/stack-logs || true
+
+      - name: Upload screenshots, report and logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-full-stack-${{ github.sha }}
+          path: |
+            e2e/results.xml
+            e2e/test-results/
+            e2e/playwright-report/
+            e2e/stack-logs/
+          retention-days: 7
+          if-no-files-found: warn
