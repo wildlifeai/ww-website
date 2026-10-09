@@ -28,7 +28,7 @@ from a controlled source. ``taxon`` needs a ``taxon_id`` or a
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 TARGET_ROLE = "target"
 BACKGROUND_ROLE = "background"
@@ -96,11 +96,16 @@ def entry_problem(label: str, entry: Any) -> str | None:
     return f"LM-10: class '{label}' predicts {entry.get('predicts')!r}; a class can predict 'taxon' or 'type'"
 
 
+def label_map_problems_by_label(label_map: dict) -> dict[str, str]:
+    """LM-10 per class: ``{label: problem}`` for each invalid class, empty when valid."""
+    return {str(label): p for label, entry in label_map.items() if (p := entry_problem(str(label), entry))}
+
+
 def label_map_problems(label_map: Any) -> list[str]:
     """LM-10 over a whole ``label_map``: one message per invalid class, empty when valid."""
     if not isinstance(label_map, dict):
         return ["LM-10: label_map must be an object keyed by class label"]
-    return [p for label, entry in label_map.items() if (p := entry_problem(str(label), entry))]
+    return list(label_map_problems_by_label(label_map).values())
 
 
 def target_observation_fields(entry: Any) -> dict | None:
@@ -180,3 +185,29 @@ def fetch_model_label_map(client, model_id: str) -> dict | None:
     res = client.table("ai_models").select(LABEL_MAP_SELECT).eq("id", model_id).is_("deleted_at", "null").limit(1).execute()
     row = (res.data or [None])[0]
     return describe_label_map(row) if row else None
+
+
+# ── Write (PUT /api/models/{model_id}/label-map) ─────────────────────
+
+SaveOutcome = Literal["saved", "invalid", "forbidden", "not_found"]
+
+
+def save_model_label_map(client, model_id: str, label_map: dict, user_id: str) -> tuple[SaveOutcome, Any]:
+    """Write ``label_map`` as the caller once it passes LM-10.
+
+    ``invalid`` carries ``{label: problem}`` and nothing is written. ``saved``
+    carries ``describe_label_map`` of the stored row. Pass the caller's own client
+    (``get_user_client``) so RLS decides who may edit: 0 rows updated is
+    ``forbidden`` when the caller can still read the model and ``not_found`` when
+    they cannot see it at all.
+    """
+    problems = label_map_problems_by_label(label_map)
+    if problems:
+        return "invalid", problems
+    rows = (
+        client.table("ai_models").update({"label_map": label_map, "modified_by": user_id}).eq("id", model_id).is_("deleted_at", "null").execute().data
+    )
+    if rows:
+        return "saved", describe_label_map(rows[0])
+    visible = client.table("ai_models").select("id").eq("id", model_id).is_("deleted_at", "null").limit(1).execute().data
+    return ("forbidden" if visible else "not_found"), None

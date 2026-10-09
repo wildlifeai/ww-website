@@ -732,6 +732,22 @@
         "title": "INatPublishRequest",
         "type": "object"
       },
+      "LabelMapRequest": {
+        "description": "A model's whole ``label_map``, keyed by device label; LM-10 runs on it before the write.",
+        "properties": {
+          "label_map": {
+            "additionalProperties": true,
+            "description": "Per-class meaning, see domain/label_map.py",
+            "title": "Label Map",
+            "type": "object"
+          }
+        },
+        "required": [
+          "label_map"
+        ],
+        "title": "LabelMapRequest",
+        "type": "object"
+      },
       "ManifestRequest": {
         "description": "Request to generate a MANIFEST.zip firmware package.",
         "properties": {
@@ -3559,6 +3575,65 @@
           }
         },
         "summary": "Get Label Map",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "description": "Save a model's ``label_map`` once it passes LM-10, and return it as the GET does.\n\nA map that breaks LM-10 is a 422 whose ``detail.problems`` is ``{label: problem}``;\nnothing is written. The write runs on the caller's client, so RLS decides who may\nedit: a refusal is 403, a model the caller cannot see is 404.",
+        "operationId": "put_label_map_api_models__model_id__label_map_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelMapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Label Map",
         "tags": [
           "models"
         ]

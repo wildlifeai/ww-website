@@ -1,8 +1,8 @@
 # Model class semantics: what a label actually asserts
 
 > **Status:** ✅ Decided 9 Oct 2026, v1 built: a class predicts a taxon or a type, behaviour
-> is rejected (LM-10). Requiring a `taxon_id`, a server-side write gate and the GBIF export
-> are still open, see [Outcome](#outcome).
+> is rejected (LM-10), and the website's save enforces it (#324). Requiring a `taxon_id` and
+> the GBIF export are still open, see [Outcome](#outcome).
 
 Started from [#134](https://github.com/wildlifeai/ww-website/issues/134), where a two-class
 person detector shipped with a one-line labels file. Fixing that exposed a larger question
@@ -157,6 +157,7 @@ Still open:
 - LM-10 accepts a taxon class with only a `scientific_name`, because `Rat Detection` and
   every trained model can carry `taxon_id: null`. Requiring a `taxa.id` is what makes the GBIF
   keys reachable; deferred until those models carry one.
-- No server-side write gate: `ModelLabelMapper` writes `label_map` straight from the browser,
-  and LM-10 is reported, not enforced, on a save
-  ([#324](https://github.com/wildlifeai/ww-website/issues/324)).
+- Server-side write gate: built in [#324](https://github.com/wildlifeai/ww-website/issues/324),
+  `ModelLabelMapper` saves through `PUT /api/models/{model_id}/label-map`, which enforces LM-10.
+  A direct PostgREST write by an organisation manager still bypasses it; closing that needs a
+  database check in ww-backend.

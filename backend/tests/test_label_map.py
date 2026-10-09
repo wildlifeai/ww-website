@@ -1,4 +1,4 @@
-"""LM-10 and the label-map read endpoint: what a model class may assert (#135)."""
+"""LM-10 and the label-map endpoints: what a model class may assert (#135, #324)."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -224,3 +224,101 @@ def test_label_map_endpoint_rejects_a_non_uuid_id(client, as_user):
 
 def test_label_map_endpoint_requires_auth(client):
     assert client.get(f"/api/models/{MODEL_ID}/label-map").status_code in (401, 403, 422)
+
+
+# ── PUT /api/models/{model_id}/label-map ─────────────────────────────
+
+VALID_MAP = {
+    "no person": {"role": "background"},
+    "person": {"role": "target", "predicts": "type", "observation_type": "human", "threshold": 0.7},
+    "rat": {"role": "target", "taxon_id": None, "scientific_name": "Rattus rattus"},
+}
+
+
+def _writing_client(*results):
+    """A user-scoped client stub whose successive ``execute`` calls return ``results``."""
+    table = MagicMock()
+    for name in ("update", "select", "eq", "is_", "limit"):
+        getattr(table, name).return_value = table
+    table.execute.side_effect = [SimpleNamespace(data=rows) for rows in results]
+    client = MagicMock()
+    client.table.return_value = table
+    return client, table
+
+
+def _put(client, label_map):
+    return client.put(f"/api/models/{MODEL_ID}/label-map", json={"label_map": label_map}, headers={"Authorization": "Bearer t"})
+
+
+def test_put_label_map_saves_a_valid_map_as_the_caller(client, as_user, monkeypatch):
+    import app.routers.models as models_router
+    import app.services.supabase_client as supabase_client
+
+    service = MagicMock(side_effect=AssertionError("the label-map write must not use the service role"))
+    monkeypatch.setattr(supabase_client, "create_service_client", service)
+    monkeypatch.setattr(models_router, "create_service_client", service)
+    stored = {"id": MODEL_ID, "name": "Mixed", "detection_capabilities": ["no person", "person", "rat"], "label_map": VALID_MAP}
+    user_client, table = _writing_client([stored])
+    as_user(user_client)
+
+    res = _put(client, VALID_MAP)
+
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["problems"] == [] and data["predicts"] == ["taxon", "type"]
+    assert data["label_map"]["rat"]["predicts"] == "taxon"
+    assert data["label_map"]["person"]["threshold"] == 0.7
+    table.update.assert_called_once_with({"label_map": VALID_MAP, "modified_by": "u1"})
+    table.eq.assert_called_once_with("id", MODEL_ID)
+    table.is_.assert_called_once_with("deleted_at", "null")
+    service.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("entry", "fragment"),
+    [
+        ({"role": "target", "predicts": "behavior", "behavior": "grooming"}, "behaviour"),
+        ({"role": "target", "predicts": "type"}, "no observation_type"),
+        ({"role": "target", "predicts": "type", "observation_type": "blank"}, "mark the class background"),
+        ({"role": "target", "predicts": "type", "observation_type": "person"}, "use one of animal, human, vehicle"),
+        ({"role": "target", "predicts": "taxon"}, "names none"),
+        ({"role": "target", "predicts": "life_stage"}, "'taxon' or 'type'"),
+        ({"role": "negative"}, "'target' or 'background'"),
+        ("target", "must be an object"),
+    ],
+)
+def test_put_label_map_rejects_each_lm10_failure_and_writes_nothing(client, as_user, entry, fragment):
+    user_client, table = _writing_client()
+    as_user(user_client)
+
+    res = _put(client, {"no person": {"role": "background"}, "bad": entry})
+
+    assert res.status_code == 422
+    problems = res.json()["detail"]["problems"]
+    assert list(problems) == ["bad"] and fragment in problems["bad"]
+    table.update.assert_not_called()
+
+
+def test_put_label_map_is_403_when_rls_refuses_the_write(client, as_user):
+    user_client, table = _writing_client([], [{"id": MODEL_ID}])
+    as_user(user_client)
+    res = _put(client, VALID_MAP)
+    assert res.status_code == 403
+    table.update.assert_called_once()
+
+
+def test_put_label_map_is_404_for_a_model_the_caller_cannot_see(client, as_user):
+    as_user(_writing_client([], [])[0])
+    assert _put(client, VALID_MAP).status_code == 404
+
+
+def test_put_label_map_rejects_a_body_that_is_not_a_map(client, as_user):
+    user_client, table = _writing_client()
+    as_user(user_client)
+    assert _put(client, ["rat"]).status_code == 422
+    table.update.assert_not_called()
+
+
+def test_put_label_map_requires_auth(client):
+    res = client.put(f"/api/models/{MODEL_ID}/label-map", json={"label_map": VALID_MAP})
+    assert res.status_code in (401, 403, 422)

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Model conversion, upload and training schemas."""
 
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -58,3 +58,9 @@ class TrainModelRequest(BaseModel):
     colour: Literal["grayscale", "rgb"] = Field("grayscale", description="Input channels; grayscale is the recipe used for the rat model")
     epochs: int = Field(30, ge=5, le=100, description="Training cycles (guide: 30 to 50)")
     learning_rate: float = Field(0.001, gt=0, le=0.1)
+
+
+class LabelMapRequest(BaseModel):
+    """A model's whole ``label_map``, keyed by device label; LM-10 runs on it before the write."""
+
+    label_map: Dict[str, Any] = Field(..., description="Per-class meaning, see domain/label_map.py")
