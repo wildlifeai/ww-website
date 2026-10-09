@@ -32,11 +32,17 @@ Usage (from ``backend/``, ``GEMINI_API_KEY`` in the root ``.env`` for live runs)
     # the same dump with and without the whole-frame and vehicle box rules (#285)
     python scripts/eval_presence.py labels.csv --variants "" --speciesnet-results speciesnet.json --speciesnet-rules
 
+    # a new prompt on a chosen subset only (one path per line, as in the CSV)
+    python scripts/eval_presence.py labels.csv --variants single --prompt-version v3 --only subset.txt \\
+        --cache eval_cache_v3.jsonl --min-interval 4.2
+
 ``--cache`` is a JSONL of every live call keyed by (model, variant, frames,
 prompt version), so re-running after a crash or adding a model never pays twice
 for the same frames. A v1 cache is never reused for a v2 run: the key carries
 ``--prompt-version`` (v1 keys keep the original shape so the 2026-09-28 cache
-still resumes a ``--prompt-version v1`` run).
+still resumes a ``--prompt-version v1`` run). ``--only`` restricts every run to
+the frames a file lists, so a prompt can be tried on a subset without editing
+the labels.
 
 Besides the headline table the script reports recall per stratum that needs no
 extra labels: night IR vs day (``light_of``: the flash, else the WW500 exposure,
@@ -123,6 +129,7 @@ class FrameOutcome:
     evidence: list[str] = field(default_factory=list)
     description: str = ""
     prompt_version: str = ""
+    has_person: Optional[bool] = None  # v3 only
 
 
 @dataclass
@@ -188,6 +195,27 @@ def read_labels(csv_path: str, root: Optional[str] = None) -> list[LabelledFrame
         frames.append(LabelledFrame(path=path, burst_id=row.get("burst_id") or path, has_animal=truth, label=label))
     frames.sort(key=lambda f: (f.burst_id, f.path))
     return frames
+
+
+def read_only_list(path: str, root: Optional[str] = None) -> set[str]:
+    """Normalised paths from an ``--only`` file: one per line, ``#`` comments and blanks skipped, relative ones resolved against ``root``."""
+    out: set[str] = set()
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            if root and not os.path.isabs(entry):
+                entry = os.path.join(root, entry)
+            out.add(os.path.normpath(entry))
+    return out
+
+
+def filter_only(bursts: list[list[LabelledFrame]], only: Optional[set[str]]) -> list[list[LabelledFrame]]:
+    """``bursts`` keeping only the frames in ``only`` (None keeps everything); bursts left empty are dropped."""
+    if only is None:
+        return bursts
+    return [b for b in ([f for f in b if f.path in only] for b in bursts) if b]
 
 
 def compute_bursts(frames: list[LabelledFrame], gap_seconds: float = DEFAULT_GAP_SECONDS) -> list[list[LabelledFrame]]:
@@ -294,7 +322,10 @@ def person_line(outcomes_by_run: dict[tuple, list[FrameOutcome]], person_paths: 
     for key, outs in outcomes_by_run.items():
         answered = [o for o in outs if o.path in person_paths and o.predicted is not None]
         called = sum(1 for o in answered if o.predicted)
-        parts.append(f"{' / '.join(str(k) for k in key)}: {called} of {len(answered)} answered")
+        part = f"{' / '.join(str(k) for k in key)}: {called} of {len(answered)} answered"
+        if any(o.has_person is not None for o in answered):  # v3 reports people on their own
+            part += f", has_person on {sum(1 for o in answered if o.has_person)}"
+        parts.append(part)
     return f"\nPerson frames ({len(person_paths)}, not counted above), called animal by " + "; ".join(parts) + ".\n"
 
 
@@ -512,6 +543,7 @@ def _outcomes_from_result(unit: list[LabelledFrame], result_rec: dict) -> list[F
             evidence=list((v or {}).get("evidence") or []),
             description=(v or {}).get("description") or "",
             prompt_version=result_rec.get("prompt_version", "v1"),
+            has_person=None if v is None else v.get("has_person"),
         )
         for f, v in zip(unit, verdicts)
     ]
@@ -520,6 +552,7 @@ def _outcomes_from_result(unit: list[LabelledFrame], result_rec: dict) -> list[F
 def _verdict_record(v: gp.PresenceVerdict) -> dict:
     return {
         "has_animal": v.has_animal,
+        "has_person": v.has_person,
         "confidence": v.confidence,
         "description": v.description,
         "bbox": v.bbox,
@@ -634,6 +667,7 @@ def dump_verdicts(outcomes_by_run: dict[tuple, list[FrameOutcome]], out_path: st
             o.path: {
                 "truth": o.truth,
                 "predicted": o.predicted,
+                "has_person": o.has_person,
                 "confidence": o.confidence,
                 "animal_visibility": o.visibility,
                 "animal_size": o.size,
@@ -728,6 +762,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--variants", default="single,contact_sheet,batch", help="comma-separated: single, contact_sheet, batch")
     ap.add_argument("--models", default=DEFAULT_MODEL, help="comma-separated Gemini model ids (each needs a price row)")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N labelled frames (rounded up to whole bursts)")
+    ap.add_argument(
+        "--only",
+        default=None,
+        metavar="PATHS_TXT",
+        help="use only the frames listed in this file, one path per line as in the CSV (relative ones resolved against --root)",
+    )
     ap.add_argument("--gap", type=float, default=DEFAULT_GAP_SECONDS, help="burst gap in seconds for the contact sheet and the burst_len stratum")
     ap.add_argument("--dry-run", action="store_true", help="estimate tokens and cost only; no API call")
     ap.add_argument("--cache", default=None, help="JSONL cache of live call results (resumable, never pays twice)")
@@ -753,7 +793,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    bursts = apply_limit(compute_bursts(read_labels(args.labels, args.root), args.gap), args.limit)
+    bursts = all_bursts = compute_bursts(read_labels(args.labels, args.root), args.gap)
+    if args.only:
+        only = read_only_list(args.only, args.root)
+        bursts = filter_only(bursts, only)
+        found = sum(len(b) for b in bursts)
+        if found < len(only):
+            print(f"--only: {len(only) - found} listed path(s) are not in the labels", file=sys.stderr)
+    bursts = apply_limit(bursts, args.limit)
     frames = [f for b in bursts for f in b]
 
     def _scored(f: LabelledFrame) -> bool:  # animal/empty for the metrics, person for its own line
@@ -763,7 +810,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     person_paths = {f.path for f in frames if f.label == "person"}
     scored = [f for f in frames if _scored(f)]
     scored_bursts = [b for b in ([f for f in b if _scored(f)] for b in bursts) if b]
-    labelled_bursts = [b for b in ([f for f in b if f.has_animal is not None] for b in bursts) if b]
     n_unsure = len(frames) - len(scored)
     print(
         f"{len(frames)} frames ({len(labelled)} labelled, {len(person_paths)} person, {n_unsure} unsure) in {len(bursts)} bursts",
@@ -813,7 +859,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     if not args.dry_run:
         table += person_line(outcomes_by_run, person_paths)
     if not args.dry_run and not args.no_strata and labelled:
-        strata = strata_of(labelled, labelled_bursts)
+        # Burst length comes from the whole labelled set, so --only does not shorten a burst.
+        strata = strata_of(labelled, [b for b in ([f for f in b if f.has_animal is not None] for b in all_bursts) if b])
         # Only frames that were actually answered say anything about a stratum.
         per_run = {key: metrics_by_stratum([o for o in outs if o.predicted is not None], strata) for key, outs in outcomes_by_run.items()}
         table += "\n### Recall by stratum (answered frames only)\n\n" + light_line(strata) + "\n" + render_strata_markdown(per_run)

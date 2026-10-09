@@ -154,6 +154,11 @@ export function groupByBox<T extends ObservationBox>(obs: T[]): T[][] {
   return [...groups.values()]
 }
 
+/** What a viewer calls an observation: its common name, else its species, else its type. */
+export function observationLabel(o: { vernacular_name?: string | null; scientific_name: string | null; observation_type: string | null }): string {
+  return o.vernacular_name || o.scientific_name || o.observation_type || 'Unlabelled'
+}
+
 // ── Provenance builders ──────────────────────────────────────────────────────
 
 export interface Actor {

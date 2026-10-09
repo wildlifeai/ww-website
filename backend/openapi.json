@@ -1553,7 +1553,7 @@
     },
     "/api/deployments/backfill-timezones": {
       "post": {
-        "description": "Resolve and persist ``deployments.timezone`` for deployments that lack it.\n\nIdempotent maintenance task: for every deployment with coordinates but no\ntimezone, derive the IANA zone from latitude/longitude (timezonefinder) and\nstore it so the UI can render capture times in local time. Run once after the\ntimezone column is deployed; new CamtrapDP imports populate it automatically.",
+        "description": "Resolve and persist ``deployments.timezone`` for deployments that lack it.\n\nIdempotent maintenance task: for every deployment with coordinates but no\ntimezone, derive the IANA zone from latitude/longitude (timezonefinder) and\nstore it so the UI can render capture times in local time. New CamtrapDP imports\npopulate it automatically.\n\nSystem admins only (``403`` otherwise, and for the demo account): it is a service-role\nwrite across every organisation's deployments, so no project role is enough (#309).",
         "operationId": "backfill_timezones_api_deployments_backfill_timezones_post",
         "parameters": [
           {
@@ -1600,7 +1600,7 @@
     },
     "/api/deployments/batch": {
       "delete": {
-        "description": "Soft-delete deployments (and cascade to their media + observations).\n\nRequires write access (project_admin/member, org-manager, or system) on **every** project the\nselected deployments belong to. Deployments the caller can't write are refused (404). Returns\nthe shared ``deleted_at`` so the client can offer an Undo.",
+        "description": "Soft-delete deployments (and cascade to their media + observations).\n\nThe database decides: each id goes through ``soft_delete_deployment`` as the caller, which\nallows the deployment's creator while they hold ``project_member``, a ``project_admin`` of\nthe project, or ``ww_admin`` (ww-backend #266). Ids it refuses come back in ``refused_ids``;\nids the caller cannot see are skipped. ``403`` when nothing was deleted and something was\nrefused. Returns the shared ``deleted_at`` so the client can offer an Undo.",
         "operationId": "batch_delete_deployments_api_deployments_batch_delete",
         "parameters": [
           {
@@ -1655,7 +1655,7 @@
     },
     "/api/deployments/batch/restore": {
       "post": {
-        "description": "Undo a deployment delete \u2014 clears ``deleted_at`` (== the given timestamp) on the deployments\nand the media/observations that were deleted with them.",
+        "description": "Undo a deployment delete \u2014 clears ``deleted_at`` (== the given timestamp) on the deployments\nand the media/observations that were deleted with them.\n\nSame rule as the delete: the creator while a ``project_member``, a ``project_admin``, or\n``ww_admin``. It is checked here in Python (``split_deployments_by_delete_right``) because the\ndatabase has no restore function and hides a soft-deleted row from the caller's own session.\nRefused ids come back in ``refused_ids``; ``403`` when nothing was restored and something was\nrefused.",
         "operationId": "batch_restore_deployments_api_deployments_batch_restore_post",
         "parameters": [
           {
@@ -2798,7 +2798,7 @@
     },
     "/api/media/batch": {
       "delete": {
-        "description": "Soft-delete multiple media records (sets deleted_at).\n\nIdempotent: already-deleted media are silently skipped. Runs as the\nrequesting user (not the service role) so RLS restricts the update to\nmedia in projects where they hold project_member \u2014 IDs outside their\nprojects are silently ignored, never deleted.",
+        "description": "Soft-delete multiple media records (sets deleted_at).\n\nIdempotent: already-deleted media are silently skipped. Runs as the\nrequesting user (not the service role), so RLS decides which rows change:\na photo's uploader while they hold at least project_member on its project\n(ww-backend #277), or a project_admin of the project. Any other id,\nincluding a plain member's request for a photo someone else uploaded,\nchanges 0 rows without an error; ``deleted`` counts only the rows that\nchanged, so ``deleted < requested`` means some were skipped.",
         "operationId": "batch_delete_media_api_media_batch_delete",
         "parameters": [
           {
@@ -2849,7 +2849,7 @@
     },
     "/api/media/batch/restore": {
       "post": {
-        "description": "Undo a media delete \u2014 clears ``deleted_at`` where it equals the given timestamp. Runs as the\nuser so RLS keeps it to their own projects; scoping by the exact timestamp restores only the\nphotos removed in that delete.",
+        "description": "Undo a media delete \u2014 clears ``deleted_at`` where it equals the given timestamp. Runs as the\nuser, so RLS applies the delete rule: the photo's uploader while they hold at least\nproject_member, or a project_admin of the project; other ids change 0 rows without an error.\nScoping by the exact timestamp restores only the photos removed in that delete.",
         "operationId": "batch_restore_media_api_media_batch_restore_post",
         "parameters": [
           {
@@ -2900,7 +2900,7 @@
     },
     "/api/media/registry/{deployment_id}": {
       "get": {
-        "description": "Paginated media list with pre-resolved URLs \u2014 primary source for the grid.",
+        "description": "Paginated media list with pre-resolved URLs, null where only the private original exists.",
         "operationId": "media_registry_api_media_registry__deployment_id__get",
         "parameters": [
           {
@@ -3140,7 +3140,7 @@
     },
     "/api/media/{media_id}/resolve": {
       "get": {
-        "description": "Return a display URL for a media item regardless of storage provider.",
+        "description": "Return a URL a plain ``<img>`` can load for a media item, regardless of storage provider.\n\n``url`` is null when the photo has no rendition yet and its original is private.",
         "operationId": "resolve_media_url_api_media__media_id__resolve_get",
         "parameters": [
           {
