@@ -3,10 +3,12 @@
  *
  * Mirrors FilterSelect's look but allows multiple choices. The trigger shows the
  * single label when one is picked, or "N <noun>s" for several, or `allLabel`
- * when nothing is selected (i.e. no filter).
+ * when nothing is selected (i.e. no filter). With `searchable`, a box at the top of the menu
+ * narrows a long list as you type.
  */
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { matchOptions } from '../../lib/deploymentFilterOptions'
 
 interface Option { value: string; label: string }
 
@@ -18,10 +20,13 @@ interface Props {
   allLabel?: string
   /** Singular noun for the "N nouns" summary (e.g. "deployment"). */
   noun?: string
+  /** Show a type-to-filter box above the options. */
+  searchable?: boolean
 }
 
-export function MultiSelect({ values, onChange, options, allLabel = 'All', noun = 'item' }: Props) {
+export function MultiSelect({ values, onChange, options, allLabel = 'All', noun = 'item', searchable = false }: Props) {
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   // The menu renders in a portal (fixed position) so it overlays the grid
@@ -69,6 +74,7 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
       : `${values.length} ${noun}s`
 
   const active = values.length > 0
+  const shown = searchable ? matchOptions(options, query) : options
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
@@ -79,6 +85,7 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
           if (!open) {
             const r = ref.current?.getBoundingClientRect()
             if (r) setPos({ top: r.bottom + 4, left: r.left })
+            setQuery('')
           }
           setOpen(o => !o)
         }}
@@ -111,12 +118,26 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
               </button>
             )}
           </div>
+          {searchable && (
+            <div style={{ padding: '0.4rem 0.6rem', borderBottom: '1px solid var(--border)' }}>
+              <input
+                type="search" autoFocus value={query} onChange={e => setQuery(e.target.value)}
+                placeholder={`Search ${noun}s`} aria-label={`Search ${noun}s`}
+                onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
+                style={{
+                  width: '100%', boxSizing: 'border-box', padding: '0.3rem 0.5rem', fontSize: '0.8125rem',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+                  background: 'var(--surface)', color: 'var(--text-color)',
+                }}
+              />
+            </div>
+          )}
           <div style={{ maxHeight: 280, overflowY: 'auto', padding: '0.25rem 0' }}>
-            {options.length === 0 && <div style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem', opacity: 0.5 }}>No options</div>}
-            {options.map(o => (
+            {shown.length === 0 && <div style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem', opacity: 0.5 }}>{options.length === 0 ? 'No options' : 'No matches'}</div>}
+            {shown.map(o => (
               <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0.75rem', fontSize: '0.8125rem', cursor: 'pointer' }}>
                 <input type="checkbox" checked={values.includes(o.value)} onChange={() => toggle(o.value)} style={{ accentColor: 'var(--primary)', cursor: 'pointer' }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
+                <span title={o.label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
               </label>
             ))}
           </div>
