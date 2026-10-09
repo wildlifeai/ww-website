@@ -39,7 +39,8 @@ for the same frames. A v1 cache is never reused for a v2 run: the key carries
 still resumes a ``--prompt-version v1`` run).
 
 Besides the headline table the script reports recall per stratum that needs no
-extra labels: night IR vs day (from the frame's greyscale ratio), burst length
+extra labels: night IR vs day (``light_of``: the flash, else the WW500 exposure,
+else the greyscale ratio, with a line counting each source), burst length
 (1 / 2 / 3+ from the CSV's burst ids) and the top-level folder of each frame.
 ``--dump-verdicts`` writes every frame's verdict with the v2 structured fields.
 """
@@ -54,6 +55,7 @@ import os
 import statistics
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Optional
@@ -62,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.domain.burst_evidence import DEFAULT_GAP_SECONDS  # noqa: E402
 from app.domain.burst_evidence import group_bursts as group_media_bursts  # noqa: E402
+from app.domain.exif import parse_exif_from_bytes  # noqa: E402
 from app.services import gemini_presence as gp  # noqa: E402
 from app.services.gemini_pricing import DEFAULT_MODEL, PRICE_READ_ON, PRICE_SOURCE_URL  # noqa: E402
 from scripts.label_presence import make_frame, media_row  # noqa: E402
@@ -71,7 +74,22 @@ T3_MAX_FALSE_NEGATIVE_RATE = 0.015
 
 # A frame whose colour channels differ by less than this (mean absolute
 # difference on 0-255, after downscaling) is treated as greyscale, i.e. night IR.
+# Only for frames without flash or exposure metadata: the WW500's HM0360 is
+# monochrome, so every frame it takes is greyscale (#302).
 GREYSCALE_MAX_CHANNEL_DIFF = 3.0
+
+# Exposure (``exposure_of``: integration lines x analog gain x digital gain) at or
+# above which a WW500 frame without a fired flash counts as night_ir: full
+# integration (376 lines), analog code 4 (16x) and digital gain 2x, so the AE has
+# run past the analog gain and is spending digital gain. Chosen from the labelled
+# set (2026-09-26, Tommy_WW_Tests left out): integration is 376 lines on all 658
+# frames with a MakerNote, and on the Colorado deployment the analog code climbs
+# from 1 at 17:30 to 4 at 20:15 local time, daylight to dusk. The highest
+# ambient-lit exposure is 6,110 (376, code 4, digital 65); the one frame above the
+# cut (376, code 4, digital 192, ae_mean 5, not converged) is black. The firmware's
+# flash rule (lightSensor.c, analog code above 2) would put 94 of these ambient-lit
+# frames in night_ir.
+LOW_LIGHT_MIN_EXPOSURE = 376 * 16 * 2
 
 
 # ── Data ─────────────────────────────────────────────────────────────
@@ -322,6 +340,44 @@ def is_greyscale(data: bytes, max_channel_diff: float = GREYSCALE_MAX_CHANNEL_DI
     return diff <= max_channel_diff
 
 
+def exposure_of(exif: dict) -> Optional[float]:
+    """Integration lines x analog x digital gain from the WW500 MakerNote fields, or None without them.
+
+    The analog code (ANALOG_GAIN bits 4-6, ``hm0360_md.c``) is read as a power of
+    two and the digital gain as 64 = 1x. An all-zero read (no sensor) is None.
+    """
+    lines, analog, digital = (exif.get(k) for k in ("integration_lines", "analog_gain", "digital_gain"))
+    if not lines or analog is None or not digital:
+        return None
+    return lines * 2**analog * digital / 64
+
+
+def light_of(data: bytes) -> tuple[str, str]:
+    """``(night_ir | day, source)`` for one frame, from the first source it carries.
+
+    ``flash``: EXIF Flash (or the MakerNote copy) says the flash fired, night_ir; a
+    flash that did not fire decides nothing, since the flash can be switched off.
+    ``exposure``: the WW500 MakerNote AE fields against ``LOW_LIGHT_MIN_EXPOSURE``.
+    ``greyscale``: the channel ratio, for frames with neither (other cameras).
+    """
+    exif = parse_exif_from_bytes(data)
+    if exif.get("flash_fired"):
+        return "night_ir", "flash"
+    exposure = exposure_of(exif)
+    if exposure is not None:
+        return ("night_ir" if exposure >= LOW_LIGHT_MIN_EXPOSURE else "day"), "exposure"
+    return ("night_ir" if is_greyscale(data) else "day"), "greyscale"
+
+
+def light_line(strata: dict[str, dict[str, str]]) -> str:
+    """How many frames got each light value and how many each source decided."""
+
+    def _counts(by_path: dict[str, str]) -> str:
+        return ", ".join(f"{k} {n}" for k, n in sorted(Counter(by_path.values()).items()))
+
+    return f"Light ({len(strata['light'])} frames): {_counts(strata['light'])}; decided by {_counts(strata['light_source'])}.\n"
+
+
 def top_folder_of(paths: Iterable[str]) -> Callable[[str], str]:
     """A function giving each path's first directory below the common root of all ``paths``."""
     normed = [os.path.normpath(p) for p in paths]
@@ -343,18 +399,20 @@ def burst_len_bucket(n: int) -> str:
 
 
 def strata_of(frames: list[LabelledFrame], bursts: list[list[LabelledFrame]], read: Callable[[str], bytes] = None) -> dict[str, dict[str, str]]:
-    """``{stratum family: {path: stratum value}}`` for every frame: ``light``, ``burst_len``, ``folder``."""
+    """``{stratum family: {path: stratum value}}`` for every frame: ``light``, ``light_source``, ``burst_len``, ``folder``."""
     read = read or (lambda p: open(p, "rb").read())
     sizes: dict[str, int] = {f.path: len(b) for b in bursts for f in b}
     top = top_folder_of([f.path for f in frames]) if frames else (lambda p: "(root)")
     light: dict[str, str] = {}
+    source: dict[str, str] = {}
     for f in frames:
         try:
-            light[f.path] = "night_ir" if is_greyscale(read(f.path)) else "day"
+            light[f.path], source[f.path] = light_of(read(f.path))
         except Exception:
-            light[f.path] = "unknown"
+            light[f.path], source[f.path] = "unknown", "unreadable"
     return {
         "light": light,
+        "light_source": source,
         "burst_len": {f.path: burst_len_bucket(sizes.get(f.path, 1)) for f in frames},
         "folder": {f.path: top(f.path) for f in frames},
     }
@@ -758,7 +816,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         strata = strata_of(labelled, labelled_bursts)
         # Only frames that were actually answered say anything about a stratum.
         per_run = {key: metrics_by_stratum([o for o in outs if o.predicted is not None], strata) for key, outs in outcomes_by_run.items()}
-        table += "\n### Recall by stratum (answered frames only)\n\n" + render_strata_markdown(per_run)
+        table += "\n### Recall by stratum (answered frames only)\n\n" + light_line(strata) + "\n" + render_strata_markdown(per_run)
     if args.dump_verdicts:
         dump_verdicts(outcomes_by_run, args.dump_verdicts)
         print(f"verdicts written to {args.dump_verdicts}", file=sys.stderr)

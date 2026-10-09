@@ -68,7 +68,7 @@ Clicking a photo opens a **full-screen modal** (`MediaDetail.tsx`):
 
 | Action | Effect |
 |--------|--------|
-| **✓ Confirm** | Accept the AI label → `review_status='human_reviewed'`, sets `reviewer_id`; auto-advances |
+| **✓ Confirm** | Accept the AI label → `review_status='human_reviewed'`, sets `reviewer_id`; auto-advances. With no observation selected it confirms every unreviewed per-model AI row (`confirmAllTargets`); the consensus row (`source_type='consensus'`) stays `ai_reviewed` (#301) |
 | **✕ Blank** | False trigger → `observation_type='blank'`, clears species; auto-advances |
 | **Correct** | Change species via the taxon-validated `SpeciesPicker` (writes `taxon_id`) |
 | **▭ Box / Redraw / ✕** | Draw, replace, or delete the bounding box (writes the bbox quad) |

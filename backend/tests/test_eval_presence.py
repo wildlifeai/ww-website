@@ -178,6 +178,7 @@ def test_strata_light_burst_length_and_top_folder(tmp_path):
     ]
     strata = ev.strata_of(frames, [frames[:1], frames[1:]])
     assert strata["light"] == {str(grey): "night_ir", str(colour): "day", str(third): "day"}
+    assert set(strata["light_source"].values()) == {"greyscale"}  # no flash or exposure metadata
     assert strata["burst_len"] == {str(grey): "1", str(colour): "2", str(third): "2"}
     assert strata["folder"] == {str(grey): "MEDIA", str(colour): "Tommy", str(third): "Tommy"}
     assert ev.burst_len_bucket(3) == "3+" and ev.burst_len_bucket(7) == "3+"
@@ -193,6 +194,59 @@ def test_strata_light_burst_length_and_top_folder(tmp_path):
     assert set(per["gemini_location"]) == {"corner", "none"}
     table = ev.render_strata_markdown({("single", "m", "v2"): per})
     assert "**single / m / prompt v2**" in table and "| light | night_ir | 1 | 1 | 0.0% | 1 | n/a |" in table
+
+
+def _ww500_jpeg(maker_note=None, flash=None, rgb=(90, 90, 90)) -> bytes:
+    """A frame with the WW500's EXIF: little-endian, Flash and MakerNote in the Exif sub-IFD."""
+    exif = Image.Exif()
+    exif.endian = "<"  # as the firmware writes it
+    sub = exif.get_ifd(0x8769)
+    if flash is not None:
+        sub[0x9209] = flash
+    if maker_note is not None:
+        sub[0x927C] = maker_note
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 48), rgb).save(buf, format="JPEG", exif=exif)
+    return buf.getvalue()
+
+
+DAY_NOTE = "376, 2, 65, 70, Y"  # Colorado, 18:15 local
+DARK_NOTE = "376, 4, 192, 5, N"  # Colorado, 20:19 local: the AE spending digital gain
+
+
+def test_light_flash_fired_is_night_ir_whatever_the_exposure():
+    assert ev.light_of(_ww500_jpeg(DAY_NOTE, flash=1)) == ("night_ir", "flash")
+    assert ev.light_of(_ww500_jpeg(DAY_NOTE + ", 0, 0, 2")) == ("night_ir", "flash")  # the MakerNote copy (IR = 2)
+    # A flash that did not fire decides nothing: the flash can be switched off.
+    assert ev.light_of(_ww500_jpeg(DARK_NOTE, flash=0)) == ("night_ir", "exposure")
+    assert ev.light_of(_ww500_jpeg(DAY_NOTE, flash=0)) == ("day", "exposure")
+
+
+def test_light_from_ww500_exposure_beats_the_greyscale_ratio():
+    # Both frames are greyscale, as every HM0360 frame is; the exposure decides.
+    assert ev.light_of(_ww500_jpeg(DAY_NOTE)) == ("day", "exposure")
+    assert ev.light_of(_ww500_jpeg(DARK_NOTE)) == ("night_ir", "exposure")
+    assert ev.exposure_of({"integration_lines": 376, "analog_gain": 4, "digital_gain": 65}) == pytest.approx(6110)  # brightest day
+    assert ev.exposure_of({"integration_lines": 376, "analog_gain": 4, "digital_gain": 128}) == ev.LOW_LIGHT_MIN_EXPOSURE
+    assert ev.exposure_of({}) is None
+    assert ev.exposure_of({"integration_lines": 0, "analog_gain": 0, "digital_gain": 0}) is None  # no sensor read
+
+
+def test_light_falls_back_to_the_greyscale_ratio_without_metadata():
+    assert ev.light_of(_ww500_jpeg()) == ("night_ir", "greyscale")
+    assert ev.light_of(_ww500_jpeg(rgb=(30, 120, 60))) == ("day", "greyscale")
+    assert ev.light_of(_ww500_jpeg("Canon MakerNote blob", rgb=(30, 120, 60))) == ("day", "greyscale")
+
+
+def test_strata_record_the_light_source_and_the_line_counts_them(tmp_path):
+    paths = []
+    for name, data in (("day.jpg", _ww500_jpeg(DAY_NOTE)), ("ir.jpg", _ww500_jpeg(DAY_NOTE, flash=1)), ("grey.jpg", _ww500_jpeg())):
+        (tmp_path / name).write_bytes(data)
+        paths.append(str(tmp_path / name))
+    frames = [ev.LabelledFrame(path=p, burst_id=p, has_animal=True) for p in paths + [str(tmp_path / "missing.jpg")]]
+    strata = ev.strata_of(frames, [[f] for f in frames])
+    assert list(strata["light_source"].values()) == ["exposure", "flash", "greyscale", "unreadable"]
+    assert ev.light_line(strata) == ("Light (4 frames): day 1, night_ir 2, unknown 1; decided by exposure 1, flash 1, greyscale 1, unreadable 1.\n")
 
 
 def test_dump_verdicts_writes_structured_fields(tmp_path):

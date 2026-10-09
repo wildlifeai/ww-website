@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import type { ObservationRecord, MediaRecord, MediaAssetRecord } from './MediaBrowser'
-import { groupByBox, humanCreateFields, humanReviewFields, isHumanReviewed, isAiLabel } from '../../lib/observations'
+import { confirmAllTargets, groupByBox, humanCreateFields, humanReviewFields, isHumanReviewed, isAiLabel } from '../../lib/observations'
 import { SpeciesPicker } from './SpeciesPicker'
 import { StatusBadge } from '../ui/StatusBadge'
 import { AiOriginBadge } from '../ui/AiOriginBadge'
@@ -480,11 +480,11 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
   }
 
   // Confirm: accept as-is (stamp human review). With no selection, confirm every
-  // unreviewed AI observation on the image, then advance.
+  // unreviewed per-model AI observation on the image (never the consensus row), then advance.
   const confirm = async () => {
     const targets = selectedObs
       ? [selectedObs]
-      : media.observations.filter(o => isAiLabel(o) && !isHumanReviewed(o))
+      : confirmAllTargets(media.observations)
     if (targets.length === 0) { onNext?.(); return }
     // One batched update instead of N sequential requests (no per-row flicker).
     setSaving(true); setSaveMsg(null)
