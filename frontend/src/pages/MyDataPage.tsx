@@ -579,7 +579,7 @@ export function MyDataPage() {
       {/* ── Media tab ──────────────────────────────────────────────────────── */}
       {tab === 'media' && !showNothing && (
         <MediaBrowser
-          deployments={deployments.map(d => ({ id: d.id, location_name: d.location_name, project_id: d.project_id, timezone: d.timezone }))}
+          deployments={deployments.map(d => ({ id: d.id, location_name: d.location_name, project_id: d.project_id, timezone: d.timezone, deployment_start: d.deployment_start }))}
         />
       )}
     </div>

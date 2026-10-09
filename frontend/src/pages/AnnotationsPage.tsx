@@ -20,6 +20,7 @@ interface Deployment {
   project_id: string
   location_name: string | null
   timezone?: string | null
+  deployment_start?: string | null
 }
 
 export function AnnotationsPage() {
@@ -48,9 +49,9 @@ export function AnnotationsPage() {
       .in('project_id', queryProjectIds)
 
     ;(async () => {
-      const withTz = await runQuery('id, project_id, location_name, timezone')
+      const withTz = await runQuery('id, project_id, location_name, deployment_start, timezone')
       const data = withTz.error
-        ? (await runQuery('id, project_id, location_name')).data
+        ? (await runQuery('id, project_id, location_name, deployment_start')).data
         : withTz.data
       if (cancelled) return
       setDeployments((data as unknown as Deployment[]) || [])

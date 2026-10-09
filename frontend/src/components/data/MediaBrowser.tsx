@@ -26,6 +26,7 @@ import { useMultiClusters, useConfirmCluster, useSimilarImages } from '../../hoo
 import { useUploadStore } from '../../contexts/UploadContext'
 import { useJobsList } from '../../hooks/useJobs'
 import { useBusyDeployments } from '../../hooks/useBusyDeployments'
+import { useDeploymentFilterOptions } from '../../hooks/useDeploymentFilterOptions'
 import { useRefreshWhileBusy } from '../../hooks/useRefreshWhileBusy'
 import { isThumbnailStuck } from '../../lib/thumbnailRetry'
 import { applySelectIntent, cardClickIntent, cardKeyIntent, circleClickIntent, type CardIntent } from '../../lib/cardSelection'
@@ -171,7 +172,7 @@ export interface ObservationRecord {
 }
 
 interface Props {
-  deployments: { id: string; location_name: string | null; project_id: string; timezone?: string | null }[]
+  deployments: { id: string; location_name: string | null; project_id: string; timezone?: string | null; deployment_start?: string | null }[]
   /** WS5-T6: Pre-select a deployment when navigating from the upload dock. */
   initialDeploymentId?: string
   /** Pre-apply a species filter (e.g. deep-linked from an Insights chart). */
@@ -293,6 +294,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     () => new Map(deployments.map(d => [d.id, d.timezone ?? null])),
     [deployments],
   )
+  const deploymentOptions = useDeploymentFilterOptions(deployments)
   const qc = useQueryClient()
   const { isActive: uploadActive, pendingUploads, pendingSince } = useUploadStore()
   const [reloadKey, setReloadKey] = useState(0)
@@ -1294,7 +1296,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
             groups: [
               { id: 'deployment', title: 'Deployment', content: (
                 <MultiSelect values={filterDeployments} onChange={setFilterDeployments} allLabel="All deployments" noun="deployment"
-                  options={deployments.map(d => ({ value: d.id, label: d.location_name || d.id.slice(0, 8) }))} />
+                  searchable options={deploymentOptions} />
               ) },
               { id: 'species', title: 'Species', content: (
                 <MultiSelect values={filterSpecies} onChange={setFilterSpecies} allLabel="All species" noun="species"
