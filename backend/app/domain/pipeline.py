@@ -252,11 +252,13 @@ def build_gemini_presence_observation(
     carry the Gemini model id, which is how the row is told apart from
     SpeciesNet's and how a re-run finds it (idempotence).
 
-    ``confidence`` is written only for a v1 answer (v2 does not ask for it and it
-    is never used in a decision). ``observation_comments`` carries the v2
-    structured fields as ``visibility=..; size=..; location=..; conditions=.. |
-    description`` (``services.gemini_presence.format_verdict_comment``) until the
-    media_evidence table exists; a v1 answer keeps the bare description.
+    ``confidence`` is the model's own number on a v1 answer (the default prompt)
+    and the computed one on v2 and v3; it is never used in a decision.
+    ``observation_comments`` carries the v2/v3 structured fields as
+    ``visibility=..; size=..; location=..; conditions=.. | description``
+    (``services.gemini_presence.format_verdict_comment``) until the
+    media_evidence table exists; a v1 answer keeps the bare description, which
+    evidence fusion reads as "no visibility label" and scores as a plain yes/no.
     """
     from app.services.gemini_presence import format_verdict_comment
 
@@ -298,13 +300,15 @@ def gemini_evidence_signals(verdict) -> dict[str, Any]:
 
     ``gemini_presence`` is ``has_animal`` as 0/1; the visibility-weighted fusion
     input is derived later by ``burst_evidence``. A v1 verdict has no labels and
-    contributes ``gemini_presence`` only.
+    contributes ``gemini_presence`` only; v3 adds visibility, and only v2 asks
+    for a size.
     """
     from app.services.gemini_presence import SIZE_VALUE, VISIBILITY_VALUE
 
     signals: dict[str, Any] = {"gemini_presence": 1.0 if verdict.has_animal else 0.0}
     if verdict.prompt_version != "v1":
         signals["gemini_visibility"] = (VISIBILITY_VALUE.get(verdict.animal_visibility, 0.0), verdict.animal_visibility)
+    if verdict.prompt_version == "v2":
         signals["gemini_size"] = (SIZE_VALUE.get(verdict.animal_size, 0.0), verdict.animal_size)
     return signals
 
@@ -321,7 +325,9 @@ class GeminiPresenceStep(PipelineStep):
     has an observation for this model is skipped.
 
     Config overrides: ``gemini_model``, ``gemini_variant`` (single |
-    contact_sheet | batch), ``gemini_thinking_level``, ``gemini_batch_max_wait_seconds``.
+    contact_sheet | batch), ``gemini_prompt_version`` (default
+    ``gemini_presence.PROMPT_VERSION``, v1), ``gemini_thinking_level``,
+    ``gemini_batch_max_wait_seconds``.
     """
 
     step_type = PipelineStepType.GEMINI_PRESENCE
@@ -348,6 +354,9 @@ class GeminiPresenceStep(PipelineStep):
             return PipelineStepResult(step=self.step_type, media_processed=0, model_version=model)
         if variant not in gp.VARIANTS:
             raise ValueError(f"GEMINI_PRESENCE_VARIANT must be one of {gp.VARIANTS}, got {variant!r}")
+        prompt_version = config.get("gemini_prompt_version") or gp.PROMPT_VERSION
+        if prompt_version not in gp.PROMPT_VERSIONS:
+            raise ValueError(f"gemini_prompt_version must be one of {gp.PROMPT_VERSIONS}, got {prompt_version!r}")
 
         svc = create_service_client()
         media_ids = [m["id"] for m in media]
@@ -394,14 +403,17 @@ class GeminiPresenceStep(PipelineStep):
                     thinking_level=thinking_level,
                     max_wait_seconds=float(config.get("gemini_batch_max_wait_seconds", gp.BATCH_MAX_WAIT_SECONDS)),
                     display_name=f"ww-presence-{deployment_id[:8]}",
+                    prompt_version=prompt_version,
                 )
             out = []
             for payload in payloads:
                 try:
-                    out.append(gp.presence(payload, variant, model, thinking_level=thinking_level))
+                    out.append(gp.presence(payload, variant, model, thinking_level=thinking_level, prompt_version=prompt_version))
                 except Exception as exc:  # one failed call must not sink the batch
                     logger.warning("gemini_presence_call_error", model=model, error=str(exc))
-                    out.append(gp.PresenceResult(model=model, variant=variant, verdicts=[None] * len(payload), error=str(exc)))
+                    out.append(
+                        gp.PresenceResult(model=model, variant=variant, verdicts=[None] * len(payload), error=str(exc), prompt_version=prompt_version)
+                    )
             return out
 
         results = await asyncio.to_thread(_call_all) if groups else []
@@ -454,6 +466,7 @@ class GeminiPresenceStep(PipelineStep):
             deployment_id=deployment_id,
             model=model,
             variant=variant,
+            prompt_version=prompt_version,
             media_processed=len(media),
             skipped_existing=len(done),
             calls=len(groups),

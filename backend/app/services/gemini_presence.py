@@ -33,9 +33,10 @@ Design: the SDK is imported lazily inside the three network functions
 without the package and tests monkeypatch those three names; everything else
 (image preparation, prompt, schema, parsing, cost) is pure.
 
-Prompt versions: ``PROMPT_VERSION`` (v2, structured evidence, no confidence) is
-the default everywhere; v1 stays selectable so the eval can compare them. See
-the ``PROMPT_VERSION`` block below.
+Prompt versions: ``PROMPT_VERSION`` (v1) is the default everywhere, the
+pipeline included; v2 (structured evidence) and v3 (animals only, a separate
+``has_person``, short answers) stay selectable so the eval can compare them.
+See the ``PROMPT_VERSION`` block below.
 """
 
 from __future__ import annotations
@@ -97,8 +98,18 @@ _BATCH_DONE_STATES = {"JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANC
 # conditions, evidence strings), which the fusion step scores with hand-set
 # weights (domain/burst_evidence.py). The version travels on every verdict and
 # in the eval cache key, so answers from different prompts are never mixed.
-PROMPT_VERSION = "v2"
-PROMPT_VERSIONS = ("v1", "v2")
+#
+# v1 is the default (2026-10-09). On the 632 frames of the labelled set both
+# answered, v2 matched v1 on wildlife (98.8% vs 98.1% recall) at about $0.35
+# vs $0.21 per 1,000 frames (726 vs 473 tokens per frame) and called 68 of 82
+# person frames an animal while its own description named the human. v3 asks
+# only for what the fusion reads (has_animal, visibility, bbox), plus
+# has_person, since a person is never an animal; its answer is v1's length
+# (48 to 76 output tokens) and its longer prompt puts it at about $0.22 per
+# 1,000 frames. It is opt-in until its person frames are measured. Never edit a released prompt's text: the eval cache is keyed
+# by version, not text, so a changed prompt must be a new version.
+PROMPT_VERSION = "v1"
+PROMPT_VERSIONS = ("v1", "v2", "v3")
 
 # The v2 vocabulary (architecture report section 9). Every string is enumerated
 # in the JSON schema, so a stray label is a schema violation and never a silent
@@ -187,6 +198,42 @@ _PROMPT_SHEET_V2 = (
     + "bbox: [ymin, xmin, ymax, xmax] normalised to 0-1000 of the WHOLE contact sheet when an animal is visible in that cell, else null."
 )
 
+# v3: animals only, people reported on their own, and a short answer. The cue
+# list is v2's in fewer words; has_person comes first in the schema so the
+# model settles "is this a person" before it answers has_animal.
+_CUES_V3 = (
+    "Look for subtle wildlife evidence: eye shine, a body outline, fur or feathers, a partial limb, tail or snout, "
+    "or a motion-blur trail; a small rodent close to the lens on a night IR frame can be a dark low-contrast shape. "
+    "A person is never an animal: a human or any part of one (hand, arm, leg, face) sets has_person, not has_animal. "
+    "Insects and spiders on the lens do not count. "
+)
+
+_FIELDS_V3 = 'has_person: bool; has_animal: bool; animal_visibility: "clear" | "partial" | "obscured" | "none"; description: at most 8 words; '
+
+_PROMPT_SINGLE_V3 = (
+    "Examine this camera trap image for animals. It may have been automatically flagged as empty. "
+    + _CUES_V3
+    + "Return JSON: "
+    + _FIELDS_V3
+    + "bbox: [ymin, xmin, ymax, xmax] normalised to 0-1000 around the animal, else null."
+)
+
+_PROMPT_SHEET_V3 = (
+    "This image is a contact sheet of {n} camera trap frames from one trigger, laid out in a grid. "
+    "Each cell has its index number burned into its top-left corner (1 to {n}), read left to right, top to bottom. "
+    "Judge every cell independently for animals. Some may have been automatically flagged as empty. "
+    + _CUES_V3
+    + "Return JSON with a field cells: one entry per cell, each with index: int (the burned-in number); "
+    + _FIELDS_V3
+    + "bbox: [ymin, xmin, ymax, xmax] normalised to 0-1000 of the WHOLE contact sheet around the animal in that cell, else null."
+)
+
+_PROMPTS: dict[str, tuple[str, str]] = {
+    "v1": (_PROMPT_SINGLE_V1, _PROMPT_SHEET_V1),
+    "v2": (_PROMPT_SINGLE_V2, _PROMPT_SHEET_V2),
+    "v3": (_PROMPT_SINGLE_V3, _PROMPT_SHEET_V3),
+}
+
 _BBOX_SCHEMA = {"anyOf": [{"type": "array", "items": {"type": "integer"}, "minItems": 4, "maxItems": 4}, {"type": "null"}]}
 
 _VERDICT_PROPERTIES_V1: dict[str, Any] = {
@@ -208,6 +255,21 @@ _VERDICT_PROPERTIES_V2: dict[str, Any] = {
     "bbox": _BBOX_SCHEMA,
 }
 _VERDICT_REQUIRED_V2 = ["has_animal", "animal_visibility", "animal_size", "animal_location", "visual_conditions", "evidence", "description", "bbox"]
+
+_VERDICT_PROPERTIES_V3: dict[str, Any] = {
+    "has_person": {"type": "boolean"},
+    "has_animal": {"type": "boolean"},
+    "animal_visibility": {"type": "string", "enum": list(VISIBILITY_VALUES)},
+    "description": {"type": "string"},
+    "bbox": _BBOX_SCHEMA,
+}
+_VERDICT_REQUIRED_V3 = ["has_person", "has_animal", "animal_visibility", "description", "bbox"]
+
+_SCHEMAS: dict[str, tuple[dict[str, Any], list[str]]] = {
+    "v1": (_VERDICT_PROPERTIES_V1, _VERDICT_REQUIRED_V1),
+    "v2": (_VERDICT_PROPERTIES_V2, _VERDICT_REQUIRED_V2),
+    "v3": (_VERDICT_PROPERTIES_V3, _VERDICT_REQUIRED_V3),
+}
 
 
 def _check_prompt_version(prompt_version: str) -> None:
@@ -262,7 +324,9 @@ class PresenceVerdict:
     v2 evidence, each one of its fixed vocabulary (``none`` when absent):
     ``animal_visibility`` in ``VISIBILITY_VALUES``, ``animal_size`` in
     ``SIZE_VALUES``, ``animal_location`` in ``LOCATION_VALUES``,
-    ``visual_conditions`` and ``evidence`` from their lists.
+    ``visual_conditions`` and ``evidence`` from their lists. A v3 answer fills
+    ``animal_visibility`` only, plus ``has_person`` (None on v1 and v2, which
+    do not ask).
     """
 
     has_animal: bool
@@ -275,6 +339,7 @@ class PresenceVerdict:
     visual_conditions: tuple[str, ...] = ()
     evidence: tuple[str, ...] = ()
     prompt_version: str = PROMPT_VERSION
+    has_person: Optional[bool] = None
 
     @property
     def evidence_items(self) -> tuple[str, ...]:
@@ -434,19 +499,20 @@ def map_sheet_bbox_to_frame(raw: Any, sheet: PreparedImage, cell_index: int) -> 
 
 def build_prompt(variant: str, n_frames: int = 1, prompt_version: str = PROMPT_VERSION) -> str:
     _check_prompt_version(prompt_version)
+    single, sheet = _PROMPTS[prompt_version]
     if variant == "contact_sheet":
-        return (_PROMPT_SHEET_V1 if prompt_version == "v1" else _PROMPT_SHEET_V2).format(n=n_frames)
-    return _PROMPT_SINGLE_V1 if prompt_version == "v1" else _PROMPT_SINGLE_V2
+        return sheet.format(n=n_frames)
+    return single
 
 
 def response_json_schema(variant: str, prompt_version: str = PROMPT_VERSION) -> dict[str, Any]:
     """JSON Schema handed to the SDK's ``response_json_schema`` (strict JSON mode).
 
     The contact sheet returns one verdict object per cell (plus its ``index``);
-    ``confidence`` exists only in the v1 schema.
+    ``confidence`` exists only in the v1 schema, ``has_person`` only in v3.
     """
     _check_prompt_version(prompt_version)
-    props, required = (_VERDICT_PROPERTIES_V1, _VERDICT_REQUIRED_V1) if prompt_version == "v1" else (_VERDICT_PROPERTIES_V2, _VERDICT_REQUIRED_V2)
+    props, required = _SCHEMAS[prompt_version]
     if variant == "contact_sheet":
         cell = {"type": "object", "properties": {"index": {"type": "integer"}, **props}, "required": ["index", *required]}
         return {"type": "object", "properties": {"cells": {"type": "array", "items": cell}}, "required": ["cells"]}
@@ -459,8 +525,11 @@ def format_verdict_comment(verdict: PresenceVerdict) -> str:
     ``visibility=partial; size=small; location=edge; conditions=night_ir,low_light; evidence=tail,fur_texture | <description>``.
     Until the ``media_evidence`` table exists this is where the structured fields live;
     :func:`parse_verdict_comment` reads them back. ``none`` values and empty lists are left out.
+    A v3 answer that saw a person adds ``person=yes``.
     """
     parts = [f"visibility={verdict.animal_visibility}"]
+    if verdict.has_person:
+        parts.append("person=yes")
     if verdict.animal_size and verdict.animal_size != "none":
         parts.append(f"size={verdict.animal_size}")
     if verdict.animal_location and verdict.animal_location != "none":
@@ -475,13 +544,13 @@ def format_verdict_comment(verdict: PresenceVerdict) -> str:
 
 
 _COMMENT_LIST_KEYS = ("conditions", "evidence")
-_COMMENT_KEYS = ("visibility", "size", "location", *_COMMENT_LIST_KEYS)
+_COMMENT_KEYS = ("visibility", "person", "size", "location", *_COMMENT_LIST_KEYS)
 
 
 def parse_verdict_comment(text: Optional[str]) -> dict[str, Any]:
     """Inverse of :func:`format_verdict_comment`; a plain v1 description yields ``{}``.
 
-    Returns the keys found among ``visibility``, ``size``, ``location`` (strings),
+    Returns the keys found among ``visibility``, ``person``, ``size``, ``location`` (strings),
     ``conditions`` and ``evidence`` (lists), plus ``description``.
     """
     if not text:
@@ -535,6 +604,12 @@ def _string_list(value: Any, allowed: Optional[Sequence[str]] = None, limit: int
     return tuple(out[:limit])
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "yes", "1")
+    return bool(value)
+
+
 def _verdict_from_obj(obj: Any, bbox_mapper, prompt_version: str = PROMPT_VERSION) -> PresenceVerdict:
     """A verdict object (either prompt version) -> PresenceVerdict, tolerant of type slips.
 
@@ -543,15 +618,14 @@ def _verdict_from_obj(obj: Any, bbox_mapper, prompt_version: str = PROMPT_VERSIO
     missing or outside the vocabulary is a parse error (the schema enumerates
     it; a stray label must never become a silent category), while an unknown
     size or location falls back to ``none`` and unknown list items are dropped,
-    because those only feed strata. ``confidence`` on a v2 answer is
-    :func:`derived_confidence`; on v1 it is the model's number.
+    because those only feed strata. ``confidence`` on a v2 or v3 answer is
+    :func:`derived_confidence`; on v1 it is the model's number. ``has_person``
+    is read on v3 only (False when the model left it out).
     """
     if not isinstance(obj, dict) or "has_animal" not in obj:
         raise PresenceParseError("verdict object missing has_animal")
-    has_animal = obj["has_animal"]
-    if isinstance(has_animal, str):
-        has_animal = has_animal.strip().lower() in ("true", "yes", "1")
-    has_animal = bool(has_animal)
+    has_animal = _as_bool(obj["has_animal"])
+    has_person = _as_bool(obj.get("has_person")) if prompt_version == "v3" else None
     conditions = _string_list(obj.get("visual_conditions"), VISUAL_CONDITIONS)
     evidence = _string_list(obj.get("evidence"), EVIDENCE_VALUES)
     if not has_animal:
@@ -576,6 +650,7 @@ def _verdict_from_obj(obj: Any, bbox_mapper, prompt_version: str = PROMPT_VERSIO
         confidence = derived_confidence(visibility, evidence)
     return PresenceVerdict(
         has_animal=has_animal,
+        has_person=has_person,
         confidence=confidence,
         description=str(obj.get("description") or ""),
         bbox=bbox_mapper(obj.get("bbox")),
