@@ -114,15 +114,15 @@ registries/→ static config (camera configs, model + embedding registries)
 ```
 
 **Routers** (`/api/*`, registered in `app/main.py`): `auth` (demo session), `jobs`, `deployments`,
-`projects`, `exif`, `lorawan`, `manifest`, `models`, `media`, `inaturalist`, `clustering`, and,
-each behind its feature flag, `camtrapdp`, `pipeline`, `brain`
+`projects`, `exif`, `lorawan`, `manifest`, `models`, `media`, `public_api`, `inaturalist`,
+`clustering`, and — each behind its feature flag — `camtrapdp`, `pipeline`, `brain`
 (embeddings/clusters/UMAP/similarity), `qa` (AI-vs-human agreement), `intelligence`
 (dataset health/alerts).
 
 **Key domain modules**: `exif`, `photo_preprocessing`, `pipeline` (SpeciesNet steps), `events`,
 `clustering`, `wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
-`intelligence`, `media_registry` / `media_resolver`, `model`, `manifest`, `lorawan`, `camtrapdp`
-(import only; export is the `export-camtrap-dp` Edge Function), `inaturalist`.
+`intelligence`, `media_registry` / `media_resolver`, `model`, `manifest`, `lorawan`, `camtrapdp`,
+`inaturalist`, `public_api`.
 
 ### Adding a feature (backend)
 
