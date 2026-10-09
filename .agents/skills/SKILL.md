@@ -18,7 +18,7 @@ The `ww-website` repository is a multi-service platform consisting of:
 * Python FastAPI backend
 * Shared Supabase data layer
 * Image analysis and AI tooling
-* LoRaWAN telemetry ingestion
+* LoRaWAN telemetry display (ingest is ww-backend's `lorawan-ingest`)
 * Firmware and manifest management workflows
 
 > **Canonical Documentation**

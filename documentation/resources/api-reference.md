@@ -13,6 +13,9 @@ Complete endpoint reference for the Wildlife Watcher V2 API.
 
 **Authentication:** JWT Bearer token from Supabase Auth (required for protected endpoints).
 
+> LoRaWAN uplinks do not come through this API. Network servers post to ww-backend's
+> `lorawan-ingest` edge function, see [LORAWAN_INGEST](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/LORAWAN_INGEST.md).
+
 **Response Format:** All endpoints return a standard envelope:
 
 ```json
@@ -53,7 +56,6 @@ On error:
 - [Manifest Generation](#manifest-generation)
 - [Model Conversion](#model-conversion)
 - [EXIF Parsing](#exif-parsing)
-- [LoRaWAN Webhooks](#lorawan-webhooks)
 - [iNaturalist Integration](#inaturalist-integration)
 - [Image Clustering](#image-clustering)
 - [AI Pipeline](#ai-pipeline)
@@ -170,22 +172,6 @@ image-upload pipeline — see [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.
 `latitude`/`longitude` (GPS DMS→decimal), `date` (Original → Create → DateTime), `Make`/`Model`,
 and `temperature_c`/`battery_pct` (parsed from `UserComment` telemetry). The full set lands in
 `media.exif_metadata`.
-
----
-
-## LoRaWAN Webhooks
-
-Receive device uplinks from LoRaWAN network servers. Webhooks authenticate with the
-**`X-Webhook-Secret`** header (`LORAWAN_TTN_WEBHOOK_SECRET` / `LORAWAN_CHIRPSTACK_WEBHOOK_SECRET` /
-`LORAWAN_WEBHOOK_SECRET`); query endpoints use JWT. Gated by `FF_LORAWAN_WEBHOOKS_ENABLED`. Prefix
-`/api/lorawan`. Payload formats + network-server config: [LoRaWAN Webhook Setup](./lorawan-webhook-setup.md).
-
-| Method · Path | Auth | Description |
-|---|---|---|
-| `POST /api/lorawan/webhook/ttn` | `X-Webhook-Secret` | TTN v3 uplink → parsed battery / SD-card / model-output |
-| `POST /api/lorawan/webhook/chirpstack` | `X-Webhook-Secret` | Chirpstack v4 uplink |
-| `GET /api/lorawan/messages` | JWT | Org-scoped parsed-message list |
-| `GET /api/lorawan/messages/{device_eui}/latest` | JWT | Latest parsed message for a device EUI |
 
 ---
 

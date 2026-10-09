@@ -30,11 +30,6 @@ class Settings(BaseSettings):
     )
     RATE_LIMIT_PER_MINUTE: int = Field(60, description="Default per-IP rate limit")
 
-    # ── LoRaWAN Webhooks ─────────────────────────────────────────────
-    LORAWAN_WEBHOOK_SECRET: str = Field("", description="Generic LoRaWAN webhook shared secret")
-    LORAWAN_TTN_WEBHOOK_SECRET: str = Field("", description="TTN-specific webhook secret")
-    LORAWAN_CHIRPSTACK_WEBHOOK_SECRET: str = Field("", description="Chirpstack-specific webhook secret")
-
     # ── Demo account ─────────────────────────────────────────────────
     # Credentials for the shared read-only demo user (seeded by
     # scripts/seed_demo.py). The /api/auth/demo-session endpoint is
@@ -50,7 +45,6 @@ class Settings(BaseSettings):
     FF_INAT_ENABLED: bool = Field(False)
     FF_ML_ENABLED: bool = Field(False)
     FF_CLUSTERING_ENABLED: bool = Field(False)
-    FF_LORAWAN_WEBHOOKS_ENABLED: bool = Field(True)
     FF_CAMTRAPDP_IMPORT_ENABLED: bool = Field(True, description="Enable CamtrapDP package import endpoint")
     FF_PIPELINE_ENABLED: bool = Field(False, description="Enable AI pipeline inference endpoints")
 
