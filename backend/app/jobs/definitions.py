@@ -628,6 +628,72 @@ def _is_uuid(value: object) -> bool:
         return False
 
 
+# Keys per `.in_()` lookup. 50 hashes of 64 hex chars keep the URL near 3.5 KB, the size of
+# the 100-UUID chunks used elsewhere, well under the proxy's request-line limit.
+_DEDUP_CHUNK = 50
+
+
+def unregistered_uploads(svc, candidates: list[dict]) -> list[dict]:
+    """The uploaded files with no media row yet in their deployment, by file_hash or gdrive:// path.
+
+    A photo that appears twice in the batch is kept once, at its first occurrence.
+    """
+    keys = existing_media_keys(svc, candidates)
+    seen: set[tuple[str, str, str]] = set()
+    fresh: list[dict] = []
+    for uf in candidates:
+        own = [("path", f"gdrive://{uf['file_id']}")]
+        if uf.get("file_hash"):
+            own.append(("hash", uf["file_hash"]))
+        batch_keys = [(uf["deployment_id"], *k) for k in own]
+        if any(k in keys for k in own) or any(k in seen for k in batch_keys):
+            continue
+        seen.update(batch_keys)
+        fresh.append(uf)
+    return fresh
+
+
+def existing_media_keys(svc, candidates: list[dict]) -> set[tuple[str, str]]:
+    """Return the ("hash", file_hash) and ("path", file_path) keys the candidates already have.
+
+    Looks up only the candidates' own hashes and gdrive:// paths, per deployment and in chunks,
+    so the read stays small however many photos the deployment holds. A full read of the
+    deployment stopped at PostgREST's 1,000-row cap and let re-uploads duplicate (#317).
+    Soft-deleted rows count, as they always have. A failed lookup skips that chunk's dedup.
+    """
+    by_dep: dict[str, tuple[set[str], set[str]]] = {}
+    for uf in candidates:
+        hashes, paths = by_dep.setdefault(uf["deployment_id"], (set(), set()))
+        if uf.get("file_hash"):
+            hashes.add(uf["file_hash"])
+        paths.add(f"gdrive://{uf['file_id']}")
+
+    keys: set[tuple[str, str]] = set()
+    for dep in sorted(by_dep):
+        for column, values in zip(("file_hash", "file_path"), by_dep[dep]):
+            ordered = sorted(values)
+            for i in range(0, len(ordered), _DEDUP_CHUNK):
+                try:
+                    rows = (
+                        svc.table("media")
+                        .select("file_hash, file_path")
+                        .eq("deployment_id", dep)
+                        .in_(column, ordered[i : i + _DEDUP_CHUNK])
+                        .execute()
+                        .data
+                        or []
+                    )
+                except Exception as exc:
+                    logger.warning("media_dedup_lookup_failed", deployment_id=dep, column=column, error=str(exc))
+                    rows = []
+                for r in rows:
+                    if r.get("file_hash"):
+                        keys.add(("hash", r["file_hash"]))
+                    if r.get("file_path"):
+                        keys.add(("path", r["file_path"]))
+    return keys
+
+
 def plan_ai_coalescing(dep_ids: list[str], active_jobs: list[dict]) -> tuple[list[str], dict[str, str], dict[str, str]]:
     """Split an upload's deployments by the AI jobs already on them (#284).
 
@@ -1208,18 +1274,6 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         # e.g. back-filled). Because upload_file now returns Drive-skipped duplicates
         # too, this also *back-fills* a media row for an image that's in Drive but has
         # no DB row yet — so re-upload is self-healing instead of stranding images.
-        existing_keys: set = set()
-        for dep in sorted({uf["deployment_id"] for uf in candidates}):
-            try:
-                rows = svc.table("media").select("file_hash, file_path").eq("deployment_id", dep).execute().data or []
-            except Exception:
-                rows = []
-            for r in rows:
-                if r.get("file_hash"):
-                    existing_keys.add(("hash", r["file_hash"]))
-                if r.get("file_path"):
-                    existing_keys.add(("path", r["file_path"]))
-
         media_rows = [
             {
                 "id": str(_uuid.uuid4()),
@@ -1234,8 +1288,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                 # settings, NN scores) — None is dropped by the chunk filter below.
                 "exif_metadata": uf.get("exif"),
             }
-            for uf in candidates
-            if ("hash", uf.get("file_hash")) not in existing_keys and ("path", f"gdrive://{uf['file_id']}") not in existing_keys
+            for uf in unregistered_uploads(svc, candidates)
         ]
         media_created = 0
         if media_rows:

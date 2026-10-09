@@ -77,7 +77,8 @@ Supabase caps every response at 1,000 rows, and a query without `.range()` just 
 1,000 with no error. A deployment can hold more photos than that: the thumbnail backfill read
 1,000 of "Sunset test 2"'s 1,101 and never saw the rest (#208). Any backend loop over a whole
 deployment pages with `.order()` plus `.range()` until a short page, as
-`media_registry.backfill_thumbnails` does.
+`media_registry.backfill_thumbnails` does. A check for known keys looks up only those keys with
+`.in_()` in chunks, as the upload dedup in `jobs.definitions.existing_media_keys` does (#317).
 
 ---
 
