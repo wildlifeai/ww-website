@@ -47,7 +47,7 @@ permissions, verify against the **live** DB, not just the migrations.
 | `media_assets` | embedded in `media` queries (renditions: provider, dimensions, bytes) | RLS read — a missing GRANT aborts the **whole** embedding query (prod, Jul 2026) |
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
 | `taxa` | SpeciesPicker (local search) | RLS read |
-| `user_roles`, `project_invitations` | members panel, invitation banner | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below) |
+| `user_roles`, `project_invitations` | members panel, invitation banner; the user's own roles in Settings and the move picker | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below); a user reads only their own `user_roles` rows directly |
 | `media_embeddings`, `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
 | `devices`, `lorawan_*`, `firmware`, `ai_models`, `api_jobs` | LoRaWAN, manifests, models, jobs | service-role |
 
@@ -97,6 +97,19 @@ the `observations` read policy checks the deployment, not the photo. Every read 
 lists observations (Insights, My Data, Reporting, Field, the upload summary) goes through
 `frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
 with no photo unless asked not to, and pages past the 1,000-row cap (#198).
+
+**A deployment changes project only through the `move_deployment` RPC** (ww-backend#272); a
+direct UPDATE of `deployments.project_id` is refused with 42501. Insights > Deployments, Move to
+project, calls it from the browser as the signed-in user through
+`frontend/src/lib/moveDeployment.ts`; a service-role call has no `auth.uid()` and is refused. The
+rule is project_admin on both projects (or ww_admin), the same organisation, and a target that is
+neither deleted nor archived. An organisation_manager can see every project but cannot move. The
+picker lists only targets that pass, from the user's own `user_roles` rows, and `toMoveError` maps
+the SQLSTATEs: 42501 not allowed, P0002 deployment or target not found, 22023 another organisation
+or an archived target, 22004 a missing argument. Photos, observations, annotations and alerts
+follow the deployment, since they reach their project through it. Originals already in Google
+Drive stay in the old project's folder and later uploads go to the new one: the photos are found
+by their stored references, so nothing is moved in Drive.
 
 ## Frontend ⇄ backend env mapping
 
