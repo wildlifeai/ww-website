@@ -9,11 +9,14 @@
     "e2e:demo": "playwright test specs/02-demo.spec.ts",
     "e2e:upload": "playwright test specs/03-upload-exif.spec.ts",
     "e2e:lorawan": "playwright test specs/04-lorawan-realtime.spec.ts",
-    "report": "playwright show-report"
+    "report": "playwright show-report",
+    "e2e:a11y": "playwright test specs/05-a11y.spec.ts",
+    "e2e:ci-smoke": "playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts"
   },
   "devDependencies": {
-    "@playwright/test": "^1.49.0",
-    "@supabase/supabase-js": "^2.47.0",
-    "dotenv": "^16.4.5"
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
+    "@supabase/supabase-js": "^2.117.2",
+    "dotenv": "^18.0.5"
   }
 }

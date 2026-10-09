@@ -22,9 +22,16 @@ Never:
 
 If a schema change is required:
 
-1. Make the change in `ww-backend`
-2. Follow the backend schema workflow
-3. Update this repository only after the schema exists
+1. File an issue in `ww-backend` with the exact change (columns, constraints, grants,
+   `push_changes`), why, and when it is done. Website work does not edit `ww-backend`'s code,
+   docs or skills; its maintainers make the change through their schema workflow
+2. Update this repository only after the change is on `dev`
+
+**No live database is changed by hand, from here or anywhere.** Dev and staging, which serves
+wildlifewatcher.ai, change only through ww-backend migrations, merged to its `dev` first and then
+promoted. That includes repairing drift, such as a GRANT the schema declares but production
+lacks (ww-backend#247): the repair is a ww-backend migration, never SQL pasted into a project's
+editor. When diagnosing production, hand the maintainer read-only SELECTs only.
 
 
 # 2. Repository Ecosystem Awareness

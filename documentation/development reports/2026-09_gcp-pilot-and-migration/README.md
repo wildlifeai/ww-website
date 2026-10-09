@@ -313,6 +313,11 @@ us-central1, 4 / 16:       0.0002907  USD/s  (US$1.047 per hour)
 cost per photo = 0.00034884 x (t_photo + t_cold / N)
 ```
 
+`t_photo` comes from the run's logs (#171): `pipeline_complete.seconds_per_frame` for the whole
+pipeline, `pipeline_step_timing` per step (`gpu_model` marks SpeciesNet and BioCLIP), and
+`auto_embed_complete.seconds_per_frame` for the DINOv3 embedding. Every step counts, not only the
+GPU models, because the job is billed for each second it runs.
+
 Inference only, at the T4's 1 to 2 s per image (L4 speed *unverified* until step 10):
 
 | Seconds per photo | USD per photo | NZD per photo | NZD per 1,000 photos |
@@ -440,7 +445,7 @@ The pilot rows are done (the state table in §2); Track 2 rows are not started.
 | `backend/app/jobs/cloudrun_entry.py` (new) | `python -m app.jobs.cloudrun_entry <job_name> <json>`: resolve the function from `definitions.JOBS`, `asyncio.run` it, `await flush_pending_syncs()`, exit 0 done, 1 failed, 2 bad arguments; `selftest` prints `cuda? True` and logs torch version, CUDA availability, device name and the three model load times |
 | `backend/app/jobs/definitions.py` | The upload job's inline and offload branches: `settings.REDIS_URL` becomes `settings.job_offload_configured`, or with `REDIS_URL` unset the upload job runs the AI inline on the lean API image |
 | `backend/app/jobs/store.py` | Comment only, at step 12 when the Azure worker is parked: the KEDA window is gone; the reaper is the heartbeat's only consumer |
-| `backend/requirements.txt` | `google-cloud-run==0.16.1`, moved from `requirements-ml.txt` so the API image can start executions. Track 2: `google-cloud-storage`; remove `azure-storage-blob`, `aiohttp` at 2.8 |
+| `backend/requirements.txt` | `google-cloud-run==0.16.2`, moved from `requirements-ml.txt` so the API image can start executions. Track 2: `google-cloud-storage`; remove `azure-storage-blob`, `aiohttp` at 2.8 |
 | `backend/tests/test_cloudrun_worker.py` | `enqueue_job` precedence cloudrun, redis, local; fallback on a refused start and on an oversized payload; `_defer_by` as a delayed start, and its fallback; `cloudrun_entry` running a job, exit codes, argument parsing |
 | `backend/cloudbuild.worker.yaml` (new) | §4.1; `gcloud builds submit --tag` would build the last stage (`api`) |
 | `.github/workflows/deploy-ml-worker-gcp.yml` (new) | §4.1. Track 2: fold in the API build and retire `deploy-backend.yml`'s Azure steps |

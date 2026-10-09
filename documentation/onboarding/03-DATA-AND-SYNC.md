@@ -75,9 +75,28 @@ photos as the user sees them; with the raw BMP on, the app doubles it for op5. A
 camera keeps its old values until its next deployment start. Ranges and the cost note live in
 `frontend/src/lib/burstCapture.ts`.
 
+Beside the burst, `detection_threshold_pct` (50 to 99, default 57, the camera's factory setting) is
+how confident the on-device model must be before a photo counts as a detection; the app writes it
+as op16 (ww-backend#246, ww-mobile-app#342). The input clamps to the column's CHECK range, which
+lives in `frontend/src/lib/detectionThreshold.ts`.
+
+The same panel edits the capture flash (ww-backend#168, written as op34, op13, op35 and op36 by
+ww-mobile-app#282): `flash_mode` (default `off`, which also turns off the night IR for motion
+detection), `flash_led`, and for `time_of_day` a window stored as UTC minutes
+(`flash_window_start_minutes_utc`, `flash_window_minutes`, null for any other mode). The panel
+shows the window in the browser's timezone beside the UTC the camera runs on; the conversion is
+`frontend/src/lib/flashSettings.ts`. A save asks for the row back, because RLS turns a
+non-admin's update into 0 rows with no error.
+
 Observation provenance fields (`source_type`, `review_status`, `reviewer_id`, `annotator_id`,
 `classification_method`) are written through one helper, `frontend/src/lib/observations.ts`, so
 every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md).
+
+Deleting photos soft-deletes their `media` rows only; their observations stay readable, because
+the `observations` read policy checks the deployment, not the photo. Every read that counts or
+lists observations (Insights, My Data, Reporting, Field, the upload summary) goes through
+`frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
+with no photo unless asked not to, and pages past the 1,000-row cap (#198).
 
 ## Frontend ⇄ backend env mapping
 
@@ -88,6 +107,7 @@ every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./
 | `SUPABASE_URL` | `VITE_SUPABASE_URL` |
 | `SUPABASE_ANON_KEY` | `VITE_SUPABASE_ANON_KEY` |
 | `VITE_API_BASE_URL` | `VITE_API_BASE_URL` |
+| `VITE_GOOGLE_CLIENT_ID` | `VITE_GOOGLE_CLIENT_ID` (public web OAuth client ID; set in Cloudflare Pages too) |
 
 The **service-role key is never exposed to the browser** — it stays in the backend.
 
@@ -148,7 +168,11 @@ and the Upload button waits for it (the deployment count resolves by card folder
    matches it exactly against the user's deployments. Only when a frame carries no tag does the
    card folder (`MEDIA/<8-hex>/`, a prefix of the same id) decide. The folder can be wrong: it is
    created at boot, before the deployment id is configured, so a frame under `MEDIA/00000000/`
-   can carry the real id in its EXIF (ww-website#140).
+   can carry the real id in its EXIF (ww-website#140). A WW500 frame (EXIF `Make` "Wildlife.ai")
+   with no id, or the all-zero one, is a **test photo** taken before a deployment was set on the
+   camera: it leaves the selection as soon as the EXIF read lands, whatever its folder, and the page
+   says "N test photos skipped" (`withoutTestPhotos`, ww-website#287). A file with no EXIF keeps the
+   folder fallback.
 2. **Triage of unassigned photos** (`UnassignedTriage`). Files that resolve to no deployment are
    grouped into **capture sessions** — same EXIF id, else same card folder, gaps under 6 h
    (`unassignedSessions.ts`) — and shown with sample thumbnails, time-span stats and, when the
@@ -208,7 +232,9 @@ with a fresh Supabase client after an HTTP/2 `ConnectionTerminated` (`routers/ex
 ### On the server
 
 ```
-POST /api/exif/parse  → parse EXIF, bind deployment (EXIF Deployment_ID, else card-folder prefix;
+POST /api/exif/parse  → parse EXIF, drop WW500 test photos (domain/exif.py is_test_photo,
+                        counted as `test_photos_skipped` in the response and the job summary),
+                        bind deployment (EXIF Deployment_ID, else card-folder prefix;
                         `deployment_id_source` says which), buffer bytes to Azure blob store,
                         enqueue upload_drive_images_job
 upload_drive_images_job:

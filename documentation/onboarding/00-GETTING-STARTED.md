@@ -18,7 +18,7 @@ FastAPI ──▶ Azure Blob (temp image buffer) ──▶ async job ──▶ G
 
 ## Prerequisites
 
-- Node.js 20 (LTS) or higher
+- Node.js 22 (LTS) or higher
 - Python 3.11+
 - A Supabase project with the Wildlife Watcher schema (owned by `ww-backend`)
 - _(optional)_ Docker + Docker Compose
@@ -95,7 +95,7 @@ npm run dev
 | Swagger | open `http://localhost:8000/docs` | interactive API docs |
 | Frontend up | open `http://localhost:5173` | landing page loads |
 | Auth | click **Login** | Supabase Auth UI appears |
-| Signed-in nav | log in | top tabs: **Toolkit · Annotations · Insights** (plus **Realtime** when a deployment is active) |
+| Signed-in nav | log in | top tabs: **Toolkit · Review · Insights** (the Review tab is `/annotations` in the code) (plus **Realtime** when a deployment is active) |
 | Data reads | open **Insights** | your projects / deployments |
 | Upload path | log in as a [seed user](../resources/testing-with-seed-users.md) and drag a folder from [`test-fixtures/camera-trap/sdcard/dev-sdcard/MEDIA/`](../../test-fixtures/camera-trap/README.md) into **Upload Data** | pipeline reaches **✅ Done**; the images appear in **Annotations** |
 

@@ -19,6 +19,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { PipelineStatusBox } from '../toolkit/PipelineStatusBox'
 import { supabase } from '../../config/supabase'
+import { fetchLiveObservations } from '../../lib/liveObservations'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -69,11 +70,13 @@ function UploadSummaryLine({ deploymentIds }: { deploymentIds: string[] }) {
     if (deploymentIds.length === 0) { setLoading(false); return }
     let cancelled = false
     setLoading(true)
-    supabase
-      .from('observations')
-      .select('scientific_name, observation_type, media(timestamp)')
-      .in('deployment_id', deploymentIds)
-      .eq('source_type', 'ai')
+    // Live photos only: a deleted photo's detections leave the summary (#198).
+    fetchLiveObservations(supabase, {
+      columns: 'scientific_name, observation_type',
+      mediaColumns: 'timestamp',
+      requirePhoto: true,
+      filter: q => q.in('deployment_id', deploymentIds).eq('source_type', 'ai'),
+    })
       .then(({ data, error }) => {
         if (cancelled) return
         if (error) { setSummary(null); setLoading(false); return }

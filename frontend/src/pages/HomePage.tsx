@@ -3,13 +3,13 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { supabase } from '../config/supabase'
-import { QRCodeSVG } from 'qrcode.react'
-import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS, DEFAULT_MARKETING_STEPS } from '../components/common/ThreeStepGuide'
+import { ThreeStepGuide } from '../components/common/ThreeStepGuide'
+import { DEFAULT_SIGNED_IN_STEPS, DEFAULT_MARKETING_STEPS } from '../components/common/guideSteps'
 import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { PrototypeBanner } from '../components/common/PrototypeBanner'
-
-const APP_STORE_URL = 'https://apps.apple.com/app/id6480342929'
-const PLAY_STORE_URL = 'https://play.google.com/store/apps/details?id=com.wildlife.wildlifewatcher&pcampaignid=web_share'
+import { StoreBadges, APP_STORE_URL } from '../components/common/StoreBadges'
+import { Camera, Globe, Smartphone } from 'lucide-react'
+import { usePageMeta } from '../lib/pageMeta'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -82,6 +82,7 @@ function ProjectCardTile({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Dashboard() {
+  usePageMeta({ title: 'Home' })
   const { user } = useAuth()
   const navigate = useNavigate()
   // `projects` changes when the shared list reloads (e.g. an accepted
@@ -123,7 +124,7 @@ function Dashboard() {
         <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.75rem' }}>
           Welcome back, {firstName} 👋
         </h2>
-        <p style={{ margin: 0, opacity: 0.65, fontSize: '0.9375rem' }}>
+        <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9375rem' }}>
           Your three-step workflow to go from SD card to results.
         </p>
       </div>
@@ -158,7 +159,7 @@ function Dashboard() {
         }}>
           <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📷</div>
           <h3 style={{ marginTop: 0 }}>No projects yet</h3>
-          <p style={{ opacity: 0.7, fontSize: '0.9rem', maxWidth: '400px', margin: '0 auto 1.5rem' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', maxWidth: '400px', margin: '0 auto 1.5rem' }}>
             Create your first project to start managing deployments and reviewing results.
             You can also manage projects from the{' '}
             <a href={APP_STORE_URL} target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>Wildlife Watcher mobile app</a>.
@@ -196,6 +197,7 @@ const SECTION_HEADING: React.CSSProperties = {
 }
 
 function MarketingHero() {
+  usePageMeta({ description: 'The Wildlife Watcher is a compact open-source AI camera for invertebrates and small animals, with a mobile app for the field and a website for review, analysis and reporting.' })
   return (
     <div>
       <div style={{ maxWidth: '800px', margin: '0 auto 2rem' }}>
@@ -207,13 +209,10 @@ function MarketingHero() {
         <h1 style={{ fontSize: '3rem', color: 'var(--primary)', marginBottom: '1rem' }}>
           Smart monitoring of small animals
         </h1>
-        <p style={{ fontSize: '1.25rem', opacity: 0.8, marginBottom: '1rem' }}>
+        <p style={{ fontSize: '1.25rem', opacity: 0.8, marginBottom: '2rem' }}>
           The Wildlife Watcher is a compact camera designed to monitor invertebrates and
           small animals that traditional camera traps miss. On-device AI flags your target
           species in the field, and an open-source website makes analysis and reporting easy.
-        </p>
-        <p style={{ fontSize: '0.9375rem', opacity: 0.6, marginBottom: '2rem', fontWeight: 600, letterSpacing: '0.01em' }}>
-          Smart monitoring of small animals · on-device AI · open-source web analysis
         </p>
         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <Link
@@ -236,33 +235,6 @@ function MarketingHero() {
         </div>
       </div>
 
-      {/* ── Get the Mobile App ──────────────────────────────────────────── */}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '3rem 0' }}>
-        <h2 style={{ fontSize: '1.5rem', marginBottom: '1.5rem', fontWeight: 600 }}>Get the Mobile App</h2>
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '4rem', flexWrap: 'wrap' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <a href={APP_STORE_URL} target="_blank" rel="noreferrer">
-                <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store" style={{ height: '40px' }} />
-              </a>
-            </div>
-            <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-              <QRCodeSVG value={APP_STORE_URL} size={150} />
-            </div>
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ marginBottom: '1rem' }}>
-              <a href={PLAY_STORE_URL} target="_blank" rel="noreferrer">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Get it on Google Play" style={{ height: '40px' }} />
-              </a>
-            </div>
-            <div style={{ padding: '1rem', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
-              <QRCodeSVG value={PLAY_STORE_URL} size={150} />
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* ── Section 1: Why ──────────────────────────────────────────────── */}
       <div id="why" style={SECTION_STYLE}>
         <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 1rem' }}>
@@ -274,9 +246,9 @@ function MarketingHero() {
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.75rem' }}>
             {[
-              { icon: '📷', title: 'The hardware', body: 'Compact, weatherproof AI cameras built for small wildlife, auto-tagging images with deployment metadata.', anchor: '#watchers' },
-              { icon: '📱', title: 'The app',      body: 'Configure devices and manage projects from the field on iOS or Android.',               anchor: '#app' },
-              { icon: '🌐', title: 'The web',      body: 'Upload images, review AI detections, group look-alikes, and export publication-ready reports.', anchor: '#web' },
+              { icon: Camera, title: 'The hardware', body: 'Compact, weatherproof AI cameras built for small wildlife, auto-tagging images with deployment metadata.', anchor: '#watchers' },
+              { icon: Smartphone, title: 'The app',      body: 'Configure devices and manage projects from the field on iOS or Android.',               anchor: '#app' },
+              { icon: Globe, title: 'The web',      body: 'Upload images, review AI detections, group look-alikes, and export publication-ready reports.', anchor: '#web' },
             ].map(item => (
               <a key={item.anchor} href={item.anchor} style={{ textDecoration: 'none', color: 'inherit' }}>
                 <div style={{
@@ -287,7 +259,7 @@ function MarketingHero() {
                   onMouseEnter={e => ((e.currentTarget as HTMLElement).style.borderColor = 'var(--primary)')}
                   onMouseLeave={e => ((e.currentTarget as HTMLElement).style.borderColor = 'var(--border)')}
                 >
-                  <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>{item.icon}</div>
+                  <div style={{ marginBottom: '0.625rem', color: 'var(--primary)' }}><item.icon size={26} aria-hidden="true" /></div>
                   <div style={{ fontWeight: 600, marginBottom: '0.375rem' }}>{item.title}</div>
                   <p style={{ margin: 0, fontSize: '0.875rem', opacity: 0.7, lineHeight: 1.5 }}>{item.body}</p>
                   <div style={{ marginTop: '0.75rem', fontSize: '0.8125rem', color: 'var(--primary)', fontWeight: 500 }}>
@@ -317,7 +289,7 @@ function MarketingHero() {
             <li>LoRaWAN telemetry (in development) will send battery and SD-card status back to the dashboard.</li>
             <li>Fully open hardware — schematics and firmware published on GitHub.</li>
           </ul>
-          <p style={{ opacity: 0.7, fontSize: '0.9rem', lineHeight: 1.6, marginBottom: '1rem' }}>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: '1rem' }}>
             Wildlife Watcher is currently in a prototype phase — devices are available to Beta
             testers. <Link to="/faq#buy" style={{ color: 'var(--primary)' }}>How to get one →</Link>
           </p>
@@ -328,12 +300,15 @@ function MarketingHero() {
             className="btn"
             style={{ textDecoration: 'none', display: 'inline-block' }}
           >
-            Learn more →
+            The Wildlife Watcher at wildlife.ai
           </a>
         </div>
       </div>
 
-      {/* ── Section 3: The Wildlife Watcher App ─────────────────────────── */}
+      {/* ── Section 3: The Wildlife Watcher App. The store badges live here, once,
+          after the reader knows what the app is for; the QR codes that used to sit
+          under the hero went with them (a phone taps the badge, a desktop reads
+          this section first). */}
       <div id="app" style={SECTION_STYLE}>
         <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 1rem' }}>
           <h2 style={SECTION_HEADING}>The Wildlife Watcher App</h2>
@@ -349,15 +324,7 @@ function MarketingHero() {
             <li>Pair and provision Wildlife Watcher devices over Bluetooth, with a live preview while monitoring.</li>
             <li>Remote battery and SD-card telemetry over LoRaWAN is in development.</li>
           </ul>
-          {/* Reuse app-store badges inline */}
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <a href={APP_STORE_URL} target="_blank" rel="noreferrer">
-              <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store" style={{ height: '36px' }} />
-            </a>
-            <a href={PLAY_STORE_URL} target="_blank" rel="noreferrer">
-              <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Get it on Google Play" style={{ height: '36px' }} />
-            </a>
-          </div>
+          <StoreBadges height={36} style={{ justifyContent: 'flex-start' }} />
         </div>
       </div>
 
@@ -371,7 +338,7 @@ function MarketingHero() {
           </p>
           <ThreeStepGuide steps={DEFAULT_MARKETING_STEPS} />
           <div style={{ marginTop: '2rem', textAlign: 'center' }}>
-            <Link to="/login" className="btn" style={{ textDecoration: 'none', padding: '0.75rem 2.5rem', fontSize: '1rem' }}>
+            <Link to="/signup" className="btn" style={{ textDecoration: 'none', padding: '0.75rem 2.5rem', fontSize: '1rem' }}>
               Get started — it's free
             </Link>
           </div>

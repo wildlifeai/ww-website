@@ -14,6 +14,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { supabase } from '../config/supabase'
+import { fetchLiveObservations } from '../lib/liveObservations'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { FilterSelect } from '../components/ui/ControlBar'
 import { Ribbon, type RibbonGroupDef } from '../components/ui/Ribbon'
@@ -23,6 +24,7 @@ import { LiveInsightsBanner } from '../components/data/LiveInsightsBanner'
 import { DeploymentBulkActions } from '../components/data/DeploymentBulkActions'
 import { type DeploymentRow } from '../components/data/DeploymentActionRow'
 import { useUploadStore } from '../contexts/UploadContext'
+import { NoProjectSelected } from '../components/common/NoProjectSelected'
 
 interface Observation {
   id: string
@@ -63,7 +65,7 @@ const VIEW_BTN = (active: boolean): React.CSSProperties => ({
 
 export function InsightsPage() {
   const { user } = useAuth()
-  const { selectedProjectIds } = useProjectSelection()
+  const { queryProjectIds, noProjectSelected } = useProjectSelection()
   const { isActive: uploadActive, phase: uploadPhase } = useUploadStore()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -124,9 +126,13 @@ export function InsightsPage() {
   // Reflect external URL changes (back/forward, a new deep-link) into the filter.
   useEffect(() => { setReportFilterDepState(deploymentParam) }, [deploymentParam])
 
+  // With nothing selected the page shows only a deep-linked ?deployment=, or the empty state.
+  const linkOnly = noProjectSelected && !!deploymentParam
+  const showNothing = noProjectSelected && !deploymentParam
+
   // Load deployments (both tabs use them) ──────────────────────────────────
   useEffect(() => {
-    if (!user) return
+    if (!user || (!queryProjectIds && !linkOnly)) return
     let cancelled = false
     setDepLoading(true)
     setError(null)
@@ -137,15 +143,15 @@ export function InsightsPage() {
       .is('deleted_at', null)
       .order('created_at', { ascending: false })
 
-    if (selectedProjectIds.length > 0) {
+    if (!queryProjectIds) {
+      query = query.eq('id', deploymentParam)
+    } else if (deploymentParam) {
       // Honour the project selection, but always include a deep-linked deployment
       // even when its project isn't currently selected, so ?deployment= never
       // lands on an empty report.
-      if (deploymentParam) {
-        query = query.or(`project_id.in.(${selectedProjectIds.join(',')}),id.eq.${deploymentParam}`)
-      } else {
-        query = query.in('project_id', selectedProjectIds)
-      }
+      query = query.or(`project_id.in.(${queryProjectIds.join(',')}),id.eq.${deploymentParam}`)
+    } else {
+      query = query.in('project_id', queryProjectIds)
     }
 
     query.then(({ data, error: err }) => {
@@ -163,11 +169,11 @@ export function InsightsPage() {
       setDepLoading(false)
     })
     return () => { cancelled = true }
-  }, [user, selectedProjectIds, deploymentParam, depRefresh])
+  }, [user, queryProjectIds, linkOnly, deploymentParam, depRefresh])
 
   // Load observations (reports always; map view when shown) ─────────────────
   useEffect(() => {
-    if (!user) return
+    if (!user || showNothing) return
     if (tab !== 'reports' && tab !== 'map') return
     if (deployments.length === 0) return
     let cancelled = false
@@ -177,11 +183,10 @@ export function InsightsPage() {
     const background = key === obsKeyRef.current
     obsKeyRef.current = key
     if (!background) setObsLoading(true)
-    supabase
-      .from('observations')
-      .select('id, deployment_id, scientific_name, observation_type, created_at')
-      .in('deployment_id', deployments.map(d => d.id))
-      .is('deleted_at', null)
+    fetchLiveObservations<Observation>(supabase, {
+      columns: 'id, deployment_id, scientific_name, observation_type, created_at',
+      filter: q => q.in('deployment_id', deployments.map(d => d.id)),
+    })
       .then(({ data, error: err }) => {
         if (cancelled) return
         if (!err) setObservations(data || [])
@@ -189,7 +194,7 @@ export function InsightsPage() {
       })
     return () => { cancelled = true }
     // liveTick + uploadPhase drive the live refresh while an upload is being classified.
-  }, [user, tab, deployments, liveTick, uploadPhase])
+  }, [user, showNothing, tab, deployments, liveTick, uploadPhase])
 
   // Map markers: per-deployment detection count (optionally for one species),
   // effort-normalised to a per-active-day rate, and present/absent flags.
@@ -227,14 +232,16 @@ export function InsightsPage() {
 
   // Default map focus: the most recently *finished* deployment of the selected project(s),
   // so the map opens on the latest completed survey rather than the whole-world centroid.
+  // "Finished" is judged against the time the page opened: reading the clock during
+  // render would give a different answer on every re-render.
+  const [openedAt] = useState(Date.now)
   const defaultFocusId = useMemo(() => {
-    const now = Date.now()
     const finished = deployments
       .filter(d => d.latitude != null && d.longitude != null && d.deployment_end &&
-        new Date(d.deployment_end).getTime() <= now)
+        new Date(d.deployment_end).getTime() <= openedAt)
       .sort((a, b) => new Date(b.deployment_end!).getTime() - new Date(a.deployment_end!).getTime())
     return finished[0]?.id ?? null
-  }, [deployments])
+  }, [deployments, openedAt])
 
   const filteredObservations = useMemo(() => {
     let obs = observations
@@ -310,6 +317,8 @@ export function InsightsPage() {
       <span style={{ fontSize: '0.8125rem', opacity: 0.7 }}><strong>{deployments.length}</strong> shown</span>
     ) }]
   }
+
+  if (showNothing) return <NoProjectSelected />
 
   return (
     <div>

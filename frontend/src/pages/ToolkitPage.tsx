@@ -5,6 +5,7 @@
 // Occasional, task-flavoured tools, grouped: Camera prep · AI models ·
 // Integrations · Exports. (Monitoring lives in Field; configuration in Settings.)
 import { useState } from 'react'
+import { Wrench } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../hooks/useAuth'
@@ -102,7 +103,7 @@ export function ToolkitPage() {
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 0.375rem 0' }}>🧰 Toolkit</h2>
+      <h2 style={{ margin: '0 0 0.375rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Wrench size={22} color="var(--primary)" aria-hidden="true" />Toolkit</h2>
       <p style={{ margin: '0 0 2rem 0', opacity: 0.65, fontSize: '0.9rem' }}>
         Prepare cameras, manage AI models, connect integrations, and export your data.
       </p>

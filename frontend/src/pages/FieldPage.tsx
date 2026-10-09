@@ -13,8 +13,10 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { supabase } from '../config/supabase'
+import { fetchLiveObservations } from '../lib/liveObservations'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { DeploymentMap } from '../components/data/DeploymentMap'
+import { NoProjectSelected } from '../components/common/NoProjectSelected'
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -89,7 +91,7 @@ function Kpi({ label, value, tone }: { label: string; value: number | string; to
 export function FieldPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const { selectedProjectIds } = useProjectSelection()
+  const { queryProjectIds, noProjectSelected } = useProjectSelection()
   const [deps, setDeps] = useState<ActiveDeployment[]>([])
   const [telemetry, setTelemetry] = useState<Record<string, { battery: number | null; sdUsed: number | null; lastSeen: string | null }>>({})
   const [detections, setDetections] = useState<Record<string, { count: number; latest: string | null; top: string | null }>>({})
@@ -98,17 +100,17 @@ export function FieldPage() {
 
   // Active deployments (no end date, or an end date in the future).
   useEffect(() => {
-    if (!user) return
+    if (!user || !queryProjectIds) return
     let cancelled = false
     setLoading(true); setError(null)
     const nowIso = new Date().toISOString()
-    let query = supabase
+    const query = supabase
       .from('deployments')
       .select('id, project_id, device_id, location_name, latitude, longitude, deployment_start, deployment_end, projects(name), devices(name)')
       .is('deleted_at', null)
       .or(`deployment_end.is.null,deployment_end.gt.${nowIso}`)
       .order('deployment_start', { ascending: true })
-    if (selectedProjectIds.length > 0) query = query.in('project_id', selectedProjectIds)
+      .in('project_id', queryProjectIds)
 
     query.then(({ data, error: err }) => {
       if (cancelled) return
@@ -124,7 +126,7 @@ export function FieldPage() {
       setLoading(false)
     })
     return () => { cancelled = true }
-  }, [user, selectedProjectIds])
+  }, [user, queryProjectIds])
 
   // Live updates: any new LoRaWAN message re-runs the telemetry/detections
   // fetch below. Requires lorawan_messages in the supabase_realtime
@@ -132,7 +134,8 @@ export function FieldPage() {
   // applied the page just behaves as before (fetch on load).
   const [telemetryRefresh, setTelemetryRefresh] = useState(0)
   useEffect(() => {
-    if (!user || deps.length === 0) return
+    // No listening while nothing is selected: `deps` still holds the last selection's cameras.
+    if (!user || !queryProjectIds || deps.length === 0) return
     // Realtime already enforces RLS (only rows this user can read are
     // delivered); the deployment filter narrows further to the deployments
     // this page is showing, so messages for other projects — or bench
@@ -150,7 +153,7 @@ export function FieldPage() {
         })
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [user, deps])
+  }, [user, queryProjectIds, deps])
 
   // Latest LoRaWAN telemetry per deployment + recent detections.
   useEffect(() => {
@@ -179,13 +182,10 @@ export function FieldPage() {
 
     // Detections in the last 48h.
     const since = new Date(Date.now() - 48 * 3_600_000).toISOString()
-    supabase
-      .from('observations')
-      .select('deployment_id, scientific_name, created_at')
-      .in('deployment_id', depIds)
-      .eq('observation_type', 'animal')
-      .gte('created_at', since)
-      .is('deleted_at', null)
+    fetchLiveObservations(supabase, {
+      columns: 'deployment_id, scientific_name, created_at',
+      filter: q => q.in('deployment_id', depIds).eq('observation_type', 'animal').gte('created_at', since),
+    })
       .then(({ data }) => {
         if (cancelled) return
         const d: Record<string, { count: number; latest: string | null; top: string | null }> = {}
@@ -263,7 +263,9 @@ export function FieldPage() {
 
       {error && <p style={{ color: 'var(--error)', marginBottom: '1rem' }}>⚠ {error}</p>}
 
-      {loading ? (
+      {noProjectSelected ? (
+        <NoProjectSelected />
+      ) : loading ? (
         <p style={{ opacity: 0.5 }}>Loading cameras…</p>
       ) : cameras.length === 0 ? (
         <div className="card" style={{ padding: '2rem', textAlign: 'center', opacity: 0.7 }}>

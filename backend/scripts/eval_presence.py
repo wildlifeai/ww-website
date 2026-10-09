@@ -29,6 +29,9 @@ Usage (from ``backend/``, ``GEMINI_API_KEY`` in the root ``.env`` for live runs)
     python scripts/eval_presence.py labels.csv --dump-speciesnet speciesnet.json
     python scripts/eval_presence.py labels.csv --speciesnet-results speciesnet.json --dry-run
 
+    # the same dump with and without the whole-frame and vehicle box rules (#285)
+    python scripts/eval_presence.py labels.csv --variants "" --speciesnet-results speciesnet.json --speciesnet-rules
+
 ``--cache`` is a JSONL of every live call keyed by (model, variant, frames,
 prompt version), so re-running after a crash or adding a model never pays twice
 for the same frames. A v1 cache is never reused for a v2 run: the key carries
@@ -589,14 +592,40 @@ def dump_verdicts(outcomes_by_run: dict[tuple, list[FrameOutcome]], out_path: st
         json.dump(payload, fh, indent=1)
 
 
-def speciesnet_outcomes(frames: list[LabelledFrame], results_path: str) -> list[FrameOutcome]:
-    """Per-frame SpeciesNet verdicts from a ``--dump-speciesnet`` file: ``{path: {has_animal, ...}}``."""
+def apply_box_rules(verdict: dict, threshold: float, cutoffs) -> dict:
+    """``verdict`` with ``has_animal``/``confidence`` recomputed from its raw detections after the box rules (#285).
+
+    ``cutoffs`` is a ``domain.pipeline.DetectionCutoffs``; a verdict without
+    ``detections`` (an older dump) is returned unchanged.
+    """
+    from types import SimpleNamespace
+
+    detections = verdict.get("detections")
+    if detections is None:
+        return verdict
+    animal = []
+    for d in detections:
+        det = SimpleNamespace(observation_type=d.get("type"), confidence=float(d.get("confidence") or 0.0), bbox=d.get("bbox"))
+        if det.observation_type == "animal" and det.confidence >= threshold and cutoffs.drop_reason(det) is None:
+            animal.append(det.confidence)
+    return {**verdict, "has_animal": bool(animal), "confidence": max(animal, default=None)}
+
+
+def speciesnet_outcomes(frames: list[LabelledFrame], results_path: str, cutoffs=None) -> list[FrameOutcome]:
+    """Per-frame SpeciesNet verdicts from a ``--dump-speciesnet`` file: ``{path: {has_animal, ...}}``.
+
+    With ``cutoffs`` the verdict is recomputed from the dumped detections at the
+    dump's threshold with the box rules applied (``apply_box_rules``).
+    """
     with open(results_path, encoding="utf-8") as fh:
         data = json.load(fh)
     verdicts = {os.path.normpath(k): v for k, v in data.get("frames", data).items()}
+    threshold = float(data.get("threshold", 0.2)) if "frames" in data else 0.2
     out = []
     for f in frames:
         v = verdicts.get(f.path)
+        if v is not None and cutoffs is not None:
+            v = apply_box_rules(v, threshold, cutoffs)
         out.append(
             FrameOutcome(
                 path=f.path, truth=f.has_animal, predicted=None if v is None else bool(v.get("has_animal")), confidence=(v or {}).get("confidence")
@@ -659,6 +688,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--speciesnet-results", default=None, help="JSON from --dump-speciesnet, adds a SpeciesNet row")
     ap.add_argument("--dump-speciesnet", default=None, metavar="OUT_JSON", help="run SpeciesNet over the frames and write verdicts (ML deps needed)")
     ap.add_argument("--speciesnet-threshold", type=float, default=0.2, help="detection confidence for --dump-speciesnet")
+    ap.add_argument(
+        "--speciesnet-rules",
+        action="store_true",
+        help="add a second SpeciesNet row with the whole-frame and vehicle box rules applied (cutoffs from the SPECIESNET_* settings)",
+    )
     args = ap.parse_args(argv)
 
     bursts = apply_limit(compute_bursts(read_labels(args.labels, args.root), args.gap), args.limit)
@@ -708,6 +742,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         sn = speciesnet_outcomes(labelled, args.speciesnet_results)
         outcomes_by_run[("speciesnet", "speciesnet (local)")] = sn
         results[("speciesnet", "speciesnet (local)")] = compute_metrics(sn)
+        if args.speciesnet_rules:
+            from app.domain.pipeline import DetectionCutoffs
+
+            cutoffs = DetectionCutoffs.from_config({})
+            sn_rules = speciesnet_outcomes(labelled, args.speciesnet_results, cutoffs)
+            key = ("speciesnet", f"speciesnet + box rules ({cutoffs.audit()})")
+            outcomes_by_run[key] = sn_rules
+            results[key] = compute_metrics(sn_rules)
 
     table = render_markdown(results, args.dry_run, n_unsure)
     if not args.dry_run:

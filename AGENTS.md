@@ -13,7 +13,7 @@ This file is only the quickstart.
 ## Run it
 
 Both services share **one `.env` at the repo root** (`frontend/vite.config.ts` loads `../`;
-the backend reads `../.env` before `backend/.env`). Node 20+, Python 3.11+.
+the backend reads `../.env` before `backend/.env`). Node 22+, Python 3.11+.
 
 ```bash
 cd backend  && python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -35,11 +35,31 @@ Setup detail, env reference and a verification checklist:
 
 ```bash
 cd backend  && ruff check . && ruff format --check . && pytest
-cd frontend && npm run lint && npx tsc -b --noEmit && npm run build
+cd frontend && npm run lint && npx tsc -b --noEmit && npm run build && npm run size
+node scripts/validate-docs.js
 ```
 
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
+
+`ci.yml` runs the same gates on every pull request and adds three that only run there: pytest
+with a statement-coverage floor, a build of the backend's `api` Docker stage that is started and
+asked for `/docs`, and a check that `backend/openapi.json` matches the app (regenerate it with
+`python scripts/export_openapi.py` in `backend/` when a route or a model changes). The coverage
+floor and the `size-limit` budgets in `frontend/package.json` are ratchets set just under today's
+figures: raising one is a deliberate change in the pull request that needs it. The comment above
+each job in `ci.yml` says what it proves. `codeql.yml` scans JavaScript, TypeScript and Python on
+pull requests, on pushes to dev and weekly; its findings are code scanning alerts in the Security
+tab, and it is advisory until it is made a required check (#229). `dependency-audit.yml` runs
+`npm audit` on the frontend and `e2e/` and `pip-audit` on the backend, advisory on a pull request
+that changes a lockfile or a requirements file and blocking on its Monday run; Dependabot opens
+the grouped bump PRs. The lint toolchain and `size-limit` each come as one group, majors included,
+because their packages peer-depend on each other's version and cannot install one at a time.
+
+The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
+(`.github/workflows/e2e.yml`); what they prove and how to read a failure is in
+[`e2e/README.md`](e2e/README.md). They need a running site, so they are not part of the
+local gates above.
 
 Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 (`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
@@ -58,9 +78,10 @@ run one locally, follow the instructions in its header.
   sentence.
 - **This repo does not own the database.** Schema, RLS policies **and** table GRANTs live in
   [`ww-backend`](https://github.com/wildlifeai/wildlife-watcher-backend) under
-  `supabase/schemas/`. Never create or alter tables, columns or functions from here. Add a
-  `ww-backend` migration, then consume it. Verify column names against that repo rather than
-  guessing.
+  `supabase/schemas/`. Never create or alter tables, columns or functions from here, and never
+  edit `ww-backend` from website work: file an issue there with the exact change, then consume
+  it once merged. No live database is changed by hand, not even to repair drift. Verify column
+  names against that repo rather than guessing.
 - **Backend layering is `routers → domain → services`.** No FastAPI or HTTP imports in
   `domain/`; no business logic in `routers/`.
 - **The service-role key is backend-only.** Never expose it to frontend code, never commit
@@ -83,7 +104,7 @@ run one locally, follow the instructions in its header.
 
 | | |
 |---|---|
-| Start here, in order | [`documentation/onboarding/00`–`05`](documentation/onboarding/) |
+| Start here, in order | the six guides in [`documentation/onboarding/`](documentation/onboarding/), numbered 00 to 05 |
 | Doc index, what's living vs frozen | [`documentation/README.md`](documentation/README.md) |
 | Deep agent rules | [`.agents/skills/SKILL.md`](.agents/skills/SKILL.md) |
 | UI design system | [`.agents/DESIGN.md`](.agents/DESIGN.md) |

@@ -20,7 +20,7 @@ ww-website/
 
 ```
 src/
-├── App.tsx                 # Router, signed-in Layout (Toolkit·Annotations·Insights nav), auth guard, UploadProvider
+├── App.tsx                 # Router, signed-in Layout (Toolkit·Review·Insights nav), auth guard, UploadProvider
 ├── main.tsx                # React entry
 ├── pages/                  # route-level components
 ├── components/
@@ -54,8 +54,17 @@ when the user has an active deployment.
 
 ### Routes
 
-**Public**: `/`, `/login`, `/reset-password`, `/privacy`, `/terms`, `/resources`, `/faq`, `/guides`,
+**Public**: `/`, `/login`, `/signup`, `/reset-password`, `/privacy`, `/terms`, `/resources`, `/faq`, `/guides`,
 `/guides/:slug` (both lazy-loaded); `/support` redirects to `/faq`.
+
+`/login` and `/signup` are one `LoginPage`: email sign-in (Supabase Auth UI), an email sign-up form
+that sends `given_name` and `family_name` (`lib/signUp.ts`), and Google sign-in on both. With
+`VITE_GOOGLE_CLIENT_ID` set that is Google's own button (`lib/googleIdentity.ts`): the ID token
+comes back to the page and goes to `signInWithIdToken`, so Google's consent screen names this site,
+not `<ref>.supabase.co`; each site origin must be an Authorised JavaScript origin of that client.
+Without it, the redirect flow. Redirects and confirmation links return to the site's own origin,
+which must be on the Supabase project's redirect allow-list (#187). A new account lands in the General organisation via ww-backend's
+`handle_new_user`; a Google-only account has no password until it uses Forgot password.
 
 **Protected (`RequireAuth`)**
 

@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom'
+import { usePageMeta } from '../lib/pageMeta'
 
 export function TermsOfServicePage() {
+  usePageMeta({ title: 'Terms of Service' })
   return (
     <div className="container" style={{ maxWidth: '800px', margin: '0 auto', padding: '2rem 0', lineHeight: '1.6' }}>
       <h1 style={{ marginBottom: '1.5rem' }}>Terms of Service</h1>

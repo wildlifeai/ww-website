@@ -55,7 +55,13 @@ Run:
   `tsconfig.json` is references-only (`"files": []`), so plain `tsc --noEmit` type-checks
   nothing and exits 0 with errors present. `npm run build` (`tsc -b && vite build`) catches
   them; so does the `-b` form on its own.
-* Production build if applicable
+* Production build if applicable, then `npm run size`: the size budgets fail CI, not just the
+  build
+
+## Documentation changes
+
+Run `node scripts/validate-docs.js` from the repo root after a rename or a move: it fails on any
+repository path or relative link that no longer resolves, and CI runs it as the `Docs Links` job.
 
 ## General
 

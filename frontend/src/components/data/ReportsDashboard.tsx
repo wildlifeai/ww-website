@@ -106,13 +106,15 @@ function WidgetBody({ widget, obs, enriched }: { widget: Widget; obs: Observatio
       <>
         <div style={HEADING}>{widget.title}</div>
         <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-          <table style={{ width: '100%', fontSize: '0.8rem', borderCollapse: 'collapse' }}>
-            <thead><tr style={{ opacity: 0.6, textAlign: 'left' }}><th style={{ padding: '0.25rem 0' }}>{GROUP_BY_LABELS[widget.groupBy ?? 'scientific_name']}</th><th style={{ textAlign: 'right' }}>Count</th></tr></thead>
+          {/* Sized to its content, so each count sits beside its name rather than at the far
+              edge of a wide widget (#191); numbers stay right-aligned so digits line up. */}
+          <table style={{ fontSize: '0.875rem', borderCollapse: 'collapse' }}>
+            <thead><tr style={{ opacity: 0.75, textAlign: 'left' }}><th style={{ padding: '0.25rem 2rem 0.25rem 0' }}>{GROUP_BY_LABELS[widget.groupBy ?? 'scientific_name']}</th><th style={{ textAlign: 'right' }}>Count</th></tr></thead>
             <tbody>
               {rows.map(r => (
                 <tr key={r.label} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '0.25rem 0' }}>{r.label}</td>
-                  <td style={{ textAlign: 'right', fontWeight: 600 }}>{r.count}</td>
+                  <td style={{ padding: '0.25rem 2rem 0.25rem 0' }}>{r.label}</td>
+                  <td style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{r.count}</td>
                 </tr>
               ))}
               {rows.length === 0 && <tr><td colSpan={2} style={{ opacity: 0.5, padding: '0.5rem 0' }}>No data</td></tr>}

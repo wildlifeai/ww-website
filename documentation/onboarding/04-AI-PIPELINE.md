@@ -29,7 +29,7 @@ built from the enabled per-step flags). Steps run in order:
 
 | Step (`PipelineStepType`) | What it does | Flag |
 |---|---|---|
-| `MEDIA_PREP` | Generate thumbnail + preview renditions and upload them to the **public Supabase Storage bucket** (`media-renditions`), recording the URLs on `media_assets` so the grid never hits Google Drive. Originals stay in Drive. No observations. | `FF_MEDIA_REGISTRY_ENABLED` |
+| `MEDIA_PREP` | Generate thumbnail + preview renditions and upload them to the **public Supabase Storage bucket** (`media-renditions`), recording the URLs on `media_assets` so the grid never hits Google Drive. Originals stay in Drive. No observations. Each photo is tried three times (1 s, then 2 s apart); a permission error (`42501`) is logged once as `media_prep_refused` and stops the step, since every other photo would be refused too. Photos left without a thumbnail are made later by the backfill (`POST /api/media/thumbnails/{deployment_id}`, the grid's **Retry**). | `FF_MEDIA_REGISTRY_ENABLED` |
 | `SPECIESNET` | **The core model.** Resolves each image to a temp file, runs the **SpeciesNet ensemble** (detector + species classifier in one pass), and writes media-level `observations` with bbox, detection `confidence`, species `classification_probability`, and `scientific_name`/`vernacular_name`. By default SpeciesNet classifies **one species per image**, so multiple detection boxes of the same type are collapsed into **one** observation carrying a `count` (number of boxes) + the highest-confidence box as the representative bbox — not N duplicate rows. **With `FF_PER_CROP_CLASSIFY_ENABLED` on** this collapse is skipped: each kept detection becomes its own observation (`count = 1`, its own bbox), refined per crop by the classify stage — see [Per-detection classification](#per-detection-classification-ff_per_crop_classify_enabled) below. The species is **taxonomically rolled up** by confidence (`rollup_taxon`): below `SPECIES_CONFIDENCE` (0.5) it backs off to genus, below `GENUS_CONFIDENCE` (0.35) to the most specific available higher rank — so a shaky 0.4 "Apteryx mantelli" is recorded as "Apteryx", not a false species claim. | `FF_SPECIESNET_ENABLED` |
 | `ANIMAL_CROP` | Crops the best animal detection into `media_assets.animal_crop_url` for DINOv3 / BioCLIP. No observations. | — |
 | `BIOCLIP` | **Classify stage — pluggable.** Runs a classifier on the animal crop and adds a *second* `animal` observation tagged with the classifier's `source_model_version` — a complement / second opinion to SpeciesNet, strong for taxa outside SpeciesNet's ~2k label set. The classifier is resolved from a registry (`domain/classifiers.py`): [Imageomics BioCLIP](https://imageomics.github.io/pybioclip/) (`bioclip-2`) by default, or whatever `config['classifier']` selects. | `FF_BIOCLIP_ENABLED` |
@@ -89,7 +89,26 @@ re-uploading) a deployment processes only the *new* images. Camera AI rows (`ai_
 don't count: they are reflected before the pipeline runs, on the upload job and in
 `auto_annotate_deployments` alike (#161). The manual endpoint accepts `only_unannotated=false`
 to force a full re-run. Each run records an `annotation_runs` row (steps, threshold, observation
-count, `created_by`) for provenance.
+count, `created_by`) for provenance. Every read pages past PostgREST's 1,000-row cap.
+
+**A human verdict is final (#284).** A photo with a live `human_reviewed`, `expert_reviewed` or
+`consensus_approved` row is skipped by every run except a `force` one, and each step that writes
+rows (Gemini, SpeciesNet, BioCLIP, evidence fusion) checks again just before it writes
+(`without_human_verdicts`), so a photo reviewed while the model was working gets no machine row
+beside the verdict. A `force` run (CamtrapDP import) keeps the verdict and adds no row of the model
+whose own row the reviewer ruled on. Nothing spans the check and the insert, so a review landing in
+those milliseconds can still race.
+
+**One run per deployment at a time (#284).** `run_pipeline` holds a per-deployment lock
+(`services/locks.py`) while it reads the media and runs the steps, so a second run waits and then
+sees what the first one wrote. With `REDIS_URL` set the lock is a Redis key with a renewed 10-minute
+TTL and spans the API workers and every ARQ worker; without Redis, or when Redis is unreachable, it
+is an in-process lock only. `POST /api/pipeline/run` does not wait: it returns `PIPELINE_BUSY`.
+The upload job joins a **queued** `ai_pipeline` job on the deployment (under a lock, so chunks that
+arrive together make one); the job stays queued while it is deferred and while it waits for the
+lock, and turns `processing` only when it reads its media. A deployment whose job is already
+`processing` gets one follow-up job, which later chunks join. A follow-up's wait counts toward the
+ARQ `job_timeout` (1 hour).
 
 > **History:** the earlier `MegaDetectorStep`, `SpeciesNetClassifierStub`, and `EmptyFrameStep`
 > placeholders were **removed** — the SpeciesNet ensemble subsumes detection, classification, and
@@ -99,7 +118,12 @@ count, `created_by`) for provenance.
 
 A blank frame is a **positive result, not missing data**. When SpeciesNet keeps no detections above
 the confidence threshold, it writes **one observation with `observation_type='blank'`** (no bbox,
-`source_type='ai'`, `review_status='ai_reviewed'`). The distinction:
+`source_type='ai'`, `review_status='ai_reviewed'`). Two more rules drop boxes first, because the
+detector answers empty night scenes with a whole-frame "vehicle" (#285): a box over
+`SPECIESNET_WHOLE_FRAME_AREA` (0.9) of the frame needs `SPECIESNET_WHOLE_FRAME_MIN_CONFIDENCE` (0.5)
+whatever its class, and `SPECIESNET_DROP_VEHICLES` (on) drops every vehicle. The run's config can
+override each; the `annotation_runs` row and the evidence fusion audit comment record the values
+used, and a box these rules drop adds nothing to the fusion score. The distinction:
 
 - **Blank** = processed, no animal → has a `blank` AI observation → shows the teal **AI** badge.
 - **Unprocessed** = no observations at all → shows the neutral grey **⧗ Processing** badge (still
@@ -108,6 +132,12 @@ the confidence threshold, it writes **one observation with `observation_type='bl
 
 Blanks are excluded from species charts but counted in the observation-type breakdown and the
 deployment **false-trigger rate**.
+
+**Which verdict a photo shows (#170).** The Annotations card's Empty or species label and the
+detection notifications read a human verdict first, then the evidence fusion consensus row
+(`source_type='consensus'`), then the per-model rows as before: `photoVerdict` in
+`frontend/src/lib/observations.ts` and `photo_detections` in `backend/app/services/notifications_service.py`.
+A consensus animal no model named is notified as "Unidentified animal".
 
 ## Wildlife Brain (embeddings → clustering → active learning)
 

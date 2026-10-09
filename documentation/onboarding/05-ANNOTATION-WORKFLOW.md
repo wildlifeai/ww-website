@@ -3,7 +3,7 @@
 How reviewers validate AI labels and create new ones in the web app. This is the surface most users
 spend their time in.
 
-## Entry point: the Annotations tab
+## Entry point: the Review tab (`/annotations`)
 
 `/annotations` → `AnnotationsPage` → `MediaBrowser`. The page has **no title text** — the
 highlighted nav tab already signals where you are.
@@ -33,9 +33,20 @@ per image derived from `review_status` (`lib/observations.ts`):
 | ⧗ Processing (grey) | no observations yet — still working through the pipeline |
 | ✕ Issue (red) | explicit pipeline error (reserved; see `StatusBadge.tsx`) |
 
+A card with no thumbnail yet shows **Processing…** while its deployment has a queued or running
+job, or for 10 minutes after the photo was registered. After that it shows **No thumbnail** and a
+**Retry** button, which runs the thumbnail backfill for the whole deployment (#208). While a job
+runs on a deployment in view the grid quietly refetches its page every 30 s, keeping the cards on
+screen until the new rows arrive, and it reloads once more when
+the job finishes (`hooks/useRefreshWhileBusy.ts`, `hooks/useBusyDeployments.ts`,
+`lib/thumbnailRetry.ts`). The pipeline makes thumbnails newest first, the grid's order, four at a
+time (#286).
+
 ### Selection actions
 
-Click selects, double-click opens. Once something is selected the **Actions** menu
+A click (or Enter) opens a photo, even while others are selected, and the selection survives the
+viewer. The circle at a card's bottom-left, Ctrl/Cmd-click or Space selects; Shift-click selects
+the range from the last selected card (`lib/cardSelection.ts`, #283). Once something is selected the **Actions** menu
 (`components/data/MediaBulkActions.tsx`) offers: *Label as…* (one human observation on every
 selected image), *Find similar images* (single selection, Wildlife Brain), *Upload to iNaturalist*,
 *Remove images* (soft delete with undo), *Run AI (re-classify)* and *Create species ID model…*.
@@ -46,7 +57,7 @@ the Edge Impulse recipe (`TrainModelModal.tsx`, `POST /api/models/train`, behind
 
 ## The full-screen labeling modal
 
-Selecting a photo opens a **full-screen modal** (`MediaDetail.tsx`):
+Clicking a photo opens a **full-screen modal** (`MediaDetail.tsx`):
 
 - **Left** — the image at up to 92vh with **bounding-box overlays** and draw/redraw/delete; ‹/›
   arrows and ←/→ keys step between images; Esc cancels a draw or closes; click the backdrop to close.

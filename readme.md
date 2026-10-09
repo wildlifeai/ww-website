@@ -12,7 +12,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/license-GPL--3.0-blue.svg" alt="License: GPL-3.0">
-  <img src="https://img.shields.io/badge/node-20%20LTS-339933?logo=node.js&logoColor=white" alt="Node 20 LTS">
+  <img src="https://img.shields.io/badge/node-22%20LTS-339933?logo=node.js&logoColor=white" alt="Node 22 LTS">
   <img src="https://img.shields.io/badge/python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
   <img src="https://img.shields.io/badge/frontend-React%2019%20%2B%20Vite-61DAFB?logo=react&logoColor=white" alt="React 19 + Vite">
 </p>
@@ -294,9 +294,10 @@ HF model, put a token in `HF_TOKEN` (SpeciesNet/BioCLIP need none). Architecture
 ```bash
 cd backend && python -m pytest tests/ -v          # backend unit/domain tests
 cd frontend && npm run lint && npx tsc -b --noEmit # frontend lint + type check (-b: the root tsconfig is references-only)
+cd e2e && npm run e2e:smoke                        # browser checks against a running site, see e2e/README.md
 ```
 
-See the [Testing Guide](./documentation/resources/testing-with-seed-users.md) for seed users and role-based validation.
+See the [Testing Guide](./documentation/resources/testing-with-seed-users.md) for seed users and role-based validation, and [`e2e/README.md`](./e2e/README.md) for the Playwright flows and what CI runs them against.
 
 ## Additional Commands
 

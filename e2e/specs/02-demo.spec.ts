@@ -1,26 +1,37 @@
-import { test, expect } from '@playwright/test'
+import { Page } from '@playwright/test'
+import { test, expect } from '../helpers/test'
 
 /**
  * Demo flow: "Try the demo" signs the visitor into the shared read-only
  * account (POST /api/auth/demo-session) and DemoGuard blocks mutations.
  */
 
-test('demo button opens a signed-in read-only session', async ({ page }) => {
+/**
+ * Success is the signed-in dashboard, which the app renders at `/` itself:
+ * the URL does not change (run 36937428801 waited a minute for one while the
+ * demo banner was already on screen). The banner is the proof.
+ */
+async function openDemo(page: Page): Promise<void> {
   await page.goto('/')
   await page.getByRole('button', { name: /try the demo/i }).click()
   // The button reports failure states inline (e.g. DEMO_DISABLED: "The demo
   // account is not configured on this server.") — fail fast and loudly on those.
   await expect(page.getByText(/demo.*(unavailable|disabled|not configured)/i)).not.toBeVisible({ timeout: 15_000 })
-  // Success = we leave the marketing page for an authed view.
-  await page.waitForURL(url => url.pathname !== '/', { timeout: 60_000 })
-  const landed = new URL(page.url()).pathname
-  expect(landed, 'demo login did not navigate into the app').not.toMatch(/^\/(login)?$/)
+  // The dev API may be cold: the button itself says "Waking the server…"
+  await expect(page.getByText(/read-only demo/i).first()).toBeVisible({ timeout: 90_000 })
+}
+
+test('demo button opens a signed-in read-only session', async ({ page }) => {
+  await openDemo(page)
+  // Signed in: the authed navigation is there and the login form is not. The
+  // tab is matched by its route, not its label: it read Annotations until #248
+  // renamed it Review, and the route is the part that does not move.
+  await expect(page.locator('a[href="/annotations"]').first()).toBeVisible()
+  await expect(page.locator('form input[type="password"]')).toHaveCount(0)
 })
 
 test('demo session is read-only where it matters', async ({ page }) => {
-  await page.goto('/')
-  await page.getByRole('button', { name: /try the demo/i }).click()
-  await page.waitForURL(url => url.pathname !== '/', { timeout: 60_000 })
+  await openDemo(page)
 
   // Attempting an upload from the demo account must be gated by DemoGuard:
   // either the control is absent/disabled, or activating it shows the guard

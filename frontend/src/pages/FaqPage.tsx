@@ -10,8 +10,10 @@
 import { useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { FaqItem } from '../components/common/FaqItem'
+import { usePageMeta } from '../lib/pageMeta'
 
 export function FaqPage() {
+  usePageMeta({ title: 'FAQ', description: 'What makes the Wildlife Watcher different from other camera traps, how its AI works, battery life, SD cards, exports, and how to get a device.' })
   const { hash } = useLocation()
 
   // React Router doesn't scroll to hashes, and a <details> target stays
@@ -112,8 +114,8 @@ export function FaqPage() {
       <FaqItem q="Does it have a mobile app?">
         Yes — the app is available on the iOS App Store and Google Play. It connects to the
         camera via Bluetooth and is required to configure, control, and start your monitoring
-        sessions. See the <Link to="/resources" style={{ color: 'var(--primary)' }}>Resources</Link>{' '}
-        page for a setup guide.
+        sessions. Installing it is step three of{' '}
+        <Link to="/resources#mobile-app" style={{ color: 'var(--primary)' }}>Get started</Link>.
       </FaqItem>
 
       <FaqItem q="Can it monitor rats and other pests?">
@@ -148,18 +150,19 @@ export function FaqPage() {
       {/* ── Existing users (formerly the Support page) ───────────────────── */}
       <h2 style={{ marginTop: '2.5rem', marginBottom: '0.75rem' }}>Already using Wildlife Watcher?</h2>
       <p>
-        Questions about monitoring sessions, Bluetooth, data export, and your account are answered
-        below. Step-by-step setup instructions live under{' '}
-        <Link to="/resources" style={{ color: 'var(--primary)' }}>Resources</Link>.
+        Quick answers about the camera, the app, your data and your account. Anything that is a
+        procedure, from unboxing to your first monitoring session to troubleshooting, lives under{' '}
+        <Link to="/resources" style={{ color: 'var(--primary)' }}>Get started</Link>, once, with
+        the steps in order.
       </p>
 
       <h3 style={{ marginTop: '2rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>Getting Started</h3>
 
       <FaqItem q="How do I start a monitoring session?">
-        To start a monitoring session, ensure your camera has batteries and a microSD card installed.
-        Open the Wildlife Watcher mobile app, tap "Search for devices" in the app, and physically press the button at the bottom of the device to connect to it.
-        Once connected, you can configure the project and start the monitoring session. When you are done, you can stop the monitoring through the app.
-        See our <Link to="/resources" style={{ color: 'var(--primary)' }}>Resources</Link> page for a detailed step-by-step guide.
+        From the mobile app, connected to the camera over Bluetooth: pick the project, optionally
+        the location and settings, and tap Start Monitoring. The camera then runs on its own until
+        you connect again and stop it. The eleven steps, start to stop, are under{' '}
+        <Link to="/resources#deployment" style={{ color: 'var(--primary)' }}>Get started: Start Monitoring</Link>.
       </FaqItem>
 
       <FaqItem q="What is an organisation?">
@@ -206,12 +209,9 @@ export function FaqPage() {
       </FaqItem>
 
       <FaqItem q="The app can't connect to my camera via Bluetooth. What should I do?">
-        <ol style={{ paddingLeft: '1.5rem', margin: '0.5rem 0' }}>
-          <li>Make sure you physically tap the button at the bottom of the device to activate Bluetooth advertising, and ensure the blue light is flashing.</li>
-          <li>Ensure Bluetooth is enabled on your phone and you are within range (a few metres).</li>
-          <li>If the app is scanning but not finding the device, <strong>close the app completely and reopen it</strong>.</li>
-          <li>If the issue persists, restart both the camera and your phone.</li>
-        </ol>
+        Nine times out of ten the camera is not advertising: press the button at the bottom and
+        check the blue light flashes before you scan. The rest of the checklist, in order, is under{' '}
+        <Link to="/resources#maintenance" style={{ color: 'var(--primary)' }}>Get started: Maintenance &amp; Troubleshooting</Link>.
       </FaqItem>
 
       <h3 style={{ marginTop: '2rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>Data & Export</h3>
@@ -250,11 +250,11 @@ export function FaqPage() {
 
       <ul style={{ paddingLeft: '1.5rem', marginBottom: '1rem' }}>
         <li><strong>Email:</strong> <a href="mailto:contact@wildlife.ai" style={{ color: 'var(--primary)' }}>contact@wildlife.ai</a></li>
-        <li><strong>Resources:</strong> Visit our <Link to="/resources" style={{ color: 'var(--primary)' }}>Resources & How-To Guides</Link> for detailed setup and troubleshooting instructions.</li>
+        <li><strong>Get started:</strong> <Link to="/resources" style={{ color: 'var(--primary)' }}>the setup and troubleshooting steps</Link>, in order.</li>
       </ul>
 
       <p style={{ marginTop: '2rem', fontStyle: 'italic', color: 'var(--text-muted, #666)' }}>
-        Our support team is available Monday through Friday during standard New Zealand business hours.
+        Our support team is available Monday to Friday, New Zealand time (UTC+12, UTC+13 in summer).
       </p>
     </div>
   )

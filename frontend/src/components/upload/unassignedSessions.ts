@@ -5,6 +5,7 @@
  * triage is required) and the triage screen itself can use it without breaking
  * fast refresh.
  */
+import { isTestPhoto, type CameraExif } from '../../lib/exifDeploymentId'
 
 /** A gap longer than this starts a new capture session. */
 export const SESSION_GAP_MS = 6 * 60 * 60 * 1000
@@ -59,6 +60,31 @@ export function span(a: number, b: number): string {
 export function cardFolderOf(path: string): string | null {
   const m = path.match(/MEDIA[/\\]([A-Fa-f0-9]{8})[/\\]/i)
   return m ? m[1].toUpperCase() : null
+}
+
+/**
+ * Drop WW500 test photos (no deployment set on the camera, see isTestPhoto)
+ * from a selection, keeping `paths` and the EXIF deployment ids aligned to the
+ * files that remain. The folder plays no part: a frame in MEDIA/00000000/ that
+ * carries a real id stays (ww-website#287).
+ */
+export function withoutTestPhotos(
+  files: File[],
+  paths: string[],
+  exif: CameraExif[],
+): { files: File[]; paths: string[]; exifIds: (string | null)[]; skipped: number } {
+  const out = { files: [] as File[], paths: [] as string[], exifIds: [] as (string | null)[], skipped: 0 }
+  files.forEach((f, i) => {
+    const e = exif[i] ?? { deploymentId: null, make: null }
+    if (isTestPhoto(e)) {
+      out.skipped += 1
+      return
+    }
+    out.files.push(f)
+    out.paths.push(paths[i])
+    out.exifIds.push(e.deploymentId)
+  })
+  return out
 }
 
 /**

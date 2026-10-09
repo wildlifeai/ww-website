@@ -18,6 +18,8 @@ from app.jobs.store import (
     complete_phase,
     create_job,
     emit_event,
+    find_active_ai_jobs,
+    flush_pending_syncs,
     get_job,
     job_heartbeat,
     set_job_deployments,
@@ -678,6 +680,52 @@ def _is_uuid(value: object) -> bool:
         return False
 
 
+def plan_ai_coalescing(dep_ids: list[str], active_jobs: list[dict]) -> tuple[list[str], dict[str, str], dict[str, str]]:
+    """Split an upload's deployments by the AI jobs already on them (#284).
+
+    ``active_jobs`` is :func:`app.jobs.store.find_active_ai_jobs`. Returns the deployments
+    that need a new job, ``{deployment: queued job it joins}``, and ``{deployment:
+    processing job}`` for the new job's deployments that one is already running on, so
+    the new job is that run's follow-up. A processing job may already have read its media,
+    so it never covers a deployment on its own; a queued one has not.
+    """
+    queued: dict[str, str] = {}
+    processing: dict[str, str] = {}
+    for job in active_jobs:
+        into = queued if job.get("status") == JobStatus.QUEUED.value else processing
+        for d in job.get("deployment_ids") or []:
+            into.setdefault(d, job["job_id"])
+    new = [d for d in dep_ids if d not in queued]
+    covered = {d: queued[d] for d in dep_ids if d in queued}
+    following = {d: processing[d] for d in new if d in processing}
+    return new, covered, following
+
+
+async def reserve_ai_job(dep_ids: list[str], user_id: str | None) -> tuple[str | None, list[str], dict[str, str], dict[str, str]]:
+    """Create the ``ai_pipeline`` job an upload chunk needs, or find the queued one it joins.
+
+    Returns ``(new job id or None, its deployments, covered, following)`` as in
+    :func:`plan_ai_coalescing`. The check and the create run under one lock
+    (``services.locks``, across processes when Redis is set), and the new row is written
+    through to Supabase before the lock is let go, so two chunks that arrive together
+    cannot both create a job for one deployment (#284).
+    """
+    from app.services.locks import exclusive  # noqa: PLC0415
+
+    async with exclusive("ai-coalesce", ttl_seconds=60):
+        new_dep_ids, covered, following = plan_ai_coalescing(dep_ids, await find_active_ai_jobs())
+        if not new_dep_ids:
+            return None, new_dep_ids, covered, following
+        ai_job_id = await create_job(
+            user_id=user_id,
+            kind="ai_pipeline",
+            label=f"AI analysis — {len(new_dep_ids)} deployment(s)",
+            deployment_ids=new_dep_ids,
+        )
+        await flush_pending_syncs(ai_job_id)
+        return ai_job_id, new_dep_ids, covered, following
+
+
 def build_pipeline_steps() -> list:
     """Build the ordered pipeline step list from the enabled feature flags.
 
@@ -743,6 +791,21 @@ async def auto_annotate_deployments(
         "bioclip": "Identifying species",
         "evidence_fusion": "Combining the evidence per frame",
     }
+    step_names = [s.value for s in steps]
+
+    started = False
+
+    async def _on_start() -> None:
+        # The job turns 'processing' only once it holds its first deployment: until then
+        # (deferred, or waiting for a run already on the deployment) later upload chunks
+        # still see it 'queued' and join it (#284). Awaited to Supabase, so a chunk that
+        # read 'queued' had registered its photos before this run reads the media.
+        nonlocal started
+        if started or not job_id:
+            return
+        started = True
+        await update_job(job_id, status=JobStatus.PROCESSING, current_phase=ProgressPhase.AI_PIPELINE)
+        await flush_pending_syncs(job_id)
 
     # Heartbeat api_jobs.updated_at across the whole run: a single long step (e.g.
     # SpeciesNet over thousands of images) writes no progress between on_step calls,
@@ -760,6 +823,16 @@ async def auto_annotate_deployments(
                 label = step_labels.get(step_name, step_name)
                 await update_job(job_id, progress=min(0.99, frac), message=f"🔬 {label} — deployment {_i + 1}/{total}")
 
+            # Within a step that reports it (media preparation), so the bar moves during the
+            # thumbnails instead of sitting at the step's start (#286).
+            async def _on_progress(step_name: str, done: int, step_media: int, _i: int = i) -> None:
+                if not job_id or not step_media or not total:
+                    return
+                step_idx = step_names.index(step_name)
+                frac = (_i + (step_idx + done / step_media) / len(steps)) / total
+                label = step_labels.get(step_name, step_name)
+                await update_job(job_id, progress=min(0.99, frac), message=f"🔬 {label}, {done} of {step_media}, deployment {_i + 1}/{total}")
+
             try:
                 logger.info("auto_annotate_start", deployment_id=dep_id, steps=[s.value for s in steps])
                 # Reflect the camera's own EXIF scores as edge observations before the
@@ -774,6 +847,8 @@ async def auto_annotate_deployments(
                     steps=steps,
                     user_id=user_id,
                     on_step=_on_step if job_id else None,
+                    on_progress=_on_progress if job_id else None,
+                    on_start=_on_start,
                     force=force,
                     media_ids=media_ids,
                 )
@@ -803,12 +878,18 @@ async def auto_embed_deployment(deployment_id: str, user_id: str | None = None) 
     try:
         from app.domain.wildlife_brain import embed_and_cluster_deployment
 
+        t0 = time.monotonic()
         result = await embed_and_cluster_deployment(deployment_id, created_by=user_id)
+        duration = time.monotonic() - t0
+        images = result.get("image_count") or 0
         logger.info(
             "auto_embed_complete",
             deployment_id=deployment_id,
-            images=result.get("image_count"),
+            images=images,
             clusters=result.get("clusters"),
+            # DINOv3 runs on the GPU outside the pipeline steps; its time per frame too (#171).
+            duration_seconds=round(duration, 2),
+            seconds_per_frame=round(duration / images, 3) if images else None,
         )
     except Exception as exc:
         logger.warning("auto_embed_failed", deployment_id=deployment_id, error=str(exc))
@@ -826,9 +907,9 @@ async def annotate_deployments_job(
 
     The actual work (``run_pipeline`` per deployment + detection notifications + DINOv3
     embed/cluster) lives in :func:`auto_annotate_deployments`; this is the thin
-    job-status wrapper around it.
+    job-status wrapper around it. The job stays 'queued' until ``run_pipeline`` holds
+    its first deployment, which then marks it 'processing'.
     """
-    await update_job(job_id, status=JobStatus.PROCESSING, current_phase=ProgressPhase.AI_PIPELINE)
     try:
         await auto_annotate_deployments(deployment_ids, user_id=user_id, job_id=job_id, force=force, media_ids=media_ids)
         await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message="AI analysis complete")
@@ -876,6 +957,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         job_id,
         total=total_files,
         started_at=datetime.now(timezone.utc),
+        test_photos_skipped=int(payload.get("test_photos_skipped") or 0),
     )
     await emit_event(
         job_id,
@@ -1417,34 +1499,25 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             from datetime import timedelta  # noqa: PLC0415
 
             from app.jobs.dispatch import enqueue_job  # noqa: PLC0415
-            from app.jobs.store import find_queued_ai_jobs  # noqa: PLC0415
 
             await start_phase(job_id, ProgressPhase.AI_PIPELINE)
 
             # Debounced coalescing. A chunked upload sends ~18 requests (10 images each), each
-            # firing its own AI job → a queue full of redundant runs. The fix is two parts:
-            #   1) Enqueue the AI job **deferred** by ANNOTATE_DEBOUNCE_SECONDS. During that window
-            #      the api_jobs row stays 'queued' AND the worker hasn't fetched media yet — so all
-            #      later chunks (2) find it and reuse it, and when it finally runs every image is
-            #      already registered. (Previously the job completed in ~1s, before the next chunk
-            #      could coalesce, so nothing deduped.)
-            #   2) Reuse any still-queued AI job covering the deployment instead of enqueuing again.
-            # Net: one AI run per deployment per upload instead of ~18. run_pipeline's unannotated
-            # scoping keeps even a stray extra run a cheap no-op.
-            active_ai = await find_queued_ai_jobs()
-            covered: dict[str, str] = {}
-            for j in active_ai:
-                for d in j["deployment_ids"]:
-                    covered.setdefault(d, j["job_id"])
-            new_dep_ids = [d for d in _dep_ids if d not in covered]
-
-            if new_dep_ids:
-                ai_job_id = await create_job(
-                    user_id=_user_id,
-                    kind="ai_pipeline",
-                    label=f"AI analysis — {len(new_dep_ids)} deployment(s)",
-                    deployment_ids=new_dep_ids,
-                )
+            # firing its own AI job → a queue full of redundant runs. The fix is three parts:
+            #   1) Enqueue the AI job **deferred** by ANNOTATE_DEBOUNCE_SECONDS. The api_jobs row
+            #      stays 'queued' through that window AND while it waits for a run already on the
+            #      deployment (run_pipeline's per-deployment lock); it turns 'processing' only when
+            #      it reads its media. So all later chunks (2) find it and reuse it, and when it
+            #      runs every image is already registered.
+            #   2) Reuse any queued AI job covering the deployment instead of enqueuing again. A
+            #      deployment covered only by a 'processing' job gets one follow-up job, which
+            #      later chunks join through (2) (#284).
+            #   3) reserve_ai_job holds a lock across the check and the create, so concurrent
+            #      chunks cannot both create one.
+            # Net: one AI run per deployment per upload, plus at most one follow-up for the
+            # photos that arrive while it runs.
+            ai_job_id, new_dep_ids, covered, following = await reserve_ai_job(_dep_ids, _user_id)
+            if ai_job_id:
                 await enqueue_job(
                     "annotate_deployments_job",
                     ai_job_id,
@@ -1452,6 +1525,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                     _user_id,
                     _defer_by=timedelta(seconds=ANNOTATE_DEBOUNCE_SECONDS),
                 )
+                follow_note = f", after the run already going (job {next(iter(following.values()))[:8]}) finishes" if following else ""
                 await emit_event(
                     job_id,
                     ProgressEvent(
@@ -1459,7 +1533,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                         phase=ProgressPhase.AI_PIPELINE,
                         child_job_id=ai_job_id,
                         message=(
-                            f"🛰️ Queued AI analysis for {len(new_dep_ids)} deployment(s) on the AI worker "
+                            f"🛰️ Queued AI analysis for {len(new_dep_ids)} deployment(s) on the AI worker{follow_note} "
                             f"— track it in Processing history (job {ai_job_id[:8]})"
                         ),
                     ),
@@ -1536,10 +1610,14 @@ async def backfill_thumbnails_job(job_id: str, deployment_id: str):
     """Generate thumbnail/preview renditions for a deployment's media (Media Registry)."""
     logger.info("job_start", job_type="backfill_thumbnails", job_id=job_id, deployment_id=deployment_id)
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1, message="Generating thumbnails…")
+
+    async def _progress(done: int, total: int):
+        await update_job(job_id, progress=0.1 + 0.9 * done / total, message=f"Generating thumbnails, {done} of {total}")
+
     try:
         from app.domain.media_registry import backfill_thumbnails
 
-        count = await backfill_thumbnails(deployment_id)
+        count = await backfill_thumbnails(deployment_id, progress=_progress)
         await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message=f"Generated {count} thumbnails")
     except Exception as e:
         logger.error("job_failed", job_type="backfill_thumbnails", job_id=job_id, error=str(e))

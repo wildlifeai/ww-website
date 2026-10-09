@@ -231,6 +231,10 @@ ww-backend `supabase/schemas/public/tables/35_observations.sql`:
 | `classification_probability`, `embedding_run_id`, `cluster_id`, `observation_tags`, `deleted_at` | NULL | |
 | `observation_comments` | `evidence_fusion_v1 score=0.91 threshold=0.50 speciesnet=0 gemini=1.0 neighbour=1 motion=0.60 edge=absent near=0.70` | audit line, under 500 characters |
 
+Readers (#170): the Annotations card and the detection notifications follow this row's
+`observation_type` for presence when no human verdict exists, and take the species from the
+per-model rows (`photoVerdict`, `photo_detections`).
+
 Uniqueness is enforced by the writer. If ww-backend wants it in the schema:
 `unique (media_id) where source_type = 'consensus' and deleted_at is null` (partial index, not
 part of the `media_evidence` issue).

@@ -155,7 +155,14 @@ async def enqueue_thumbnail_backfill(
     from app.jobs.runner import enqueue_local_job
     from app.jobs.store import create_job
 
-    job_id = await create_job()
+    # Owner and deployment let the job show in the user's processing history and
+    # drive the Annotations "being processed" banner for that deployment.
+    job_id = await create_job(
+        user_id=user.id,
+        kind="media_prep",
+        label=f"Thumbnails for deployment {deployment_id[:8]}",
+        deployment_ids=[deployment_id],
+    )
     enqueue_local_job(backfill_thumbnails_job(job_id, deployment_id))
     return ApiResponse(
         data={"job_id": job_id, "status": "queued", "deployment_id": deployment_id},

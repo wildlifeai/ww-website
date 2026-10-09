@@ -63,6 +63,12 @@ class _Query:
         self.filters.append(("limit", n))
         return self
 
+    def order(self, *_a, **_k):
+        return self
+
+    def range(self, *_a):
+        return self
+
     def execute(self):
         return self.fake.execute(self)
 
@@ -102,7 +108,14 @@ class _Fake:
         if q.table == "observations":
             if q.op == "select":
                 ids = self._ids(q, "media_id") or []
-                return _R([o for o in self.observations if o["media_id"] in ids and o.get("deleted_at") is None])
+                states = self._ids(q, "review_status")  # the write-time human verdict check
+                return _R(
+                    [
+                        o
+                        for o in self.observations
+                        if o["media_id"] in ids and o.get("deleted_at") is None and (states is None or o.get("review_status") in states)
+                    ]
+                )
             if q.op == "delete":
                 self.deletes.append(q.filters)
                 ids = self._ids(q, "media_id") or []
@@ -260,6 +273,7 @@ async def test_step_writes_one_consensus_row_per_media_and_recovers_a_burst_neig
     assert (
         rows["a"]["observation_comments"]
         == "evidence_fusion_v1 score=0.87 threshold=0.50 speciesnet=0 gemini=0.80 neighbour=1 motion=1 edge=absent near=0.70"
+        " det=0.20 frame_area=0.90 frame_conf=0.50 vehicle=dropped"
     )
     # c: singleton, both blank, near 0.15: score 0.015, confirmed blank, neighbour absent.
     assert rows["c"]["observation_type"] == "blank" and rows["c"]["confidence"] == 0.015
@@ -290,12 +304,14 @@ async def test_step_writes_one_consensus_row_per_media_and_recovers_a_burst_neig
 
 
 async def test_step_replaces_only_its_own_ai_reviewed_rows(monkeypatch):
-    media = [_media("a", "2026-06-16T17:42:00+00:00")]
+    # "b" is hours after "a", so each is its own burst. A reviewer ruled on "b" (#284).
+    media = [_media("a", "2026-06-16T17:42:00+00:00"), _media("b", "2026-06-16T20:42:00+00:00")]
     stale = _obs("a", "animal", EVIDENCE_FUSION_VERSION, conf=0.9, source="consensus", origin=None)
-    promoted = _obs("a", "animal", EVIDENCE_FUSION_VERSION, conf=0.9, source="consensus", origin=None, review="human_reviewed")
     other = _obs("a", "animal", "vote_v0", conf=0.9, source="consensus", origin=None)
     human = _obs("a", "animal", "human", source="human", origin=None)
-    fake = _Fake(media, [stale, promoted, other, human, _obs("a", "blank", SN), _obs("a", "blank", GEM)], evidence_table=False)
+    promoted = _obs("b", "animal", EVIDENCE_FUSION_VERSION, conf=0.9, source="consensus", origin=None, review="human_reviewed")
+    rows = [stale, other, human, promoted, _obs("a", "blank", SN), _obs("a", "blank", GEM), _obs("b", "blank", SN)]
+    fake = _Fake(media, rows, evidence_table=False)
     _enable(monkeypatch, fake)
 
     async def fake_resolve(path, size="full"):
@@ -307,9 +323,11 @@ async def test_step_replaces_only_its_own_ai_reviewed_rows(monkeypatch):
     kept = {o["id"] for o in fake.observations}
     assert stale["id"] not in kept and {promoted["id"], other["id"], human["id"]} <= kept
     mine = [o for o in fake.observations if o["source_model_version"] == EVIDENCE_FUSION_VERSION and o["review_status"] == "ai_reviewed"]
-    assert len(mine) == 1 and mine[0]["observation_type"] == "blank"
+    # The reviewed photo keeps its verdict and gets no machine row beside it.
+    assert [(o["media_id"], o["observation_type"]) for o in mine] == [("a", "blank")]
     delete_filters = fake.deletes[-1]
     assert ("eq", "source_model_version", EVIDENCE_FUSION_VERSION) in delete_filters and ("eq", "review_status", "ai_reviewed") in delete_filters
+    assert ("in", "media_id", ["a"]) in delete_filters
     await EvidenceFusionStep().run(media, DEP, {})
     assert len([o for o in fake.observations if o["source_model_version"] == EVIDENCE_FUSION_VERSION and o["review_status"] == "ai_reviewed"]) == 1
 

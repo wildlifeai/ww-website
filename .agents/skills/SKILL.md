@@ -58,17 +58,18 @@ The `ww-website` repository is a multi-service platform consisting of:
   `AGENTS.md`, this file or a reference file wrong, missing or redundant, and fix it in the
   same commit. The three questions are in
   [references/documentation.md](references/documentation.md).
-- Before you claim work is done, run the gates:
-  `cd backend && ruff check . && ruff format --check . && pytest`, then
-  `cd frontend && npm run lint && npx tsc -b --noEmit && npm run build` (`tsc -b`: plain
-  `tsc --noEmit` checks nothing here, see `AGENTS.md`).
+- Before you claim work is done, run the gates in `AGENTS.md`, "Validate before committing"
+  (`tsc -b`, never plain `tsc --noEmit`, which checks nothing here).
 - **Verify against the code, not the docs**, and against `ww-backend` for anything about the
   database. Column names guessed from memory are a recurring source of failures here.
 
 ## The five that apply to almost any change
 
 1. **This repo does not own the database.** Schema, RLS policies and table GRANTs live in
-   `ww-backend`. Add a migration there, then consume it.
+   `ww-backend`, which website work does not edit: file an issue there with the exact change,
+   then consume it once merged. Never change a live database by hand,
+   not even to repair drift; production SQL from here is read-only diagnosis
+   ([references/database-and-cross-repo.md](references/database-and-cross-repo.md)).
 2. **Backend layering is `routers` to `domain` to `services`.** No FastAPI or HTTP imports in
    `domain/`, no business logic in `routers/`.
 3. **The service-role key is backend-only.** Never expose it to frontend code.

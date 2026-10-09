@@ -71,6 +71,16 @@ When a `ww-backend` change touches roles, invitations or RLS, run
 
 ---
 
+## A PostgREST read stops at 1,000 rows without saying so
+
+Supabase caps every response at 1,000 rows, and a query without `.range()` just gets the first
+1,000 with no error. A deployment can hold more photos than that: the thumbnail backfill read
+1,000 of "Sunset test 2"'s 1,101 and never saw the rest (#208). Any backend loop over a whole
+deployment pages with `.order()` plus `.range()` until a short page, as
+`media_registry.backfill_thumbnails` does.
+
+---
+
 ## Shared Model Lists
 
 Do not invent model names.
@@ -159,6 +169,16 @@ detection's box beside SpeciesNet's (#162).
 
 ---
 
+## A pipeline step writes nothing beside a human verdict
+
+A run picks its photos when it starts and a reviewer can label one while the model works, so a
+step that inserts `observations` filters its rows through `pipeline.without_human_verdicts` just
+before the insert, and deletes superseded rows only for the photos it kept. Runs on one deployment
+are serialised by `run_pipeline`'s lock (`services/locks.py`); call `run_pipeline` rather than a
+step directly, or two runs pick the same photos again (#284).
+
+---
+
 ## `consensus_approved` means human truth
 
 `active_learning` treats `review_status='consensus_approved'` as a human verdict. Machine rows,
@@ -187,3 +207,17 @@ them.
 A per-run password such as `` `pw-${crypto.randomUUID()}` `` trips the Generic Password
 detector (#159). Generate test passwords with no literal part (`crypto.randomUUID()`), and mark
 a genuine false positive in the GitGuardian dashboard rather than ignoring a path.
+
+---
+
+## The React compiler lint can skip a whole component without a word
+
+The `react-hooks` compiler rules (`set-state-in-effect`, `refs`, `purity`) silently skip a
+component they cannot analyse: one carrying an `eslint-disable` for `exhaustive-deps`, or one
+calling `Intl.DateTimeFormat()` during render. Removing that disable in `MediaDetail` surfaced
+three errors it had hidden (#184); the `Intl` call hid `ProjectDefaultsPanel` (#137). The symptom
+is a `react-hooks/*` disable directive reported as unused. Keep such calls at module scope, and
+treat that warning as a component that stopped being checked, not a line to delete. One skip is
+loud: a callback that reads a `useMemo` declared further down the component is an error,
+`preserve-manual-memoization`, and the fix is to declare the memo, and what it reads, above the
+callback (`UploadFlow`'s upload handler, #269).

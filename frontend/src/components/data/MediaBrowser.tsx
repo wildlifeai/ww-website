@@ -13,7 +13,7 @@ import { Ribbon } from '../ui/Ribbon'
 import { StatusBadge, deriveAnnotationStatus } from '../ui/StatusBadge'
 import type { AnnotationStatus } from '../ui/StatusBadge'
 import { Modal } from '../ui/Modal'
-import { isHumanReviewed, isAiLabel, humanCreateFields } from '../../lib/observations'
+import { isHumanReviewed, isAiLabel, humanCreateFields, photoVerdict } from '../../lib/observations'
 import { getLocalPreview } from '../../lib/localPreviewStore'
 import { apiClient } from '../../lib/apiClient'
 import { showUndoToast } from '../common/undoToastBus'
@@ -25,6 +25,10 @@ import { MediaGroup } from './MediaGroup'
 import { useMultiClusters, useConfirmCluster, useSimilarImages } from '../../hooks/useBrain'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { useJobsList } from '../../hooks/useJobs'
+import { useBusyDeployments } from '../../hooks/useBusyDeployments'
+import { useRefreshWhileBusy } from '../../hooks/useRefreshWhileBusy'
+import { isThumbnailStuck } from '../../lib/thumbnailRetry'
+import { applySelectIntent, cardClickIntent, cardKeyIntent, circleClickIntent, type CardIntent } from '../../lib/cardSelection'
 import { MediaBulkActions, type BulkAction } from './MediaBulkActions'
 import { DeleteConfirmModal, AiModelPickerModal, PipelineLogModal } from './BulkActionModals'
 import { TrainModelModal } from './TrainModelModal'
@@ -292,9 +296,16 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   const qc = useQueryClient()
   const { isActive: uploadActive, pendingUploads, pendingSince } = useUploadStore()
   const [reloadKey, setReloadKey] = useState(0)
+  // Set by the background refresh during a job: that fetch keeps the cards on screen (#286).
+  const silentReload = useRef(false)
   // Media whose thumbnail failed to load — shown as "processing" (the rendition
   // is likely still generating). Reset on every (re)load so they re-attempt.
   const [failedThumbs, setFailedThumbs] = useState<Set<string>>(new Set())
+  // When the current page of media arrived: the "now" for deciding a missing thumbnail is
+  // stuck rather than still on its way (#208), kept out of render so it stays pure.
+  const [loadedAt, setLoadedAt] = useState(0)
+  // Deployments whose thumbnail backfill this page started, until the job list shows it.
+  const [retryRequested, setRetryRequested] = useState<Set<string>>(new Set())
   const [media, setMedia]         = useState<MediaRecord[]>([])
   // "Find similar" mode: anchor media id + the resolved, similarity-ranked records.
   const [similarToId, setSimilarToId]     = useState<string | null>(null)
@@ -354,12 +365,11 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   const [inatBusy, setInatBusy]         = useState(false)
   const [inatMsg, setInatMsg]           = useState<string | null>(null)
 
-  // ── Phase 4: Unified selection (click = select, double-click = open) ───────
+  // ── Phase 4: Unified selection (click = open, circle / Ctrl / Shift = select, #283) ──
   // Selection is implicit: it's "on" whenever at least one image is selected.
   const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set())
-  // Pending single-click timer, so a fast double-click opens the detail modal
-  // without toggling selection first.
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The last card selected, where a Shift-click range starts.
+  const selectAnchor = useRef<string | null>(null)
   const [showDeleteModal, setShowDeleteModal]   = useState(false)
   const [showAiPicker, setShowAiPicker]         = useState(false)
   const [showLabelModal, setShowLabelModal]     = useState(false)
@@ -403,30 +413,6 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     }
     setInatStates(map)
   }, [])
-
-  // ── Unified selection helpers ──────────────────────────────────────────────
-  const toggleSelect = useCallback((id: string) => setSelectedIds(prev => {
-    const next = new Set(prev)
-    if (next.has(id)) next.delete(id); else next.add(id)
-    return next
-  }), [])
-
-  // Single click toggles selection (after a short delay); a second click within
-  // the window cancels the toggle and opens the full-screen detail instead.
-  const handleCardClick = useCallback((id: string) => {
-    if (clickTimer.current) {
-      clearTimeout(clickTimer.current)
-      clickTimer.current = null
-      setSelectedMediaId(id)
-    } else {
-      clickTimer.current = setTimeout(() => {
-        clickTimer.current = null
-        toggleSelect(id)
-      }, 250)
-    }
-  }, [toggleSelect])
-
-  useEffect(() => () => { if (clickTimer.current) clearTimeout(clickTimer.current) }, [])
 
   const handleBulkAction = useCallback(async (action: BulkAction) => {
     if (action === 'similar') {
@@ -512,6 +498,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
 
   // ── Fetch media (with pagination) ─────────────────────────────────────────
   useEffect(() => {
+    const silent = silentReload.current
+    silentReload.current = false
     if (!user) return
 
     const deploymentIds = filterDeployments.length
@@ -525,7 +513,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     }
 
     let cancelled = false
-    setLoading(true)
+    if (!silent) setLoading(true)
     setError(null)
 
     const from = page * PAGE_SIZE
@@ -544,6 +532,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
         setMedia((data || []) as unknown as MediaRecord[])
         setTotalCount(count ?? null)
         setFailedThumbs(new Set())  // re-attempt thumbnails (renditions may now exist)
+        setLoadedAt(Date.now())
         setLoading(false)
       })
 
@@ -558,6 +547,25 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     const t = setInterval(() => setReloadKey(k => k + 1), 4000)
     return () => { clearInterval(t); setReloadKey(k => k + 1) }
   }, [uploadActive])
+
+  // Deployments with a queued or running job. When one finishes, reload so the
+  // thumbnails and labels it produced appear without a manual refresh.
+  const busy = useBusyDeployments(() => {
+    setRetryRequested(new Set())
+    setReloadKey(k => k + 1)
+  })
+
+  const retryThumbnails = useCallback(async (deploymentId: string) => {
+    setRetryRequested(s => new Set(s).add(deploymentId))
+    try {
+      await apiClient.post(`/api/media/thumbnails/${deploymentId}`, {})
+      await qc.invalidateQueries({ queryKey: ['jobs'] })
+    } catch (e) {
+      setRetryRequested(s => { const n = new Set(s); n.delete(deploymentId); return n })
+      setNotice(`Couldn't start the thumbnails: ${e instanceof Error ? e.message : String(e)}`)
+      window.setTimeout(() => setNotice(null), 4000)
+    }
+  }, [qc])
 
   // Refresh iNaturalist badges whenever the loaded media set changes.
   useEffect(() => { loadInatStates(media.map(m => m.id)) }, [media, loadInatStates])
@@ -739,13 +747,10 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
         e.preventDefault()
         setSelectedIds(new Set(filtered.map(m => m.id)))
       }
-      // Escape: clear selection or close detail modal
-      if (e.key === 'Escape') {
-        if (selectedIds.size > 0) {
-          setSelectedIds(new Set())
-        } else if (selectedMediaId) {
-          setSelectedMediaId(null)
-        }
+      // Escape: clear the selection. While the viewer is open its own Escape closes it, and the
+      // selection survives.
+      if (e.key === 'Escape' && !selectedMediaId && selectedIds.size > 0) {
+        setSelectedIds(new Set())
       }
     }
     window.addEventListener('keydown', handler)
@@ -757,6 +762,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     if (filterDeployments.length) return filterDeployments
     return deployments.map(d => d.id)
   }, [deployments, filterDeployments])
+  // While a job runs on a deployment in view, refetch the page so its thumbnails appear (#286).
+  useRefreshWhileBusy(activeDeploymentIds, busy, () => { silentReload.current = true; setReloadKey(k => k + 1) })
   const clustersQ = useMultiClusters(
     groupBy === 'cluster' ? activeDeploymentIds : [],
     clusterThreshold,
@@ -950,6 +957,54 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   const minWidth = thumbScale
   const height = Math.round(thumbScale * 0.78)
 
+  // ── Card gestures (#283, rules in lib/cardSelection.ts) ───────────────────
+  // The grid's selectable media in rendered order, for a Shift-click range.
+  const gridOrder = () => {
+    if (similarToId) return similarRecords.map(m => m.id)
+    const ids: string[] = []
+    for (const m of groupedMedia ? groupedMedia.flatMap(([, items]) => items) : filtered) {
+      if (!m._pending && (imageView !== 'crop' || m.observations.some(isLabelCard))) ids.push(m.id)
+    }
+    return ids
+  }
+  const onCardIntent = (id: string, intent: CardIntent, focusObs: string | null) => {
+    if (intent === 'open') { setFocusObsId(focusObs); setSelectedMediaId(id); return }
+    const next = applySelectIntent({ selected: selectedIds, anchor: selectAnchor.current }, intent, id, gridOrder())
+    selectAnchor.current = next.anchor
+    setSelectedIds(next.selected)
+  }
+  const cardProps = (id: string, focusObs: string | null) => ({
+    className: 'media-card',
+    tabIndex: 0,
+    title: 'Click to open · Ctrl/Cmd-click or the circle to select · Shift-click to select a range',
+    onClick: (e: React.MouseEvent) => onCardIntent(id, cardClickIntent(e), focusObs),
+    onKeyDown: (e: React.KeyboardEvent) => {
+      // The clicked card keeps focus under the viewer, whose keys are its own.
+      const intent = selectedMediaId ? null : cardKeyIntent(e)
+      if (intent) { e.preventDefault(); onCardIntent(id, intent, focusObs) }
+    },
+  })
+  const renderSelectCircle = (m: MediaRecord, sel: boolean) => (
+    <button
+      type="button"
+      className="media-card-select"
+      aria-label={`Select ${m.file_name || m.file_path.split('/').pop() || 'photo'}`}
+      aria-pressed={sel}
+      onClick={e => { e.stopPropagation(); onCardIntent(m.id, circleClickIntent(e), null) }}
+      style={{
+        position: 'absolute', bottom: 4, left: 4, width: 18, height: 18, padding: 0, border: 'none',
+        borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+        backgroundColor: sel ? 'var(--primary)' : 'rgba(0,0,0,0.45)',
+        color: '#fff', boxShadow: '0 0 0 1.5px rgba(255,255,255,0.85)',
+        // Every circle shows while a selection is active; otherwise on hover (index.css).
+        opacity: selectedIds.size > 0 ? 1 : undefined,
+      }}
+    >
+      {sel ? '✓' : ''}
+    </button>
+  )
+
   // ── Thumbnail card renderer (shared by flat + grouped grids) ──────────────
   const renderThumbCard = (m: MediaRecord) => {
     const imgUrl = resolveImageUrl(m)
@@ -980,14 +1035,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
       hasAi:       m.observations.some(isAiLabel),
     })
 
-    // Top label: human-reviewed first, then AI
-    const sortedObs = [...m.observations].sort((a, b) => {
-      const ar = isHumanReviewed(a) ? 1 : 0
-      const br = isHumanReviewed(b) ? 1 : 0
-      return br - ar
-    })
-    const topObs = sortedObs[0] || null
-    const isEmpty = !!topObs && !topObs.scientific_name && topObs.observation_type === 'blank'
+    // Top label: a human verdict, then the consensus row, then the first row (#170)
+    const { labelObs: topObs, isEmpty } = photoVerdict(m.observations)
     const label  = topObs?.scientific_name || (isEmpty ? 'Empty' : null)
     const conf   = topObs?.classification_probability ?? null
     const aiConfs = m.observations
@@ -1001,8 +1050,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     return (
       <div
         key={m.id}
-        onClick={() => { setFocusObsId(null); handleCardClick(m.id) }}
-        title="Click to select · double-click to open"
+        {...cardProps(m.id, null)}
         style={{
           border: sel ? '2px solid var(--primary)' : isSelected ? '2px solid var(--primary)' : '1px solid var(--border)',
           borderRadius: 'var(--radius)',
@@ -1031,6 +1079,20 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               onError={() => setFailedThumbs(s => new Set(s).add(m.id))}
             />
+          ) : imgUrl && !retryRequested.has(m.deployment_id) && isThumbnailStuck(m, loadedAt, busy) ? (
+            // Old enough that the thumbnail should exist, and nothing is making it.
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
+              <span style={{ opacity: 0.5 }}>No thumbnail</span>
+              <button
+                type="button"
+                className="btn btn-outline"
+                style={{ fontSize: '0.72rem', padding: '0.15rem 0.6rem' }}
+                title="Make the missing thumbnails for this deployment"
+                onClick={e => { e.stopPropagation(); retryThumbnails(m.deployment_id) }}
+              >
+                Retry
+              </button>
+            </div>
           ) : imgUrl ? (
             // Thumbnail not ready yet (rendition still generating / resolving).
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', opacity: 0.5, fontSize: '0.72rem' }}>
@@ -1061,18 +1123,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
             </span>
           )}
 
-          {/* Selection checkmark — bottom-left, shown while a selection is active */}
-          {(sel || selectedIds.size > 0) && (
-            <span style={{
-              position: 'absolute', bottom: 4, left: 4, width: 18, height: 18,
-              borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '0.7rem', fontWeight: 700,
-              backgroundColor: sel ? 'var(--primary)' : 'rgba(0,0,0,0.45)',
-              color: '#fff', boxShadow: '0 0 0 1.5px rgba(255,255,255,0.85)',
-            }}>
-              {sel ? '✓' : ''}
-            </span>
-          )}
+          {/* Selection circle, bottom-left: its own button */}
+          {renderSelectCircle(m, sel)}
         </div>
 
         {/* Label bar */}
@@ -1119,8 +1171,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     return (
       <div
         key={key}
-        onClick={() => { setFocusObsId(obs?.id ?? null); handleCardClick(m.id) }}
-        title="Click to select · double-click to open"
+        {...cardProps(m.id, obs?.id ?? null)}
         style={{
           border: sel || isSelected ? '2px solid var(--primary)' : '1px solid var(--border)',
           borderRadius: 'var(--radius)', overflow: 'hidden', cursor: 'pointer',
@@ -1149,11 +1200,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
               full frame
             </span>
           )}
-          {(sel || selectedIds.size > 0) && (
-            <span style={{ position: 'absolute', bottom: 4, left: 4, width: 18, height: 18, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, backgroundColor: sel ? 'var(--primary)' : 'rgba(0,0,0,0.45)', color: '#fff', boxShadow: '0 0 0 1.5px rgba(255,255,255,0.85)' }}>
-              {sel ? '✓' : ''}
-            </span>
-          )}
+          {renderSelectCircle(m, sel)}
         </div>
         <div style={{ padding: '0.375rem 0.5rem', fontSize: '0.6875rem' }}>
           <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

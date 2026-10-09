@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { findDeploymentIdInJpeg, readDeploymentIds } from './exifDeploymentId'
+import { findCameraExifInJpeg, findDeploymentIdInJpeg, isTestPhoto, readCameraExif } from './exifDeploymentId'
 
 const UUID = 'e10f7c43-9b90-4f59-bef5-f35b8e698517'
 
@@ -114,22 +114,55 @@ describe('findDeploymentIdInJpeg', () => {
   })
 })
 
-describe('readDeploymentIds', () => {
-  it('returns ids aligned to the input files, null where absent', async () => {
-    const withId = new File([jpegWith([{ tag: 0xf200, value: UUID }])], 'a.jpg', { type: 'image/jpeg' })
+describe('test photos (ww-website#287)', () => {
+  const MAKE = { tag: 0x010f, value: 'Wildlife.ai' }
+  const ZERO = '00000000-0000-0000-0000-000000000000'
+  const exifOf = (entries: { tag: number; value: string }[]) => findCameraExifInJpeg(jpegWith(entries))
+
+  it('reads Make alongside the deployment id', () => {
+    expect(exifOf([MAKE, { tag: 0xf200, value: UUID }])).toEqual({ deploymentId: UUID, make: 'Wildlife.ai' })
+  })
+
+  it('flags a WW500 frame with no Deployment_ID tag', () => {
+    expect(isTestPhoto(exifOf([MAKE, { tag: 0x0110, value: 'WW500 RP3' }]))).toBe(true)
+  })
+
+  it('flags a WW500 frame carrying the all-zero id', () => {
+    expect(isTestPhoto(exifOf([MAKE, { tag: 0xf200, value: ZERO }]))).toBe(true)
+  })
+
+  it('keeps a WW500 frame with a real id', () => {
+    expect(isTestPhoto(exifOf([MAKE, { tag: 0xf200, value: UUID }]))).toBe(false)
+  })
+
+  it('keeps a frame from another camera, even without an id', () => {
+    expect(isTestPhoto(exifOf([{ tag: 0x010f, value: 'Canon' }]))).toBe(false)
+  })
+
+  it('keeps a file with no EXIF at all (BMP, bare JPEG)', () => {
+    expect(isTestPhoto(findCameraExifInJpeg(new Uint8Array([0x42, 0x4d, 0x00, 0x00]).buffer))).toBe(false)
+    expect(isTestPhoto(findCameraExifInJpeg(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]).buffer))).toBe(false)
+  })
+})
+
+describe('readCameraExif', () => {
+  it('returns ids and Make aligned to the input files, null where absent', async () => {
+    const withId = new File([jpegWith([{ tag: 0x010f, value: 'Wildlife.ai' }, { tag: 0xf200, value: UUID }])], 'a.jpg', { type: 'image/jpeg' })
     const without = new File([jpegWith([{ tag: 0x0110, value: 'x' }])], 'b.jpg', { type: 'image/jpeg' })
     const junk = new File(['not a jpeg'], 'c.txt')
-    expect(await readDeploymentIds([withId, without, junk, withId], 2)).toEqual([UUID, null, null, UUID])
+    const got = await readCameraExif([withId, without, junk, withId], 2)
+    expect(got.map((e) => e.deploymentId)).toEqual([UUID, null, null, UUID])
+    expect(got.map((e) => e.make)).toEqual(['Wildlife.ai', null, null, 'Wildlife.ai'])
   })
 
   it('handles an empty batch', async () => {
-    expect(await readDeploymentIds([])).toEqual([])
+    expect(await readCameraExif([])).toEqual([])
   })
 
   it('reports progress once per file, ending at the total', async () => {
     const file = new File([jpegWith([{ tag: 0xf200, value: UUID }])], 'a.jpg', { type: 'image/jpeg' })
     const seen: [number, number][] = []
-    await readDeploymentIds([file, file, file, file, file], 2, (done, total) => seen.push([done, total]))
+    await readCameraExif([file, file, file, file, file], 2, (done, total) => seen.push([done, total]))
     expect(seen.map(([done]) => done).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5])
     expect(seen.every(([, total]) => total === 5)).toBe(true)
     expect(seen[seen.length - 1]).toEqual([5, 5])

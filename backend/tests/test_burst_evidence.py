@@ -239,6 +239,7 @@ def test_consensus_type_band_and_audit_line():
         be.audit_line(0.91, 0.5, signals)
         == "evidence_fusion_v1 score=0.91 threshold=0.50 speciesnet=0 gemini=1 neighbour=1 motion=0.60 edge=absent near=0.70"
     )
+    assert be.audit_line(0.91, 0.5, signals, cutoffs="det=0.20 vehicle=dropped").endswith("near=0.70 det=0.20 vehicle=dropped")
 
 
 def test_six_frame_burst_worked_example_section_6_3():

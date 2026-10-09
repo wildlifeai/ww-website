@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { login, expectHealthyRender, API_URL, CREDS } from '../helpers/session'
+import { test, expect } from '../helpers/test'
+import { login, expectHealthyRender, warmApi, API_URL, HAS_CREDS } from '../helpers/session'
 
 /**
  * Smoke: the dev website is up, the API answers, public pages render,
@@ -7,9 +7,12 @@ import { login, expectHealthyRender, API_URL, CREDS } from '../helpers/session'
  */
 
 test('backend API is up and answering', async ({ request }) => {
-  // FastAPI serves /docs unauthenticated; any 200 proves the container is alive.
-  const res = await request.get(`${API_URL}/docs`)
-  expect(res.status(), `API at ${API_URL} unreachable`).toBe(200)
+  // FastAPI serves /docs unauthenticated; any 200 proves the container is
+  // alive. The dev API scales to zero, so the first answer can take a minute:
+  // this test absorbs the cold start so the page tests after it do not.
+  test.setTimeout(240_000)
+  const ms = await warmApi(request)
+  console.log(`[e2e] API answered after ${Math.round(ms / 1000)}s`)
 })
 
 test('public pages render without errors', async ({ page }) => {
@@ -24,7 +27,7 @@ test('public pages render without errors', async ({ page }) => {
 })
 
 test('seeded user can sign in and reach all authed pages', async ({ page }) => {
-  test.skip(!CREDS.email, 'E2E_EMAIL/E2E_PASSWORD not set')
+  test.skip(!HAS_CREDS, 'E2E_EMAIL/E2E_PASSWORD not set')
   await login(page)
   for (const path of ['/toolkit', '/field', '/annotations', '/insights', '/settings']) {
     // Navigate in-SPA (nav links) — full reloads drop the session in this app.

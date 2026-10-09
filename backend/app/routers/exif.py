@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse
 from app.authz import assert_access, classify_deployment_access, deployment_id_prefix_bounds
 from app.config import settings
 from app.dependencies import get_optional_user, is_email_confirmed
-from app.domain.exif import parse_exif_from_bytes, resolve_deployment_source
+from app.domain.exif import is_test_photo, parse_exif_from_bytes, resolve_deployment_source
 from app.jobs.definitions import upload_drive_images_job
 from app.jobs.runner import enqueue_local_job
 from app.jobs.store import create_job
@@ -164,6 +164,7 @@ async def parse_exif(
     """
     results = []
     file_contents: List[bytes] = []
+    test_photos_skipped = 0
 
     # ── 0. Per-request image cap (anti-abuse) ────────────────────
     # Anon: small cap (also drive a login). Authenticated: a generous per-request
@@ -230,6 +231,17 @@ async def parse_exif(
                 continue
         else:
             parsed = parse_exif_from_bytes(content)
+            # A WW500 test photo (no deployment set on the camera) is never uploaded,
+            # whatever folder it sits in, so another client cannot store one either.
+            # Kept in the arrays for index alignment, flagged and with no deployment,
+            # so neither the folder nor an assigned_deployment_id binds it. #287.
+            if is_test_photo(parsed):
+                test_photos_skipped += 1
+                parsed["deployment_id"] = None
+                parsed["test_photo"] = True
+                file_contents.append(content)
+                results.append({"filename": filename, "relative_path": rel_path, "exif": parsed})
+                continue
 
         file_contents.append(content)
 
@@ -323,6 +335,7 @@ async def parse_exif(
                 user_id=user.id if user else None,
                 assigned_deployment_id=assigned_deployment_id,
                 run_ai=run_ai,
+                test_photos_skipped=test_photos_skipped,
             )
         except Exception as exc:
             logger.error("drive_enqueue_failed", error=str(exc))
@@ -337,6 +350,7 @@ async def parse_exif(
             "images": results,
             "drive_upload": drive_upload_info,
             "auto_created_deployments": auto_created,
+            "test_photos_skipped": test_photos_skipped,
         },
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None) if request else None),
     )
@@ -381,6 +395,7 @@ async def _enqueue_drive_upload(
     user_id: Optional[str] = None,
     assigned_deployment_id: Optional[str] = None,
     run_ai: bool = True,
+    test_photos_skipped: int = 0,
 ) -> dict:
     """Upload images to Supabase Storage and enqueue the Drive upload job.
 
@@ -540,6 +555,9 @@ async def _enqueue_drive_upload(
             return None
 
         exif_data = results[i].get("exif", {}) if i < len(results) else {}
+        # Test photos were flagged in step 1; never store one, not even under an assignment.
+        if exif_data.get("test_photo"):
+            return None
         # Prefer the post-conversion filename (BMP→.jpg) recorded in results.
         out_filename = (results[i].get("filename") if i < len(results) else None) or upload.filename
         file_dep_id = exif_data.get("deployment_id")
@@ -614,6 +632,8 @@ async def _enqueue_drive_upload(
         "user_id": user_id,
         # Gate the post-upload AI/Brain phase (upload_drive_images_job reads this).
         "run_ai": run_ai,
+        # Counted into the job summary; the files themselves never reach the job.
+        "test_photos_skipped": test_photos_skipped,
     }
 
     try:

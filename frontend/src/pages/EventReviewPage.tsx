@@ -130,6 +130,17 @@ const MOCK_EVENTS: ObservationEvent[] = [
   },
 ]
 
+function getNZSpeciesInfo(name: string): { code: string; status: 'CR' | 'EN' | 'LC' | 'Pest' } {
+  const lowercase = (name || '').toLowerCase()
+  if (lowercase.includes('kiwi')) return { code: 'kiwi', status: 'CR' }
+  if (lowercase.includes('kakapo')) return { code: 'kakapo', status: 'EN' }
+  if (lowercase.includes('weka')) return { code: 'weka', status: 'LC' }
+  if (lowercase.includes('stoat')) return { code: 'stoat', status: 'Pest' }
+  if (lowercase.includes('possum')) return { code: 'possum', status: 'Pest' }
+  if (lowercase.includes('ferret')) return { code: 'ferret', status: 'Pest' }
+  return { code: 'unknown', status: 'LC' }
+}
+
 export function EventReviewPage() {
   const { deployment_id } = useParams<{ deployment_id: string }>()
   const navigate = useNavigate()
@@ -215,17 +226,6 @@ export function EventReviewPage() {
     }
     loadData()
   }, [deployment_id])
-
-  const getNZSpeciesInfo = (name: string): { code: string; status: 'CR' | 'EN' | 'LC' | 'Pest' } => {
-    const lowercase = (name || '').toLowerCase()
-    if (lowercase.includes('kiwi')) return { code: 'kiwi', status: 'CR' }
-    if (lowercase.includes('kakapo')) return { code: 'kakapo', status: 'EN' }
-    if (lowercase.includes('weka')) return { code: 'weka', status: 'LC' }
-    if (lowercase.includes('stoat')) return { code: 'stoat', status: 'Pest' }
-    if (lowercase.includes('possum')) return { code: 'possum', status: 'Pest' }
-    if (lowercase.includes('ferret')) return { code: 'ferret', status: 'Pest' }
-    return { code: 'unknown', status: 'LC' }
-  }
 
   // Active selected event
   const selectedEvent = events.find(e => e.id === selectedEventId) || events[0]
