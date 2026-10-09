@@ -340,7 +340,8 @@ them, register new docs there, not here.
 ## Contributing
 
 Submit a [pull request](https://github.com/wildlifeai/ww-website/pulls). Use
-[Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, …).
+[Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, …),
+checked by commitlint on every commit and pull request.
 Backend changes follow the **router → domain → service** layering (see
 [02-CODEBASE-GUIDE.md](./documentation/onboarding/02-CODEBASE-GUIDE.md)); frontend changes must pass
 `npm run lint` and `tsc -b --noEmit`.

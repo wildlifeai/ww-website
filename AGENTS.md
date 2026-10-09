@@ -55,6 +55,9 @@ tab, and it is advisory until it is made a required check (#229). `dependency-au
 that changes a lockfile or a requirements file and blocking on its Monday run; Dependabot opens
 the grouped bump PRs. The lint toolchain and `size-limit` each come as one group, majors included,
 because their packages peer-depend on each other's version and cannot install one at a time.
+`commitlint.yml` checks every commit message in a pull request against Conventional Commits,
+as the `frontend/.husky/commit-msg` hook does locally; the rules and what trips them are in
+[`references/documentation.md`](.agents/skills/references/documentation.md#commit-messages).
 
 The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
 (`.github/workflows/e2e.yml`); what they prove and how to read a failure is in
