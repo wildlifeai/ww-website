@@ -18,7 +18,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | Charts | `vega-embed` (Vega-Lite) | 7 | All charts — Recharts fully removed |
 | Maps | `leaflet` + `react-leaflet` | 1.9 / 5 | Deployment maps |
 | Icons / QR | `lucide-react`, `qrcode.react` | — | UI icons, app-store QR |
-| Tooling | `eslint` 9, `typescript-eslint` 8, `husky` 9, `lint-staged` 16 | — | Lint + pre-commit |
+| Tooling | `eslint` 9, `typescript-eslint` 8, `husky` 9, `lint-staged` 16, `commitlint` 20 | — | Lint + pre-commit, commit messages |
 
 **Conventions**: no Tailwind — components use inline `style={{}}` objects with CSS variables
 (`--primary`, `--surface`, `--border`, `--radius`). Shared primitives live in

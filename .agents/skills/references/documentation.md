@@ -108,6 +108,26 @@ Avoid:
 - **Verify against the code, not the docs**, and against `ww-backend` for anything about the
   database. Treat any undated claim as a hypothesis, and say when you checked.
 
+## Commit messages
+
+[Conventional Commits](https://www.conventionalcommits.org/) under
+`@commitlint/config-conventional`, the same rules as ww-mobile-app
+([`frontend/commitlint.config.js`](../../../frontend/commitlint.config.js)). The
+`frontend/.husky/commit-msg` hook checks each commit and
+[`commitlint.yml`](../../../.github/workflows/commitlint.yml) checks every commit in a pull
+request; a dev to main release is skipped, its commits were checked on the way into dev. What
+failed in the dev history when it was turned on (9 Oct 2026, 10 of the last 50):
+
+- The type is one of `build chore ci docs feat fix perf refactor revert style test`. Not `ui`,
+  `content` or `deps`: use `feat`, `fix`, `style`, `docs` or `build(deps)`.
+- The subject starts lower case, proper nouns included: `ci(e2e): add Lighthouse budgets`, not
+  `ci(e2e): Lighthouse budgets`.
+- Every line, header, body and footer, is at most 100 characters. Wrap the body by hand.
+
+Hooks run from `frontend/.husky/_`, which `npm install` in `frontend/` creates. A worktree with a
+junctioned `node_modules` has none, so no hook runs there until you run
+`frontend/node_modules/.bin/husky frontend/.husky` from its root.
+
 ## The commit-time check
 
 Before every commit, look at what the change means for the agent layer, meaning `AGENTS.md`,

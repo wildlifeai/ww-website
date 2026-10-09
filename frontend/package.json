@@ -37,6 +37,8 @@
     "vega-embed": "^7.3.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.5.3",
+    "@commitlint/config-conventional": "^20.5.3",
     "@eslint/js": "^9.39.4",
     "@size-limit/file": "^11.2.0",
     "@types/node": "^24.12.2",
