@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -103,6 +104,25 @@ def test_person_line_counts_person_frames_called_animal_and_skips_unanswered():
     assert "Person frames (3" in line and "single / m / v2: 1 of 2 answered" in line
     assert ev.person_line({("single", "m", "v2"): outs}, set()) == ""
     assert ev.compute_metrics(outs).frames == 1  # person frames never enter the wildlife metrics
+    v3 = [
+        ev.FrameOutcome(path="p1", truth=None, predicted=False, has_person=True),
+        ev.FrameOutcome(path="p2", truth=None, predicted=True, has_person=False),
+    ]
+    assert "single / m / v3: 1 of 2 answered, has_person on 1" in ev.person_line({("single", "m", "v3"): v3}, {"p1", "p2"})
+
+
+def test_only_list_filters_frames_and_drops_empty_bursts(tmp_path):
+    root = tmp_path / "export"
+    only = tmp_path / "only.txt"
+    only.write_text("# subset\nA/1.jpg\n\n" + str(root / "B" / "3.jpg") + "\n", encoding="utf-8")
+    paths = ev.read_only_list(str(only), str(root))
+    assert paths == {os.path.normpath(str(root / "A" / "1.jpg")), os.path.normpath(str(root / "B" / "3.jpg"))}
+    frames = [
+        ev.LabelledFrame(path=os.path.normpath(str(root / d / f"{i}.jpg")), burst_id=d, has_animal=True) for d, i in (("A", 1), ("A", 2), ("C", 4))
+    ]
+    kept = ev.filter_only([frames[:2], frames[2:]], paths)
+    assert [[f.path for f in b] for b in kept] == [[frames[0].path]]  # C's burst had no listed frame
+    assert ev.filter_only([frames], None) == [frames]
 
 
 def _exif_jpeg(path, dt: str) -> None:
@@ -244,15 +264,15 @@ def test_run_variant_live_uses_cache_and_never_pays_twice(tmp_path, monkeypatch)
     cache = str(tmp_path / "cache.jsonl")
     first = ev.run_variant(frames, "single", "gemini-3.1-flash-lite", dry_run=False, cache_path=cache)
     second = ev.run_variant(frames, "single", "gemini-3.1-flash-lite", dry_run=False, cache_path=cache)
-    assert calls == [("single", "v2"), ("single", "v2")]  # two frames, first run only
+    assert calls == [("single", "v1"), ("single", "v1")]  # two frames, first run only
     assert [o.predicted for o in first] == [True, True] == [o.predicted for o in second]
-    assert [(o.visibility, o.size, o.conditions, o.prompt_version) for o in second] == [("clear", "small", ["night_ir"], "v2")] * 2
+    assert [(o.visibility, o.size, o.conditions, o.prompt_version) for o in second] == [("clear", "small", ["night_ir"], "v1")] * 2
     m = ev.compute_metrics(second)
     assert (m.tp, m.fp) == (1, 1) and m.tokens_per_frame == 310 and m.median_latency_s == 0.4
     assert len(open(cache, encoding="utf-8").read().splitlines()) == 2
     # A different prompt version never reuses those records; --max-calls caps the new calls.
-    third = ev.run_variant(frames, "single", "gemini-3.1-flash-lite", dry_run=False, cache_path=cache, prompt_version="v1", max_calls=1)
-    assert len(calls) == 3 and calls[-1] == ("single", "v1")
+    third = ev.run_variant(frames, "single", "gemini-3.1-flash-lite", dry_run=False, cache_path=cache, prompt_version="v2", max_calls=1)
+    assert len(calls) == 3 and calls[-1] == ("single", "v2")
     assert [o.predicted for o in third] == [True, None]  # the uncalled frame stays unanswered
 
 

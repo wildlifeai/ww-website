@@ -141,7 +141,7 @@ def test_parse_single_response_v2_structured_fields_and_derived_confidence():
             "bbox": [600, 0, 1000, 400],
         }
     )
-    v = gp.parse_single_response(text)
+    v = gp.parse_single_response(text, "v2")
     assert v.prompt_version == "v2"
     assert (v.animal_visibility, v.animal_size, v.animal_location) == ("partial", "small", "edge")
     assert v.visual_conditions == ("night_ir", "low_light")  # unknown dropped, duplicate collapsed
@@ -154,18 +154,20 @@ def test_parse_single_response_v2_structured_fields_and_derived_confidence():
 
 def test_parse_single_response_v2_consistency_rules():
     empty = gp.parse_single_response(
-        json.dumps({"has_animal": False, "animal_visibility": "clear", "animal_size": "large", "animal_location": "centre"})
+        json.dumps({"has_animal": False, "animal_visibility": "clear", "animal_size": "large", "animal_location": "centre"}), "v2"
     )
     assert (empty.animal_visibility, empty.animal_size, empty.animal_location, empty.confidence) == ("none", "none", "none", 0.0)
     # An animal answer must carry a visibility from the vocabulary: a stray label is a parse error, never a silent category.
     with pytest.raises(gp.PresenceParseError):
-        gp.parse_single_response(json.dumps({"has_animal": True, "animal_visibility": "none"}))
+        gp.parse_single_response(json.dumps({"has_animal": True, "animal_visibility": "none"}), "v2")
     with pytest.raises(gp.PresenceParseError):
-        gp.parse_single_response(json.dumps({"has_animal": True, "animal_visibility": "kind of"}))
+        gp.parse_single_response(json.dumps({"has_animal": True, "animal_visibility": "kind of"}), "v2")
     with pytest.raises(gp.PresenceParseError):
-        gp.parse_single_response(json.dumps({"has_animal": True}))
+        gp.parse_single_response(json.dumps({"has_animal": True}), "v2")
     # Size and location only feed strata: an unknown value falls back to none.
-    loose = gp.parse_single_response(json.dumps({"has_animal": True, "animal_visibility": "Clear", "animal_size": "HUGE", "animal_location": 3}))
+    loose = gp.parse_single_response(
+        json.dumps({"has_animal": True, "animal_visibility": "Clear", "animal_size": "HUGE", "animal_location": 3}), "v2"
+    )
     assert (loose.animal_visibility, loose.animal_size, loose.animal_location, loose.confidence) == ("clear", "none", "none", 0.85)
     # A v1 answer has no visibility field: partial by convention, the model's own confidence.
     v1 = gp.parse_single_response(json.dumps({"has_animal": True, "confidence": 0.9, "description": "x"}), "v1")
@@ -241,22 +243,59 @@ def test_prompt_and_schema_per_variant():
     assert "[ymin, xmin, ymax, xmax]" in gp.build_prompt("single")
 
 
-def test_prompt_v2_is_the_default_and_carries_the_near_lens_cue():
-    assert gp.PROMPT_VERSION == "v2"
-    prompt = gp.build_prompt("single")
+def test_prompt_v1_is_the_default():
+    assert gp.PROMPT_VERSION == "v1" and gp.PROMPT_VERSIONS == ("v1", "v2", "v3")
+    assert gp.build_prompt("single") == gp.build_prompt("single", prompt_version="v1")
+    assert "confidence" in gp.response_json_schema("single")["properties"]
+    assert gp.PresenceVerdict(True).prompt_version == gp.PresenceResult("m", "single", []).prompt_version == "v1"
+
+
+def test_prompt_v2_carries_the_near_lens_cue():
+    prompt = gp.build_prompt("single", prompt_version="v2")
     assert "Small rodents very close to the lens on night IR frames" in prompt and "no eye shine" in prompt
-    assert prompt == gp.build_prompt("single", prompt_version="v2") != gp.build_prompt("single", prompt_version="v1")
+    assert prompt != gp.build_prompt("single", prompt_version="v1")
     assert "confidence" in gp.build_prompt("single", prompt_version="v1") and "confidence" not in prompt
     for value in gp.VISIBILITY_VALUES + gp.SIZE_VALUES + gp.LOCATION_VALUES + gp.VISUAL_CONDITIONS + gp.EVIDENCE_VALUES:
         assert f'"{value}"' in prompt
-    sheet = gp.build_prompt("contact_sheet", 3)
+    sheet = gp.build_prompt("contact_sheet", 3, "v2")
     assert "contact sheet of 3" in sheet and "no eye shine" in sheet
     with pytest.raises(ValueError):
         gp.build_prompt("single", prompt_version="v9")
 
 
+def test_prompt_v3_is_animals_only_short_and_asks_for_has_person():
+    prompt = gp.build_prompt("single", prompt_version="v3")
+    assert "A person is never an animal" in prompt and "has_person" in prompt and "at most 8 words" in prompt
+    assert "night IR" in prompt and "confidence" not in prompt
+    assert len(prompt) < len(gp.build_prompt("single", prompt_version="v2"))
+    schema = gp.response_json_schema("single", "v3")
+    assert list(schema["properties"]) == ["has_person", "has_animal", "animal_visibility", "description", "bbox"]  # person first
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["properties"]["animal_visibility"]["enum"] == list(gp.VISIBILITY_VALUES)
+    cell = gp.response_json_schema("contact_sheet", "v3")["properties"]["cells"]["items"]
+    assert "index" in cell["required"] and "has_person" in cell["properties"]
+    assert "contact sheet of 2" in gp.build_prompt("contact_sheet", 2, "v3")
+
+
+def test_parse_v3_reads_has_person_and_keeps_people_out_of_has_animal():
+    person = gp.parse_single_response(
+        json.dumps({"has_person": True, "has_animal": False, "animal_visibility": "none", "description": "a hand", "bbox": None}), "v3"
+    )
+    assert person.has_person is True and person.has_animal is False and person.prompt_version == "v3" and person.confidence == 0.0
+    rat = gp.parse_single_response(
+        json.dumps({"has_person": "false", "has_animal": True, "animal_visibility": "obscured", "description": "rodent", "bbox": [0, 0, 500, 500]}),
+        "v3",
+    )
+    assert rat.has_person is False and rat.has_animal is True and rat.confidence == 0.5 and rat.animal_size == "none"
+    assert gp.parse_single_response(json.dumps({"has_animal": False}), "v3").has_person is False  # left out reads as no
+    with pytest.raises(gp.PresenceParseError):  # an animal answer still needs a visibility
+        gp.parse_single_response(json.dumps({"has_person": False, "has_animal": True}), "v3")
+    assert gp.parse_single_response(json.dumps({"has_animal": True, "confidence": 1.0}), "v1").has_person is None
+    assert gp.format_verdict_comment(person) == "visibility=none; person=yes | a hand"
+
+
 def test_schema_v2_enumerates_every_string_and_has_no_confidence():
-    schema = gp.response_json_schema("single")
+    schema = gp.response_json_schema("single", "v2")
     props = schema["properties"]
     assert "confidence" not in props
     assert gp.VISIBILITY_VALUES == ("clear", "partial", "obscured", "none")
@@ -277,7 +316,7 @@ def test_schema_v2_enumerates_every_string_and_has_no_confidence():
         "description",
         "bbox",
     }
-    cell = gp.response_json_schema("contact_sheet")["properties"]["cells"]["items"]
+    cell = gp.response_json_schema("contact_sheet", "v2")["properties"]["cells"]["items"]
     assert "index" in cell["properties"] and "animal_visibility" in cell["properties"] and "confidence" not in cell["properties"]
     assert "confidence" in gp.response_json_schema("single", "v1")["properties"]
 
@@ -287,7 +326,7 @@ def test_estimate_call_v2_assumes_a_longer_answer():
     _inp1, out1, usd1 = gp.estimate_call(prepared, "gemini-3.1-flash-lite", "single", prompt_version="v1")
     _inp2, out2, usd2 = gp.estimate_call(prepared, "gemini-3.1-flash-lite", "single", prompt_version="v2")
     assert out2 > out1 and usd2 > usd1
-    assert gp.estimate_call(prepared, "gemini-3.1-flash-lite", "single")[1] == out2  # the default is v2
+    assert gp.estimate_call(prepared, "gemini-3.1-flash-lite", "single")[1] == out1  # the default is v1
 
 
 # ── Tokens and cost ──────────────────────────────────────────────────
@@ -399,7 +438,7 @@ def test_presence_waits_out_a_dropped_connection(monkeypatch):
         )
 
     monkeypatch.setattr(gp, "_generate_content", fake_generate)
-    result = gp.presence([_jpeg()], "single", "gemini-3.1-flash-lite", sleep=waits.append)
+    result = gp.presence([_jpeg()], "single", "gemini-3.1-flash-lite", sleep=waits.append, prompt_version="v2")
     assert calls["n"] == 3 and waits == [gp.QUOTA_DEFAULT_WAIT_S] * 2
     assert result.verdicts[0].has_animal is True and result.verdicts[0].confidence == 0.75
 
@@ -435,7 +474,7 @@ def test_presence_contact_sheet_returns_one_verdict_per_frame(monkeypatch):
         return _fake_response(json.dumps({"cells": cells}))
 
     monkeypatch.setattr(gp, "_generate_content", fake_generate)
-    result = gp.presence([_jpeg(), _jpeg(), _jpeg()], "contact_sheet", "gemini-3.1-flash-lite")
+    result = gp.presence([_jpeg(), _jpeg(), _jpeg()], "contact_sheet", "gemini-3.1-flash-lite", prompt_version="v2")
     assert [v.has_animal for v in result.verdicts] == [False, True, False]
     assert [v.animal_visibility for v in result.verdicts] == ["none", "clear", "none"]
     assert [v.animal_size for v in result.verdicts] == ["none", "medium", "none"]
