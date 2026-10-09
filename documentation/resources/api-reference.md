@@ -63,7 +63,6 @@ On error:
 - [Wildlife Brain — Embeddings & Clustering](#wildlife-brain--embeddings--clustering)
 - [Conservation Intelligence](#conservation-intelligence)
 - [QA](#qa)
-- [Public Data API (v1)](#public-data-api-v1)
 - [Error Codes](#error-codes)
 
 ---
@@ -284,7 +283,8 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 |---|---|
 | `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id` |
 
-> Public-API export of CamtrapDP is `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
+> CamtrapDP export is not on this API: the frontend calls the `export-camtrap-dp` Supabase Edge
+> Function, which ww-backend owns.
 
 ---
 
@@ -356,26 +356,6 @@ Prefix `/api/qa`. JWT required.
 | Method · Path | Description |
 |---|---|
 | `GET /api/qa/report/{deployment_id}` | AI-vs-human agreement (a precision proxy over images carrying both an AI and a human label) |
-
----
-
-## Public Data API (v1)
-
-Token-authenticated **read** API for external integrations. Data endpoints authenticate with an
-**`X-API-Key`** header (not the JWT) carrying a `<resource>:read` scope; the key-management endpoints
-use the normal JWT. Gated by **`FF_PUBLIC_API_ENABLED`**. Prefix `/api/v1`.
-
-| Method · Path | Auth | Description |
-|---|---|---|
-| `POST /api/v1/api-keys` | JWT | Create an API key (the secret is returned **once**) |
-| `GET /api/v1/api-keys` | JWT | List your API keys (metadata only, no secrets) |
-| `DELETE /api/v1/api-keys/{key_id}` | JWT | Revoke an API key |
-| `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | List deployments (filter `?project_id=&status=&limit=&offset=`) |
-| `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | Deployment detail |
-| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | List devices |
-| `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | Device LoRaWAN telemetry |
-| `GET /api/v1/observations` | `X-API-Key` · `observations:read` | List observations (filterable) |
-| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | Export a CamtrapDP package |
 
 ---
 
