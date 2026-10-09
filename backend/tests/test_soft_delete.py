@@ -39,32 +39,53 @@ def _roles_client(monkeypatch, *, org_id, roles):
 # ── Role gates ───────────────────────────────────────────────────────────────
 
 
-async def test_assert_project_writer_allows_member(monkeypatch):
-    from app.authz import assert_project_writer
-
-    _roles_client(
-        monkeypatch,
-        org_id="org-1",
-        roles=[
-            {"role": "project_member", "scope_type": "project", "scope_id": "proj-1", "expires_at": None},
-        ],
-    )
-    await assert_project_writer("u1", "proj-1")  # must not raise
+def _role(role, scope_type, scope_id):
+    return {"role": role, "scope_type": scope_type, "scope_id": scope_id, "expires_at": None}
 
 
-async def test_assert_project_writer_denies_viewer(monkeypatch):
-    from app.authz import assert_project_writer
+# The database's rule (soft_delete_deployment, ww-backend #266): the creator while a
+# project_member, any project_admin, or ww_admin. Organisation managers, viewers and other
+# system-scope roles are refused.
+@pytest.mark.parametrize(
+    ("roles", "setup_by", "allowed"),
+    [
+        ([_role("project_member", "project", "proj-1")], "u1", True),
+        ([_role("project_member", "project", "proj-1")], "someone-else", False),
+        ([_role("project_admin", "project", "proj-1")], "someone-else", True),
+        ([_role("project_viewer", "project", "proj-1")], "u1", False),
+        ([_role("project_member", "project", "proj-2")], "u1", False),
+        ([_role("organisation_manager", "organisation", "org-1")], "u1", False),
+        ([_role("ww_admin", "system", None)], "someone-else", True),
+        ([_role("system_manager", "system", None)], "someone-else", False),
+        ([], "u1", False),
+    ],
+)
+def test_may_delete_deployment_matches_database_rule(roles, setup_by, allowed):
+    from app.authz import _may_delete_deployment
 
-    _roles_client(
-        monkeypatch,
-        org_id="org-1",
-        roles=[
-            {"role": "project_viewer", "scope_type": "project", "scope_id": "proj-1", "expires_at": None},
-        ],
-    )
-    with pytest.raises(HTTPException) as exc:
-        await assert_project_writer("u1", "proj-1")
-    assert exc.value.status_code == 404
+    assert _may_delete_deployment(roles, "u1", setup_by, "proj-1") is allowed
+
+
+def test_may_delete_deployment_ignores_expired_role():
+    from app.authz import _may_delete_deployment
+
+    expired = {**_role("project_admin", "project", "proj-1"), "expires_at": "2000-01-01T00:00:00Z"}
+    assert _may_delete_deployment([expired], "u1", "u1", "proj-1") is False
+
+
+async def test_split_deployments_by_delete_right(monkeypatch):
+    from app.authz import split_deployments_by_delete_right
+
+    roles = [_role("project_member", "project", "proj-1")]
+    deps = [
+        {"id": "mine", "project_id": "proj-1", "setup_by": "u1"},
+        {"id": "theirs", "project_id": "proj-1", "setup_by": "u2"},
+    ]
+    client = MagicMock()
+    client.table.side_effect = lambda name: _chain(roles) if name == "user_roles" else _chain(deps)
+    monkeypatch.setattr("app.authz.create_service_client", lambda: client)
+
+    assert await split_deployments_by_delete_right("u1", ["mine", "theirs", "missing"]) == (["mine"], ["theirs"])
 
 
 async def test_assert_project_admin_denies_member(monkeypatch):
@@ -152,9 +173,150 @@ def test_soft_delete_project_cascades_to_deployments():
     assert "deployments" in tables and "projects" in tables
 
 
+class _DbError(Exception):
+    """Stands in for postgrest's APIError, which carries the Postgres code."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def _user_client(visible_ids, rpc_errors=None):
+    """A user-session client: RLS shows ``visible_ids``; ``rpc_errors`` maps id -> Postgres code."""
+    rpc_errors = rpc_errors or {}
+    calls: list[str] = []
+    client = MagicMock()
+    client.table.side_effect = lambda name: _chain([{"id": i} for i in visible_ids])
+
+    def rpc(name, params):
+        assert name == "soft_delete_deployment"
+        calls.append(params["p_id"])
+        call = MagicMock()
+        code = rpc_errors.get(params["p_id"])
+        if code:
+            call.execute.side_effect = _DbError(code)
+        return call
+
+    client.rpc.side_effect = rpc
+    return client, calls
+
+
+def test_delete_as_user_lets_the_database_decide():
+    from app.domain.soft_delete import soft_delete_deployments_as_user
+
+    user, rpc_calls = _user_client(["mine", "theirs"], {"theirs": "42501"})
+    svc, svc_calls = _recording_client()
+    deleted, refused = soft_delete_deployments_as_user(user, svc, ["mine", "theirs", "hidden", "mine"], "ts")
+
+    assert (deleted, refused) == (["mine"], ["theirs"])
+    assert rpc_calls == ["mine", "theirs"]  # an id RLS hides is never sent; duplicates once
+    # The cascade stamps the shared ts on the deployment and its children only.
+    assert {name for name, _ in svc_calls} == {"deployments", "media", "observations"}
+    assert all(payload == {"deleted_at": "ts"} for _, payload in svc_calls)
+
+
+def test_delete_as_user_all_refused_cascades_nothing():
+    from app.domain.soft_delete import soft_delete_deployments_as_user
+
+    user, _ = _user_client(["theirs"], {"theirs": "42501"})
+    svc, svc_calls = _recording_client()
+    assert soft_delete_deployments_as_user(user, svc, ["theirs"], "ts") == ([], ["theirs"])
+    assert svc_calls == []
+
+
+def test_delete_as_user_cascades_before_an_unexpected_error_surfaces():
+    from app.domain.soft_delete import soft_delete_deployments_as_user
+
+    user, _ = _user_client(["a", "b"], {"b": "08006"})
+    svc, svc_calls = _recording_client()
+    with pytest.raises(_DbError):
+        soft_delete_deployments_as_user(user, svc, ["a", "b"], "ts")
+    assert {name for name, _ in svc_calls} == {"deployments", "media", "observations"}
+
+
 def test_restore_project_clears_deleted_at():
     from app.domain.soft_delete import restore_project
 
     client, calls = _recording_client(dep_rows=[{"id": "d1"}])
     restore_project(client, "proj-1", "ts")
     assert ("projects", {"deleted_at": None}) in calls
+
+
+# ── Routes: deployment delete/restore report refusals, backfill is admin-only ─
+
+
+@pytest.fixture
+def api(monkeypatch):
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from app.dependencies import get_current_user, get_user_client, get_verified_user
+    from app.main import app
+
+    user = SimpleNamespace(id="u1", app_metadata={}, email_confirmed_at="2026-01-01T00:00:00Z")
+    app.dependency_overrides[get_current_user] = lambda: user
+    app.dependency_overrides[get_verified_user] = lambda: user
+    app.dependency_overrides[get_user_client] = lambda: MagicMock()
+    monkeypatch.setattr("app.routers.deployments.create_service_client", lambda: MagicMock())
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+def test_batch_delete_reports_refused_ids(api, monkeypatch):
+    monkeypatch.setattr("app.routers.deployments.soft_delete_deployments_as_user", lambda *a: (["mine"], ["theirs"]))
+    resp = api.request("DELETE", "/api/deployments/batch", json={"deployment_ids": ["mine", "theirs"]})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["deployment_ids"] == ["mine"] and body["refused_ids"] == ["theirs"]
+    assert body["deleted_at"]
+
+
+def test_batch_delete_all_refused_is_403(api, monkeypatch):
+    monkeypatch.setattr("app.routers.deployments.soft_delete_deployments_as_user", lambda *a: ([], ["theirs"]))
+    resp = api.request("DELETE", "/api/deployments/batch", json={"deployment_ids": ["theirs"]})
+    assert resp.status_code == 403
+    assert "theirs" in resp.json()["detail"]
+
+
+def test_batch_restore_restores_only_allowed(api, monkeypatch):
+    async def split(user_id, ids):
+        return ["mine"], ["theirs"]
+
+    restored_with: list = []
+
+    def restore(svc, ids, ts):
+        restored_with.append(ids)
+        return ids
+
+    monkeypatch.setattr("app.routers.deployments.split_deployments_by_delete_right", split)
+    monkeypatch.setattr("app.routers.deployments.restore_deployments", restore)
+    resp = api.post("/api/deployments/batch/restore", json={"deployment_ids": ["mine", "theirs"], "deleted_at": "ts"})
+    assert resp.status_code == 200
+    assert resp.json() == {"restored": 1, "refused_ids": ["theirs"]}
+    assert restored_with == [["mine"]]
+
+
+def test_backfill_timezones_refuses_non_admin(api, monkeypatch):
+    async def not_admin(user_id):
+        return False
+
+    def no_service_client():
+        raise AssertionError("a refused call must not reach the service role")
+
+    monkeypatch.setattr("app.authz.is_system_admin", not_admin)
+    monkeypatch.setattr("app.routers.deployments.create_service_client", no_service_client)
+    assert api.post("/api/deployments/backfill-timezones").status_code == 403
+
+
+def test_backfill_timezones_runs_for_system_admin(api, monkeypatch):
+    async def admin(user_id):
+        return True
+
+    svc = MagicMock()
+    svc.table.side_effect = lambda name: _chain([])
+    monkeypatch.setattr("app.authz.is_system_admin", admin)
+    monkeypatch.setattr("app.routers.deployments.create_service_client", lambda: svc)
+    resp = api.post("/api/deployments/backfill-timezones")
+    assert resp.status_code == 200
+    assert resp.json() == {"candidates": 0, "updated": 0}

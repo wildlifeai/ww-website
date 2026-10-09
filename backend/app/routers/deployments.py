@@ -7,9 +7,9 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.authz import assert_access, assert_project_writer, deployment_id_prefix_bounds
+from app.authz import assert_access, deployment_id_prefix_bounds, require_system_admin, split_deployments_by_delete_right
 from app.dependencies import get_current_user, get_user_client, get_verified_user, require_not_demo
-from app.domain.soft_delete import now_iso, restore_deployments, soft_delete_deployments
+from app.domain.soft_delete import now_iso, restore_deployments, soft_delete_deployments_as_user
 from app.schemas.common import ApiResponse
 from app.services.supabase_client import create_service_client
 
@@ -129,44 +129,35 @@ class RestoreDeploymentsRequest(BaseModel):
     deleted_at: str
 
 
-async def _resolve_deployment_projects(deployment_ids: List[str], only_active: bool) -> Dict[str, str]:
-    """Map deployment id → project id (service client). only_active filters out already-deleted rows."""
+_DELETE_RULE = "only the person who set a deployment up, while a project member, or a project admin can delete it"
 
-    def _q() -> Dict[str, str]:
-        svc = create_service_client()
-        q = svc.table("deployments").select("id, project_id").in_("id", deployment_ids)
-        if only_active:
-            q = q.is_("deleted_at", "null")
-        resp = q.execute()
-        return {r["id"]: r["project_id"] for r in (resp.data or [])}
 
-    return await asyncio.to_thread(_q)
+def _refusal(action: str, refused: List[str]) -> HTTPException:
+    return HTTPException(status_code=403, detail=f"Not {action}: {_DELETE_RULE}. Refused: {', '.join(refused)}")
 
 
 @router.delete("/batch", dependencies=[Depends(require_not_demo)])
 async def batch_delete_deployments(
     body: BatchDeploymentIdsRequest,
     user: Any = Depends(get_verified_user),
+    user_client: Any = Depends(get_user_client),
 ) -> Dict[str, Any]:
     """Soft-delete deployments (and cascade to their media + observations).
 
-    Requires write access (project_admin/member, org-manager, or system) on **every** project the
-    selected deployments belong to. Deployments the caller can't write are refused (404). Returns
-    the shared ``deleted_at`` so the client can offer an Undo.
+    The database decides: each id goes through ``soft_delete_deployment`` as the caller, which
+    allows the deployment's creator while they hold ``project_member``, a ``project_admin`` of
+    the project, or ``ww_admin`` (ww-backend #266). Ids it refuses come back in ``refused_ids``;
+    ids the caller cannot see are skipped. ``403`` when nothing was deleted and something was
+    refused. Returns the shared ``deleted_at`` so the client can offer an Undo.
     """
     if not body.deployment_ids:
-        return {"deleted_at": None, "deployment_ids": []}
-
-    dep_to_project = await _resolve_deployment_projects(body.deployment_ids, only_active=True)
-    if not dep_to_project:
-        return {"deleted_at": None, "deployment_ids": []}
-    for project_id in set(dep_to_project.values()):
-        await assert_project_writer(user.id, project_id)
+        return {"deleted_at": None, "deployment_ids": [], "refused_ids": []}
 
     ts = now_iso()
-    found_ids = list(dep_to_project.keys())
-    await asyncio.to_thread(lambda: soft_delete_deployments(create_service_client(), found_ids, ts))
-    return {"deleted_at": ts, "deployment_ids": found_ids}
+    deleted, refused = await asyncio.to_thread(lambda: soft_delete_deployments_as_user(user_client, create_service_client(), body.deployment_ids, ts))
+    if refused and not deleted:
+        raise _refusal("deleted", refused)
+    return {"deleted_at": ts if deleted else None, "deployment_ids": deleted, "refused_ids": refused}
 
 
 @router.post("/batch/restore", dependencies=[Depends(require_not_demo)])
@@ -175,18 +166,22 @@ async def batch_restore_deployments(
     user: Any = Depends(get_verified_user),
 ) -> Dict[str, Any]:
     """Undo a deployment delete — clears ``deleted_at`` (== the given timestamp) on the deployments
-    and the media/observations that were deleted with them."""
-    if not body.deployment_ids:
-        return {"restored": 0}
-    dep_to_project = await _resolve_deployment_projects(body.deployment_ids, only_active=False)
-    if not dep_to_project:
-        return {"restored": 0}
-    for project_id in set(dep_to_project.values()):
-        await assert_project_writer(user.id, project_id)
+    and the media/observations that were deleted with them.
 
-    found_ids = list(dep_to_project.keys())
-    await asyncio.to_thread(lambda: restore_deployments(create_service_client(), found_ids, body.deleted_at))
-    return {"restored": len(found_ids)}
+    Same rule as the delete: the creator while a ``project_member``, a ``project_admin``, or
+    ``ww_admin``. It is checked here in Python (``split_deployments_by_delete_right``) because the
+    database has no restore function and hides a soft-deleted row from the caller's own session.
+    Refused ids come back in ``refused_ids``; ``403`` when nothing was restored and something was
+    refused.
+    """
+    if not body.deployment_ids:
+        return {"restored": 0, "refused_ids": []}
+    allowed, refused = await split_deployments_by_delete_right(user.id, body.deployment_ids)
+    if refused and not allowed:
+        raise _refusal("restored", refused)
+
+    restored = await asyncio.to_thread(lambda: restore_deployments(create_service_client(), allowed, body.deleted_at))
+    return {"restored": len(restored), "refused_ids": refused}
 
 
 @router.post("/validate")
@@ -266,16 +261,17 @@ async def validate_deployments(
     return ApiResponse(data=results)
 
 
-@router.post("/backfill-timezones")
-async def backfill_timezones(
-    user: Any = Depends(get_current_user),
-) -> Dict[str, int]:
+@router.post("/backfill-timezones", dependencies=[Depends(require_system_admin), Depends(require_not_demo)])
+async def backfill_timezones() -> Dict[str, int]:
     """Resolve and persist ``deployments.timezone`` for deployments that lack it.
 
     Idempotent maintenance task: for every deployment with coordinates but no
     timezone, derive the IANA zone from latitude/longitude (timezonefinder) and
-    store it so the UI can render capture times in local time. Run once after the
-    timezone column is deployed; new CamtrapDP imports populate it automatically.
+    store it so the UI can render capture times in local time. New CamtrapDP imports
+    populate it automatically.
+
+    System admins only (``403`` otherwise, and for the demo account): it is a service-role
+    write across every organisation's deployments, so no project role is enough (#309).
     """
     from app.domain.photo_preprocessing import resolve_timezone
 
