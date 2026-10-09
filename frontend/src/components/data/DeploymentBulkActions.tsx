@@ -3,7 +3,7 @@
 //
 // DeploymentBulkActions — selection toolbar for the Insights ▸ Deployments table.
 // Replaces the per-row Actions column: the user ticks rows, then picks one action from
-// this dropdown. Some actions only make sense for a single deployment (Results);
+// this dropdown. Some actions only make sense for a single deployment (Results, Edit location);
 // those appear only when exactly one row is selected.
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -12,6 +12,7 @@ import { apiClient } from '../../lib/apiClient'
 import { useDemoGuard } from '../common/DemoGuard'
 import { showUndoToast } from '../common/undoToastBus'
 import type { DeploymentRow } from './DeploymentActionRow'
+import { EditLocationDialog } from './EditLocationDialog'
 
 interface Props {
   selected: Set<string>
@@ -20,6 +21,8 @@ interface Props {
   onShowMap: () => void
   /** Called after a delete/undo so the parent can refetch the deployment list. */
   onDeleted?: () => void
+  /** Called after a location edit was saved, so the parent can refetch the list. */
+  onEdited?: () => void
 }
 
 function downloadCsv(rows: DeploymentRow[]) {
@@ -32,13 +35,14 @@ function downloadCsv(rows: DeploymentRow[]) {
   URL.revokeObjectURL(url)
 }
 
-export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDeleted }: Props) {
+export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDeleted, onEdited }: Props) {
   const navigate = useNavigate()
   const { clearAll, toggleProject } = useProjectSelection()
   const { guard } = useDemoGuard()
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -138,6 +142,9 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
                 {single && (
                   <button style={item} onClick={() => run(() => navigate(`/reporting/${single.id}`))}>📊 Results</button>
                 )}
+                {single && (
+                  <button style={item} onClick={guard(() => { setOpen(false); setEditingId(single.id) })}>📍 Edit location</button>
+                )}
                 <div style={{ height: 1, background: 'var(--border)', margin: '0.25rem 0' }} />
                 <button style={{ ...item, color: 'var(--error, #f44336)' }} onClick={guard(() => setConfirming(true))}>🗑 Delete</button>
               </>
@@ -145,6 +152,12 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
           </div>
         )}
       </div>
+      {editingId && (
+        <EditLocationDialog
+          deploymentId={editingId}
+          onClose={changed => { setEditingId(null); if (changed) onEdited?.() }}
+        />
+      )}
       <button onClick={onClear} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.78rem', opacity: 0.65 }}>
         Clear
       </button>

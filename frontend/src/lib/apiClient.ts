@@ -100,6 +100,8 @@ export const apiClient = {
   get: (path: string) => request(path),
   post: (path: string, data?: any) => 
     request(path, { method: 'POST', body: JSON.stringify(data) }),
+  patch: (path: string, data?: unknown) =>
+    request(path, { method: 'PATCH', body: JSON.stringify(data) }),
   upload: (path: string, formData: FormData) =>
     request(path, { method: 'POST', body: formData }),
   del: (path: string, data?: any) =>

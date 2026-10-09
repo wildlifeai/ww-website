@@ -107,7 +107,7 @@ export function InsightsPage() {
 
   // Tracks the last observations-query key so the live refresh can skip the loading flash.
   const obsKeyRef = useRef('')
-  // Bumped after a deployment delete/undo to refetch the list.
+  // Bumped after a deployment delete/undo or location edit to refetch the list.
   const [depRefresh, setDepRefresh] = useState(0)
 
   const [reportFilterDep, setReportFilterDepState]    = useState(deploymentParam)
@@ -363,6 +363,7 @@ export function InsightsPage() {
               onClear={() => setSelectedDeps(new Set())}
               onShowMap={() => setTab('map')}
               onDeleted={() => { setSelectedDeps(new Set()); setDepRefresh(x => x + 1) }}
+              onEdited={() => setDepRefresh(x => x + 1)}
             />
             <DataTable<DeploymentRow>
               columns={deploymentColumns}

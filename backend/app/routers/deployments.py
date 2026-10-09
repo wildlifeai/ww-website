@@ -5,10 +5,12 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from postgrest.exceptions import APIError
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.authz import assert_access, deployment_id_prefix_bounds, require_system_admin, split_deployments_by_delete_right
 from app.dependencies import get_current_user, get_user_client, get_verified_user, require_not_demo
+from app.domain.deployment_location import apply_location_update, location_update
 from app.domain.soft_delete import now_iso, restore_deployments, soft_delete_deployments_as_user
 from app.schemas.common import ApiResponse
 from app.services.supabase_client import create_service_client
@@ -182,6 +184,76 @@ async def batch_restore_deployments(
 
     restored = await asyncio.to_thread(lambda: restore_deployments(create_service_client(), allowed, body.deleted_at))
     return {"restored": len(restored), "refused_ids": refused}
+
+
+LOCATION_FORBIDDEN = (
+    "You can change a deployment's location if you set it up and are still a member of its project, or if you are an admin of the project."
+)
+
+
+class DeploymentLocationRequest(BaseModel):
+    """The whole location of one deployment. Every field is written, so a blank clears it."""
+
+    location_name: str
+    location_description: Optional[str] = None
+    latitude: Optional[float] = Field(None, ge=-90, le=90, allow_inf_nan=False)
+    longitude: Optional[float] = Field(None, ge=-180, le=180, allow_inf_nan=False)
+    altitude: Optional[float] = Field(None, allow_inf_nan=False)
+    accuracy: Optional[float] = Field(None, ge=0, allow_inf_nan=False)
+
+    @field_validator("location_name")
+    @classmethod
+    def _name_required(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("location_name is required")
+        return v
+
+    @field_validator("location_description")
+    @classmethod
+    def _blank_description_is_none(cls, v: Optional[str]) -> Optional[str]:
+        return (v or "").strip() or None
+
+    @model_validator(mode="after")
+    def _coordinates_pair(self) -> "DeploymentLocationRequest":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("latitude and longitude go together: give both or neither")
+        return self
+
+
+@router.patch("/{deployment_id}/location", dependencies=[Depends(require_not_demo)])
+async def update_deployment_location(
+    deployment_id: str,
+    body: DeploymentLocationRequest,
+    user_client: Any = Depends(get_user_client),
+) -> ApiResponse:
+    """Correct a deployment's location as the signed-in user, with ``timezone`` recomputed.
+
+    Runs on the caller's client, so RLS decides: the deployment's creator while they hold
+    project_member on its project, or a project_admin. A refusal is 403, a deployment the caller
+    cannot see is 404. Returns the location columns as the database now holds them.
+    """
+    try:
+        dep_id = str(uuid.UUID(deployment_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
+    def _apply():
+        return apply_location_update(user_client, dep_id, location_update(body.model_dump()))
+
+    try:
+        outcome, row = await asyncio.to_thread(_apply)
+    except APIError as exc:
+        if exc.code == "23514":
+            raise HTTPException(status_code=422, detail=f"That location is not allowed: {exc.message}")
+        if exc.code == "42501":
+            raise HTTPException(status_code=403, detail=LOCATION_FORBIDDEN)
+        raise
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    if outcome == "forbidden":
+        raise HTTPException(status_code=403, detail=LOCATION_FORBIDDEN)
+    return ApiResponse(data=row)
 
 
 @router.post("/validate")
