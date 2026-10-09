@@ -53,6 +53,22 @@ function useBulkReassign(deploymentId?: string) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Thumb: a registry image, or the grid's no-thumbnail placeholder when the
+// registry has no URL (no rendition yet and a private original, #305)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function Thumb({ src, style }: { src: string | null | undefined; style: React.CSSProperties }) {
+  if (!src) {
+    return (
+      <div style={{ ...style, background: 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ opacity: 0.3 }}>📷</span>
+      </div>
+    )
+  }
+  return <img src={src} alt="" style={style} />
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PhotoGrid — expandable grid with checkbox selection
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -90,9 +106,8 @@ function PhotoGrid({
               transition: 'outline 0.1s',
             }}
           >
-            <img
-              src={thumbById[mid] || undefined}
-              alt=""
+            <Thumb
+              src={thumbById[mid]}
               style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', borderRadius: 4, display: 'block', background: 'var(--surface)' }}
             />
             {/* Checkbox overlay */}
@@ -216,7 +231,7 @@ function ClusterPanel({
         {/* Contact strip (always visible, max 5 thumbs) */}
         <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
           {members.slice(0, 5).map(mid => (
-            <img key={mid} src={thumbById[mid] || undefined} alt=""
+            <Thumb key={mid} src={thumbById[mid]}
               style={{ width: 52, height: 40, objectFit: 'cover', borderRadius: 3, background: 'var(--surface)' }} />
           ))}
           {members.length > 5 && (

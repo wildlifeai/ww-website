@@ -2900,7 +2900,7 @@
     },
     "/api/media/registry/{deployment_id}": {
       "get": {
-        "description": "Paginated media list with pre-resolved URLs \u2014 primary source for the grid.",
+        "description": "Paginated media list with pre-resolved URLs, null where only the private original exists.",
         "operationId": "media_registry_api_media_registry__deployment_id__get",
         "parameters": [
           {
@@ -3140,7 +3140,7 @@
     },
     "/api/media/{media_id}/resolve": {
       "get": {
-        "description": "Return a display URL for a media item regardless of storage provider.",
+        "description": "Return a URL a plain ``<img>`` can load for a media item, regardless of storage provider.\n\n``url`` is null when the photo has no rendition yet and its original is private.",
         "operationId": "resolve_media_url_api_media__media_id__resolve_get",
         "parameters": [
           {

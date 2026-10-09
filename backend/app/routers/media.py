@@ -93,7 +93,10 @@ async def resolve_media_url(
     size: Literal["thumbnail", "preview", "original"] = Query("thumbnail"),
     user=Depends(get_current_user),
 ):
-    """Return a display URL for a media item regardless of storage provider."""
+    """Return a URL a plain ``<img>`` can load for a media item, regardless of storage provider.
+
+    ``url`` is null when the photo has no rendition yet and its original is private.
+    """
     req_id = getattr(request.state, "request_id", None)
     if not settings.FF_MEDIA_REGISTRY_ENABLED:
         return _registry_disabled(req_id)
@@ -117,7 +120,7 @@ async def media_registry(
     page_size: int = Query(200, ge=1, le=500),
     user=Depends(get_current_user),
 ):
-    """Paginated media list with pre-resolved URLs — primary source for the grid."""
+    """Paginated media list with pre-resolved URLs, null where only the private original exists."""
     req_id = getattr(request.state, "request_id", None)
     if not settings.FF_MEDIA_REGISTRY_ENABLED:
         return _registry_disabled(req_id)
