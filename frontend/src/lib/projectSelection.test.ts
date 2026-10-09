@@ -44,6 +44,32 @@ describe('selectionAfterLoad', () => {
     expect(selectionAfterLoad(state(['c']), 'u1', [A, B, C]).selectedProjectIds).toEqual(['c'])
   })
 
+  it('returns the same state when a reload changes nothing, so pages do not refetch (#299)', () => {
+    const prev = state(['a'])
+    expect(selectionAfterLoad(prev, 'u1', [{ ...A }, { ...B }])).toBe(prev)
+    const all = state(['a', 'b'])
+    expect(selectionAfterLoad(all, 'u1', [A, B])).toBe(all)
+  })
+
+  it('returns a new state when a project is renamed or arrives', () => {
+    const prev = state(['a'])
+    expect(selectionAfterLoad(prev, 'u1', [{ ...A, name: 'Alpha 2' }, B]).projects[0].name).toBe('Alpha 2')
+    const arrived = selectionAfterLoad(prev, 'u1', [A, B, C])
+    expect(arrived).not.toBe(prev)
+    expect(arrived.projects).toEqual([A, B, C])
+  })
+
+  it('selects a project that arrives on a tab-return refetch only when all were selected (#299)', () => {
+    // A project created in the mobile app syncs while the website tab is in the background.
+    expect(selectionAfterLoad(state(['a', 'b']), 'u1', [A, B, C]).selectedProjectIds).toEqual(['a', 'b', 'c'])
+    expect(selectionAfterLoad(state(['b']), 'u1', [A, B, C]).selectedProjectIds).toEqual(['b'])
+    expect(selectionAfterLoad(state([]), 'u1', [A, B, C]).selectedProjectIds).toEqual([])
+  })
+
+  it('selects the first project of a user who had none, since an empty list is all ticked', () => {
+    expect(selectionAfterLoad(state([], []), 'u1', [C]).selectedProjectIds).toEqual(['c'])
+  })
+
   it('keeps the selection when a reload fails, and settles a failed first load as no projects', () => {
     const prev = state(['a'])
     expect(selectionAfterLoad(prev, 'u1', null)).toBe(prev)
