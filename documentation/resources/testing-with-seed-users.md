@@ -79,7 +79,7 @@ Using `pytest` + the Supabase client, you can authenticate as each test user and
 | Project member cannot see unassigned project | `ngaio@ww.org` | `supabase.from('projects').select()` | Does NOT return Kiwi Migration Study |
 | Unassigned user sees no projects | `hemi@ww.org` | `supabase.from('projects').select()` | Returns empty list |
 | Upload Model blocked for non-managers | `rata@ww.org` | `POST /api/models/convert` | Returns `403` |
-| Project delete blocked for members | `rata@ww.org` | `DELETE /api/projects/{id}` | Returns `404` (admin-only, doesn't leak existence) |
+| Project delete blocked for members and org managers | `rata@ww.org`, `kowhai@ww.org` | `DELETE /api/projects/{id}` on a project they can see | Returns `403` (only a project admin or `ww_admin`); a project they cannot see is `404` |
 | CamtrapDP import succeeds for any authenticated user | `ngaio@ww.org` | `POST /api/camtrapdp/import` | Returns `200` with valid ZIP |
 
 **Implementation approach:**

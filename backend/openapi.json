@@ -3335,7 +3335,7 @@
     },
     "/api/projects/{project_id}": {
       "delete": {
-        "description": "Soft-delete a project and cascade to its deployments \u2192 media \u2192 observations.\n\nAdmin-only: requires ``project_admin`` on the project (or org-manager / system). A member or\nviewer is refused (404). Returns the shared ``deleted_at`` so the client can offer an Undo.",
+        "description": "Soft-delete a project and cascade to its deployments, media and observations.\n\nThe database decides: ``soft_delete_project`` runs as the caller and allows a\n``project_admin`` of the project or ``ww_admin``. Anyone else who can see the project, an\norganisation manager included, gets ``403``; a project the caller cannot see is ``404``.\nReturns the shared ``deleted_at`` so the client can offer an Undo.",
         "operationId": "delete_project_api_projects__project_id__delete",
         "parameters": [
           {
@@ -3389,7 +3389,7 @@
     },
     "/api/projects/{project_id}/restore": {
       "post": {
-        "description": "Undo a project delete \u2014 clears ``deleted_at`` (== the given timestamp) on the project and the\ndeployments/media/observations that were deleted with it.",
+        "description": "Undo a project delete: clears ``deleted_at`` (equal to the given timestamp) on the project\nand the deployments, media and observations deleted with it.\n\nSame rule as the delete, a ``project_admin`` or ``ww_admin``. It is checked here in Python\n(``project_restore_right``) because the database has no restore function (ww-backend #286)\nand hides a soft-deleted project from the caller's own session. ``403`` for anyone else with\na role reaching the project, ``404`` otherwise.",
         "operationId": "restore_project_endpoint_api_projects__project_id__restore_post",
         "parameters": [
           {

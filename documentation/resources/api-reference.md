@@ -105,8 +105,8 @@ that need service-role cascades or admin checks.
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/projects` | JWT | Create a project in the caller's organisation — body `{ name, description? }` |
-| `DELETE /api/projects/{project_id}` | JWT · `project_admin` | Soft-delete, cascading to deployments → media → observations. Returns the shared `deleted_at` so the client can offer Undo. Members/viewers get `404` |
-| `POST /api/projects/{project_id}/restore` | JWT · `project_admin` | Undo a soft-delete using that `deleted_at` |
+| `DELETE /api/projects/{project_id}` | JWT · `project_admin` or `ww_admin` | Soft-delete, cascading to deployments → media → observations. The database decides: `soft_delete_project` runs as the caller and allows a `project_admin` of the project or `ww_admin`. Anyone else who can see the project, an organisation manager included, gets `403`; a project the caller cannot see is `404`. Returns the shared `deleted_at` so the client can offer Undo |
+| `POST /api/projects/{project_id}/restore` | JWT · `project_admin` or `ww_admin` | Undo that delete, body `{ deleted_at }`. Same rule, checked in the API because the database has no restore function (ww-backend #286). `403` for anyone else with a role reaching the project, `404` otherwise |
 
 ---
 
