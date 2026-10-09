@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // When a grid card with no thumbnail is "still processing" and when it is stuck (#208).
-// A stuck card offers Retry, which runs the deployment's thumbnail backfill.
+// A stuck card offers Retry, which runs the deployment's thumbnail backfill; the grid also
+// starts that backfill once by itself per deployment and browser session (#175).
 
 /** How long after a photo is registered its thumbnail may still legitimately be on its way. */
 export const THUMBNAIL_GRACE_MS = 10 * 60 * 1000
@@ -32,6 +33,51 @@ export function busyDeployments(
     if (j.status === 'queued' || j.status === 'processing') (j.deployment_ids ?? []).forEach(id => busy.add(id))
   }
   return busy
+}
+
+/**
+ * Deployments with a card showing "No thumbnail", sorted: the grid starts their backfill once
+ * by itself (#175). `cards` are the photos with no image to show and no Retry requested yet.
+ */
+export function stuckDeployments(
+  cards: ReadonlyArray<{ deployment_id: string; created_at?: string | null }>,
+  now: number,
+  busyDeploymentIds: ReadonlySet<string>,
+): string[] {
+  const stuck = new Set<string>()
+  for (const c of cards) if (isThumbnailStuck(c, now, busyDeploymentIds)) stuck.add(c.deployment_id)
+  return [...stuck].toSorted()
+}
+
+/**
+ * The stuck deployments not yet retried automatically in this browser session. One automatic
+ * request per deployment, so a photo whose thumbnail cannot be made never loops; Retry stays
+ * for later attempts.
+ */
+export function dueForAutoRetry(stuck: ReadonlyArray<string>, alreadyRetried: ReadonlySet<string>): string[] {
+  return stuck.filter(id => !alreadyRetried.has(id))
+}
+
+/** sessionStorage key holding the deployments already retried automatically. */
+export const AUTO_RETRY_KEY = 'ww:thumbnailAutoRetry'
+
+/** The deployments `storage` says were retried automatically; empty when it is missing, unreadable or corrupt. */
+export function readAutoRetried(storage: Pick<Storage, 'getItem'> | null): Set<string> {
+  try {
+    const ids: unknown = JSON.parse(storage?.getItem(AUTO_RETRY_KEY) ?? '[]')
+    return new Set(Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+/** Record the automatically retried deployments; a storage that refuses the write is ignored. */
+export function rememberAutoRetried(storage: Pick<Storage, 'setItem'> | null, ids: ReadonlySet<string>): void {
+  try {
+    storage?.setItem(AUTO_RETRY_KEY, JSON.stringify([...ids]))
+  } catch {
+    // Private mode or a full quota: the in-memory record still holds for this page load.
+  }
 }
 
 /** How often the grid refetches its page while a job runs on a deployment in view (#286). */
