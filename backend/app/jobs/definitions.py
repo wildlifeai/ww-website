@@ -541,6 +541,58 @@ async def generate_manifest_job(job_id: str, params: dict):
         raise
 
 
+async def export_camtrapdp_job(job_id: str, org_id: str, params: dict):
+    """Export deployment data as CamtrapDP package."""
+    logger.info("job_start", job_type="export_camtrapdp", job_id=job_id)
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
+
+    try:
+        from app.domain.public_api import generate_camtrapdp_package
+        from app.services.storage import upload_to_storage
+        from app.services.supabase_client import create_service_client
+
+        package_bytes = await generate_camtrapdp_package(
+            org_id=org_id,
+            project_id=params.get("project_id"),
+            deployment_ids=params.get("deployment_ids"),
+            date_from=params.get("date_from"),
+            date_to=params.get("date_to"),
+            include_observations=params.get("include_observations", True),
+        )
+
+        await update_job(job_id, progress=0.8)
+
+        result_path = f"temp/exports/{job_id}/camtrap-dp.zip"
+        uploaded = await upload_to_storage("firmware", result_path, package_bytes, "application/zip")
+
+        if uploaded:
+            client = create_service_client()
+            try:
+                signed = client.storage.from_("firmware").create_signed_url(
+                    result_path,
+                    expires_in=3600,  # 1 hour for exports
+                )
+                result_url = signed.get("signedURL", result_path)
+            except Exception:
+                result_url = result_path
+
+            await update_job(
+                job_id,
+                status=JobStatus.COMPLETED,
+                progress=1.0,
+                result_url=result_url,
+            )
+        else:
+            await update_job(job_id, status=JobStatus.FAILED, error="Failed to upload export")
+
+        logger.info("job_complete", job_type="export_camtrapdp", job_id=job_id)
+
+    except Exception as e:
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+        logger.error("job_failed", job_type="export_camtrapdp", job_id=job_id, error=str(e))
+        raise
+
+
 async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, org_id: str, custom_name: str = "", custom_desc: str = ""):
     """Download, convert, and register an SSCMA pretrained model."""
     logger.info("job_start", job_type="download_pretrained", job_id=job_id)
@@ -654,7 +706,7 @@ async def reserve_ai_job(dep_ids: list[str], user_id: str | None) -> tuple[str |
 
     Returns ``(new job id or None, its deployments, covered, following)`` as in
     :func:`plan_ai_coalescing`. The check and the create run under one lock
-    (``services.locks``, across processes when Redis is set), and the new row is written
+    (``services.locks``, across processes through Redis or the database), and the new row is written
     through to Supabase before the lock is let go, so two chunks that arrive together
     cannot both create a job for one deployment (#284).
     """
@@ -1692,6 +1744,7 @@ JOBS = [
     convert_model_job,
     train_species_brain_job,
     generate_manifest_job,
+    export_camtrapdp_job,
     download_pretrained_job,
     download_github_pretrained_job,
     upload_drive_images_job,

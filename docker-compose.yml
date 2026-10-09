@@ -33,6 +33,7 @@ services:
       - FF_INAT_ENABLED=${FF_INAT_ENABLED:-false}
       - FF_ML_ENABLED=${FF_ML_ENABLED:-false}
       - FF_CLUSTERING_ENABLED=${FF_CLUSTERING_ENABLED:-false}
+      - FF_PUBLIC_API_ENABLED=${FF_PUBLIC_API_ENABLED:-false}
       - FF_PIPELINE_ENABLED=${FF_PIPELINE_ENABLED:-false}
       - FF_ACTIVE_LEARNING_ENABLED=${FF_ACTIVE_LEARNING_ENABLED:-false}
       # Dual AI: reflect the camera's own NN scores from EXIF as edge observations

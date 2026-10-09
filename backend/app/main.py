@@ -34,6 +34,7 @@ from app.routers import (
     models,
     pipeline,
     projects,
+    public_api,
     qa,
 )
 
@@ -153,6 +154,7 @@ app.include_router(exif.router)
 app.include_router(manifest.router)
 app.include_router(models.router)
 app.include_router(media.router)
+app.include_router(public_api.router)
 app.include_router(inaturalist.router)
 app.include_router(clustering.router)
 if settings.FF_CAMTRAPDP_IMPORT_ENABLED:

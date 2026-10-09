@@ -65,6 +65,7 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_INAT_ENABLED` | `false` | iNaturalist endpoints |
 | `FF_ML_ENABLED` | `false` | ML-assisted classification — **must** be true or `build_pipeline_steps()` returns `[]` |
 | `FF_CLUSTERING_ENABLED` | `false` | ⚠️ **Declared but not wired** — nothing reads it; `/api/clustering` (legacy perceptual-hash) is registered unconditionally in `main.py`. Either gate the router or drop the flag |
+| `FF_PUBLIC_API_ENABLED` | `false` | Public data API (`/api/v1/*`) |
 | `FF_CAMTRAPDP_IMPORT_ENABLED` | `true` | CamtrapDP package import |
 | `FF_PIPELINE_ENABLED` | `false` | AI pipeline inference endpoints |
 | `FF_SPECIESNET_ENABLED` | `false` | SpeciesNet detector+classifier step |

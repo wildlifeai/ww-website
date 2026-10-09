@@ -1650,8 +1650,8 @@ async def run_pipeline(
         wait: Wait for a run already on this deployment (default), or raise
             ``PipelineBusyError`` at once.
 
-    The lock (``services.locks.exclusive``) spans every process that shares Redis, and
-    this process alone when there is none; its docstring has the exact guarantee.
+    The lock (``services.locks.exclusive``) spans every process that shares Redis or, with
+    no Redis, the database; its docstring has the exact guarantee.
 
     Returns:
         PipelineRunResult with per-step and aggregate metrics.
