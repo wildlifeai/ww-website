@@ -213,7 +213,119 @@ def test_strata_light_burst_length_and_top_folder(tmp_path):
     assert per["gemini_size"]["tiny"].recall == 1.0 and per["gemini_size"]["none"].recall == 0.0  # the model's own label, animal frames only
     assert set(per["gemini_location"]) == {"corner", "none"}
     table = ev.render_strata_markdown({("single", "m", "v2"): per})
-    assert "**single / m / prompt v2**" in table and "| light | night_ir | 1 | 1 | 0.0% | 1 | n/a |" in table
+    assert "**single / m / prompt v2**" in table and "| light | night_ir | 1 | 1 | too few |  | 1 | n/a |" in table
+    assert "| light | night_ir | 1 | 1 | 0.0% | 0.0 to 79.3% | 1 | n/a |" in ev.render_strata_markdown({("single", "m", "v2"): per}, floor=1)
+    assert "light_source" not in per  # counted by the source line, not a table row
+
+
+def test_wilson_interval_matches_the_published_values():
+    assert ev.wilson_interval(0, 0) is None
+    lo, hi = ev.wilson_interval(8, 10)
+    assert (round(lo, 4), round(hi, 4)) == (0.4902, 0.9433)  # Newcombe 1998, table I
+    lo, hi = ev.wilson_interval(30, 30)
+    assert hi == 1.0 and lo == pytest.approx(0.8865, abs=1e-4)  # a perfect stratum still has a lower bound
+    assert ev.wilson_interval(0, 30)[0] == 0.0
+
+
+def test_strata_floor_reports_too_few_below_30_animal_frames():
+    def stratum(n_animal, n_missed, n_empty=0):
+        outs = [_outcome(True, i >= n_missed) for i in range(n_animal)] + [_outcome(False, False)] * n_empty
+        return ev.compute_metrics(outs)
+
+    per = {("single", "m", "v1"): {"size": {"small": stratum(30, 3, 30), "tiny": stratum(29, 0, 29), "none": stratum(0, 0, 1)}}}
+    table = ev.render_strata_markdown(per)
+    assert "| size | small | 60 | 30 | 90.0% | 74.4 to 96.5% | 3 | 100.0% |" in table
+    assert "| size | tiny | 58 | 29 | too few |  | 0 | too few |" in table
+    assert "| size | none | 1 | 0 | n/a |  | 0 | too few |" in table
+    assert ev.MIN_STRATUM_ANIMAL_FRAMES == 30
+
+
+def test_size_and_border_from_a_box_and_who_decides():
+    assert ev.size_class((0.0, 0.0, 0.1, 0.1)) == "tiny"  # 1% of the frame
+    assert ev.size_class((0.0, 0.0, 0.2, 0.25)) == "small"  # 5%
+    assert ev.size_class((0.0, 0.0, 0.5, 0.5)) == "medium"  # 25%
+    assert ev.size_class((0.0, 0.0, 0.6, 0.6)) == "large"  # 36%
+    assert ev.on_border((0.01, 0.4, 0.1, 0.1)) and ev.on_border((0.5, 0.5, 0.49, 0.2))
+    assert not ev.on_border((0.3, 0.3, 0.2, 0.2))
+    plain = ev.LabelledFrame(path="a", burst_id="a", has_animal=True)
+    human = ev.LabelledFrame(path="a", burst_id="a", has_animal=True, animal_size="large", visibility="border")
+    box = (0.3, 0.3, 0.05, 0.05)
+    assert ev.size_of(human, box, "tiny") == ("large", "human")  # a human label overrides the automatic one
+    assert ev.size_of(plain, box, "large") == ("tiny", "box")
+    assert ev.size_of(plain, None, "small") == ("small", "gemini")
+    assert ev.size_of(plain, None, "none") == ("unknown", "none")
+    assert ev.border_of(human, box, "centre") == ("border", "human")
+    assert ev.border_of(plain, box, "corner") == ("interior", "box")
+    assert ev.border_of(plain, None, "edge") == ("border", "gemini")
+    assert ev.border_of(plain, None, "centre") == ("interior", "gemini")
+    assert ev.border_of(plain, None, None) == ("unknown", "none")
+
+
+def test_deployment_from_exif():
+    assert ev.deployment_of({"deployment_id": "AD4CA41F-01e0-4d6e-881c-c7c2e6264564"}) == "ad4ca41f"
+    assert ev.deployment_of({"deployment_id": "00000000-0000-0000-0000-000000000000"}) == "no_id"
+    assert ev.deployment_of({}) == "no_id"
+
+
+def test_boxes_prefer_speciesnet_and_model_labels_skip_none():
+    sn = [ev.FrameOutcome(path="a", truth=True, predicted=True, bbox=(0.1, 0.1, 0.1, 0.1)), ev.FrameOutcome(path="b", truth=True, predicted=False)]
+    gem = [
+        ev.FrameOutcome(path="a", truth=True, predicted=True, bbox=(0.5, 0.5, 0.4, 0.4), size="large", location="none"),
+        ev.FrameOutcome(path="b", truth=True, predicted=True, bbox=(0.2, 0.2, 0.2, 0.2), size="small", location="edge"),
+        ev.FrameOutcome(path="c", truth=True, predicted=False, bbox=(0.2, 0.2, 0.2, 0.2)),  # a box on a "no" is not used
+    ]
+    runs = {("single", "m", "v2"): gem, ("speciesnet", "speciesnet (local)"): sn}
+    assert ev.boxes_of(runs) == {"a": (0.1, 0.1, 0.1, 0.1), "b": (0.2, 0.2, 0.2, 0.2)}
+    assert ev.model_labels_of(runs) == {"a": {"size": "large"}, "b": {"size": "small", "location": "edge"}}
+
+
+def test_strata_add_deployment_box_and_human_families(tmp_path):
+    paths = []
+    for name in ("a.jpg", "b.jpg", "e.jpg"):
+        Image.new("RGB", (64, 48), (30, 120, 60)).save(tmp_path / name, format="JPEG")
+        paths.append(str(tmp_path / name))
+    frames = [
+        ev.LabelledFrame(path=paths[0], burst_id="x", has_animal=True, visibility="camouflaged", distance="far", conditions=("night_ir", "rain")),
+        ev.LabelledFrame(path=paths[1], burst_id="x", has_animal=True),
+        ev.LabelledFrame(path=paths[2], burst_id="x", has_animal=False, conditions=("rain",)),
+    ]
+    strata = ev.strata_of(frames, [frames], boxes={paths[0]: (0.0, 0.0, 0.9, 0.9)}, model_labels={paths[1]: {"size": "tiny", "location": "centre"}})
+    assert strata["light"][paths[0]] == "night_ir" and strata["light_source"][paths[0]] == "human"  # the label beats the colour ratio
+    assert strata["light"][paths[1]] == "day"
+    assert set(strata["deployment"].values()) == {"no_id"}
+    assert strata["size"] == {paths[0]: "large", paths[1]: "tiny"}  # animal frames only
+    assert strata["size_source"] == {paths[0]: "box", paths[1]: "gemini"}
+    assert strata["border"] == {paths[0]: "border", paths[1]: "interior"}
+    assert strata["visibility"] == {paths[0]: "camouflaged"} and strata["distance"] == {paths[0]: "far"}
+    assert strata["conditions"] == {paths[0]: ("night_ir", "rain"), paths[2]: ("rain",)}
+    assert ev.source_line(strata, "size", "Size") == "Size (2 frames): large 1, tiny 1; decided by box 1, gemini 1.\n"
+    outcomes = [
+        ev.FrameOutcome(path=paths[0], truth=True, predicted=False),
+        ev.FrameOutcome(path=paths[1], truth=True, predicted=True),
+        ev.FrameOutcome(path=paths[2], truth=False, predicted=False),
+        ev.FrameOutcome(path="person.jpg", truth=None, predicted=True),  # in no stratum: left out, no "unknown" row
+    ]
+    per = ev.metrics_by_stratum(outcomes, strata)
+    assert per["conditions"]["rain"].frames == 2 and per["conditions"]["night_ir"].recall == 0.0  # one frame, two conditions
+    assert per["visibility"]["camouflaged"].fn == 1 and set(per["visibility"]) == {"camouflaged"}
+    assert "unknown" not in per["light"] and not any(f.endswith("_source") for f in per)
+    assert ev.human_line(frames) == "Human strata labelled on 2 animal frames: animal_size 0, visibility 1, distance 1, conditions 1.\n"
+    # No human column anywhere: no human family at all.
+    bare = ev.strata_of(frames[1:2], [frames[1:2]])
+    assert not set(ev.HUMAN_FAMILIES) & set(bare)
+
+
+def test_read_labels_reads_the_optional_strata_columns(tmp_path):
+    p = tmp_path / "labels.csv"
+    p.write_text(
+        "path,burst_id,has_animal,label,labelled_by,labelled_at,notes,animal_size,visibility,conditions,distance\n"
+        '/x/a.jpg,x/a,1,animal,v,t,,small,border,"night_ir,rain",close\n'
+        "/x/b.jpg,x/a,1,animal,v,t,,,,fog;vegetation,\n",
+        encoding="utf-8",
+    )
+    a, b = ev.read_labels(str(p))
+    assert (a.animal_size, a.visibility, a.distance, a.conditions) == ("small", "border", "close", ("night_ir", "rain"))
+    assert (b.animal_size, b.conditions) == ("", ("fog", "vegetation"))  # semicolons read as well
 
 
 def _ww500_jpeg(maker_note=None, flash=None, rgb=(90, 90, 90)) -> bytes:
@@ -379,6 +491,50 @@ def test_speciesnet_box_rules_recompute_the_dump(tmp_path):
     outcomes = ev.speciesnet_outcomes(frames, str(dump), cutoffs)
     assert [(o.predicted, o.confidence) for o in outcomes] == [(False, None), (True, 0.3), (True, 0.9)]
     assert [o.predicted for o in ev.speciesnet_outcomes(frames, str(dump))] == [True, True, True]
+
+
+def test_speciesnet_dump_from_docker_is_rerooted_and_carries_the_top_animal_box(tmp_path):
+    frames = _write_frames(tmp_path, 2)
+    dump = tmp_path / "sn.json"
+    detections = [
+        {"type": "animal", "confidence": 0.3, "bbox": [0.1, 0.1, 0.2, 0.2]},
+        {"type": "animal", "confidence": 0.8, "bbox": [0.5, 0.5, 0.3, 0.3]},
+        {"type": "human", "confidence": 0.95, "bbox": [0.0, 0.0, 1.0, 1.0]},
+        {"type": "animal", "confidence": 0.1, "bbox": [0.0, 0.0, 0.9, 0.9]},
+    ]
+    frames_json = {
+        f"/photos/{Path(frames[0].path).name}": {"has_animal": True, "confidence": 0.8, "detections": detections},
+        f"/photos/{Path(frames[1].path).name}": {"has_animal": False, "confidence": None, "detections": detections[-1:]},
+    }
+    dump.write_text(json.dumps({"model": "speciesnet-v4.0.1a", "threshold": 0.2, "frames": frames_json}), encoding="utf-8")
+    outcomes = ev.speciesnet_outcomes(frames, str(dump), dump_root="/photos", root=str(tmp_path))
+    assert [o.predicted for o in outcomes] == [True, False]
+    assert outcomes[0].bbox == (0.5, 0.5, 0.3, 0.3) and outcomes[1].bbox is None  # below the dump's threshold
+    assert [o.predicted for o in ev.speciesnet_outcomes(frames, str(dump))] == [None, None]  # not re-rooted: no match
+    assert ev.rebase_path("/photos/a/b.jpg", "/photos", "C:/x") == os.path.normpath("C:/x/a/b.jpg")
+    assert ev.rebase_path("/other/b.jpg", "/photos", "C:/x") == os.path.normpath("/other/b.jpg")
+
+
+def test_cache_only_never_calls_the_api(tmp_path, monkeypatch):
+    frames = _write_frames(tmp_path, 2)
+    labels = tmp_path / "labels.csv"
+    labels.write_text(
+        "path,burst_id,has_animal,label\n" + "".join(f"{f.path},b,{int(f.has_animal)},x\n" for f in frames),
+        encoding="utf-8",
+    )
+    cache = tmp_path / "cache.jsonl"
+    model = "gemini-3.1-flash-lite"
+    record = {"key": ev._cache_key(model, "single", [frames[0]], "v1"), "verdicts": [{"has_animal": True, "bbox": [0.1, 0.1, 0.1, 0.1]}]}
+    cache.write_text(json.dumps(record) + "\n", encoding="utf-8")
+    before = cache.read_text(encoding="utf-8")
+    monkeypatch.setattr(gp, "presence", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network")))
+    out = tmp_path / "out.md"
+    args = [str(labels), "--variants", "single", "--models", model, "--cache", str(cache), "--cache-only", "--out", str(out)]
+    assert ev.main(args + ["--prompt-version", "v1"]) == 0
+    assert cache.read_text(encoding="utf-8") == before  # nothing appended
+    assert f"| single | {model} | v1 | 2 |" in out.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit):
+        ev.main([str(labels), "--variants", "single", "--cache-only"])
 
 
 def test_jpeg_helper_roundtrip():
