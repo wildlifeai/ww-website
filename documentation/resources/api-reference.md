@@ -255,9 +255,9 @@ endpoints are gated by `FF_MEDIA_REGISTRY_ENABLED`. All return the standard `Api
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/media/{media_id}/image` | Serve/proxy a media image (`?size=thumb\|full`); resolves public files / signed URLs |
-| `GET /api/media/{media_id}/resolve` | Resolve a media id to a displayable URL (rendition or signed original) |
-| `GET /api/media/registry/{deployment_id}` | Rendition status for a deployment's media |
+| `GET /api/media/{media_id}/image` | Serve/proxy a media image (`?size=thumb\|full`); resolves public files / signed URLs. Needs the Bearer header, so a plain `<img>` cannot load it |
+| `GET /api/media/{media_id}/resolve` | Resolve a media id to a URL an `<img>` can load (`?size=thumbnail\|preview\|original`): a rendition or a public original, `null` when only a private original exists |
+| `GET /api/media/registry/{deployment_id}` | A deployment's media with `thumbnail_url`, `preview_url` and `original_url` resolved as for `/resolve`, each `null` when only a private original exists. Cluster Review and the Review Queue read it |
 | `POST /api/media/thumbnails/{deployment_id}` | Make the missing thumbnails/previews for a deployment (async job, in the caller's job list, progress per 25 photos). The grid's Retry on a "No thumbnail" card calls it |
 | `DELETE /api/media/batch` | Soft-delete media by id list — body `{ "media_ids": [...] }` |
 | `POST /api/media/run-selected` | Run the AI pipeline on a media subset — body `{ "media_ids": [...], "steps": [...] }` |

@@ -10,7 +10,11 @@ export interface MediaRow {
   original_url: string | null
 }
 
-/** Paginated media for a deployment with pre-resolved CDN URLs (Media Registry). */
+/**
+ * Paginated media for a deployment with pre-resolved CDN URLs (Media Registry).
+ * A URL is null when the photo has no rendition yet and its original is private:
+ * show a placeholder, never the auth-gated image proxy (#305).
+ */
 export function useMediaRegistry(deploymentId?: string, page = 1, pageSize = 200) {
   return useQuery({
     queryKey: ['mediaRegistry', deploymentId, page, pageSize],

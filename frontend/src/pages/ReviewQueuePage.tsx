@@ -80,6 +80,7 @@ export function ReviewQueuePage() {
     )
   }
 
+  const previewUrl = previewById[current.media_id]
   const reasons: string[] = []
   if (current.is_outlier) reasons.push('outlier')
   if ((current.cluster_confidence ?? 1) < 0.5) reasons.push('novel')
@@ -97,7 +98,14 @@ export function ReviewQueuePage() {
       </div>
 
       <div className="glass-card" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem', alignItems: 'center' }}>
-        <img src={previewById[current.media_id] || undefined} alt="" style={{ maxWidth: '100%', maxHeight: 420, borderRadius: 'var(--radius)', background: 'var(--surface)' }} />
+        {previewUrl ? (
+          <img src={previewUrl} alt="" style={{ maxWidth: '100%', maxHeight: 420, borderRadius: 'var(--radius)', background: 'var(--surface)' }} />
+        ) : (
+          // No rendition yet and a private original: the registry has no URL (#305).
+          <div style={{ width: '100%', maxWidth: 560, aspectRatio: '4/3', borderRadius: 'var(--radius)', background: 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: '2rem', opacity: 0.3 }}>📷</span>
+          </div>
+        )}
 
         {/* Score + reasons */}
         <div style={{ width: '100%' }}>
