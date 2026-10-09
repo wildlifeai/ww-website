@@ -117,6 +117,16 @@ export function photoVerdict<T extends PresenceFields>(obs: readonly T[]): Photo
   return { labelObs: top, isEmpty: !!top && !top.scientific_name && top.observation_type === 'blank' }
 }
 
+/**
+ * The rows Confirm stamps human reviewed when no observation is selected (#301): the
+ * per-model AI labels not yet reviewed, including older machine rows with no `source_type`.
+ * The consensus row is a derived machine verdict and keeps `ai_reviewed`; the photo's verdict
+ * follows the human row first.
+ */
+export function confirmAllTargets<T extends ObservationStatusFields>(obs: readonly T[]): T[] {
+  return obs.filter(o => isAiLabel(o) && o.source_type !== 'consensus' && !isHumanReviewed(o))
+}
+
 // ── Boxes ────────────────────────────────────────────────────────────────────
 
 export interface ObservationBox {
