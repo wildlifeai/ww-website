@@ -283,7 +283,8 @@ instant in the **deployment's** timezone at display time.
   schema (display-only; `media.timestamp` stays UTC). It is **app-populated** (no DB trigger):
   `resolve_timezone(lat, lon)` in [`domain/photo_preprocessing.py`](../../backend/app/domain/photo_preprocessing.py)
   derives it from the deployment's GPS via `timezonefinder`. CamtrapDP import sets it automatically;
-  existing/device deployments are filled by `POST /api/deployments/backfill-timezones` (idempotent).
+  existing/device deployments are filled by `POST /api/deployments/backfill-timezones` (idempotent,
+  system admins only).
 - **Display** — [`frontend/src/lib/time.ts`](../../frontend/src/lib/time.ts) (`formatCaptureTime`,
   `getTimeOfDay`, `hourInTimezone`) renders the UTC instant in the deployment zone (with a label like
   `10:44 am NZST`) and drives the day/night filter. **Store the IANA name, not a fixed offset**, so DST

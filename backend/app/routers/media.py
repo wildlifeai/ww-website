@@ -192,9 +192,12 @@ async def batch_delete_media(
     """Soft-delete multiple media records (sets deleted_at).
 
     Idempotent: already-deleted media are silently skipped. Runs as the
-    requesting user (not the service role) so RLS restricts the update to
-    media in projects where they hold project_member — IDs outside their
-    projects are silently ignored, never deleted.
+    requesting user (not the service role), so RLS decides which rows change:
+    a photo's uploader while they hold at least project_member on its project
+    (ww-backend #277), or a project_admin of the project. Any other id,
+    including a plain member's request for a photo someone else uploaded,
+    changes 0 rows without an error; ``deleted`` counts only the rows that
+    changed, so ``deleted < requested`` means some were skipped.
     """
     req_id = getattr(request.state, "request_id", None)
     now = datetime.now(timezone.utc).isoformat()
@@ -226,8 +229,9 @@ async def batch_restore_media(
     user_client=Depends(get_user_client),
 ):
     """Undo a media delete — clears ``deleted_at`` where it equals the given timestamp. Runs as the
-    user so RLS keeps it to their own projects; scoping by the exact timestamp restores only the
-    photos removed in that delete."""
+    user, so RLS applies the delete rule: the photo's uploader while they hold at least
+    project_member, or a project_admin of the project; other ids change 0 rows without an error.
+    Scoping by the exact timestamp restores only the photos removed in that delete."""
     req_id = getattr(request.state, "request_id", None)
 
     def _restore():
