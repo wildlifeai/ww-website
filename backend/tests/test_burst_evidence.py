@@ -183,6 +183,17 @@ def test_edge_signals_zero_when_nn_scores_present_but_none_cleared():
     assert be.edge_signals([_obs("m", "animal", "20V1", origin="edge", prob=0.9, label="rat")], exif) == (1.0, 0.9, "rat")
 
 
+def test_edge_signals_ignore_person_and_vehicle_rows():
+    # A type class (#135) writes a human or vehicle row; presence means an animal, so it does not count.
+    exif = {"user_comment_fields": {"person": "91%", "no person": "9%"}}
+    person = _obs("m", "human", "PD1", origin="edge", prob=0.91, label=None)
+    vehicle = _obs("m", "vehicle", "PD1", origin="edge", prob=0.8, label=None)
+    assert be.edge_signals([person], exif) == (0.0, None, None)
+    assert be.edge_signals([person, vehicle], None) == (None, None, None)
+    rat = _obs("m", "animal", "20V1", origin="edge", prob=0.7, label="rat")
+    assert be.edge_signals([person, rat], exif) == (1.0, 0.7, "rat")
+
+
 def test_motion_and_near_threshold_inputs():
     assert be.motion_input(None) == (None, False)
     assert be.motion_input(0.012) == (pytest.approx(0.6), False)

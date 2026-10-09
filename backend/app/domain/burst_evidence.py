@@ -173,6 +173,10 @@ def is_gemini_row(obs: dict) -> bool:
     return obs.get("source_type") == "ai" and str(obs.get("source_model_version") or "").startswith(GEMINI_MODEL_PREFIX)
 
 
+# Camera AI rows of these types are not animal evidence (#135).
+NON_ANIMAL_EDGE_TYPES = frozenset({"human", "vehicle"})
+
+
 def is_edge_row(obs: dict) -> bool:
     return obs.get("source_type") == "ai" and obs.get("ai_origin") == "edge"
 
@@ -210,12 +214,15 @@ def has_model_presence(observations: Iterable[dict]) -> bool:
 
 
 def edge_signals(observations: Iterable[dict], exif_metadata: Any) -> tuple[Optional[float], Optional[float], Optional[str]]:
-    """``(edge_presence, edge_score, label)``: 1 with an edge row; 0 when the EXIF carried NN scores and none cleared; absent otherwise.
+    """``(edge_presence, edge_score, label)``: 1 with an edge animal row; 0 when the EXIF carried NN scores and none cleared; absent otherwise.
 
-    "NN scores" is approximated as any numeric percentage in ``user_comment_fields``
-    (the label map that tells targets from telemetry lives with the project model).
+    Presence means animal presence, so an edge row typed ``human`` or ``vehicle`` (a class that
+    predicts a type, #135) does not count; the frame is then judged from the EXIF scores as if
+    the camera saw no animal. "NN scores" is approximated as any numeric percentage in
+    ``user_comment_fields`` (the label map that tells targets from telemetry lives with the
+    project model).
     """
-    rows = [o for o in observations if is_edge_row(o)]
+    rows = [o for o in observations if is_edge_row(o) and o.get("observation_type") not in NON_ANIMAL_EDGE_TYPES]
     if rows:
         best = max(rows, key=lambda o: float(o.get("classification_probability") or o.get("confidence") or 0.0))
         score = best.get("classification_probability")

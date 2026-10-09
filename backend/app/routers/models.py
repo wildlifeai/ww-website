@@ -7,6 +7,7 @@ POST /api/models/upload   → enqueues upload + registration job
 GET  /api/models/sscma/catalog → cached SSCMA model list (sync)
 POST /api/models/pretrained → download + package GitHub model (async)
 GET  /api/models/train/status → is training on, which trainer, dataset limits (sync)
+GET  /api/models/{model_id}/label-map → what each class predicts, plus LM-10 problems (sync)
 POST /api/models/train    → train a Species Brain from an Annotations selection (async)
 """
 
@@ -19,7 +20,8 @@ from pydantic import BaseModel
 
 from app.authz import accessible_deployment_ids
 from app.config import settings
-from app.dependencies import get_current_user, get_manager_roles, get_verified_user
+from app.dependencies import get_current_user, get_manager_roles, get_user_client, get_verified_user
+from app.domain.label_map import fetch_model_label_map
 from app.domain.model import next_model_version, resolve_or_create_model_family
 from app.domain.training import media_deployments, training_mode, training_status
 from app.jobs.definitions import convert_model_job, download_github_pretrained_job, download_pretrained_job
@@ -202,6 +204,24 @@ async def get_managed_orgs(
         data=orgs.data or [],
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
     )
+
+
+@router.get("/{model_id}/label-map")
+async def get_label_map(
+    model_id: uuid.UUID,
+    request: Request,
+    user=Depends(get_current_user),
+    user_client=Depends(get_user_client),
+):
+    """A model's ``label_map``, what its classes predict (``taxon`` | ``type``) and LM-10 problems.
+
+    Read-only and read as the caller (RLS on ``ai_models``), so a model the caller
+    cannot see is a 404, the same as one that does not exist.
+    """
+    data = await asyncio.to_thread(fetch_model_label_map, user_client, str(model_id))
+    if data is None:
+        raise HTTPException(404, detail="Model not found")
+    return ApiResponse(data=data, meta=ApiMeta(request_id=getattr(request.state, "request_id", None)))
 
 
 @router.get("/sscma/catalog")

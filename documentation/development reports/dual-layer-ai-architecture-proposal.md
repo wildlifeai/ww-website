@@ -321,6 +321,7 @@ The class-index chain that must never break:
 | LM-7 | Truncation behaviour | Bench | >4 classes (EXIF_MAX_DYNAMIC_CLASSES) and >20-char labels: verify defined, documented truncation — highest-scoring classes kept, no buffer corruption |
 | LM-8 | Provenance completeness | E2E | Every edge observation and alert event resolves to exactly one `ai_models` row via `(firmware_model_id, version_number)`; images from a device running vX while DB says vY must be flagged, not silently mapped |
 | LM-9 | Build-flag coupling | Firmware CI | `ENABLE_EXIF_CONFIDENCE` without `USE_PERCENTAGE` must `#error` at compile time (the 2026-06-19 silent-EXIF bug, made structurally impossible) |
+| LM-10 | A target class resolves to one observation field | Label map read, edge reflection | `predicts` is `taxon` (a `taxon_id` or `scientific_name`) or `type` (`observation_type` animal, human or vehicle); behaviour is rejected for now. Built in `domain/label_map.py`, see [what a class predicts](../resources/ai-model-pipeline.md#what-a-class-predicts-lm-10) |
 
 ## 4.1 Roadmap phases
 

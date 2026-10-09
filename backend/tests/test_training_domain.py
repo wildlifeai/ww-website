@@ -8,6 +8,7 @@ import zipfile
 
 import pytest
 
+from app.domain.label_map import label_map_problems
 from app.domain.training import (
     BACKGROUND_ROLE,
     TARGET_ROLE,
@@ -187,8 +188,15 @@ class TestDatasetZipAndLabelMap:
 
     def test_label_map_targets_carry_taxon_and_background_is_marked(self):
         m = build_label_map([RAT], ["not rat", "rat"], "not rat")
-        assert m["rat"] == {"role": "target", "taxon_id": "t-rat", "scientific_name": "Rattus rattus", "vernacular_name": "Ship rat"}
+        assert m["rat"] == {
+            "role": "target",
+            "predicts": "taxon",
+            "taxon_id": "t-rat",
+            "scientific_name": "Rattus rattus",
+            "vernacular_name": "Ship rat",
+        }
         assert m["not rat"]["role"] == BACKGROUND_ROLE
+        assert label_map_problems(m) == []  # a trained model always passes LM-10
 
     def test_firmware_warning_only_when_background_is_index_1(self):
         m = build_label_map([{"label": "gecko", "scientific_name": "x"}], ["gecko", "not gecko"], "not gecko")

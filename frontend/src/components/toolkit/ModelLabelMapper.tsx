@@ -2,23 +2,67 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // ModelLabelMapper — post-upload step that captures what a model's output
-// classes mean: which are target species (mapped to a taxon via SpeciesPicker)
-// and which are background/negative classes. Saved to ai_models.label_map (RLS:
-// organisation_manager). This lets the website reflect on-device predictions as
-// real taxa and skip negatives. Labels come from the model's own class order
-// (detection_capabilities), so they stay aligned with the device's labels.txt.
+// classes mean: which are target species (predicts: taxon, mapped via
+// SpeciesPicker), which are a type such as a person (predicts: type, an
+// observation_type) and which are background/negative classes. Saved to
+// ai_models.label_map (RLS: organisation_manager). This lets the website reflect
+// on-device predictions as real observations and skip negatives; the rules are
+// LM-10 in backend/app/domain/label_map.py. Labels come from the model's own
+// class order (detection_capabilities), so they stay aligned with labels.txt.
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react'
 import { supabase } from '../../config/supabase'
 import { SpeciesPicker } from '../data/SpeciesPicker'
 
+// The observation types a class may predict (LM-10): blank is what background means.
+type TargetType = 'human' | 'vehicle' | 'animal'
+
 interface LabelEntry {
   role: 'target' | 'background'
+  predicts?: 'taxon' | 'type'
+  observation_type?: TargetType
   taxon_id?: string | null
   scientific_name?: string | null
   vernacular_name?: string | null
+  threshold?: number
 }
 type LabelMap = Record<string, LabelEntry>
+
+// What a class asserts. A target with no `predicts` predates it and is a species.
+type Kind = 'taxon' | 'type' | 'background'
+const KINDS: { kind: Kind; label: string }[] = [
+  { kind: 'taxon', label: 'Target species' },
+  { kind: 'type', label: 'Target type' },
+  { kind: 'background', label: 'Background / negative' },
+]
+const TYPES: { value: TargetType; label: string }[] = [
+  { value: 'human', label: 'Person' },
+  { value: 'vehicle', label: 'Vehicle' },
+  { value: 'animal', label: 'Animal (any species)' },
+]
+
+function kindOf(entry: LabelEntry | undefined): Kind {
+  if (!entry || entry.role === 'background') return 'background'
+  return entry.predicts === 'type' ? 'type' : 'taxon'
+}
+
+// The entry for `prev` switched to `kind`; keeps a per-class threshold and, for a species, the taxon.
+function withKind(prev: LabelEntry | undefined, kind: Kind): LabelEntry {
+  const noTaxon = { taxon_id: null, scientific_name: null, vernacular_name: null }
+  if (kind === 'background') return { role: 'background', ...noTaxon }
+  const threshold = prev?.threshold !== undefined ? { threshold: prev.threshold } : {}
+  if (kind === 'type') {
+    return { role: 'target', predicts: 'type', observation_type: prev?.observation_type ?? 'human', ...noTaxon, ...threshold }
+  }
+  return {
+    role: 'target',
+    predicts: 'taxon',
+    taxon_id: prev?.taxon_id ?? null,
+    scientific_name: prev?.scientific_name ?? null,
+    vernacular_name: prev?.vernacular_name ?? null,
+    ...threshold,
+  }
+}
 
 // Heuristic default: names like "not rat", "background", "blank" are negatives.
 function looksNegative(label: string): boolean {
@@ -58,18 +102,16 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
     return () => { cancelled = true }
   }, [modelId])
 
-  const setRole = (label: string, role: LabelEntry['role']) =>
-    setMap(m => ({
-      ...m,
-      [label]: role === 'background'
-        ? { role, taxon_id: null, scientific_name: null, vernacular_name: null }
-        : { ...m[label], role },
-    }))
+  const setKind = (label: string, kind: Kind) =>
+    setMap(m => ({ ...m, [label]: withKind(m[label], kind) }))
+
+  const setType = (label: string, observation_type: TargetType) =>
+    setMap(m => ({ ...m, [label]: { ...withKind(m[label], 'type'), observation_type } }))
 
   const setSpecies = (label: string, sel: { taxon_id: string | null; scientific_name: string; vernacular_name: string | null }) =>
     setMap(m => ({
       ...m,
-      [label]: { role: 'target', taxon_id: sel.taxon_id, scientific_name: sel.scientific_name, vernacular_name: sel.vernacular_name },
+      [label]: { ...withKind(m[label], 'taxon'), taxon_id: sel.taxon_id, scientific_name: sel.scientific_name, vernacular_name: sel.vernacular_name },
     }))
 
   const save = async () => {
@@ -90,33 +132,44 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
     )
   }
 
-  const unmappedTargets = labels.filter(l => map[l]?.role === 'target' && !map[l]?.scientific_name)
+  const unmappedTargets = labels.filter(l => kindOf(map[l]) === 'taxon' && !map[l]?.scientific_name && !map[l]?.taxon_id)
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '1rem', marginTop: '1rem', backgroundColor: 'var(--surface)' }}>
       <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>🏷️ What do this model's labels mean?</div>
       <p style={{ fontSize: '0.8rem', opacity: 0.7, margin: '0 0 0.875rem 0', lineHeight: 1.5 }}>
         Tell us which of <strong>{modelName || 'this model'}</strong>'s output classes are species
-        to detect (mapped to a taxon) and which are background/negative classes. This lets the site
-        show the camera's on-device predictions as real species and ignore the negatives.
+        to detect (mapped to a taxon), which are a type such as a person, and which are
+        background/negative classes. This lets the site show the camera's on-device predictions
+        as real observations and ignore the negatives.
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         {labels.map(label => {
           const entry = map[label]
-          const isTarget = entry?.role === 'target'
+          const kind = kindOf(entry)
           return (
             <div key={label} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border)' }}>
               <code style={{ fontSize: '0.8rem', minWidth: 90, paddingTop: '0.35rem' }}>{label}</code>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                {(['target', 'background'] as const).map(role => (
-                  <label key={role} style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer', paddingTop: '0.35rem' }}>
-                    <input type="radio" checked={entry?.role === role} onChange={() => setRole(label, role)} />
-                    {role === 'target' ? 'Target species' : 'Background / negative'}
+                {KINDS.map(k => (
+                  <label key={k.kind} style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', cursor: 'pointer', paddingTop: '0.35rem' }}>
+                    <input type="radio" checked={kind === k.kind} onChange={() => setKind(label, k.kind)} />
+                    {k.label}
                   </label>
                 ))}
               </div>
-              {isTarget && (
+              {kind === 'type' && (
+                <select
+                  aria-label={`Type for ${label}`}
+                  value={entry?.observation_type ?? 'human'}
+                  onChange={e => setType(label, e.target.value as TargetType)}
+                  style={{ fontSize: '0.8rem' }}
+                >
+                  {TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              )}
+              {kind === 'taxon' && (
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <SpeciesPicker
                     initialQuery={entry?.vernacular_name || entry?.scientific_name || label}

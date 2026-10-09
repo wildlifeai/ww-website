@@ -3513,6 +3513,57 @@
         ]
       }
     },
+    "/api/models/{model_id}/label-map": {
+      "get": {
+        "description": "A model's ``label_map``, what its classes predict (``taxon`` | ``type``) and LM-10 problems.\n\nRead-only and read as the caller (RLS on ``ai_models``), so a model the caller\ncannot see is a 404, the same as one that does not exist.",
+        "operationId": "get_label_map_api_models__model_id__label_map_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Label Map",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/projects": {
       "post": {
         "description": "Create a project in the caller's organisation.\n\nThe caller becomes ``project_admin`` automatically via the ``handle_new_project`` DB trigger\n(which reads ``created_by``), mirroring the CamtrapDP import. Requires the user to belong to\nan organisation. ``get_verified_user`` blocks the demo/unverified accounts.",
