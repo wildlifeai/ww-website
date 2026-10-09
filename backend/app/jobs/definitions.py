@@ -654,7 +654,7 @@ async def reserve_ai_job(dep_ids: list[str], user_id: str | None) -> tuple[str |
 
     Returns ``(new job id or None, its deployments, covered, following)`` as in
     :func:`plan_ai_coalescing`. The check and the create run under one lock
-    (``services.locks``, across processes when Redis is set), and the new row is written
+    (``services.locks``, across processes through Redis or the database), and the new row is written
     through to Supabase before the lock is let go, so two chunks that arrive together
     cannot both create a job for one deployment (#284).
     """

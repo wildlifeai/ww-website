@@ -100,6 +100,8 @@ Rules:
 * Feature flags gating ML must be set on the **worker**, not just the API.
 * Status is mirrored to Supabase `api_jobs`, so `/api/jobs/{id}` polling works cross-process. Rely on
   that rather than in-memory state.
+* `api_jobs` also holds the run-lock leases (`status = 'lock'`, `services/locks.py`) when there is
+  no Redis. A new reader of `api_jobs` filters by status or `job_data->>kind`, never takes every row.
 
 Live infrastructure detail: `documentation/resources/cloud-infrastructure.md`. Everything under
 `documentation/development reports/_archive/` (including `v2-architecture-plan.md`) is **frozen
