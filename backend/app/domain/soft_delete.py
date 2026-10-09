@@ -8,8 +8,8 @@ only that delete and never resurrects rows that were already deleted earlier. Ca
 the ops cleanup script (observations → media → deployments → project).
 
 Callers pass a service-role client (the endpoint runs the access guard first) and run these inside
-``asyncio.to_thread``, as they're synchronous Supabase calls. The one exception is
-``soft_delete_deployments_as_user``, which lets the database decide who may delete a deployment.
+``asyncio.to_thread``, as they're synchronous Supabase calls. The exceptions are the ``_as_user``
+functions, which take the caller's own client so the database decides who may delete.
 """
 
 from datetime import datetime, timezone
@@ -90,6 +90,29 @@ def soft_delete_deployments_as_user(user_client, svc, dep_ids: list[str], ts: st
     return deleted, refused
 
 
+def _split_changed(requested: list[str], rows) -> tuple[list[str], list[str]]:
+    """Split ``requested`` (deduplicated, in order) into the ids in ``rows`` and the rest."""
+    changed = {r["id"] for r in (rows or []) if isinstance(r, dict) and "id" in r}
+    ids = list(dict.fromkeys(requested))
+    return [i for i in ids if i in changed], [i for i in ids if i not in changed]
+
+
+def soft_delete_media_as_user(user_client, media_ids: list[str], ts: str) -> tuple[list[str], list[str]]:
+    """Soft-delete media as the requesting user, so RLS decides which rows change.
+
+    The UPDATE policies allow a photo's uploader while they hold at least ``project_member`` on
+    its project, or a ``project_admin`` of the project. Any other id changes 0 rows without an
+    error, as does an id that is unknown or already deleted. PostgREST returns the changed rows,
+    so the ids it did not return are the skipped ones.
+
+    Returns ``(deleted_ids, skipped_ids)``.
+    """
+    if not media_ids:
+        return [], []
+    resp = user_client.table("media").update({"deleted_at": ts}).in_("id", media_ids).is_("deleted_at", "null").execute()
+    return _split_changed(media_ids, resp.data)
+
+
 def soft_delete_project(svc, project_id: str, ts: str) -> None:
     """Soft-delete a project and its whole tree (deployments → media → observations)."""
     resp = svc.table("deployments").select("id").eq("project_id", project_id).is_("deleted_at", "null").execute()
@@ -114,6 +137,18 @@ def restore_deployments(svc, dep_ids: list[str], ts: str) -> list[str]:
     svc.table("media").update({"deleted_at": None}).in_("deployment_id", dep_ids).eq("deleted_at", ts).execute()
     svc.table("observations").update({"deleted_at": None}).in_("deployment_id", dep_ids).eq("deleted_at", ts).execute()
     return [r["id"] for r in (resp.data or []) if isinstance(r, dict) and "id" in r]
+
+
+def restore_media_as_user(user_client, media_ids: list[str], ts: str) -> tuple[list[str], list[str]]:
+    """Clear ``deleted_at == ts`` on media as the requesting user, under the same RLS rule as
+    ``soft_delete_media_as_user``.
+
+    Returns ``(restored_ids, skipped_ids)``.
+    """
+    if not media_ids:
+        return [], []
+    resp = user_client.table("media").update({"deleted_at": None}).in_("id", media_ids).eq("deleted_at", ts).execute()
+    return _split_changed(media_ids, resp.data)
 
 
 def restore_project(svc, project_id: str, ts: str) -> None:

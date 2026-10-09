@@ -320,3 +320,73 @@ def test_backfill_timezones_runs_for_system_admin(api, monkeypatch):
     resp = api.post("/api/deployments/backfill-timezones")
     assert resp.status_code == 200
     assert resp.json() == {"candidates": 0, "updated": 0}
+
+
+# ── Routes: media delete/restore report which ids changed ────────────────────
+
+
+def _media_user_client(changed_ids):
+    """A user-session client whose media UPDATE returns ``changed_ids``, as RLS would."""
+    updates: list[dict] = []
+    table = MagicMock()
+
+    def _update(payload):
+        updates.append(payload)
+        return table
+
+    table.update.side_effect = _update
+    for m in ("in_", "eq", "is_"):
+        getattr(table, m).return_value = table
+    table.execute.return_value = _Result([{"id": i} for i in changed_ids])
+    client = MagicMock()
+    client.table.return_value = table
+    return client, updates
+
+
+@pytest.fixture
+def media_api(api):
+    from app.dependencies import get_user_client
+    from app.main import app
+
+    holder = {}
+    app.dependency_overrides[get_user_client] = lambda: holder["client"]
+    return api, holder
+
+
+# All changed, some skipped (a member asking for someone else's photo), none changed.
+_MEDIA_CASES = [
+    (["a", "b"], ["a", "b"], []),
+    (["b"], ["b"], ["a"]),
+    ([], [], ["a", "b"]),
+]
+
+
+@pytest.mark.parametrize(("changed", "done", "skipped"), _MEDIA_CASES)
+def test_media_batch_delete_reports_skipped_ids(media_api, changed, done, skipped):
+    api, holder = media_api
+    holder["client"], updates = _media_user_client(changed)
+    resp = api.request("DELETE", "/api/media/batch", json={"media_ids": ["a", "b"]})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["deleted_ids"] == done and data["skipped_ids"] == skipped
+    assert data["deleted"] == len(done) and data["requested"] == 2
+    assert updates == [{"deleted_at": data["deleted_at"]}]
+
+
+@pytest.mark.parametrize(("changed", "done", "skipped"), _MEDIA_CASES)
+def test_media_batch_restore_reports_skipped_ids(media_api, changed, done, skipped):
+    api, holder = media_api
+    holder["client"], updates = _media_user_client(changed)
+    resp = api.post("/api/media/batch/restore", json={"media_ids": ["a", "b"], "deleted_at": "ts"})
+    assert resp.status_code == 200
+    assert resp.json()["data"] == {"restored": len(done), "restored_ids": done, "skipped_ids": skipped}
+    assert updates == [{"deleted_at": None}]
+
+
+def test_media_delete_as_user_dedupes_and_skips_empty():
+    from app.domain.soft_delete import soft_delete_media_as_user
+
+    client, updates = _media_user_client(["a"])
+    assert soft_delete_media_as_user(client, ["a", "b", "a"], "ts") == (["a"], ["b"])
+    assert soft_delete_media_as_user(client, [], "ts") == ([], [])
+    assert len(updates) == 1  # an empty request sends nothing
