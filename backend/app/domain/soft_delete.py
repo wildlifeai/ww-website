@@ -13,6 +13,7 @@ functions, which take the caller's own client so the database decides who may de
 """
 
 from datetime import datetime, timezone
+from typing import Literal
 
 
 def now_iso() -> str:
@@ -113,12 +114,41 @@ def soft_delete_media_as_user(user_client, media_ids: list[str], ts: str) -> tup
     return _split_changed(media_ids, resp.data)
 
 
-def soft_delete_project(svc, project_id: str, ts: str) -> None:
-    """Soft-delete a project and its whole tree (deployments → media → observations)."""
+def _cascade_project_delete(svc, project_id: str, ts: str) -> None:
+    """Stamp ``ts`` on a project the database has just soft-deleted, and soft-delete its tree.
+
+    ``soft_delete_project`` stamps the database's own ``now()`` and does not cascade. The project
+    gets the shared ``ts`` (only if it is already soft-deleted), then its live deployments, media
+    and observations are soft-deleted under the same ``ts``, so ``restore_project`` undoes it all.
+    """
+    svc.table("projects").update({"deleted_at": ts}).eq("id", project_id).not_.is_("deleted_at", "null").execute()
     resp = svc.table("deployments").select("id").eq("project_id", project_id).is_("deleted_at", "null").execute()
-    dep_ids = [r["id"] for r in (resp.data or [])]
-    soft_delete_deployments(svc, dep_ids, ts)
-    svc.table("projects").update({"deleted_at": ts}).eq("id", project_id).is_("deleted_at", "null").execute()
+    soft_delete_deployments(svc, [r["id"] for r in (resp.data or [])], ts)
+
+
+def soft_delete_project_as_user(user_client, svc, project_id: str, ts: str) -> Literal["deleted", "refused", "not_found"]:
+    """Soft-delete a project as the requesting user, so the database decides who may.
+
+    ``soft_delete_project`` runs on ``user_client`` (the caller's session). The database allows a
+    ``project_admin`` of the project or ``ww_admin`` and raises ``42501`` for anyone else, an
+    organisation manager included. A project the caller cannot see (unknown, already deleted, or
+    in a project they have no role on) is ``not_found`` without calling the function, as RLS
+    would hide it. Only a project the function deleted is cascaded, with ``svc`` under ``ts``.
+    """
+    visible = user_client.table("projects").select("id").eq("id", project_id).limit(1).execute()
+    if not visible.data:
+        return "not_found"
+    try:
+        user_client.rpc("soft_delete_project", {"p_id": project_id}).execute()
+    except Exception as exc:
+        code = getattr(exc, "code", None)
+        if code == "42501":
+            return "refused"
+        if code == "P0002":  # gone since the read above
+            return "not_found"
+        raise
+    _cascade_project_delete(svc, project_id, ts)
+    return "deleted"
 
 
 # ── Restore (undo) — scoped to the exact delete timestamp ────────────────────

@@ -5,7 +5,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
 
 
 class _Result:
@@ -22,12 +21,13 @@ def _chain(rows):
 
 
 def _roles_client(monkeypatch, *, org_id, roles):
-    """Mock create_service_client so _resolve_org_project + _fetch_active_roles work."""
+    """Mock create_service_client so _resolve_org_project + _fetch_active_roles work.
+    ``org_id=None`` stands for a project that does not exist."""
     client = MagicMock()
 
     def table(name):
         if name == "projects":
-            return _chain([{"organisation_id": org_id}])
+            return _chain([{"organisation_id": org_id}] if org_id else [])
         if name == "user_roles":
             return _chain(roles)
         return _chain([])
@@ -88,31 +88,50 @@ async def test_split_deployments_by_delete_right(monkeypatch):
     assert await split_deployments_by_delete_right("u1", ["mine", "theirs", "missing"]) == (["mine"], ["theirs"])
 
 
-async def test_assert_project_admin_denies_member(monkeypatch):
-    from app.authz import assert_project_admin
+# The database's rule (soft_delete_project): a project_admin of the project, or ww_admin.
+# Organisation managers, members, viewers and other system-scope roles are refused.
+@pytest.mark.parametrize(
+    ("roles", "allowed"),
+    [
+        ([_role("project_admin", "project", "proj-1")], True),
+        ([_role("ww_admin", "system", None)], True),
+        ([_role("project_admin", "project", "proj-2")], False),
+        ([_role("project_member", "project", "proj-1")], False),
+        ([_role("project_viewer", "project", "proj-1")], False),
+        ([_role("organisation_manager", "organisation", "org-1")], False),
+        ([_role("system_manager", "system", None)], False),
+        ([], False),
+    ],
+)
+def test_may_delete_project_matches_database_rule(roles, allowed):
+    from app.authz import _may_delete_project
 
-    _roles_client(
-        monkeypatch,
-        org_id="org-1",
-        roles=[
-            {"role": "project_member", "scope_type": "project", "scope_id": "proj-1", "expires_at": None},
-        ],
-    )
-    with pytest.raises(HTTPException):
-        await assert_project_admin("u1", "proj-1")
+    assert _may_delete_project(roles, "proj-1") is allowed
 
 
-async def test_assert_project_admin_allows_org_manager(monkeypatch):
-    from app.authz import assert_project_admin
+def test_may_delete_project_ignores_expired_role():
+    from app.authz import _may_delete_project
 
-    _roles_client(
-        monkeypatch,
-        org_id="org-1",
-        roles=[
-            {"role": "organisation_manager", "scope_type": "organisation", "scope_id": "org-1", "expires_at": None},
-        ],
-    )
-    await assert_project_admin("u1", "proj-1")  # org-manager of the project's org → allowed
+    expired = {**_role("project_admin", "project", "proj-1"), "expires_at": "2000-01-01T00:00:00Z"}
+    assert _may_delete_project([expired], "proj-1") is False
+
+
+@pytest.mark.parametrize(
+    ("org_id", "roles", "right"),
+    [
+        ("org-1", [_role("project_admin", "project", "proj-1")], "allowed"),
+        ("org-1", [_role("ww_admin", "system", None)], "allowed"),
+        ("org-1", [_role("organisation_manager", "organisation", "org-1")], "refused"),
+        ("org-1", [_role("project_member", "project", "proj-1")], "refused"),
+        ("org-1", [_role("organisation_manager", "organisation", "org-2")], "not_found"),
+        (None, [_role("ww_admin", "system", None)], "not_found"),
+    ],
+)
+async def test_project_restore_right(monkeypatch, org_id, roles, right):
+    from app.authz import project_restore_right
+
+    _roles_client(monkeypatch, org_id=org_id, roles=roles)
+    assert await project_restore_right("u1", "proj-1") == right
 
 
 # ── Cascade helpers ──────────────────────────────────────────────────────────
@@ -160,17 +179,6 @@ def test_soft_delete_deployments_noop_on_empty():
     client, calls = _recording_client()
     soft_delete_deployments(client, [], "ts")
     assert calls == []
-
-
-def test_soft_delete_project_cascades_to_deployments():
-    from app.domain.soft_delete import soft_delete_project
-
-    # The deployments select returns two child deployments to cascade into.
-    client, calls = _recording_client(dep_rows=[{"id": "d1"}, {"id": "d2"}])
-    soft_delete_project(client, "proj-1", "ts")
-    tables = [name for name, _ in calls]
-    assert "observations" in tables and "media" in tables
-    assert "deployments" in tables and "projects" in tables
 
 
 class _DbError(Exception):
@@ -234,6 +242,66 @@ def test_delete_as_user_cascades_before_an_unexpected_error_surfaces():
     assert {name for name, _ in svc_calls} == {"deployments", "media", "observations"}
 
 
+def _project_user_client(visible=True, rpc_error=None):
+    """A user-session client for one project: RLS shows it when ``visible``; ``soft_delete_project``
+    raises ``rpc_error`` (a Postgres code) when given. Records the ids sent to the function."""
+    calls: list[str] = []
+    client = MagicMock()
+    client.table.side_effect = lambda name: _chain([{"id": "proj-1"}] if visible else [])
+
+    def rpc(name, params):
+        assert name == "soft_delete_project"
+        calls.append(params["p_id"])
+        call = MagicMock()
+        if rpc_error:
+            call.execute.side_effect = _DbError(rpc_error)
+        return call
+
+    client.rpc.side_effect = rpc
+    return client, calls
+
+
+def test_delete_project_as_user_cascades_what_the_database_deleted():
+    from app.domain.soft_delete import soft_delete_project_as_user
+
+    user, rpc_calls = _project_user_client()
+    svc, svc_calls = _recording_client(dep_rows=[{"id": "d1"}, {"id": "d2"}])
+    assert soft_delete_project_as_user(user, svc, "proj-1", "ts") == "deleted"
+    assert rpc_calls == ["proj-1"]
+    # The project gets the shared ts, then its deployments and their children.
+    assert svc_calls[0] == ("projects", {"deleted_at": "ts"})
+    assert {name for name, _ in svc_calls} == {"projects", "deployments", "media", "observations"}
+    assert all(payload == {"deleted_at": "ts"} for _, payload in svc_calls)
+
+
+@pytest.mark.parametrize(
+    ("visible", "rpc_error", "outcome", "rpc_called"),
+    [
+        (True, "42501", "refused", True),  # an organisation manager, member or viewer
+        (True, "P0002", "not_found", True),  # deleted since the visibility read
+        (False, None, "not_found", False),  # RLS hides it: no role, unknown or already deleted
+    ],
+)
+def test_delete_project_as_user_cascades_nothing_when_not_deleted(visible, rpc_error, outcome, rpc_called):
+    from app.domain.soft_delete import soft_delete_project_as_user
+
+    user, rpc_calls = _project_user_client(visible, rpc_error)
+    svc, svc_calls = _recording_client(dep_rows=[{"id": "d1"}])
+    assert soft_delete_project_as_user(user, svc, "proj-1", "ts") == outcome
+    assert bool(rpc_calls) is rpc_called
+    assert svc_calls == []
+
+
+def test_delete_project_as_user_surfaces_an_unexpected_error():
+    from app.domain.soft_delete import soft_delete_project_as_user
+
+    user, _ = _project_user_client(rpc_error="08006")
+    svc, svc_calls = _recording_client()
+    with pytest.raises(_DbError):
+        soft_delete_project_as_user(user, svc, "proj-1", "ts")
+    assert svc_calls == []
+
+
 def test_restore_project_clears_deleted_at():
     from app.domain.soft_delete import restore_project
 
@@ -242,7 +310,7 @@ def test_restore_project_clears_deleted_at():
     assert ("projects", {"deleted_at": None}) in calls
 
 
-# ── Routes: deployment delete/restore report refusals, backfill is admin-only ─
+# ── Routes: deployment and project delete/restore refusals, backfill is admin-only
 
 
 @pytest.fixture
@@ -259,6 +327,7 @@ def api(monkeypatch):
     app.dependency_overrides[get_verified_user] = lambda: user
     app.dependency_overrides[get_user_client] = lambda: MagicMock()
     monkeypatch.setattr("app.routers.deployments.create_service_client", lambda: MagicMock())
+    monkeypatch.setattr("app.routers.projects.create_service_client", lambda: MagicMock())
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -320,6 +389,60 @@ def test_backfill_timezones_runs_for_system_admin(api, monkeypatch):
     resp = api.post("/api/deployments/backfill-timezones")
     assert resp.status_code == 200
     assert resp.json() == {"candidates": 0, "updated": 0}
+
+
+_PROJECT = "11111111-2222-3333-4444-555555555555"
+
+
+# Delete runs soft_delete_project as the caller, so the user client stands in for the database.
+@pytest.mark.parametrize(
+    ("visible", "rpc_error", "status"),
+    [
+        (True, None, 200),  # project_admin or ww_admin
+        (True, "42501", 403),  # organisation manager who is not a project admin, member, viewer
+        (False, None, 404),  # no role reaching the project
+        (True, "P0002", 404),
+    ],
+)
+def test_project_delete_status_follows_the_database(api, monkeypatch, visible, rpc_error, status):
+    from app.dependencies import get_user_client
+    from app.main import app
+
+    user, _ = _project_user_client(visible, rpc_error)
+    svc, svc_calls = _recording_client()
+    app.dependency_overrides[get_user_client] = lambda: user
+    monkeypatch.setattr("app.routers.projects.create_service_client", lambda: svc)
+
+    resp = api.delete(f"/api/projects/{_PROJECT}")
+    assert resp.status_code == status
+    if status == 200:
+        assert resp.json()["deleted_at"] and svc_calls
+    else:
+        assert svc_calls == []
+
+
+def test_project_delete_rejects_a_malformed_id(api):
+    assert api.delete("/api/projects/not-a-uuid").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("roles", "status"),
+    [
+        ([_role("project_admin", "project", _PROJECT)], 200),
+        ([_role("ww_admin", "system", None)], 200),
+        ([_role("organisation_manager", "organisation", "org-1")], 403),
+        ([_role("project_member", "project", _PROJECT)], 403),
+        ([_role("organisation_manager", "organisation", "org-2")], 404),
+    ],
+)
+def test_project_restore_by_role(api, monkeypatch, roles, status):
+    restored: list = []
+    _roles_client(monkeypatch, org_id="org-1", roles=roles)
+    monkeypatch.setattr("app.routers.projects.restore_project", lambda svc, pid, ts: restored.append((pid, ts)))
+
+    resp = api.post(f"/api/projects/{_PROJECT}/restore", json={"deleted_at": "ts"})
+    assert resp.status_code == status
+    assert restored == ([(_PROJECT, "ts")] if status == 200 else [])
 
 
 # ── Routes: media delete/restore report which ids changed ────────────────────

@@ -10,7 +10,7 @@ caller's own bucket, and anonymous callers have no token so fall back to IP.
 
 Enforcement is per-route via ``@limiter.limit(...)`` on the abuse-prone /
 expensive endpoints (uploads, AI pipeline, embedding). It is intentionally NOT a
-global middleware, so ``/health`` probes and LoRaWAN webhooks are never throttled.
+global middleware, so ``/health`` probes are never throttled.
 """
 
 import base64

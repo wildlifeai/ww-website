@@ -143,7 +143,6 @@ See [00-GETTING-STARTED.md](../onboarding/00-GETTING-STARTED.md#environment-vari
 
 - [ ] `SUPABASE_SERVICE_ROLE_KEY` is set and kept secret
 - [ ] `ALLOWED_ORIGINS` is set to your exact frontend domain(s)
-- [ ] `LORAWAN_WEBHOOK_SECRET` is set (not empty)
 - [ ] `SENTRY_DSN` is set for error tracking
 - [ ] `LOG_LEVEL` is `info` (not `debug`)
 - [ ] `RATE_LIMIT_PER_MINUTE` is appropriate for your traffic
@@ -211,7 +210,6 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 | Var | Enables |
 |-----|---------|
 | `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI` + `FF_INAT_ENABLED` | iNaturalist sync/publish. |
-| `LORAWAN_*_WEBHOOK_SECRET` | LoRaWAN webhooks. |
 | `EMAIL_PROVIDER`, `EMAIL_FROM`, `RESEND_API_KEY` / `SENDGRID_API_KEY` / `ACS_CONNECTION_STRING` | Notification email. |
 | `SENTRY_DSN`, `LOG_LEVEL` | Error tracking / log verbosity. |
 
@@ -248,14 +246,12 @@ The backend reads/writes these tables (schema managed by `ww-backend` repo):
 
 | Table | Used By | Access |
 |-------|---------|--------|
-| `devices` | LoRaWAN domain (device lookup by EUI) | RLS + service-role |
-| `deployments` | LoRaWAN domain (active deployment match) | RLS + service-role |
+| `devices` | CamtrapDP import (device lookup and insert) | RLS + service-role |
+| `deployments` | Most domains (authz, CamtrapDP import, events, soft delete) | RLS + service-role |
 | `ai_models` | Model domain (register/update) | RLS + service-role |
 | `ai_model_families` | Model domain (family→firmware ID mapping) | RLS + service-role |
 | `firmware` | Manifest domain (config firmware lookup) | RLS + service-role |
 | `user_roles` | Dependencies (permission checks) | RLS + service-role |
-| `lorawan_messages` | LoRaWAN domain (raw message store) | service-role only |
-| `lorawan_parsed_messages` | LoRaWAN domain (parsed data store) | service-role only |
 | `api_jobs` | Job system (status persistence + recovery) | service-role only |
 
 ### RPC Functions
@@ -535,7 +531,3 @@ Add your frontend origin to `ALLOWED_ORIGINS`:
 ```
 ALLOWED_ORIGINS=https://wildlifewatcher.ai,http://localhost:5173
 ```
-
-**LoRaWAN webhooks returning 401**
-
-Webhook secret mismatch. Verify the secret matches between your network server and `LORAWAN_TTN_WEBHOOK_SECRET` / `LORAWAN_CHIRPSTACK_WEBHOOK_SECRET`.

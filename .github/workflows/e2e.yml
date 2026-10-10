@@ -19,6 +19,7 @@ name: E2E (Playwright)
 # renders every public page, the seeded user signs in and reaches every
 # authed page, and the demo session is read-only. What it does not prove: the
 # backend half of the same pull request, which still deploys from `dev`.
+# e2e-full-stack.yml runs the same two specs with that backend on the runner.
 
 on:
   deployment_status:

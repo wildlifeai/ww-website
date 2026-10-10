@@ -13,6 +13,9 @@ Complete endpoint reference for the Wildlife Watcher V2 API.
 
 **Authentication:** JWT Bearer token from Supabase Auth (required for protected endpoints).
 
+> LoRaWAN uplinks do not come through this API. Network servers post to ww-backend's
+> `lorawan-ingest` edge function, see [LORAWAN_INGEST](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/LORAWAN_INGEST.md).
+
 **Response Format:** All endpoints return a standard envelope:
 
 ```json
@@ -53,7 +56,6 @@ On error:
 - [Manifest Generation](#manifest-generation)
 - [Model Conversion](#model-conversion)
 - [EXIF Parsing](#exif-parsing)
-- [LoRaWAN Webhooks](#lorawan-webhooks)
 - [iNaturalist Integration](#inaturalist-integration)
 - [Image Clustering](#image-clustering)
 - [AI Pipeline](#ai-pipeline)
@@ -63,6 +65,7 @@ On error:
 - [Wildlife Brain — Embeddings & Clustering](#wildlife-brain--embeddings--clustering)
 - [Conservation Intelligence](#conservation-intelligence)
 - [QA](#qa)
+- [Public Data API (v1)](#public-data-api-v1)
 - [Error Codes](#error-codes)
 
 ---
@@ -102,8 +105,8 @@ that need service-role cascades or admin checks.
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/projects` | JWT | Create a project in the caller's organisation — body `{ name, description? }` |
-| `DELETE /api/projects/{project_id}` | JWT · `project_admin` | Soft-delete, cascading to deployments → media → observations. Returns the shared `deleted_at` so the client can offer Undo. Members/viewers get `404` |
-| `POST /api/projects/{project_id}/restore` | JWT · `project_admin` | Undo a soft-delete using that `deleted_at` |
+| `DELETE /api/projects/{project_id}` | JWT · `project_admin` or `ww_admin` | Soft-delete, cascading to deployments → media → observations. The database decides: `soft_delete_project` runs as the caller and allows a `project_admin` of the project or `ww_admin`. Anyone else who can see the project, an organisation manager included, gets `403`; a project the caller cannot see is `404`. Returns the shared `deleted_at` so the client can offer Undo |
+| `POST /api/projects/{project_id}/restore` | JWT · `project_admin` or `ww_admin` | Undo that delete, body `{ deleted_at }`. Same rule, checked in the API because the database has no restore function (ww-backend #286). `403` for anyone else with a role reaching the project, `404` otherwise |
 
 ---
 
@@ -170,22 +173,6 @@ image-upload pipeline — see [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.
 `latitude`/`longitude` (GPS DMS→decimal), `date` (Original → Create → DateTime), `Make`/`Model`,
 and `temperature_c`/`battery_pct` (parsed from `UserComment` telemetry). The full set lands in
 `media.exif_metadata`.
-
----
-
-## LoRaWAN Webhooks
-
-Receive device uplinks from LoRaWAN network servers. Webhooks authenticate with the
-**`X-Webhook-Secret`** header (`LORAWAN_TTN_WEBHOOK_SECRET` / `LORAWAN_CHIRPSTACK_WEBHOOK_SECRET` /
-`LORAWAN_WEBHOOK_SECRET`); query endpoints use JWT. Gated by `FF_LORAWAN_WEBHOOKS_ENABLED`. Prefix
-`/api/lorawan`. Payload formats + network-server config: [LoRaWAN Webhook Setup](./lorawan-webhook-setup.md).
-
-| Method · Path | Auth | Description |
-|---|---|---|
-| `POST /api/lorawan/webhook/ttn` | `X-Webhook-Secret` | TTN v3 uplink → parsed battery / SD-card / model-output |
-| `POST /api/lorawan/webhook/chirpstack` | `X-Webhook-Secret` | Chirpstack v4 uplink |
-| `GET /api/lorawan/messages` | JWT | Org-scoped parsed-message list |
-| `GET /api/lorawan/messages/{device_eui}/latest` | JWT | Latest parsed message for a device EUI |
 
 ---
 
@@ -287,8 +274,7 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 |---|---|
 | `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id` |
 
-> CamtrapDP export is not on this API: the frontend calls the `export-camtrap-dp` Supabase Edge
-> Function, which ww-backend owns.
+> Public-API export of CamtrapDP is `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
 
 ---
 
@@ -360,6 +346,26 @@ Prefix `/api/qa`. JWT required.
 | Method · Path | Description |
 |---|---|
 | `GET /api/qa/report/{deployment_id}` | AI-vs-human agreement (a precision proxy over images carrying both an AI and a human label) |
+
+---
+
+## Public Data API (v1)
+
+Token-authenticated **read** API for external integrations. Data endpoints authenticate with an
+**`X-API-Key`** header (not the JWT) carrying a `<resource>:read` scope; the key-management endpoints
+use the normal JWT. Gated by **`FF_PUBLIC_API_ENABLED`**. Prefix `/api/v1`.
+
+| Method · Path | Auth | Description |
+|---|---|---|
+| `POST /api/v1/api-keys` | JWT | Create an API key (the secret is returned **once**) |
+| `GET /api/v1/api-keys` | JWT | List your API keys (metadata only, no secrets) |
+| `DELETE /api/v1/api-keys/{key_id}` | JWT | Revoke an API key |
+| `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | List deployments (filter `?project_id=&status=&limit=&offset=`) |
+| `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | Deployment detail |
+| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | List devices |
+| `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | Device LoRaWAN telemetry |
+| `GET /api/v1/observations` | `X-API-Key` · `observations:read` | List observations (filterable) |
+| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | Export a CamtrapDP package |
 
 ---
 
