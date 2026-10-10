@@ -126,7 +126,8 @@ that need service-role cascades or admin checks.
 ## Jobs (Async)
 
 Long-running operations (manifest, model conversion, pipeline, embedding) return a `job_id`
-immediately; poll these to track progress. Job IDs are unguessable UUIDs (no auth). Prefix `/api/jobs`.
+immediately; poll these to track progress. JWT required: a user's jobs are its own, owner-less system jobs
+are readable by any signed-in user, and an API key's jobs are read with `GET /api/v1/jobs/{job_id}`. Prefix `/api/jobs`.
 
 | Method · Path | Description |
 |---|---|
@@ -288,7 +289,7 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 |---|---|
 | `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id` |
 
-> Public-API export of CamtrapDP is `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
+> An API key starts the same export with `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
 
 ---
 
@@ -377,9 +378,10 @@ Prefix `/api/qa`. JWT required.
 ## Public Data API (v1)
 
 Token-authenticated **read** API for external integrations. Data endpoints authenticate with an
-**`X-API-Key`** header (not the JWT) carrying a `<resource>:read` scope; the key-management endpoints
-use the normal JWT. Gated by **`FF_PUBLIC_API_ENABLED`**; while it is off the data endpoints answer
-404 and the key-management endpoints answer a `FEATURE_DISABLED` error. Prefix `/api/v1`.
+**`X-API-Key`** header (not the JWT); the key-management endpoints use the normal JWT. Gated by
+**`FF_PUBLIC_API_ENABLED`**; while it is off the data endpoints answer 404 and the key-management
+endpoints answer a `FEATURE_DISABLED` error. Prefix `/api/v1`. For partners, with curl examples:
+the [Public API guide](./public-api-guide.md).
 
 **API keys** belong to one organisation. Only an `organisation_manager` of that organisation
 (`scope_type = 'organisation'`) may create, list or revoke them, and the caller names the
@@ -390,22 +392,31 @@ account cannot create or revoke. Organisation managers do this in Settings, Inte
 - A key is `ww_live_` plus 32 hex characters. It is returned once, at creation. ww-backend's
   `api_keys` table stores only its SHA-256 hex and the first 16 characters (`key_prefix`).
 - `scopes` needs at least one of `deployments:read`, `devices:read`, `telemetry:read`,
-  `observations:read`, `export:camtrapdp`, `models:read`. `expires_at` is optional and must be in
-  the future; a time without a zone is read as UTC.
-- A revoked or expired key, or one without the endpoint's scope, gets 401. Each accepted call
-  sets the key's `last_used_at`.
+  `observations:read`, `export:camtrapdp`, `models:read` (no endpoint yet). `expires_at` is
+  optional and must be in the future; a time without a zone is read as UTC.
+- A missing, revoked or expired key gets 401, a key without the endpoint's scope 403. Each
+  accepted call sets the key's `last_used_at`.
+- **Organisation scoping.** The queries run with the service role, so `domain/public_api.py` is
+  what keeps organisations apart. A deployment's organisation is its project's; deleted rows, and
+  rows under a deleted deployment or project, are left out. Another organisation's id answers 404.
+- **Paging.** The lists take `limit` (at most 1,000, PostgREST's row cap, so one page is one
+  request; more answers 422) and `offset`, and return `meta.total` and `meta.page`.
+- **Rate limit** per key, not per address: `PUBLIC_API_RATE_LIMIT_PER_MINUTE` (default 60) calls a
+  minute across the data endpoints, and 5 exports a minute. Over it: 429 with `Retry-After`.
+  Counted in the slowapi limiter's storage, so per API process.
 
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/v1/api-keys` | JWT · organisation manager | Create a key. Body `{organisation_id, name, scopes, expires_at?}`; the raw key is in `data.key`, **once** |
 | `GET /api/v1/api-keys?organisation_id=` | JWT · organisation manager | List the organisation's unrevoked keys: name, `key_prefix`, scopes, created, last used, expiry. Never the key or its hash |
 | `DELETE /api/v1/api-keys/{key_id}?organisation_id=` | JWT · organisation manager | Revoke a key (sets `revoked_at`); 404 if the organisation has no such unrevoked key |
-| `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | List deployments (filter `?project_id=&status=&limit=&offset=`) |
-| `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | Deployment detail |
-| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | List devices |
-| `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | Device LoRaWAN telemetry |
-| `GET /api/v1/observations` | `X-API-Key` · `observations:read` | List observations (filterable) |
-| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | Export a CamtrapDP package |
+| `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | Deployments in the organisation's projects, newest first, with `project_name`, `device_name` and `status` (`planned`, `started`, `ended`). Filters `?project_id=&status=&limit=&offset=` |
+| `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | One of those deployments |
+| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The organisation's own cameras (`devices.organisation_id`), newest first |
+| `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | The camera's `lorawan_messages` whose deployment is in one of the organisation's projects (ww-backend#323), newest first, with the parsed `battery_level`, `sd_card_used_capacity` and `model_output`. `?date_from=&date_to=&limit=` (≤ 1,000). An EUI with none answers `[]` |
+| `GET /api/v1/observations` | `X-API-Key` · `observations:read` | One verdict per live photo with at least one live observation, chosen as the grid's `photoVerdict` chooses it (#170; `photo_verdict` is its port): the label fields of the observation the card shows, `is_empty`, and `human_reviewed` when any observation is reviewed. Photos in `media.created_at` then `id` order, their observations in `created_at` order. `?project_id=&deployment_id=&limit=&offset=` |
+| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | The [CamtrapDP export](#camtrapdp-export) job for the key's organisation: the same body and package, with `export-camtrap-dp` called with the service role and `organisation_id` (ww-backend#290). 404 for a project outside the organisation, and while `FF_CAMTRAPDP_EXPORT_ENABLED` is off. Returns `{ job_id }` |
+| `GET /api/v1/jobs/{job_id}` | `X-API-Key` · `export:camtrapdp` | A job one of the organisation's keys started (`organisation_id` in `api_jobs.job_data`): `status`, `progress`, `message`, `error`, `result_url`. Any other job answers 404; `/api/jobs/{id}` does not serve these jobs to signed-in users |
 
 ---
 

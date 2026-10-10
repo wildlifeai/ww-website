@@ -103,6 +103,7 @@ export interface PhotoVerdict<T> {
  * shows Empty, anything else takes its name from the first named per-model row. With
  * neither, the first row, as before the consensus existed. A consensus row a reviewer
  * confirmed is a human verdict, but a reviewed per-model row is preferred as the label.
+ * The public API's `photo_verdict` (backend/app/domain/public_api.py) is a port: change both.
  */
 export function photoVerdict<T extends PresenceFields>(obs: readonly T[]): PhotoVerdict<T> {
   const reviewed = obs.filter(isHumanReviewed)

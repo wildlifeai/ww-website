@@ -44,6 +44,10 @@ class ApiKeyError(Exception):
     pass
 
 
+class ApiKeyScopeError(ApiKeyError):
+    """The key is valid but lacks the scope the call needs."""
+
+
 # ── Key generation ───────────────────────────────────────────────────
 
 
@@ -105,7 +109,7 @@ async def validate_api_key(
 
         # Check scope
         if required_scope and required_scope not in key_record.get("scopes", []):
-            raise ApiKeyError(f"Key does not have required scope: {required_scope}")
+            raise ApiKeyScopeError(f"Key does not have required scope: {required_scope}")
 
         # Update last_used_at (fire-and-forget). Postgres reads the string "now()" as
         # the transaction time, like "now", so PostgREST stores a real timestamp.

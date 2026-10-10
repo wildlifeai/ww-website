@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     FF_ML_ENABLED: bool = Field(False)
     FF_CLUSTERING_ENABLED: bool = Field(False)
     FF_PUBLIC_API_ENABLED: bool = Field(False, description="Enable the public API (/api/v1/*) and its key management")
+    PUBLIC_API_RATE_LIMIT_PER_MINUTE: int = Field(60, ge=1, description="Calls a minute one API key may make to the /api/v1 data endpoints")
     FF_CAMTRAPDP_IMPORT_ENABLED: bool = Field(True, description="Enable CamtrapDP package import endpoint")
     FF_CAMTRAPDP_EXPORT_ENABLED: bool = Field(
         False,
