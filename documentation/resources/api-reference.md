@@ -51,6 +51,7 @@ On error:
 
 - [System](#system)
 - [Auth](#auth)
+- [Admin](#admin)
 - [Projects](#projects)
 - [Jobs (Async)](#jobs-async)
 - [Manifest Generation](#manifest-generation)
@@ -94,6 +95,17 @@ router exists only to mint the shared read-only demo session server-side. Detail
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/auth/demo-session` | None (rate-limited 10/min per IP) | Mint a session for the shared demo account → `{ access_token, refresh_token }`. Returns `DEMO_DISABLED` when `DEMO_EMAIL`/`DEMO_PASSWORD` are unset on the server |
+
+---
+
+## Admin
+
+Prefix `/api/admin`. System admins only: `401` without a valid JWT, `403` for anyone else.
+Reads every organisation with the service role, because RLS keeps these rows organisation-scoped.
+
+| Method · Path | Description |
+|---|---|
+| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Backs `/admin/devices` |
 
 ---
 
@@ -366,13 +378,28 @@ Prefix `/api/qa`. JWT required.
 
 Token-authenticated **read** API for external integrations. Data endpoints authenticate with an
 **`X-API-Key`** header (not the JWT) carrying a `<resource>:read` scope; the key-management endpoints
-use the normal JWT. Gated by **`FF_PUBLIC_API_ENABLED`**. Prefix `/api/v1`.
+use the normal JWT. Gated by **`FF_PUBLIC_API_ENABLED`**; while it is off the data endpoints answer
+404 and the key-management endpoints answer a `FEATURE_DISABLED` error. Prefix `/api/v1`.
+
+**API keys** belong to one organisation. Only an `organisation_manager` of that organisation
+(`scope_type = 'organisation'`) may create, list or revoke them, and the caller names the
+organisation (`organisation_id`) on every call. Its `organisation_member`s and system-scope roles,
+`ww_admin` included, get 403; anyone else gets 404, so other organisations cannot be probed. The demo
+account cannot create or revoke. Organisation managers do this in Settings, Integrations.
+
+- A key is `ww_live_` plus 32 hex characters. It is returned once, at creation. ww-backend's
+  `api_keys` table stores only its SHA-256 hex and the first 16 characters (`key_prefix`).
+- `scopes` needs at least one of `deployments:read`, `devices:read`, `telemetry:read`,
+  `observations:read`, `export:camtrapdp`, `models:read`. `expires_at` is optional and must be in
+  the future; a time without a zone is read as UTC.
+- A revoked or expired key, or one without the endpoint's scope, gets 401. Each accepted call
+  sets the key's `last_used_at`.
 
 | Method · Path | Auth | Description |
 |---|---|---|
-| `POST /api/v1/api-keys` | JWT | Create an API key (the secret is returned **once**) |
-| `GET /api/v1/api-keys` | JWT | List your API keys (metadata only, no secrets) |
-| `DELETE /api/v1/api-keys/{key_id}` | JWT | Revoke an API key |
+| `POST /api/v1/api-keys` | JWT · organisation manager | Create a key. Body `{organisation_id, name, scopes, expires_at?}`; the raw key is in `data.key`, **once** |
+| `GET /api/v1/api-keys?organisation_id=` | JWT · organisation manager | List the organisation's unrevoked keys: name, `key_prefix`, scopes, created, last used, expiry. Never the key or its hash |
+| `DELETE /api/v1/api-keys/{key_id}?organisation_id=` | JWT · organisation manager | Revoke a key (sets `revoked_at`); 404 if the organisation has no such unrevoked key |
 | `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | List deployments (filter `?project_id=&status=&limit=&offset=`) |
 | `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | Deployment detail |
 | `GET /api/v1/devices` | `X-API-Key` · `devices:read` | List devices |

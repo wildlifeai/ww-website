@@ -298,6 +298,36 @@ async def project_restore_right(user_id: str, project_id: str) -> Literal["allow
     return await asyncio.to_thread(_check)
 
 
+def _is_org_manager(roles: list[dict], org_id: Optional[str]) -> bool:
+    """An active ``organisation_manager`` role on the organisation itself (#307).
+
+    The rule for managing an organisation's API keys. ``ww_admin``, a system-scope manager and
+    an ``organisation_member`` are refused, since a key hands the organisation's data to a
+    machine. Pure, so the tests pin it."""
+    now = datetime.now(timezone.utc)
+    for r in roles:
+        if not _role_active(r, now):
+            continue
+        if r.get("role") == "organisation_manager" and r.get("scope_type") == "organisation" and org_id and r.get("scope_id") == org_id:
+            return True
+    return False
+
+
+async def org_manager_right(user_id: str, org_id: str) -> Literal["allowed", "refused", "not_found"]:
+    """Whether the caller may manage the organisation's API keys (``_is_org_manager``).
+
+    ``not_found`` when the caller holds no organisation or system role reaching it, so ids in
+    other tenants cannot be probed. ``refused`` when they reach it but are not its manager."""
+
+    def _check() -> Literal["allowed", "refused", "not_found"]:
+        roles = _fetch_active_roles(create_service_client(), user_id)
+        if _is_org_manager(roles, org_id):
+            return "allowed"
+        return "refused" if _has_access(roles, org_id, None) else "not_found"
+
+    return await asyncio.to_thread(_check)
+
+
 async def is_system_admin(user_id: str) -> bool:
     def _check() -> bool:
         svc = create_service_client()

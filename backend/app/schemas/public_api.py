@@ -6,9 +6,11 @@ These schemas define the external-facing data contract for partner
 platforms (Wildlife Insights, TRAPPER, EcoSecrets, GBIF).
 """
 
-from typing import Any, Dict, List, Optional
+import uuid
+from datetime import datetime
+from typing import Annotated, Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 # ── API Key Management ───────────────────────────────────────────────
 
@@ -16,9 +18,10 @@ from pydantic import BaseModel, Field
 class ApiKeyCreate(BaseModel):
     """Request to create a new API key."""
 
-    name: str = Field(..., description="Human-readable key name", max_length=100)
-    scopes: List[str] = Field(..., description="Permission scopes (e.g. 'deployments:read')")
-    expires_at: Optional[str] = Field(None, description="ISO timestamp — key expires after this time")
+    organisation_id: uuid.UUID = Field(..., description="Organisation the key belongs to. The caller must be its organisation_manager.")
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)] = Field(..., description="Human-readable key name")
+    scopes: List[str] = Field(..., min_length=1, description="Permission scopes (e.g. 'deployments:read')")
+    expires_at: Optional[datetime] = Field(None, description="The key stops working after this time. Must be in the future.")
 
 
 class ApiKeyResponse(BaseModel):

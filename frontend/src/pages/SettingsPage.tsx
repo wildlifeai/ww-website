@@ -24,6 +24,7 @@ import { NotificationRulesPanel } from '../components/settings/NotificationRules
 import { ProjectDefaultsPanel } from '../components/settings/ProjectDefaultsPanel'
 import { ProjectDetailsPanel } from '../components/settings/ProjectDetailsPanel'
 import { InaturalistPanel } from '../components/settings/InaturalistPanel'
+import { ApiKeysPanel } from '../components/settings/ApiKeysPanel'
 import { adminScope, isProjectAdmin, type AdminScope, type OwnRole } from '../lib/moveDeployment'
 
 interface ProjectRow {
@@ -297,6 +298,7 @@ export function SettingsPage() {
 
       <Section title="Integrations" description="External services linked to your account.">
         <InaturalistPanel />
+        <ApiKeysPanel />
       </Section>
 
       <CreateProjectModal
