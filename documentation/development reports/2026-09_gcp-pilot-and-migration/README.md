@@ -70,7 +70,8 @@ Owners: **Victor** (infrastructure, code), **Dinnie** (billing account, cost mod
 | 4 | Dataset `billing` (US) created; the Standard usage cost export is switched on in the Console only (still to do). Until credits land the budget is **NZ$50, credits excluded**, alerts at 50/80/100%; raise it to the credit amount then |
 | 5 | Done except the throwaway-workflow check. GitHub variables `GCP_PROJECT_ID`, `GCP_WIF_PROVIDER`, `GCP_DEPLOYER_SA` set on the repository |
 | 8 | Quota not checked yet |
-| 9 to 15 | Not started; the code is §8 |
+| 9 | Code done (§8), in review |
+| 10 to 15 | Not started |
 
 | # | Step | Owner | Acceptance check |
 |---|---|---|---|
@@ -209,87 +210,22 @@ the scaler: [deployment-guide](../../resources/deployment-guide.md#gpu-worker--s
 
 ## 4. Draft workflow, config differences, secrets
 
-### 4.1 Draft `deploy-ml-worker-gcp.yml` (not added yet)
+### 4.1 Build and deploy
 
-Builds the `worker` target in Cloud Build and changes only the job's image, like Azure's
-`revision copy`. Uses `google-github-actions/auth@v3` with WIF (README read 2026-09-26).
+[`deploy-ml-worker-gcp.yml`](../../../.github/workflows/deploy-ml-worker-gcp.yml) signs in with
+WIF as `github-deployer@`, builds the `worker` target with
+[`backend/cloudbuild.worker.yaml`](../../../backend/cloudbuild.worker.yaml) (E2_HIGHCPU_32, 200 GB
+disk, from the [GPU best practices](https://docs.cloud.google.com/run/docs/configuring/services/gpu-best-practices)
+build example), changes only the job's image like Azure's `revision copy`, then runs the
+self-test.
 
-```yaml
-name: Build and deploy the ML worker to Cloud Run (GPU)
-
-on:
-  push:
-    branches: [dev]
-    paths: ['backend/**', '.github/workflows/deploy-ml-worker-gcp.yml']
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  id-token: write          # OIDC token for Workload Identity Federation
-
-env:
-  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}          # ww-pilot-dev
-  REGION: asia-southeast1                         # only APAC region with L4 on Cloud Run
-  REPO: ww-backend
-  IMAGE: ww-backend-worker
-  JOB: ww-ml-worker-dev
-
-jobs:
-  build-and-roll:
-    runs-on: ubuntu-latest
-    environment: dev
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}   # projects/762962404573/locations/global/workloadIdentityPools/github/providers/wildlifeai
-          service_account: ${{ vars.GCP_DEPLOYER_SA }}               # github-deployer@ww-pilot-dev.iam.gserviceaccount.com
-
-      - uses: google-github-actions/setup-gcloud@v3
-
-      - name: Build the worker image in Cloud Build
-        run: |
-          # --target worker is essential: the Dockerfile's last stage is `api`.
-          IMG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}"
-          gcloud builds submit backend/ \
-            --config backend/cloudbuild.worker.yaml \
-            --gcs-source-staging-dir "gs://${PROJECT_ID}-build-source/source" \
-            --substitutions _IMAGE="${IMG}",_SHA="${GITHUB_SHA}",_ENV_TAG=dev-latest
-
-      - name: Roll the job to the new image
-        run: |
-          IMG="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/${IMAGE}:${GITHUB_SHA}"
-          # Changes only the image; GPU, secrets, env, labels and task timeout are preserved.
-          gcloud run jobs update "${JOB}" --region "${REGION}" --image "${IMG}" \
-            --update-labels git_sha="${GITHUB_SHA::12}"
-
-      - name: Smoke test on the GPU
-        run: |
-          # About a minute of L4 time per deploy.
-          gcloud run jobs execute "${JOB}" --region "${REGION}" --wait \
-            --args=-m,app.jobs.cloudrun_entry,selftest
-```
-
-`backend/cloudbuild.worker.yaml` (not added yet; machine and disk from the
-[GPU best practices](https://docs.cloud.google.com/run/docs/configuring/services/gpu-best-practices)
-build example):
-
-```yaml
-steps:
-  - name: gcr.io/cloud-builders/docker
-    args: ['build', '--target', 'worker',
-           '-t', '${_IMAGE}:${_SHA}', '-t', '${_IMAGE}:${_ENV_TAG}',
-           '-f', 'Dockerfile', '.']
-images: ['${_IMAGE}:${_SHA}', '${_IMAGE}:${_ENV_TAG}']
-# Run as the deployer (IAM table): a user-specified build account needs a logging option.
-serviceAccount: 'projects/ww-pilot-dev/serviceAccounts/github-deployer@ww-pilot-dev.iam.gserviceaccount.com'
-options:
-  machineType: E2_HIGHCPU_32
-  diskSizeGb: 200
-  logging: CLOUD_LOGGING_ONLY
-timeout: 2400s
-```
+- It runs by hand; a push to `dev` deploys only when the repository variable
+  `GCP_WORKER_AUTODEPLOY` is `true`, because every build uses the 32-CPU machine.
+- The build runs as `github-deployer@` (`--service-account`) with source staged in
+  `gs://ww-pilot-dev-build-source`. Its log is not streamed into the Actions run
+  (`--suppress-logs`): streaming needs project Viewer on the deployer. The step still waits and
+  fails with the build; read the log in Cloud Build history.
+- Until the job exists (step 10) the roll and self-test steps are skipped with a notice.
 
 ### 4.2 Config differences from Azure
 
@@ -300,7 +236,7 @@ timeout: 2400s
 | Scaling | KEDA Postgres scaler, `pg-conn`, 15 min window, 0 to 1 | one execution per run |
 | ARQ `job_timeout = 3600` | ARQ setting | `--task-timeout 3600` |
 | ARQ `max_tries = 1` | ARQ setting | `--max-retries 0` |
-| ARQ `_defer_by` 60 s debounce | ARQ setting | `asyncio.sleep` before `jobs.run` on the API side; Track 2 may use a Cloud Tasks task 60 s out |
+| ARQ `_defer_by` 60 s debounce | ARQ setting | the API starts the execution 60 s later from a background task, so the `api_jobs` row stays queued for later chunks to reuse. An API restart inside that minute loses the start and the stale-job reaper fails the job after 60 min; Track 2 may use a Cloud Tasks task 60 s out |
 | CPU / memory | 4 vCPU / 16 Gi (8 Gi OOM-killed DINOv3 ViT-H) | `--cpu 4 --memory 16Gi`, the L4 minimum (8 / 32 recommended) |
 | Device flags | `EMBEDDING_DEVICE=cuda`, `BIOCLIP_DEVICE=cuda` | same |
 | Feature flags | `FF_ML_ENABLED`, `FF_PIPELINE_ENABLED`, `FF_SPECIESNET_ENABLED`, `FF_BIOCLIP_ENABLED`, `FF_PER_CROP_CLASSIFY_ENABLED`, `FF_MEDIA_REGISTRY_ENABLED`, `FF_WILDLIFE_BRAIN_ENABLED`, `FF_EDGE_REFLECT_ENABLED`, `SPECIESNET_RUN_MODE=single_thread`, `EMBEDDING_DEFAULT_MODEL`, `EMBEDDING_BATCH_SIZE`, `SUPABASE_MEDIA_BUCKET`, `LOG_LEVEL` | same values, copied with `az containerapp show … env[].name`, set on the **job** |
@@ -498,17 +434,19 @@ Google Cloud bill. State each part separately.
 9. Is there a Cloud Run metric for "job execution running longer than X", or should the
    stuck-GPU alert be a log-based metric?
 
-## 8. Code changes needed (not implemented)
+## 8. Code changes
+
+The pilot rows are done (the state table in §2); Track 2 rows are not started.
 
 | File | Change |
 |---|---|
-| `backend/app/config.py` | `GOOGLE_CLOUD_PROJECT`, `CLOUD_RUN_JOB_NAME`, `CLOUD_RUN_JOB_REGION`, `CLOUD_RUN_TRIGGER_SA_JSON` (inline JSON or path, like `GOOGLE_SERVICE_ACCOUNT_JSON`), all default `""`; property `job_offload_configured = bool(REDIS_URL or CLOUD_RUN_JOB_NAME)`. Track 2: `UPLOAD_BUFFER_BACKEND`, `GCS_UPLOAD_BUCKET` |
-| `backend/app/jobs/dispatch.py` | New first branch in `enqueue_job` when `CLOUD_RUN_JOB_NAME` is set: optional `asyncio.sleep(_defer_by)`, then Admin API `jobs.run` with `container_overrides=[{args: ["-m", "app.jobs.cloudrun_entry", name, json.dumps({"args": args, "kwargs": func_kwargs})]}]`, log `job_dispatched_cloudrun`, return `"cloudrun"`; on any exception fall through to Redis, then local |
-| `backend/app/jobs/cloudrun_entry.py` (new) | `python -m app.jobs.cloudrun_entry <job_name> <json>`: resolve the function from `definitions.JOBS`, `asyncio.run` it, `await flush_pending_syncs()`, exit 0 or 1; `selftest` logs torch version, CUDA availability, device name and the three model load times |
-| `backend/app/jobs/definitions.py` | Lines 1111 and 1191: `settings.REDIS_URL` becomes `settings.job_offload_configured`, or with `REDIS_URL` unset the upload job runs the AI inline on the lean API image |
-| `backend/app/jobs/store.py` | Comment only: the KEDA window is gone; the reaper is the heartbeat's only consumer |
-| `backend/requirements.txt` | `google-cloud-run>=0.10`. Track 2: `google-cloud-storage`; remove `azure-storage-blob`, `aiohttp` at 2.8 |
-| `backend/tests/` | `enqueue_job` precedence cloudrun, redis, local; fallback on `GoogleAPICallError`; `_defer_by` honoured on the cloudrun path; `cloudrun_entry` argument parsing |
+| `backend/app/config.py` | `CLOUD_RUN_JOB_NAME` (empty = off) and `CLOUD_RUN_TRIGGER_SA_JSON` (inline JSON or path, like `GOOGLE_SERVICE_ACCOUNT_JSON`; empty = Application Default Credentials), beside the `GOOGLE_CLOUD_PROJECT` and `CLOUD_RUN_JOB_REGION` native training added; property `job_offload_configured = bool(REDIS_URL or CLOUD_RUN_JOB_NAME)`. Track 2: `UPLOAD_BUFFER_BACKEND`, `GCS_UPLOAD_BUCKET` |
+| `backend/app/jobs/dispatch.py` | New first branch in `enqueue_job` when `CLOUD_RUN_JOB_NAME` is set: `_defer_by` as a delayed start (§4.2), then Admin API `jobs.run` with `container_overrides=[{args: ["-m", "app.jobs.cloudrun_entry", name, json.dumps({"args": args, "kwargs": func_kwargs})]}]`, log `job_dispatched_cloudrun`, return `"cloudrun"`; on any exception, or a payload over 32,000 bytes (a large CamtrapDP import's media ids), fall through to Redis, then local |
+| `backend/app/jobs/cloudrun_entry.py` (new) | `python -m app.jobs.cloudrun_entry <job_name> <json>`: resolve the function from `definitions.JOBS`, `asyncio.run` it, `await flush_pending_syncs()`, exit 0 done, 1 failed, 2 bad arguments; `selftest` prints `cuda? True` and logs torch version, CUDA availability, device name and the three model load times |
+| `backend/app/jobs/definitions.py` | The upload job's inline and offload branches: `settings.REDIS_URL` becomes `settings.job_offload_configured`, or with `REDIS_URL` unset the upload job runs the AI inline on the lean API image |
+| `backend/app/jobs/store.py` | Comment only, at step 12 when the Azure worker is parked: the KEDA window is gone; the reaper is the heartbeat's only consumer |
+| `backend/requirements.txt` | `google-cloud-run==0.16.2`, moved from `requirements-ml.txt` so the API image can start executions. Track 2: `google-cloud-storage`; remove `azure-storage-blob`, `aiohttp` at 2.8 |
+| `backend/tests/test_cloudrun_worker.py` | `enqueue_job` precedence cloudrun, redis, local; fallback on a refused start and on an oversized payload; `_defer_by` as a delayed start, and its fallback; `cloudrun_entry` running a job, exit codes, argument parsing |
 | `backend/cloudbuild.worker.yaml` (new) | §4.1; `gcloud builds submit --tag` would build the last stage (`api`) |
 | `.github/workflows/deploy-ml-worker-gcp.yml` (new) | §4.1. Track 2: fold in the API build and retire `deploy-backend.yml`'s Azure steps |
 | `scripts/fetch-env.sh`, `fetch-env.ps1` | Track 2: `gcloud secrets versions access latest --secret ww-website-dotenv --project ww-dev`; keep the `--force` guard and byte count |
