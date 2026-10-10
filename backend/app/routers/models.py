@@ -34,6 +34,7 @@ from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.schemas.job import JobCreateResponse
 from app.schemas.model import LabelMapRequest, TrainModelRequest
 from app.services.blob_store import store_blob
+from app.services.db_utils import rows_of
 from app.services.sscma import get_sscma_catalog
 from app.services.supabase_client import create_service_client
 
@@ -63,11 +64,11 @@ def resolve_managed_org(requested_org_id: str | None, manager_roles: list) -> st
 
 @router.post("/convert")
 async def convert_model(
+    request: Request,
     file: UploadFile = File(...),
     model_name: str = Form(...),
     description: str = Form(""),
     organisation_id: str = Form(""),
-    request: Request = None,
     user=Depends(get_current_user),
 ):
     """Upload a model and enqueue conversion/registration job.
@@ -78,7 +79,7 @@ async def convert_model(
     4. Inserts an ai_models row
     5. Stores the file in blob store and enqueues the worker job
     """
-    if file.content_type not in ALLOWED_MIME_TYPES and not file.filename.endswith((".zip", ".tflite", ".cc")):
+    if file.content_type not in ALLOWED_MIME_TYPES and not (file.filename or "").endswith((".zip", ".tflite", ".cc")):
         raise HTTPException(400, detail=f"Invalid file type: {file.content_type}")
 
     content = await file.read()
@@ -99,7 +100,7 @@ async def convert_model(
     existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
     existing_res = await asyncio.to_thread(existing_query.execute)
     existing_versions = []
-    for r in existing_res.data:
+    for r in rows_of(existing_res):
         v = r.get("version")
         if v:
             parts = v.split(".")
@@ -137,7 +138,7 @@ async def convert_model(
     model_row = await asyncio.to_thread(model_insert.execute)
     if not model_row.data:
         raise HTTPException(500, detail="Failed to create AI model record")
-    model_id = model_row.data[0]["id"]
+    model_id = rows_of(model_row)[0]["id"]
 
     await store_blob(
         job_id,
@@ -159,7 +160,7 @@ async def convert_model(
             "poll_url": f"/api/jobs/{job_id}",
         },
         meta=ApiMeta(
-            request_id=getattr(request.state, "request_id", None) if request else None,
+            request_id=getattr(request.state, "request_id", None),
         ),
     )
 
@@ -201,7 +202,7 @@ async def get_managed_orgs(
     orgs = await asyncio.to_thread(orgs_query.execute)
 
     return ApiResponse(
-        data=orgs.data or [],
+        data=rows_of(orgs),
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
     )
 
@@ -413,7 +414,7 @@ async def train_model(request: Request, body: TrainModelRequest, user=Depends(ge
         model_row = await asyncio.to_thread(model_insert.execute)
         if not model_row.data:
             raise HTTPException(500, detail="Failed to create the AI model record")
-        model_id = model_row.data[0]["id"]
+        model_id = rows_of(model_row)[0]["id"]
 
     job_id = await create_job(user_id=user.id, kind="model_train", label=f"Train {body.model_name}")
     params = body.model_dump()

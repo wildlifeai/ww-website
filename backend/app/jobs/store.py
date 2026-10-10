@@ -30,6 +30,7 @@ from app.schemas.job import (
     ProgressEvent,
     ProgressPhase,
 )
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -74,7 +75,7 @@ def _hydrate_from_supabase(job_id: str) -> Optional[str]:
         client = create_service_client()
         resp = client.table("api_jobs").select("job_data").eq("id", job_id).execute()
         if resp.data:
-            db_data = resp.data[0]["job_data"] or {}
+            db_data = rows_of(resp)[0]["job_data"] or {}
             events = db_data.pop("events", [])
             _memory_events[f"job:{job_id}:events"] = [json.dumps(e) for e in events]
             raw = json.dumps(db_data)
@@ -107,7 +108,7 @@ def _refresh_if_newer(job_id: str, local_updated_at: Optional[str]) -> Optional[
         resp = client.table("api_jobs").select("job_data").eq("id", job_id).execute()
         if not resp.data:
             return None
-        db_data = resp.data[0]["job_data"] or {}
+        db_data = rows_of(resp)[0]["job_data"] or {}
         db_updated = db_data.get("updated_at") or ""
         if local_updated_at and db_updated <= local_updated_at:
             return None  # memory is current (or newer — this process owns the job)
@@ -214,7 +215,7 @@ async def reap_stale_jobs(max_age_minutes: int = 60) -> int:
             client.table("api_jobs").select("id, job_data, updated_at").in_("status", [JobStatus.QUEUED.value, JobStatus.PROCESSING.value]).execute()
         )
         reaped = 0
-        for row in resp.data or []:
+        for row in rows_of(resp):
             jd = row.get("job_data") or {}
             last = jd.get("updated_at") or row.get("updated_at") or ""
             if not last or last >= cutoff:
@@ -317,7 +318,7 @@ async def list_jobs(user_id: str, limit: int = 50) -> List[dict]:
             .execute()
         )
         out: List[dict] = []
-        for row in resp.data or []:
+        for row in rows_of(resp):
             jd = row.get("job_data") or {}
             out.append(
                 {
@@ -364,7 +365,7 @@ async def find_active_ai_jobs() -> List[dict]:
             .execute()
         )
         out = []
-        for row in resp.data or []:
+        for row in rows_of(resp):
             jd = row.get("job_data") or {}
             out.append({"job_id": row["id"], "status": row.get("status") or jd.get("status"), "deployment_ids": jd.get("deployment_ids") or []})
         return out

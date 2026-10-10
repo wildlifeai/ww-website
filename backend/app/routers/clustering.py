@@ -15,7 +15,7 @@ from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.domain.clustering import cluster_images_from_bytes
-from app.schemas.common import ApiMeta, ApiResponse
+from app.schemas.common import ApiError, ApiMeta, ApiResponse
 
 logger = structlog.get_logger()
 
@@ -49,10 +49,7 @@ async def analyze_images(
     if len(files) > MAX_CLUSTERING_IMAGES:
         return ApiResponse(
             data=None,
-            error={
-                "code": "TOO_MANY_IMAGES",
-                "message": f"Maximum {MAX_CLUSTERING_IMAGES} images per request.",
-            },
+            error=ApiError(code="TOO_MANY_IMAGES", message=f"Maximum {MAX_CLUSTERING_IMAGES} images per request."),
             meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
         )
 
@@ -131,10 +128,7 @@ async def analyze_images_csv(
     if len(files) > MAX_CLUSTERING_IMAGES:
         return ApiResponse(
             data=None,
-            error={
-                "code": "TOO_MANY_IMAGES",
-                "message": f"Maximum {MAX_CLUSTERING_IMAGES} images per request.",
-            },
+            error=ApiError(code="TOO_MANY_IMAGES", message=f"Maximum {MAX_CLUSTERING_IMAGES} images per request."),
             meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
         )
 

@@ -40,7 +40,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | Hosted VLM | `google-genai` (Gemini API SDK) | animal-presence filter step (`services/gemini_presence.py`); no torch, ships in the lean API image; prices and token rules in `services/gemini_pricing.py` |
 | Logging | `structlog` | structured JSON logs |
 | Errors | `sentry-sdk` | optional, via `SENTRY_DSN` |
-| Lint/test | `ruff`, `pytest`, `pyright` | `pyproject.toml` config (line length 150); pyright is advisory in CI (#225) |
+| Lint/test | `ruff`, `pytest`, `pyright` | `pyproject.toml` config (line length 150, pyright settings) |
 
 ## External services
 

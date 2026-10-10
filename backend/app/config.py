@@ -303,4 +303,5 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
 
-settings = Settings()
+# The required fields come from the environment, which pyright cannot see.
+settings = Settings()  # pyright: ignore[reportCallIssue]

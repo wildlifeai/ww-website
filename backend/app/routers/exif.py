@@ -36,6 +36,7 @@ from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiMeta, ApiResponse
 from app.services.azure_storage import store_blob
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client, reset_service_client
 
 logger = structlog.get_logger()
@@ -87,7 +88,7 @@ async def _auto_create_deployments(deployment_ids: List[str], project_id: str, u
     def _work() -> List[str]:
         svc = create_service_client()
         existing = svc.table("deployments").select("id").in_("id", deployment_ids).execute()
-        have = {r["id"] for r in (existing.data or [])}
+        have = {r["id"] for r in rows_of(existing)}
         to_create = [d for d in deployment_ids if d not in have]
         if not to_create:
             return []
@@ -95,7 +96,7 @@ async def _auto_create_deployments(deployment_ids: List[str], project_id: str, u
         proj = svc.table("projects").select("id, organisation_id").eq("id", project_id).limit(1).execute()
         if not proj.data:
             raise HTTPException(status_code=404, detail="Project not found")
-        org_id = proj.data[0].get("organisation_id")
+        org_id = rows_of(proj)[0].get("organisation_id")
 
         created: List[str] = []
         for dep_id in to_create:
@@ -416,7 +417,7 @@ async def _enqueue_drive_upload(
                 .in_("id", deployment_ids)
                 .execute()
             )
-            for dep_row in dep_resp.data:
+            for dep_row in rows_of(dep_resp):
                 dep_id = dep_row["id"]
                 dep_start = dep_row.get("deployment_start")
                 dep_date = dep_start[:10] if dep_start else datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -462,7 +463,7 @@ async def _enqueue_drive_upload(
                     .execute()
                 )
                 if prefix_resp.data:
-                    dep_row = prefix_resp.data[0]
+                    dep_row = rows_of(prefix_resp)[0]
                     dep_id = dep_row["id"]
                     dep_start = dep_row.get("deployment_start")
                     dep_date = dep_start[:10] if dep_start else datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -516,7 +517,7 @@ async def _enqueue_drive_upload(
                         .execute()
                     )
                     if a_resp.data:
-                        dep_row = a_resp.data[0]
+                        dep_row = rows_of(a_resp)[0]
                         dep_start = dep_row.get("deployment_start")
                         dep_date = dep_start[:10] if dep_start else datetime.now(timezone.utc).strftime("%Y-%m-%d")
                         proj = dep_row.get("projects")

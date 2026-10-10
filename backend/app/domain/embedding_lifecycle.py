@@ -18,6 +18,9 @@ import asyncio
 from typing import Optional
 
 import structlog
+from postgrest import CountMethod
+
+from app.services.db_utils import rows_of
 
 logger = structlog.get_logger()
 
@@ -87,7 +90,7 @@ async def list_embedding_runs(deployment_id: str) -> list[dict]:
             .order("created_at", desc=True)
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     return await asyncio.to_thread(_fetch)
 
@@ -125,7 +128,7 @@ async def reprocess_project(project_id: str, model_name: Optional[str] = None, c
 
     def _deps():
         resp = svc.table("deployments").select("id").eq("project_id", project_id).is_("deleted_at", "null").execute()
-        return [d["id"] for d in (resp.data or [])]
+        return [d["id"] for d in rows_of(resp)]
 
     deployment_ids = await asyncio.to_thread(_deps)
     results = []
@@ -142,7 +145,7 @@ async def _count_active_media() -> int:
     svc = create_service_client()
 
     def _count():
-        resp = svc.table("media").select("id", count="exact").is_("deleted_at", "null").execute()
+        resp = svc.table("media").select("id", count=CountMethod.exact).is_("deleted_at", "null").execute()
         return resp.count or 0
 
     return await asyncio.to_thread(_count)
@@ -160,7 +163,7 @@ async def reprocess_all(model_name: Optional[str] = None, dry_run: bool = True, 
 
     def _deps():
         resp = svc.table("deployments").select("id").is_("deleted_at", "null").execute()
-        return [d["id"] for d in (resp.data or [])]
+        return [d["id"] for d in rows_of(resp)]
 
     deployment_ids = await asyncio.to_thread(_deps)
     for i, dep in enumerate(deployment_ids):
@@ -182,7 +185,7 @@ async def compare_runs(run_a: str, run_b: str) -> dict:
         resp = (
             svc.table("cluster_assignments").select("cluster_id, taxon_id, image_count, is_outlier_cluster").eq("embedding_run_id", run_id).execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     rows_a = await asyncio.to_thread(_fetch, run_a)
     rows_b = await asyncio.to_thread(_fetch, run_b)

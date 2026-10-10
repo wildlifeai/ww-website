@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 from io import BytesIO
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import structlog
 
@@ -87,8 +87,9 @@ class DinoV3Service:
         self.model_name = model_name or settings.EMBEDDING_DEFAULT_MODEL
         self.spec = get_model_spec(self.model_name)
         self.version = self.spec.hf_model_id
-        self._model = None
-        self._processor = None
+        # transformers objects, Any because requirements-ml.txt is not installed where pyright runs.
+        self._model: Any = None
+        self._processor: Any = None
 
     def _load(self):
         if self._model is None:

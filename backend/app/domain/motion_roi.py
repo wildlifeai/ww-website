@@ -268,7 +268,7 @@ def compute_motion_fractions(
     valid = [i for i, im in enumerate(images) if im is not None]
     if len(valid) < 2:
         return out
-    smalls = {i: _to_grayscale_small(images[i], small_size).astype(np.int16) for i in valid}
+    smalls = {i: _to_grayscale_small(im, small_size).astype(np.int16) for i, im in enumerate(images) if im is not None}
     ref = valid[0]
     for i in valid:
         other = smalls[valid[1]] if i == ref else smalls[ref]

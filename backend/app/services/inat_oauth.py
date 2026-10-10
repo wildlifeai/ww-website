@@ -28,6 +28,7 @@ import structlog
 from cryptography.fernet import Fernet
 
 from app.config import settings
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -244,7 +245,7 @@ async def get_user_token(user_id: str) -> Optional[Dict[str, Any]]:
         return None
 
     try:
-        token_data = decrypt_token(response.data[0]["encrypted_token"])
+        token_data = decrypt_token(rows_of(response)[0]["encrypted_token"])
     except Exception as e:
         logger.error("inat_token_decrypt_failed", user_id=user_id, error=str(e))
         return None

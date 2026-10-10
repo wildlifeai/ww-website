@@ -29,6 +29,7 @@ from app.schemas.pipeline import (
     PipelineStepType,
 )
 from app.services.bioclip_service import BIOCLIP_VERSION
+from app.services.db_utils import rows_of
 from app.services.speciesnet_service import SPECIESNET_VERSION
 from app.services.supabase_client import create_service_client
 
@@ -365,7 +366,7 @@ class GeminiPresenceStep(PipelineStep):
             if not media_ids:
                 return set()
             resp = svc.table("observations").select("media_id").in_("media_id", media_ids).eq("source_model_version", model).execute()
-            return {r["media_id"] for r in (resp.data or [])}
+            return {r["media_id"] for r in rows_of(resp)}
 
         done = await asyncio.to_thread(_already_done)
         todo = [m for m in media if m["id"] not in done]
@@ -634,10 +635,9 @@ class EvidenceFusionStep(PipelineStep):
             for i in range(0, len(media_ids), 100):
                 chunk = media_ids[i : i + 100]
                 rows.extend(
-                    svc.table("media").select("id, deployment_id, file_path, file_name, timestamp, exif_metadata").in_("id", chunk).execute().data
-                    or []
+                    rows_of(svc.table("media").select("id, deployment_id, file_path, file_name, timestamp, exif_metadata").in_("id", chunk).execute())
                 )
-                for o in svc.table("observations").select(_OBS_COLUMNS).in_("media_id", chunk).is_("deleted_at", "null").execute().data or []:
+                for o in rows_of(svc.table("observations").select(_OBS_COLUMNS).in_("media_id", chunk).is_("deleted_at", "null").execute()):
                     obs.setdefault(o["media_id"], []).append(o)
             max_conf = read_signal(svc, media_ids, "speciesnet_max_conf", source="speciesnet")
             return rows, obs, max_conf
@@ -1070,7 +1070,7 @@ class SpeciesNetStep(PipelineStep):
     """
 
     step_type = PipelineStepType.SPECIESNET
-    model_version = SPECIESNET_VERSION
+    model_version: str = SPECIESNET_VERSION
 
     async def run(
         self,
@@ -1366,7 +1366,7 @@ class BioCLIPStep(PipelineStep):
 
         def _fetch_crops() -> dict[str, str]:
             resp = svc.table("media_assets").select("media_id, animal_crop_url").in_("media_id", media_ids).execute()
-            return {r["media_id"]: r["animal_crop_url"] for r in (resp.data or []) if r.get("animal_crop_url")}
+            return {r["media_id"]: r["animal_crop_url"] for r in rows_of(resp) if r.get("animal_crop_url")}
 
         crop_map = await asyncio.to_thread(_fetch_crops)
 
@@ -1389,7 +1389,7 @@ class BioCLIPStep(PipelineStep):
                 .gte("confidence", SPECIES_CONFIDENCE)
                 .execute()
             )
-            return {r["media_id"] for r in (resp.data or [])}
+            return {r["media_id"] for r in rows_of(resp)}
 
         confident_ids = await asyncio.to_thread(_fetch_confident_speciesnet) if suppress_when_confident else set()
 
@@ -1511,7 +1511,7 @@ class BioCLIPStep(PipelineStep):
                 .like("source_model_version", "speciesnet%")
                 .execute()
             )
-            return [r for r in (resp.data or []) if r.get("crop_url")]
+            return [r for r in rows_of(resp) if r.get("crop_url")]
 
         obs_rows = await asyncio.to_thread(_fetch_animal_crops)
 

@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from app.domain.open_deployments import OpenDeploymentConflict, conflict_camera, is_open_deployment_conflict
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 REFUSED = "42501"
@@ -61,15 +62,15 @@ def _restore_conflict_camera(user_client, exc: Exception, ts: str, *, deployment
         svc = create_service_client()
         reopened = svc.table("deployments").select("device_id").eq("deleted_at", ts).is_("deployment_end", "null")
         reopened = reopened.eq("id", deployment_id) if deployment_id else reopened.eq("project_id", project_id)
-        devices = [r["device_id"] for r in (reopened.execute().data or []) if r.get("device_id")]
+        devices = [r["device_id"] for r in rows_of(reopened.execute()) if r.get("device_id")]
         if not devices:
             return camera
         open_now = svc.table("deployments").select("device_id").in_("device_id", devices).is_("deleted_at", "null").is_("deployment_end", "null")
-        busy = open_now.limit(1).execute().data
+        busy = rows_of(open_now.limit(1).execute())
         if not busy:
             return camera
         device_id = busy[0]["device_id"]
-        rows = svc.table("devices").select("name").eq("id", device_id).limit(1).execute().data
+        rows = rows_of(svc.table("devices").select("name").eq("id", device_id).limit(1).execute())
         return (rows[0].get("name") if rows else None) or device_id
     except Exception:
         return camera

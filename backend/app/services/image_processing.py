@@ -87,7 +87,7 @@ def crop_bbox(
         if box[3] <= box[1]:
             box[3] = min(height, box[1] + 1)
 
-        crop = img.crop(tuple(box))
+        crop = img.crop((box[0], box[1], box[2], box[3]))
         out = BytesIO()
         crop.save(out, format="JPEG", quality=quality)
         return out.getvalue()

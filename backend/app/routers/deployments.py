@@ -13,6 +13,7 @@ from app.dependencies import get_current_user, get_user_client, get_verified_use
 from app.domain.deployment_location import apply_location_update, location_update
 from app.domain.soft_delete import check_deleted_at, now_iso, restore_deployments_as_user, soft_delete_deployments_as_user
 from app.schemas.common import ApiResponse
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -72,7 +73,7 @@ async def create_deployment(
         proj = svc.table("projects").select("id, organisation_id").eq("id", body.project_id).limit(1).execute()
         if not proj.data:
             raise HTTPException(status_code=404, detail="Project not found")
-        org_id = proj.data[0].get("organisation_id")
+        org_id = rows_of(proj)[0].get("organisation_id")
 
         if supplied_id:
             existing = svc.table("deployments").select("id").eq("id", supplied_id).limit(1).execute()
@@ -292,7 +293,7 @@ async def validate_deployments(
     if full_uuids:
         try:
             admin_res = admin_client.table("deployments").select("id").in_("id", full_uuids).execute()
-            admin_found_ids.update(r["id"].lower() for r in admin_res.data)
+            admin_found_ids.update(r["id"].lower() for r in rows_of(admin_res))
         except Exception as exc:
             logger.warning("validate_admin_uuid_lookup_failed", error=str(exc))
 
@@ -353,15 +354,13 @@ async def backfill_timezones() -> Dict[str, int]:
     svc = create_service_client()
 
     def _do_backfill() -> tuple[int, int]:
-        rows = (
+        rows = rows_of(
             svc.table("deployments")
             .select("id, latitude, longitude, timezone")
             .is_("timezone", "null")
             .not_.is_("latitude", "null")
             .not_.is_("longitude", "null")
             .execute()
-            .data
-            or []
         )
         updated = 0
         for dep in rows:

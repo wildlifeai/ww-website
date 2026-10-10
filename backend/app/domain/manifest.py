@@ -33,6 +33,7 @@ import structlog
 from app.registries.camera_configs import CAMERA_CONFIGS
 from app.registries.model_registry import get_model_config
 from app.services.cache import cached
+from app.services.db_utils import rows_of
 from app.services.http_client import DownloadError, download_url_content
 from app.services.storage import download_from_storage
 from app.services.supabase_client import create_service_client
@@ -184,7 +185,7 @@ async def _fetch_config_firmware(client, manifest_dir: Path) -> bool:
         )
 
         if response.data:
-            config_fw = response.data[0]
+            config_fw = rows_of(response)[0]
             path = config_fw["location_path"]
             content = await download_from_storage("firmware", path, silent=True)
 
@@ -278,7 +279,7 @@ async def _fetch_himax_firmware(
         response = await asyncio.to_thread(query.order("created_at", desc=True).limit(1).execute)
 
         if response.data:
-            himax_fw = response.data[0]
+            himax_fw = rows_of(response)[0]
             path = himax_fw["location_path"]
             content = await download_from_storage("firmware", path, silent=True)
 
@@ -415,7 +416,7 @@ async def _fetch_default_model(client, manifest_dir: Path) -> bool:
             response = q.order("created_at", desc=True).limit(1).execute()
 
             if response.data:
-                model = response.data[0]
+                model = rows_of(response)[0]
                 tfl_content = await download_from_storage("ai-models", model["model_path"], silent=True)
                 if tfl_content:
                     tfl_filename = model["model_path"].split("/")[-1]
@@ -522,7 +523,7 @@ async def _resolve_project_model(client, project_id: str) -> dict:
     if not response.data:
         raise ManifestDomainError(f"Project {project_id} not found")
 
-    project = response.data[0]
+    project = rows_of(response)[0]
     if not project.get("model_id") or not project.get("ai_models"):
         return {"has_model": False}
 
@@ -752,7 +753,7 @@ async def generate_manifest(
                         .execute
                     )
                     if response.data:
-                        model = response.data[0]
+                        model = rows_of(response)[0]
                         family_data = model.get("ai_model_families")
                         family = (
                             family_data[0]

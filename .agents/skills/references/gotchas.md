@@ -95,6 +95,15 @@ CamtrapDP import gives the deployment its own placeholder device.
 
 ---
 
+## supabase-py types rows as any JSON value
+
+postgrest types `response.data` as a list of any JSON value (None, a string, a list, ...), so
+`row["id"]` or `row.get("x")` on a typed client fails pyright. Read rows through
+`rows_of(response)` and a `single()` or `maybe_single()` row through `row_of(response)`, both in
+`services/db_utils.py`. Pass `count=CountMethod.exact` (from `postgrest`), not `"exact"`.
+
+---
+
 ## Shared Model Lists
 
 Do not invent model names.
