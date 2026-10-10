@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 import structlog
 
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -99,7 +100,7 @@ async def validate_api_key(
         if not response.data:
             raise ApiKeyError("Invalid or revoked API key")
 
-        key_record = response.data[0]
+        key_record = rows_of(response)[0]
 
         # Check expiry
         if key_record.get("expires_at"):
@@ -198,7 +199,7 @@ async def create_api_key_record(
             scopes=scopes,
         )
 
-        return raw_key, response.data[0]
+        return raw_key, rows_of(response)[0]
 
     except ApiKeyError:
         raise
@@ -250,7 +251,7 @@ async def list_api_keys(org_id: str) -> List[Dict[str, Any]]:
 
     rows: List[Dict[str, Any]] = []
     while True:
-        page = (
+        page = rows_of(
             client.table("api_keys")
             .select("id, name, key_prefix, scopes, expires_at, last_used_at, created_at")
             .eq("organisation_id", org_id)
@@ -259,7 +260,7 @@ async def list_api_keys(org_id: str) -> List[Dict[str, Any]]:
             .order("id")
             .range(len(rows), len(rows) + _LIST_PAGE - 1)
             .execute()
-        ).data or []
+        )
         rows.extend(page)
         if len(page) < _LIST_PAGE:
             return rows

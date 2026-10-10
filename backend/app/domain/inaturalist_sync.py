@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 import structlog
 
 from app.domain.inaturalist import batch_poll_observations
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -62,7 +63,7 @@ async def sync_inat_identifications(user_id: Optional[str] = None, limit: int = 
         )
         if user_id:
             q = q.eq("user_id", user_id)
-        return q.limit(limit).execute().data or []
+        return rows_of(q.limit(limit).execute())
 
     rows = await asyncio.to_thread(_load_rows)
     result: Dict[str, Any] = {

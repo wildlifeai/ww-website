@@ -11,6 +11,7 @@ import hashlib
 import time
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 import structlog
 
@@ -28,6 +29,7 @@ from app.jobs.store import (
     update_summary,
 )
 from app.schemas.job import EventType, JobStatus, ProgressEvent, ProgressPhase
+from app.services.db_utils import rows_of
 from app.services.notifications_service import emit_detection_notifications
 
 logger = structlog.get_logger()
@@ -86,7 +88,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
     Idempotency: If the model is already 'validated' or 'deployed', the job
     exits immediately. This handles ARQ retries and worker restarts safely.
     """
-    log_ctx = {"job_type": "convert_model", "job_id": job_id, "model_id": model_id}
+    log_ctx: dict[str, Any] = {"job_type": "convert_model", "job_id": job_id, "model_id": model_id}
     logger.info("convert_job_start", **log_ctx)
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
 
@@ -112,7 +114,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         try:
             existing_query = client.table("ai_models").select("processing_log").eq("id", model_id)
             existing = await asyncio.to_thread(existing_query.execute)
-            current_log = existing.data[0].get("processing_log") or [] if existing.data else []
+            current_log = rows_of(existing)[0].get("processing_log") or [] if existing.data else []
             current_log.append(log_entry)
             payload["processing_log"] = current_log
         except Exception:
@@ -124,7 +126,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         # ── Idempotency guard ────────────────────────────────────
         check_query = client.table("ai_models").select("status").eq("id", model_id)
         model_check = await asyncio.to_thread(check_query.execute)
-        if model_check.data and model_check.data[0]["status"] in ("validated", "deployed"):
+        if model_check.data and rows_of(model_check)[0]["status"] in ("validated", "deployed"):
             logger.info("convert_job_skipped_already_complete", **log_ctx)
             await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0)
             return
@@ -150,7 +152,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         if not model_res.data:
             raise RuntimeError(f"Model record {model_id} not found")
 
-        model_row = model_res.data[0]
+        model_row = rows_of(model_res)[0]
         org_id = model_row.get("organisation_id")
         version_num = model_row.get("version", "1.0.0")
         family = model_row.get("ai_model_families") or {}
@@ -271,7 +273,7 @@ async def _append_model_status(
     # TODO(schema): Use a JSONB append RPC to prevent race conditions on processing_log
     try:
         existing = await asyncio.to_thread(client.table("ai_models").select("processing_log").eq("id", model_id).execute)
-        current_log = (existing.data[0].get("processing_log") or []) if existing.data else []
+        current_log = (rows_of(existing)[0].get("processing_log") or []) if existing.data else []
         current_log.append(log_entry)
         payload["processing_log"] = current_log
     except Exception:
@@ -417,7 +419,7 @@ async def train_species_brain_job(job_id: str, user_id: str, model_id: str | Non
         model_res = await asyncio.to_thread(client.table("ai_models").select("*, ai_model_families(firmware_model_id)").eq("id", model_id).execute)
         if not model_res.data:
             raise RuntimeError(f"Model record {model_id} not found")
-        model_row = model_res.data[0]
+        model_row = rows_of(model_res)[0]
         version_str = model_row.get("version", "1.0.0")
         version_num = version_str.split(".")[0] if "." in version_str else version_str
         firmware_id = (model_row.get("ai_model_families") or {}).get("firmware_model_id", 9999)
@@ -972,16 +974,17 @@ async def auto_embed_deployment(deployment_id: str, user_id: str | None = None) 
     """Embed + cluster a deployment's animal crops after annotation (best-effort).
 
     Gated on ``FF_WILDLIFE_BRAIN_ENABLED``; no-op when the Brain is disabled or
-    the deployment has no animal crops yet. Failures are logged, never raised, so
-    a missing GPU / vector store never breaks the upload flow.
+    the deployment has no animal crops yet. A process that can't embed (no ML stack,
+    HF_TOKEN or GPU) skips it with one info log and writes no run. Failures are
+    logged, never raised, so a missing GPU / vector store never breaks the upload flow.
     """
     from app.config import settings
 
     if not settings.FF_WILDLIFE_BRAIN_ENABLED:
         return
-    try:
-        from app.domain.wildlife_brain import embed_and_cluster_deployment
+    from app.domain.wildlife_brain import EmbeddingUnavailableError, embed_and_cluster_deployment
 
+    try:
         t0 = time.monotonic()
         result = await embed_and_cluster_deployment(deployment_id, created_by=user_id)
         duration = time.monotonic() - t0
@@ -995,6 +998,8 @@ async def auto_embed_deployment(deployment_id: str, user_id: str | None = None) 
             duration_seconds=round(duration, 2),
             seconds_per_frame=round(duration / images, 3) if images else None,
         )
+    except EmbeddingUnavailableError as exc:
+        logger.info("auto_embed_skipped", deployment_id=deployment_id, reason=str(exc))
     except Exception as exc:
         logger.warning("auto_embed_failed", deployment_id=deployment_id, error=str(exc))
 

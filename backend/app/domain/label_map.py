@@ -164,7 +164,8 @@ def describe_label_map(row: dict) -> dict:
     ``predicts`` lists what the model's valid targets predict and ``problems`` is
     LM-10 over the stored map (empty when the map is valid).
     """
-    stored = row.get("label_map") if isinstance(row.get("label_map"), dict) else {}
+    raw = row.get("label_map")
+    stored = raw if isinstance(raw, dict) else {}
 
     def with_default(entry: Any) -> Any:
         if isinstance(entry, dict) and entry.get("role") == TARGET_ROLE and "predicts" not in entry:

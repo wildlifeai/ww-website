@@ -278,7 +278,7 @@ def apply_stratum(row: dict, key: str) -> dict:
 
 
 def strata_summary(row: dict) -> str:
-    parts = [row.get(c) for c in STRATA_COLUMNS if row.get(c)]
+    parts = [v for c in STRATA_COLUMNS if (v := row.get(c))]
     return ", ".join(parts) if parts else "no strata"
 
 

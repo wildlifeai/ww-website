@@ -1,15 +1,38 @@
 # Copyright (c) 2024
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Paginated Supabase query helper.
+"""Supabase query helpers: typed row access and pagination.
 
-Direct port of db_utils.py fetch_all_rows() for backend use.
+fetch_all_rows() is a direct port of db_utils.py fetch_all_rows() for backend use.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, cast
 
 import structlog
+from postgrest import APIResponse
 
 logger = structlog.get_logger()
+
+Row = Dict[str, Any]
+
+
+def rows_of(response: APIResponse) -> List[Row]:
+    """The rows of a query response, or [] when it has none.
+
+    postgrest types ``data`` as a list of any JSON value, so reading a column off a row does not
+    type-check. A select, insert, update or table-returning RPC yields JSON objects, so each row
+    is a dict. Use it instead of ``response.data or []``.
+    """
+    return cast(List[Row], response.data or [])
+
+
+def row_of(response: Optional[APIResponse]) -> Optional[Row]:
+    """The row of a ``single()`` or ``maybe_single()`` response, or None when there is none.
+
+    ``maybe_single().execute()`` returns None, not an empty response, when no row matches.
+    """
+    if response is None:
+        return None
+    return cast(Optional[Row], response.data) or None
 
 
 def fetch_all_rows(client, table: str, select: str = "*", page_size: int = 1000) -> List[Dict[str, Any]]:

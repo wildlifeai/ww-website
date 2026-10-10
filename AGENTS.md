@@ -34,7 +34,7 @@ Setup detail, env reference and a verification checklist:
 ## Validate before committing
 
 ```bash
-cd backend  && ruff check . && ruff format --check . && pytest
+cd backend  && ruff check . && ruff format --check . && pyright && pytest
 cd frontend && npm run lint && npx tsc -b --noEmit && npm run build && npm run size
 node scripts/validate-docs.js
 ```
@@ -42,9 +42,10 @@ node scripts/validate-docs.js
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
 
-`pyright` in `backend/` (venv active, `requirements-dev.txt` installed) type-checks the backend
-with the `[tool.pyright]` settings in `backend/pyproject.toml`. It is advisory until its backlog
-is cleared (#225): add no new errors in the files you touch.
+`pyright` (from `requirements-dev.txt`) type-checks the backend with the `[tool.pyright]`
+settings in `backend/pyproject.toml` and must report no errors. It resolves imports from the Python on `PATH`, so activate the venv
+first: dozens of unresolved imports (`structlog`, `supabase`) mean it is reading another
+interpreter, and its count is wrong.
 
 `ci.yml` runs the same gates on every pull request and adds three that only run there: pytest
 with a statement-coverage floor, a build of the backend's `api` Docker stage that is started and
@@ -74,10 +75,11 @@ local gates above.
 Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 (`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
 ww-backend runs them against its own schema PRs, so a red run can come from either side. To
-run one locally, follow the instructions in its header. The backend has two such tests,
-`backend/tests/test_api_keys_local_stack.py` and `backend/tests/test_public_api_local_stack.py`:
-they skip without `WW_TEST_API_URL` and `WW_TEST_SERVICE_ROLE_KEY` and CI does not run them, so
-run them by hand when API key or `/api/v1` code changes.
+run one locally, follow the instructions in its header. The backend has three such tests,
+`backend/tests/test_api_keys_local_stack.py`, `backend/tests/test_public_api_local_stack.py` and
+`backend/tests/test_soft_delete_local_stack.py`: they skip without `WW_TEST_API_URL` and
+`WW_TEST_SERVICE_ROLE_KEY` (the last also needs `WW_TEST_ANON_KEY`) and CI does not run them, so
+run them by hand when API key, `/api/v1`, or deployment and project delete code changes.
 
 ## Non-negotiables
 

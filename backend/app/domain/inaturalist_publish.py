@@ -25,6 +25,7 @@ from app.domain.inaturalist import (
     upload_observation_photo,
 )
 from app.domain.media_resolver import resolve_media
+from app.services.db_utils import rows_of
 from app.services.inat_oauth import get_user_token
 from app.services.supabase_client import create_service_client
 
@@ -49,16 +50,15 @@ def _parse_ts(ts: Optional[str]) -> Optional[datetime]:
 def _cluster_bursts(media: List[dict], gap_seconds: int) -> List[List[dict]]:
     """Group media from one deployment into temporal bursts (Δt < gap_seconds)."""
     timed = sorted(
-        (m for m in media if _parse_ts(m.get("timestamp"))),
-        key=lambda m: _parse_ts(m["timestamp"]),
+        ((t, m) for m in media if (t := _parse_ts(m.get("timestamp"))) is not None),
+        key=lambda tm: tm[0],
     )
     untimed = [m for m in media if not _parse_ts(m.get("timestamp"))]
 
     bursts: List[List[dict]] = []
     cur: List[dict] = []
     prev: Optional[datetime] = None
-    for m in timed:
-        t = _parse_ts(m["timestamp"])
+    for t, m in timed:
         if prev is not None and (t - prev).total_seconds() >= gap_seconds:
             bursts.append(cur)
             cur = []
@@ -109,31 +109,21 @@ async def publish_media_to_inat(
     svc = create_service_client()
 
     def _load():
-        media = (
-            svc.table("media")
-            .select("id, deployment_id, file_path, file_name, timestamp")
-            .in_("id", media_ids)
-            .is_("deleted_at", "null")
-            .execute()
-            .data
-            or []
+        media = rows_of(
+            svc.table("media").select("id, deployment_id, file_path, file_name, timestamp").in_("id", media_ids).is_("deleted_at", "null").execute()
         )
-        obs = (
+        obs = rows_of(
             svc.table("observations")
             .select("media_id, observation_type, scientific_name, vernacular_name, review_status, source_type")
             .in_("media_id", media_ids)
             .is_("deleted_at", "null")
             .execute()
-            .data
-            or []
         )
         dep_ids = sorted({m["deployment_id"] for m in media})
         deps = (
-            (svc.table("deployments").select("id, name, location_name, latitude, longitude").in_("id", dep_ids).execute().data or [])
-            if dep_ids
-            else []
+            rows_of(svc.table("deployments").select("id, name, location_name, latitude, longitude").in_("id", dep_ids).execute()) if dep_ids else []
         )
-        published = svc.table("inat_observation_media").select("media_id").in_("media_id", media_ids).execute().data or []
+        published = rows_of(svc.table("inat_observation_media").select("media_id").in_("media_id", media_ids).execute())
         return media, obs, deps, {p["media_id"] for p in published}
 
     media, observations, deployments, already = await asyncio.to_thread(_load)
@@ -189,7 +179,7 @@ async def publish_media_to_inat(
 async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> None:
     """Create one iNat observation for a burst and upload its photos."""
     species = _best_species(burst)
-    times = [_parse_ts(m.get("timestamp")) for m in burst if _parse_ts(m.get("timestamp"))]
+    times = [t for m in burst if (t := _parse_ts(m.get("timestamp"))) is not None]
     observed_on = min(times).date().isoformat() if times else ""
     site = dep.get("location_name") or dep.get("name") or "a Wildlife Watcher deployment"
 
@@ -209,6 +199,11 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> No
         return
 
     inat_id = obs.get("id")
+    if inat_id is None:
+        # Without an id there is nothing to attach photos to or to sync later.
+        logger.error("inat_publish_create_no_id", deployment=dep.get("id"))
+        result["errors"] += 1
+        return
     inat_uuid = obs.get("uuid")
     inat_uri = obs.get("uri") or (f"https://www.inaturalist.org/observations/{inat_id}" if inat_id else None)
 
@@ -229,7 +224,7 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> No
             )
             .execute()
         )
-        return resp.data[0] if resp.data else None
+        return rows_of(resp)[0] if resp.data else None
 
     # The iNat observation is already created remotely at this point. If recording
     # it locally fails, isolate the error (count it, skip this burst's photos) rather

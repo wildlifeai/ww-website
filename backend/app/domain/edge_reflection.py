@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 import structlog
 
 from app.domain.label_map import target_observation_fields
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -85,7 +86,9 @@ def build_edge_observations(
     rows: list[dict] = []
     for label, raw_value in fields.items():
         entry = label_map.get(label)
-        observed = target_observation_fields(entry) if entry else None
+        if not entry:
+            continue
+        observed = target_observation_fields(entry)
         if observed is None:
             continue
         pct = _parse_pct(raw_value)
@@ -160,9 +163,9 @@ async def reflect_edge_deployment(deployment_id: str) -> int:
         reflected_media: set[str] = set()
         offset = 0
         while True:
-            page = (
+            page = rows_of(
                 svc.table("media").select("id, exif_metadata").eq("deployment_id", deployment_id).range(offset, offset + _MEDIA_PAGE - 1).execute()
-            ).data or []
+            )
             for m in page:
                 media_rows = build_edge_observations(m, deployment_id, model, timestamp)
                 if media_rows:

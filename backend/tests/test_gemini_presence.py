@@ -519,6 +519,14 @@ def test_presence_batch_times_out_when_job_never_finishes(monkeypatch):
         gp.presence_batch([[_jpeg()]], "batch", "gemini-3.1-flash-lite", poll_seconds=0, max_wait_seconds=-1, sleep=lambda s: None)
 
 
+def test_presence_batch_refuses_to_poll_a_job_without_a_name(monkeypatch):
+    # Polling used to call _batch_get(None) and fail inside the SDK with an unrelated error.
+    monkeypatch.setattr(gp, "_batch_create", lambda m, s, d: SimpleNamespace(name=None, state=SimpleNamespace(name="JOB_STATE_PENDING")))
+    monkeypatch.setattr(gp, "_batch_get", lambda n: pytest.fail("polled a job with no name"))
+    with pytest.raises(RuntimeError, match="without a name"):
+        gp.presence_batch([[_jpeg()]], "batch", "gemini-3.1-flash-lite", poll_seconds=0, sleep=lambda s: None)
+
+
 def test_is_enabled_follows_the_api_key(monkeypatch):
     from app.config import settings
 

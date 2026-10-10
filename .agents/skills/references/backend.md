@@ -86,10 +86,11 @@ ARQ GPU worker            (same process)
 Supabase api_jobs  ←──────────┘  (status mirrored either way)
 ```
 
-Where each runs, as of 2026-07:
+Where each runs, as of 2026-10:
 
 * **Cloud dev**, Redis + the ARQ GPU worker are **live** (`ww-embedding-worker-dev`, serverless T4).
-* **Production**, API-only; no worker, no Redis. AI does not run there yet.
+* **Production** (the staging tier), the same: `ww-redis` + `ww-embedding-worker` since 26 Jul 2026,
+  with the pipeline and Wildlife Brain flags on the worker.
 * **Local**, in-process by default; the ML deps only exist in the `dev` Docker image.
 
 Rules:

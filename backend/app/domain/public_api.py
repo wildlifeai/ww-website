@@ -16,7 +16,9 @@ The CamtrapDP export is ``domain/camtrapdp_export.py``, the same job as the Down
 from typing import Any, Dict, List, Optional
 
 import structlog
+from postgrest import CountMethod
 
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -72,14 +74,14 @@ async def list_deployments(
 ) -> tuple[List[Dict[str, Any]], int]:
     """The organisation's live deployments, newest first. Returns (records, total)."""
     client = create_service_client()
-    query = _in_org(client.table("deployments").select(_deployment_select(status), count="exact"), org_id).is_("deleted_at", "null")
+    query = _in_org(client.table("deployments").select(_deployment_select(status), count=CountMethod.exact), org_id).is_("deleted_at", "null")
     if project_id:
         query = query.eq("project_id", project_id)
     if status:
         query = query.eq("deployment_statuses.value", status)
 
     response = query.order("created_at", desc=True).order("id").range(offset, offset + limit - 1).execute()
-    records = [_flatten_deployment(row) for row in response.data or []]
+    records = [_flatten_deployment(row) for row in rows_of(response)]
     return records, response.count or 0
 
 
@@ -89,7 +91,7 @@ async def get_deployment(org_id: str, deployment_id: str) -> Optional[Dict[str, 
     response = (
         _in_org(client.table("deployments").select(_deployment_select(None)), org_id).eq("id", deployment_id).is_("deleted_at", "null").execute()
     )
-    return _flatten_deployment(response.data[0]) if response.data else None
+    return _flatten_deployment(rows_of(response)[0]) if response.data else None
 
 
 # ── Devices and telemetry ───────────────────────────────────────────
@@ -104,7 +106,7 @@ async def list_devices(
     client = create_service_client()
     response = (
         client.table("devices")
-        .select("*", count="exact")
+        .select("*", count=CountMethod.exact)
         .eq("organisation_id", org_id)
         .is_("deleted_at", "null")
         .order("created_at", desc=True)
@@ -112,7 +114,7 @@ async def list_devices(
         .range(offset, offset + limit - 1)
         .execute()
     )
-    return response.data or [], response.count or 0
+    return rows_of(response), response.count or 0
 
 
 async def get_telemetry(
@@ -142,7 +144,7 @@ async def get_telemetry(
 
     response = query.order("received_at", desc=True).order("id").limit(limit).execute()
     points = []
-    for row in response.data or []:
+    for row in rows_of(response):
         parsed = _one(row.get("lorawan_parsed_messages")) or {}
         points.append(
             {
@@ -251,7 +253,7 @@ async def list_observations(
     query = _in_org(
         client.table("media").select(
             f"id, deployment_id, timestamp, deployments!inner(project_id, {_PROJECT}), observations!inner({_OBSERVATION_COLUMNS})",
-            count="exact",
+            count=CountMethod.exact,
         ),
         org_id,
         deployments="deployments",
@@ -270,7 +272,7 @@ async def list_observations(
         .range(offset, offset + limit - 1)
         .execute()
     )
-    return [_verdict_record(m) for m in response.data or []], response.count or 0
+    return [_verdict_record(m) for m in rows_of(response)], response.count or 0
 
 
 # ── Export ──────────────────────────────────────────────────────────

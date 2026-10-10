@@ -61,6 +61,7 @@ COLUMNS = {
     "lorawan_parsed_messages": {"id", "lorawan_message_id", "device_id", "battery_level", "sd_card_used_capacity", "model_output"},
     "api_keys": {"id", "organisation_id", "name", "key_hash", "key_prefix", "scopes", "expires_at", "last_used_at", "revoked_at", "created_at"},
     "api_jobs": {"id", "status", "job_data", "created_at", "updated_at"},
+    "user_roles": {"id", "user_id", "role", "scope_type", "scope_id", "expires_at", "is_active", "deleted_at", "created_at"},
 }
 
 # (table, embed) -> (embedded table, column on table, column on embedded table, to-one)

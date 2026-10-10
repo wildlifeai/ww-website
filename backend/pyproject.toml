@@ -15,7 +15,7 @@ select = ["E", "F", "I", "W"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 
-# Type checking, advisory in CI for now (#225). How to run it: AGENTS.md, "Validate before committing".
+# Type checking, a blocking CI gate (#225). How to run it: AGENTS.md, "Validate before committing".
 # tests/ is left out: mocks and fixture dicts produce noise, and pytest exercises it anyway.
 # training/ is left out: it is its own image with its own requirements.txt (TensorFlow),
 # none of which is installed where this runs.

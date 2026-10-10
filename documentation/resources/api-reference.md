@@ -112,14 +112,14 @@ Reads every organisation with the service role, because RLS keeps these rows org
 ## Projects
 
 Prefix `/api/projects`. JWT required. **Reads go direct to Supabase** under RLS
-(`supabase.from('projects')`) — there is no `GET /api/projects`; this router covers only the writes
-that need service-role cascades or admin checks.
+(`supabase.from('projects')`) — there is no `GET /api/projects`; this router covers creation and
+the soft delete and its Undo.
 
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/projects` | JWT | Create a project in the caller's organisation — body `{ name, description? }` |
-| `DELETE /api/projects/{project_id}` | JWT · `project_admin` or `ww_admin` | Soft-delete, cascading to deployments → media → observations. The database decides: `soft_delete_project` runs as the caller and allows a `project_admin` of the project or `ww_admin`. Anyone else who can see the project, an organisation manager included, gets `403`; a project the caller cannot see is `404`. Returns the shared `deleted_at` so the client can offer Undo |
-| `POST /api/projects/{project_id}/restore` | JWT · `project_admin` or `ww_admin` | Undo that delete, body `{ deleted_at }`. Same rule, checked in the API because the database has no restore function (ww-backend #286). `403` for anyone else with a role reaching the project, `404` otherwise |
+| `DELETE /api/projects/{project_id}` | JWT · `project_admin` or `ww_admin` | Soft-delete, cascading to deployments → media → observations under one `deleted_at`. The database decides and cascades in one transaction: `soft_delete_project` runs as the caller and allows a `project_admin` of the project or `ww_admin`. Anyone else who can see the project, an organisation manager included, gets `403`; a project the caller cannot see is `404`. Returns the shared `deleted_at` so the client can offer Undo |
+| `POST /api/projects/{project_id}/restore` | JWT · `project_admin` or `ww_admin` | Undo that delete, body `{ deleted_at }` (with a time zone offset, `422` otherwise). `restore_project` runs as the caller under the same rule and clears exactly that `deleted_at` on the project and the rows deleted with it. Returns `{ id, restored }`, `restored` false when nothing was deleted at that time; `403` for anyone else, `404` for an unknown project, `409` with nothing restored when a camera in it has since got another open deployment (one per camera, ww-backend #320), naming the camera |
 
 ---
 
@@ -275,8 +275,8 @@ Deployment helpers used by the upload flow and Insights. JWT required. Prefix `/
 | `POST /api/deployments` | Create a deployment (+ placeholder device) in a project you can access — body `{ project_id, name?, id?, location_name?, latitude?, longitude?, deployment_start?, deployment_end? }`. Backs the "assign/create a deployment at upload" flow: pass the new id as `assigned_deployment_id` to `/api/exif/parse` to bind photos that carry no valid deployment ID. `id` (a UUID) creates the row under the id the camera stamped into the photos' EXIF, so the phone that configured the camera converges on it when it syncs; `400` if not a UUID, `409` if it already exists |
 | `PATCH /api/deployments/{deployment_id}/location` | Correct a deployment's location as the signed-in user (Insights > Deployments, Edit location). Body `{ location_name, location_description, latitude, longitude, altitude, accuracy }`, every field written, so `null` clears it; `timezone` is recomputed from the coordinates. Runs on the caller's client, so RLS decides: the creator while still a project member, or a project admin. `403` when RLS refuses (0 rows), `404` when the caller cannot see the deployment, `422` for an invalid body. Returns the stored location columns |
 | `POST /api/deployments/validate` | Resolve deployment ids to `valid` / `no_access` / `not_found` — the upload pre-check that drives the warning banners. Accepts full UUIDs (from EXIF `0xF200`) and 8-hex card-folder prefixes. Body `{ "deployment_ids": ["e10f7c43-…", "7785FABB", …] }` |
-| `DELETE /api/deployments/batch` | Soft-delete deployments and their media and observations, body `{ "deployment_ids": [...] }`. The database decides: each id goes through `soft_delete_deployment` as the caller, which allows the deployment's creator while a `project_member`, a `project_admin` of the project, or `ww_admin`. Returns `{ deleted_at, deployment_ids, refused_ids }`; ids the caller cannot see are skipped, and `403` when every visible id was refused. `deleted_at` is shared by the whole batch, for Undo |
-| `POST /api/deployments/batch/restore` | Undo that delete, body `{ deployment_ids, deleted_at }`. Same rule, checked in the API because the database has no restore function. Returns `{ restored, refused_ids }`, `403` when every id was refused |
+| `DELETE /api/deployments/batch` | Soft-delete deployments and their media and observations, body `{ "deployment_ids": [...] }`. The database decides and cascades: each id goes through `soft_delete_deployment` as the caller, which allows the deployment's creator while a `project_member`, a `project_admin` of the project, or `ww_admin`. Returns `{ deleted_at, deployment_ids, refused_ids }`; ids the caller cannot see are skipped, and `403` when every visible id was refused. `deleted_at` is shared by the whole batch, for Undo |
+| `POST /api/deployments/batch/restore` | Undo that delete, body `{ deployment_ids, deleted_at }` (with a time zone offset, `422` otherwise). Each id goes through `restore_deployment` as the caller under the same rule, which clears exactly that `deleted_at` on the deployment and its media and observations. Returns `{ restored, refused_ids }`; unknown ids and ids with nothing deleted at that time are not counted, and `403` when nothing was restored and something was refused. `409` naming the camera when an open deployment's camera has since got another open deployment (one per camera, ww-backend #320): that deployment stays deleted, the others are restored, and the detail says how many |
 | `POST /api/deployments/backfill-timezones` | System admins only (`403` otherwise, demo included). Derive `deployments.timezone` from GPS for rows missing it, across every organisation (idempotent) |
 
 ---
@@ -287,7 +287,7 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id` |
+| `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device of the importing organisation, reused by a re-import and never shared with another organisation. A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
 
 > An API key starts the same export with `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
 
@@ -307,7 +307,8 @@ and the Download CamtrapDP buttons then fall back to the Edge Function's metadat
 ## Wildlife Brain — Embeddings & Clustering
 
 DINOv3 embeddings → UMAP → HDBSCAN clustering → vector-store similarity, and the active-learning review
-queue. JWT required; gated by **`FF_WILDLIFE_BRAIN_ENABLED`** (returns `FEATURE_DISABLED` when off).
+queue. JWT required; gated by **`FF_WILDLIFE_BRAIN_ENABLED`**, on by default (#344). When it is off the
+router is not mounted, so every `/api/brain` path is a 404.
 Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE.md).
 
 > **Vector store:** these endpoints are backed by **`pgvector` in Supabase** (live since 2026-07-09) —
@@ -323,15 +324,15 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/brain/embed/{deployment_id}` | Embed + cluster a deployment (server mode enqueues a GPU job) |
+| `POST /api/brain/embed/{deployment_id}` | Embed + cluster a deployment (server mode enqueues a GPU job). A worker that can't embed (no ML stack, `HF_TOKEN` or GPU) fails the job with the reason and writes no run |
 | `GET /api/brain/clusters/{deployment_id}` | Clusters from the deployment's latest embedding run |
 | `POST /api/brain/clusters/multi` | Aggregate clusters across deployments — body `{ "deployment_ids": [...], "min_confidence": 0 }`; returns `clusters`, `media_clusters` (media→cluster map), `outlier_media_ids` |
 | `GET /api/brain/umap/{deployment_id}` | Persisted 2-D UMAP scatter coordinates |
 | `GET /api/brain/outliers/{deployment_id}` | HDBSCAN-rejected images (expert-review candidates) |
-| `GET /api/brain/similar/{media_id}` | Vector-store nearest-neighbour search (`?n=20&org_scoped=true`) |
+| `GET /api/brain/similar/{media_id}` | Nearest neighbours (`?n=20`, 1 to 100) among the photos of the anchor's organisation, in deployments the caller can read. `NOT_FOUND` envelope when the photo has no embedding |
 | `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | Confirm a cluster as a taxon → bulk-creates human observations for its members |
 | `GET /api/brain/embedding-runs/{deployment_id}` | List embedding runs (model version, status, image count) |
-| `POST /api/brain/reprocess/deployment/{deployment_id}` | Supersede current runs and re-embed a deployment |
+| `POST /api/brain/reprocess/deployment/{deployment_id}` | Supersede current runs and re-embed a deployment. The worker checks it can embed first, so a failed check leaves the current clusters in place |
 | `POST /api/brain/reprocess/project/{project_id}` | Reprocess every deployment in a project |
 | `POST /api/brain/reprocess/all` | Platform-wide re-embed — default dry-run returns a cost estimate; `confirm=true` executes |
 | `GET /api/brain/compare-runs` | Compare cluster assignments between two runs (`?run_a=&run_b=`) |

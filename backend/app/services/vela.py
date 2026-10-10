@@ -71,8 +71,12 @@ def compiled_sram_bytes(model_path: Path) -> Optional[int]:
 
     try:
         subgraph = Model.GetRootAs(bytearray(Path(model_path).read_bytes()), 0).Subgraphs(0)
+        if subgraph is None:
+            raise ValueError("no subgraph")
         for i in range(subgraph.TensorsLength()):
             tensor = subgraph.Tensors(i)
+            if tensor is None:
+                raise ValueError(f"tensor {i} is missing")
             name = (tensor.Name() or b"").decode(errors="replace")
             if name.endswith("scratch") and tensor.ShapeLength() == 1:
                 return int(tensor.Shape(0))

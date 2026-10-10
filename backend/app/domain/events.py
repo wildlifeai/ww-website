@@ -18,12 +18,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import structlog
+from postgrest import CountMethod
 
 from app.schemas.pipeline import (
     ClusterEventsResult,
     DeploymentEffortSummary,
     ObservationEventSummary,
 )
+from app.services.db_utils import row_of, rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -111,7 +113,7 @@ def _build_event_row(
     best = max(cluster, key=lambda o: o.get("confidence") or 0.0)
     primary_media = best.get("media_id")
     avg_confidence = None
-    confidences = [o.get("confidence") for o in cluster if o.get("confidence") is not None]
+    confidences = [c for o in cluster if (c := o.get("confidence")) is not None]
     if confidences:
         avg_confidence = sum(confidences) / len(confidences)
 
@@ -166,7 +168,7 @@ async def cluster_deployment_events(
             .order("created_at")
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     raw_obs = await asyncio.to_thread(_fetch)
 
@@ -297,7 +299,7 @@ async def compute_deployment_effort(
     def _compute():
         # Fetch deployment dates
         dep = svc.table("deployments").select("deployment_start, deployment_end").eq("id", deployment_id).single().execute()
-        dep_data = dep.data or {}
+        dep_data = row_of(dep) or {}
 
         start_str = dep_data.get("deployment_start")
         end_str = dep_data.get("deployment_end")
@@ -317,17 +319,17 @@ async def compute_deployment_effort(
         # Count events
         events_resp = (
             svc.table("observation_events")
-            .select("id, trigger_type", count="exact")
+            .select("id, trigger_type", count=CountMethod.exact)
             .eq("deployment_id", deployment_id)
             .is_("deleted_at", "null")
             .execute()
         )
         total_events = events_resp.count or 0
-        false_triggers = sum(1 for e in (events_resp.data or []) if e.get("trigger_type") in ("wind", "rain", "lighting", "vegetation"))
+        false_triggers = sum(1 for e in rows_of(events_resp) if e.get("trigger_type") in ("wind", "rain", "lighting", "vegetation"))
         false_rate = false_triggers / total_events if total_events > 0 else 0.0
 
         # Count media
-        media_resp = svc.table("media").select("id", count="exact").eq("deployment_id", deployment_id).execute()
+        media_resp = svc.table("media").select("id", count=CountMethod.exact).eq("deployment_id", deployment_id).execute()
         total_media = media_resp.count or 0
 
         # Upsert effort row
