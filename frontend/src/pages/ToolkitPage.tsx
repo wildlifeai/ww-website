@@ -4,14 +4,14 @@
 // ToolkitPage — /toolkit
 // Occasional, task-flavoured tools, grouped: Camera prep · AI models ·
 // Integrations · Exports. (Monitoring lives in Field; configuration in Settings.)
-import { useState } from 'react'
 import { Wrench } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { apiClient } from '../lib/apiClient'
-import { supabase } from '../config/supabase'
+import { useCamtrapExport } from '../hooks/useCamtrapExport'
+import { CamtrapExportStatus } from '../components/data/CamtrapExportStatus'
 import { INaturalistPanel } from '../components/toolkit/INaturalistPanel'
 
 function Section({ icon, title, description, children, comingSoon = false }: {
@@ -61,9 +61,7 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
 export function ToolkitPage() {
   const { user } = useAuth()
   const { selectedProjectIds } = useProjectSelection()
-  const [isExporting, setIsExporting] = useState(false)
-  const [exportError, setExportError] = useState<string | null>(null)
-  const [exportSuccess, setExportSuccess] = useState(false)
+  const camtrapExport = useCamtrapExport()
 
   const { data: managedOrgs } = useQuery({
     queryKey: ['managedOrgs', user?.id],
@@ -75,29 +73,6 @@ export function ToolkitPage() {
     enabled: !!user,
   })
   const isOrgManager = managedOrgs && managedOrgs.length > 0
-
-  const downloadCamtrapDP = async () => {
-    if (selectedProjectIds.length !== 1) return
-    setIsExporting(true); setExportError(null); setExportSuccess(false)
-    try {
-      const { data, error: fnErr } = await supabase.functions.invoke('export-camtrap-dp', {
-        body: { project_id: selectedProjectIds[0] },
-      })
-      if (fnErr) throw new Error(fnErr.message)
-      const blob = data instanceof Blob ? data : new Blob([data], { type: 'application/zip' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `camtrapdp-${selectedProjectIds[0]}-${new Date().toISOString().slice(0, 10)}.zip`
-      a.click()
-      URL.revokeObjectURL(url)
-      setExportSuccess(true)
-    } catch (err: unknown) {
-      setExportError(err instanceof Error ? err.message : 'Export failed')
-    } finally {
-      setIsExporting(false)
-    }
-  }
 
   const canExport = selectedProjectIds.length === 1
 
@@ -162,17 +137,16 @@ export function ToolkitPage() {
                 Select exactly one project from the Projects selector at the top of the screen to enable export.
               </p>
             )}
-            {exportError && <p style={{ fontSize: '0.8125rem', color: 'var(--error)', margin: 0 }}>⚠ {exportError}</p>}
-            {exportSuccess && <p style={{ fontSize: '0.8125rem', color: 'var(--success)', margin: 0 }}>✓ Download started.</p>}
+            <CamtrapExportStatus state={camtrapExport} />
             <button
               id="download-camtrapdp-btn"
               className="btn"
-              onClick={downloadCamtrapDP}
-              disabled={!canExport || isExporting}
+              onClick={() => camtrapExport.start(selectedProjectIds)}
+              disabled={!canExport || camtrapExport.running}
               style={{ opacity: !canExport ? 0.45 : 1, width: 'fit-content' }}
               title={!canExport ? 'Select exactly one project first' : undefined}
             >
-              {isExporting ? '⏳ Exporting…' : '📦 Download CamtrapDP'}
+              {camtrapExport.running ? '⏳ Exporting…' : '📦 Download CamtrapDP'}
             </button>
           </Section>
 

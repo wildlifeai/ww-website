@@ -27,6 +27,7 @@ from app.routers import (
     clustering,
     deployments,
     exif,
+    exports,
     inaturalist,
     intelligence,
     jobs,
@@ -154,6 +155,7 @@ app.include_router(deployments.router)
 app.include_router(projects.router)
 app.include_router(exif.router)
 app.include_router(manifest.router)
+app.include_router(exports.router)
 app.include_router(models.router)
 app.include_router(media.router)
 app.include_router(public_api.router)

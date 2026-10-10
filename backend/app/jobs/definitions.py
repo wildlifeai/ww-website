@@ -595,6 +595,94 @@ async def export_camtrapdp_job(job_id: str, org_id: str, params: dict):
         raise
 
 
+async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: dict):
+    """CamtrapDP package with the original photos (#328), saved privately behind a signed link.
+
+    ``selection`` is an ``ExportSelection`` and ``caller`` an ``ExportCaller`` as dicts: a user's
+    token for the Download buttons, or an organisation id for an API key (#327). The work is in
+    ``domain/camtrapdp_export.py``. The ZIP is built in a temporary directory removed at the end.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from app.config import settings
+    from app.domain import camtrapdp_export as export
+
+    logger.info("job_start", job_type="export_camtrapdp_originals", job_id=job_id)
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.02, message="Reading the project's records…")
+    sel = export.ExportSelection(**selection)
+    last_write = 0.0
+
+    async def on_message(msg: str, progress: float) -> None:
+        await update_job(job_id, progress=progress, message=msg)
+
+    async def on_progress(done: int, total: int, failed: int) -> None:
+        nonlocal last_write
+        if done < total and time.monotonic() - last_write < 2.0:
+            return
+        last_write = time.monotonic()
+        tail = f", {failed} could not be read" if failed else ""
+        await update_job(job_id, progress=0.1 + 0.8 * done / max(total, 1), message=f"Added {done - failed} of {total} photos{tail}…")
+
+    try:
+        async with job_heartbeat(job_id):
+            with tempfile.TemporaryDirectory(prefix="camtrapdp-") as tmp:
+                zip_path, result = await export.build_export(
+                    sel,
+                    export.ExportCaller(**caller),
+                    Path(tmp),
+                    max_bytes=settings.CAMTRAPDP_EXPORT_MAX_BYTES,
+                    on_message=on_message,
+                    on_progress=on_progress,
+                )
+                await update_job(job_id, progress=0.92, message="Saving the export…")
+                filename = export.export_filename(sel.project_id)
+                url = await export.store_export(zip_path, job_id, filename, settings.CAMTRAPDP_EXPORT_BUCKET)
+    except export.ExportError as e:
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+        logger.warning("job_failed", job_type="export_camtrapdp_originals", job_id=job_id, error=str(e))
+        return
+    except Exception as e:
+        await update_job(job_id, status=JobStatus.FAILED, error="The export failed. Try again later.")
+        logger.error("job_failed", job_type="export_camtrapdp_originals", job_id=job_id, error=str(e))
+        return
+
+    missing = len(result.missing)
+    msg = f"{result.written} of {result.photos} photos in the package"
+    if missing:
+        msg += f". {missing} could not be read and are named in its description"
+    await update_job(
+        job_id,
+        status=JobStatus.COMPLETED_WITH_ERRORS if missing else JobStatus.COMPLETED,
+        progress=1.0,
+        result_url=url,
+        message=msg + ". The link works for 24 hours.",
+    )
+    logger.info("job_complete", job_type="export_camtrapdp_originals", job_id=job_id, photos=result.photos, missing=missing, bytes=result.photo_bytes)
+    await _notify_export_ready(job_id, sel.project_id, msg)
+
+
+async def _notify_export_ready(job_id: str, project_id: str, body: str) -> None:
+    """In-app notification for the export's owner, pointing at Processing history (best-effort)."""
+    job = await get_job(job_id)
+    if not job or not job.user_id:
+        return  # an organisation API key's export has no user to tell
+    from app.services.supabase_client import create_service_client
+
+    row = {
+        "user_id": job.user_id,
+        "project_id": project_id,
+        "type": "system",
+        "title": "Your CamtrapDP export is ready",
+        "body": body + ". Download it from Processing history within 24 hours.",
+        "data": {"job_id": job_id, "link": "/processing"},
+    }
+    try:
+        await asyncio.to_thread(lambda: create_service_client().table("notifications").insert(row).execute())
+    except Exception as exc:  # noqa: BLE001 - the link is on the job either way
+        logger.warning("export_notification_skipped", job_id=job_id, error=str(exc))
+
+
 async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, org_id: str, custom_name: str = "", custom_desc: str = ""):
     """Download, convert, and register an SSCMA pretrained model."""
     logger.info("job_start", job_type="download_pretrained", job_id=job_id)
@@ -1800,6 +1888,7 @@ JOBS = [
     train_species_brain_job,
     generate_manifest_job,
     export_camtrapdp_job,
+    export_camtrapdp_originals_job,
     download_pretrained_job,
     download_github_pretrained_job,
     upload_drive_images_job,

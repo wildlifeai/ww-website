@@ -445,6 +445,57 @@
         "title": "CamtrapDPExportRequest",
         "type": "object"
       },
+      "CamtrapExportRequest": {
+        "description": "One project, narrowed as ww-backend's export-camtrap-dp narrows it.",
+        "properties": {
+          "date_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Deployments that started at or after this time",
+            "title": "Date From"
+          },
+          "date_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Deployments that started at or before this time",
+            "title": "Date To"
+          },
+          "deployment_ids": {
+            "description": "Only these deployments of the project",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Deployment Ids",
+            "type": "array"
+          },
+          "project_id": {
+            "format": "uuid",
+            "title": "Project Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "title": "CamtrapExportRequest",
+        "type": "object"
+      },
       "CreateDeploymentRequest": {
         "properties": {
           "deployment_end": {
@@ -1829,6 +1880,57 @@
         "summary": "Parse Exif",
         "tags": [
           "exif"
+        ]
+      }
+    },
+    "/api/exports/camtrapdp": {
+      "post": {
+        "description": "Start a CamtrapDP export of one project with its original photos.\n\nThe job calls ww-backend's export-camtrap-dp as the caller, so its project-membership\ncheck decides. The 404 here only saves a job for a project in another organisation.",
+        "operationId": "start_camtrapdp_export_api_exports_camtrapdp_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CamtrapExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Camtrapdp Export",
+        "tags": [
+          "exports"
         ]
       }
     },

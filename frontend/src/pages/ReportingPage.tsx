@@ -5,6 +5,8 @@ import { VegaChart } from '../components/ui/VegaChart'
 import { VEGA_CONFIG } from '../lib/vegaSpec'
 import { supabase } from '../config/supabase'
 import { fetchLiveObservations } from '../lib/liveObservations'
+import { useCamtrapExport } from '../hooks/useCamtrapExport'
+import { CamtrapExportStatus } from '../components/data/CamtrapExportStatus'
 import { useAuth } from '../hooks/useAuth'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -388,35 +390,27 @@ function ExportsTab({ deploymentId }: { deploymentId: string }) {
   const [toast, setToast] = useState<string | null>(null)
   const [logs, setLogs] = useState<Array<{ id: string; format: string; created_at: string }>>([])
 
+  const camtrapExport = useCamtrapExport()
+  const { start: startCamtrap } = camtrapExport
+
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000) }
 
   const trigger = useCallback(async (card: ExportCard) => {
+    if (card.real) {
+      // The whole project, as before; progress and errors show in CamtrapExportStatus.
+      const { data: dep } = await supabase.from('deployments').select('project_id').eq('id', deploymentId).single()
+      if (dep) await startCamtrap([dep.project_id])
+      else showToast('Export failed: Deployment not found')
+      return
+    }
     setBusy(card.id)
     try {
-      if (card.real) {
-        const { data: dep } = await supabase
-          .from('deployments')
-          .select('project_id')
-          .eq('id', deploymentId)
-          .single()
-        if (!dep) throw new Error('Deployment not found')
-        const { data, error } = await supabase.functions.invoke('export-camtrap-dp', {
-          body: { project_id: dep.project_id },
-        })
-        if (error) throw new Error(error.message)
-        const blob = data instanceof Blob ? data : new Blob([data], { type: 'application/zip' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url
-        a.download = `camtrapdp-${dep.project_id}-${toIso(new Date())}.zip`
-        a.click(); URL.revokeObjectURL(url)
-      } else {
-        const content = `deployment_id,format\n${deploymentId},${card.format}`
-        const blob = new Blob([content], { type: 'text/plain' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url
-        a.download = `${card.id}-${deploymentId}.${card.ext}`
-        a.click(); URL.revokeObjectURL(url)
-      }
+      const content = `deployment_id,format\n${deploymentId},${card.format}`
+      const blob = new Blob([content], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url
+      a.download = `${card.id}-${deploymentId}.${card.ext}`
+      a.click(); URL.revokeObjectURL(url)
       const entry = { id: `exp-${Date.now()}`, format: card.format, created_at: new Date().toISOString() }
       setLogs((prev) => [entry, ...prev.slice(0, 9)])
       showToast(`${card.format} downloaded`)
@@ -425,7 +419,7 @@ function ExportsTab({ deploymentId }: { deploymentId: string }) {
     } finally {
       setBusy(null)
     }
-  }, [deploymentId])
+  }, [deploymentId, startCamtrap])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -436,7 +430,7 @@ function ExportsTab({ deploymentId }: { deploymentId: string }) {
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
         {EXPORT_CARDS.map((card) => {
-          const isBusy = busy === card.id
+          const isBusy = busy === card.id || (!!card.real && camtrapExport.running)
           return (
             <div
               key={card.id}
@@ -468,6 +462,7 @@ function ExportsTab({ deploymentId }: { deploymentId: string }) {
           )
         })}
       </div>
+      <CamtrapExportStatus state={camtrapExport} />
       {logs.length > 0 && (
         <div className="glass-card" style={{ padding: '1.25rem' }}>
           <h4 style={{ marginTop: 0, marginBottom: '0.75rem', fontSize: '0.875rem' }}>Recent downloads</h4>
