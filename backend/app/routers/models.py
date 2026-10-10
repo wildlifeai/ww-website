@@ -239,12 +239,16 @@ async def put_label_map(
     """Save a model's ``label_map`` once it passes LM-10, and return it as the GET does.
 
     A map that breaks LM-10 is a 422 whose ``detail.problems`` is ``{label: problem}``;
-    nothing is written. The write runs on the caller's client, so RLS decides who may
-    edit: a refusal is 403, a model the caller cannot see is 404.
+    nothing is written. A map the database's own LM-10 CHECK refuses is the same 422
+    with the database's message and empty ``problems``. The write runs on the caller's
+    client, so RLS decides who may edit: a refusal is 403, a model the caller cannot
+    see is 404.
     """
     outcome, data = await asyncio.to_thread(save_model_label_map, user_client, str(model_id), body.label_map, user.id)
     if outcome == "invalid":
         raise HTTPException(422, detail={"message": "The label map breaks LM-10; nothing was saved.", "problems": data})
+    if outcome == "refused":
+        raise HTTPException(422, detail={"message": f"The database refused the label map; nothing was saved. {data}", "problems": {}})
     if outcome == "not_found":
         raise HTTPException(404, detail="Model not found")
     if outcome == "forbidden":

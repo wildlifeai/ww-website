@@ -284,8 +284,10 @@ The rules live in `backend/app/domain/label_map.py`. LM-10 is reported by
 which `ModelLabelMapper` saves through: a map with a behaviour class, an unnamed taxon class or a
 type class without `animal`, `human` or `vehicle` is refused, and the mapper shows the problem
 under each label ([#324](https://github.com/wildlifeai/ww-website/issues/324)). It also holds for
-every map the training job writes. The database has no check of its own, so an organisation
-manager writing `label_map` straight through PostgREST still bypasses it.
+every map the training job writes. The database enforces the same rules with the
+`ai_models_label_map_lm10` CHECK (`public.label_map_problems`,
+[ww-backend#292](https://github.com/wildlifeai/ww-backend/issues/292)), so a write
+straight through PostgREST is refused too; the two copies change together.
 
 ---
 

@@ -9,12 +9,17 @@ import { ApiError, apiClient } from './apiClient'
 /** LM-10 problems keyed by the label they belong to. */
 export type LabelProblems = Record<string, string>
 
-/** The per-label problems in a refused save, or null when the error is something else. */
+/**
+ * The per-label problems in a refused save, or null when the error is something else. A
+ * refusal from the database's own LM-10 CHECK names no label, so it is null too and its
+ * message is shown instead.
+ */
 export function labelMapProblems(err: unknown): LabelProblems | null {
   if (!(err instanceof ApiError)) return null
   const problems = (err.detail as { problems?: unknown } | undefined)?.problems
   if (!problems || typeof problems !== 'object' || Array.isArray(problems)) return null
-  return Object.fromEntries(Object.entries(problems).filter(([, v]) => typeof v === 'string')) as LabelProblems
+  const byLabel = Object.entries(problems).filter(([, v]) => typeof v === 'string')
+  return byLabel.length ? (Object.fromEntries(byLabel) as LabelProblems) : null
 }
 
 /** Save the whole map. Null when saved, the problems when LM-10 refused it; other errors throw. */

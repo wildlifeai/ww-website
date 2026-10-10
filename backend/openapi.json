@@ -3580,7 +3580,7 @@
         ]
       },
       "put": {
-        "description": "Save a model's ``label_map`` once it passes LM-10, and return it as the GET does.\n\nA map that breaks LM-10 is a 422 whose ``detail.problems`` is ``{label: problem}``;\nnothing is written. The write runs on the caller's client, so RLS decides who may\nedit: a refusal is 403, a model the caller cannot see is 404.",
+        "description": "Save a model's ``label_map`` once it passes LM-10, and return it as the GET does.\n\nA map that breaks LM-10 is a 422 whose ``detail.problems`` is ``{label: problem}``;\nnothing is written. A map the database's own LM-10 CHECK refuses is the same 422\nwith the database's message and empty ``problems``. The write runs on the caller's\nclient, so RLS decides who may edit: a refusal is 403, a model the caller cannot\nsee is 404.",
         "operationId": "put_label_map_api_models__model_id__label_map_put",
         "parameters": [
           {

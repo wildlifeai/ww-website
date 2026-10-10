@@ -66,6 +66,20 @@ def test_lm10_rejects_targets_that_do_not_resolve(entry, fragment):
     assert problem is not None and fragment in problem
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"role": "target", "predicts": "\u00a0type", "observation_type": "human"},
+        {"role": "target", "predicts": "type", "observation_type": "\u2003human"},
+    ],
+)
+def test_lm10_strips_only_what_the_database_strips(entry):
+    # public.label_map_problems btrims ASCII whitespace only; a bare str.strip() would
+    # accept these and the ai_models_label_map_lm10 CHECK would refuse them.
+    assert entry_problem("c", entry) is not None
+    assert entry_problem("c", {**entry, "predicts": " Type\t", "observation_type": "human\n"}) is None
+
+
 def test_label_map_problems_lists_one_message_per_bad_class():
     label_map = {
         "rat": {"role": "target", "predicts": "taxon", "taxon_id": RAT_ID},
@@ -297,6 +311,33 @@ def test_put_label_map_rejects_each_lm10_failure_and_writes_nothing(client, as_u
     problems = res.json()["detail"]["problems"]
     assert list(problems) == ["bad"] and fragment in problems["bad"]
     table.update.assert_not_called()
+
+
+def test_put_label_map_is_422_when_the_database_check_refuses_it(client, as_user):
+    from postgrest.exceptions import APIError
+
+    db_message = 'new row for relation "ai_models" violates check constraint "ai_models_label_map_lm10"'
+    user_client, table = _writing_client()
+    table.execute.side_effect = APIError({"code": "23514", "message": db_message})
+    as_user(user_client)
+
+    res = _put(client, VALID_MAP)
+
+    assert res.status_code == 422
+    detail = res.json()["detail"]
+    assert detail["problems"] == {}
+    assert "nothing was saved" in detail["message"] and db_message in detail["message"]
+
+
+def test_save_label_map_reraises_other_database_errors():
+    from postgrest.exceptions import APIError
+
+    from app.domain.label_map import save_model_label_map
+
+    user_client, table = _writing_client()
+    table.execute.side_effect = APIError({"code": "XX000", "message": "boom"})
+    with pytest.raises(APIError):
+        save_model_label_map(user_client, MODEL_ID, VALID_MAP, "u1")
 
 
 def test_put_label_map_is_403_when_rls_refuses_the_write(client, as_user):

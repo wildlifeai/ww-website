@@ -146,6 +146,10 @@ Built (website only, no schema change, `predicts` lives inside `label_map`):
 (`edge_reflection.py:97` no longer hardcodes `animal`), `ModelLabelMapper` offering a type, and
 `GET /api/models/{model_id}/label-map`. The rules and the default for maps saved before
 `predicts` are in [what a class predicts](../resources/ai-model-pipeline.md#what-a-class-predicts-lm-10).
+The write gate followed: `ModelLabelMapper` saves through `PUT /api/models/{model_id}/label-map`
+([#324](https://github.com/wildlifeai/ww-website/issues/324)), and the database refuses any other
+write that breaks LM-10 with its own CHECK
+([ww-backend#292](https://github.com/wildlifeai/ww-backend/issues/292)).
 
 Also decided (9 Oct 2026): a class's `predicts` is set per class, so one model can mix a taxon
 and a type; a Camera AI `human` or `vehicle` row does not count as presence in evidence fusion
@@ -157,7 +161,3 @@ Still open:
 - LM-10 accepts a taxon class with only a `scientific_name`, because `Rat Detection` and
   every trained model can carry `taxon_id: null`. Requiring a `taxa.id` is what makes the GBIF
   keys reachable; deferred until those models carry one.
-- Server-side write gate: built in [#324](https://github.com/wildlifeai/ww-website/issues/324),
-  `ModelLabelMapper` saves through `PUT /api/models/{model_id}/label-map`, which enforces LM-10.
-  A direct PostgREST write by an organisation manager still bypasses it; closing that needs a
-  database check in ww-backend.

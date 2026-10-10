@@ -35,6 +35,11 @@ describe('saveLabelMap', () => {
     expect(await saveLabelMap('m1', MAP)).toEqual({ grooming: "LM-10: class 'grooming' predicts behaviour" })
   })
 
+  it('throws a database refusal that names no label with its message', async () => {
+    respond(422, { detail: { message: 'The database refused the label map; nothing was saved. violates check constraint', problems: {} } })
+    await expect(saveLabelMap('m1', MAP)).rejects.toThrow(/database refused/)
+  })
+
   it('throws any other refusal with its message', async () => {
     respond(403, { detail: "Only a manager of the model's organisation can change its label map." })
     await expect(saveLabelMap('m1', MAP)).rejects.toThrow(/Only a manager/)
@@ -46,6 +51,7 @@ describe('labelMapProblems', () => {
     expect(labelMapProblems(new ApiError('UNKNOWN', 'x', false, { problems: { a: 'bad', b: 3 } }))).toEqual({ a: 'bad' })
     expect(labelMapProblems(new ApiError('UNKNOWN', 'x'))).toBeNull()
     expect(labelMapProblems(new ApiError('UNKNOWN', 'x', false, { problems: ['a'] }))).toBeNull()
+    expect(labelMapProblems(new ApiError('UNKNOWN', 'x', false, { problems: {} }))).toBeNull()
     expect(labelMapProblems(new Error('x'))).toBeNull()
   })
 })

@@ -48,10 +48,16 @@ _NOT_A_PREDICTION = ("blank", "unknown")
 _BEHAVIOUR = ("behavior", "behaviour")
 
 
-def _text(value: Any) -> str | None:
-    """A stripped non-empty string, else ``None``."""
-    if isinstance(value, str) and value.strip():
-        return value.strip()
+# What ``public.label_map_problems`` (ww-backend, the ``ai_models_label_map_lm10`` CHECK)
+# strips with btrim. A bare ``str.strip()`` also strips Unicode spaces such as U+00A0,
+# so it would accept a ``predicts`` or ``observation_type`` that the database refuses.
+_DB_WHITESPACE = " \t\n\r\f\v"
+
+
+def _text(value: Any, chars: str | None = None) -> str | None:
+    """A non-empty string stripped of ``chars`` (any whitespace by default), else ``None``."""
+    if isinstance(value, str) and value.strip(chars):
+        return value.strip(chars)
     return None
 
 
@@ -60,7 +66,7 @@ def entry_predicts(entry: dict) -> str | None:
     raw = entry.get("predicts")
     if raw is None:
         return DEFAULT_PREDICTS
-    return raw.strip().lower() if isinstance(raw, str) else None
+    return raw.strip(_DB_WHITESPACE).lower() if isinstance(raw, str) else None
 
 
 def entry_problem(label: str, entry: Any) -> str | None:
@@ -84,7 +90,7 @@ def entry_problem(label: str, entry: Any) -> str | None:
             return None
         return f"LM-10: class '{label}' predicts a taxon but names none; map it to a species or mark it background"
     if predicts == PREDICTS_TYPE:
-        obs_type = _text(entry.get("observation_type"))
+        obs_type = _text(entry.get("observation_type"), _DB_WHITESPACE)
         if obs_type in TARGET_OBSERVATION_TYPES:
             return None
         allowed = ", ".join(TARGET_OBSERVATION_TYPES)
@@ -120,7 +126,7 @@ def target_observation_fields(entry: Any) -> dict | None:
         return None
     predicts = entry_predicts(entry)
     if predicts == PREDICTS_TYPE:
-        obs_type = _text(entry.get("observation_type"))
+        obs_type = _text(entry.get("observation_type"), _DB_WHITESPACE)
         if obs_type not in TARGET_OBSERVATION_TYPES:
             return None
         # A type says what kind of thing is there, never which species: a person
@@ -189,24 +195,39 @@ def fetch_model_label_map(client, model_id: str) -> dict | None:
 
 # ── Write (PUT /api/models/{model_id}/label-map) ─────────────────────
 
-SaveOutcome = Literal["saved", "invalid", "forbidden", "not_found"]
+SaveOutcome = Literal["saved", "invalid", "refused", "forbidden", "not_found"]
+
+# check_violation: the database's own LM-10 (``ai_models_label_map_lm10``) or another CHECK.
+_CHECK_VIOLATION = "23514"
 
 
 def save_model_label_map(client, model_id: str, label_map: dict, user_id: str) -> tuple[SaveOutcome, Any]:
     """Write ``label_map`` as the caller once it passes LM-10.
 
-    ``invalid`` carries ``{label: problem}`` and nothing is written. ``saved``
-    carries ``describe_label_map`` of the stored row. Pass the caller's own client
-    (``get_user_client``) so RLS decides who may edit: 0 rows updated is
-    ``forbidden`` when the caller can still read the model and ``not_found`` when
-    they cannot see it at all.
+    ``invalid`` carries ``{label: problem}`` and nothing is written. ``refused``
+    carries the database's message when a CHECK refuses a map that passed here, so
+    a drift between this LM-10 and ``public.label_map_problems`` is a refusal, not
+    a crash. ``saved`` carries ``describe_label_map`` of the stored row. Pass the
+    caller's own client (``get_user_client``) so RLS decides who may edit: 0 rows
+    updated is ``forbidden`` when the caller can still read the model and
+    ``not_found`` when they cannot see it at all.
     """
     problems = label_map_problems_by_label(label_map)
     if problems:
         return "invalid", problems
-    rows = (
-        client.table("ai_models").update({"label_map": label_map, "modified_by": user_id}).eq("id", model_id).is_("deleted_at", "null").execute().data
-    )
+    try:
+        rows = (
+            client.table("ai_models")
+            .update({"label_map": label_map, "modified_by": user_id})
+            .eq("id", model_id)
+            .is_("deleted_at", "null")
+            .execute()
+            .data
+        )
+    except Exception as exc:
+        if getattr(exc, "code", None) != _CHECK_VIOLATION:
+            raise
+        return "refused", getattr(exc, "message", None) or str(exc)
     if rows:
         return "saved", describe_label_map(rows[0])
     visible = client.table("ai_models").select("id").eq("id", model_id).is_("deleted_at", "null").limit(1).execute().data
