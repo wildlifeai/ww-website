@@ -1223,6 +1223,49 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/devices": {
+      "get": {
+        "description": "Every live device with its organisation and latest live deployment (read-only, #343).\n\nSystem admins only (``403`` otherwise): devices stay organisation-scoped under RLS\n(ww-backend#313), so this is the one place a ``ww_admin`` sees them all.",
+        "operationId": "admin_list_devices_api_admin_devices_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin List Devices",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/auth/demo-session": {
       "post": {
         "description": "Mint a session for the shared demo account.\n\nUnauthenticated by design \u2014 this is the \"Try the demo\" button. The\nendpoint self-disables when DEMO_EMAIL/DEMO_PASSWORD are not configured.",

@@ -20,6 +20,7 @@ from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import limiter
 from app.middleware.request_id import RequestIDMiddleware
 from app.routers import (
+    admin,
     auth,
     brain,
     camtrapdp,
@@ -147,6 +148,7 @@ async def unhandled_exception_handler(request, exc):
 
 # ── Routers ──────────────────────────────────────────────────────────
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(jobs.router)
 app.include_router(deployments.router)
 app.include_router(projects.router)

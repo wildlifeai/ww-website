@@ -11,6 +11,7 @@ import { useNotifications, type AppNotification } from './hooks/useNotifications
 import { InatAutoSync } from './components/settings/InatAutoSync'
 import { useIsAdmin } from './hooks/useIsAdmin'
 import { AdminUsagePage } from './pages/AdminUsagePage'
+import { AdminDevicesPage } from './pages/AdminDevicesPage'
 import { UploadQuotaBanner } from './components/UploadQuotaBanner'
 import { InvitationsBanner } from './components/InvitationsBanner'
 import { HomePage } from './pages/HomePage'
@@ -217,6 +218,17 @@ function AccountMenu({ email, isOrgManager, isAdmin, onLogout, unreadCount, rece
               onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
             >
               📊 User usage
+            </Link>
+          )}
+          {isAdmin && (
+            <Link
+              to="/admin/devices"
+              onClick={() => setOpen(false)}
+              style={itemStyle}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(76,175,80,0.07)')}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
+            >
+              📡 Devices
             </Link>
           )}
           {isOrgManager && (
@@ -501,6 +513,7 @@ export default function App() {
               <Route path="/toolkit"     element={<RequireAuth><ToolkitPage /></RequireAuth>} />
               <Route path="/field"       element={<RequireAuth><FieldPage /></RequireAuth>} />
               <Route path="/admin/usage" element={<RequireAuth><AdminUsagePage /></RequireAuth>} />
+              <Route path="/admin/devices" element={<RequireAuth><AdminDevicesPage /></RequireAuth>} />
               <Route path="/annotations" element={<RequireAuth><AnnotationsPage /></RequireAuth>} />
               <Route path="/insights"    element={<RequireAuth><InsightsPage /></RequireAuth>} />
 
