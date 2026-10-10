@@ -15,6 +15,7 @@ import type { AnnotationStatus } from '../ui/StatusBadge'
 import { Modal } from '../ui/Modal'
 import { isHumanReviewed, isAiLabel, humanCreateFields, photoVerdict } from '../../lib/observations'
 import { apiClient } from '../../lib/apiClient'
+import { mediaDeleteOutcome, type MediaDeleteResponse } from '../../lib/mediaDelete'
 import { showUndoToast } from '../common/undoToastBus'
 import { BulkLabelModal } from './BulkLabelModal'
 import { type SpeciesSelection } from './SpeciesPicker'
@@ -414,17 +415,20 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   }, [inat.connected, connectInat, selectedIds])
 
   const handleBatchDelete = useCallback(async (ids: string[]) => {
+    const res = await apiClient.del('/api/media/batch', { media_ids: ids }) as { data?: MediaDeleteResponse }
+    const { deletedIds, deletedAt, message } = mediaDeleteOutcome(ids, res?.data)
+    // Nothing deleted: throw so the confirm modal stays open and shows why.
+    if (deletedIds.length === 0) throw new Error(message)
+    const gone = new Set(deletedIds)
     // Capture the rows so Undo can re-insert them without a full refetch.
-    const removed = media.filter(m => ids.includes(m.id))
-    const res = await apiClient.del('/api/media/batch', { media_ids: ids }) as { data?: { deleted_at?: string } }
-    const deletedAt = res?.data?.deleted_at
-    setMedia(prev => prev.filter(m => !ids.includes(m.id)))
+    const removed = media.filter(m => gone.has(m.id))
+    setMedia(prev => prev.filter(m => !gone.has(m.id)))
     setSelectedIds(new Set())
     if (deletedAt) {
       showUndoToast({
-        message: `Deleted ${ids.length} photo${ids.length !== 1 ? 's' : ''}`,
+        message,
         onUndo: async () => {
-          await apiClient.post('/api/media/batch/restore', { media_ids: ids, deleted_at: deletedAt })
+          await apiClient.post('/api/media/batch/restore', { media_ids: deletedIds, deleted_at: deletedAt })
           setMedia(prev => {
             const have = new Set(prev.map(m => m.id))
             return [...removed.filter(m => !have.has(m.id)), ...prev]
