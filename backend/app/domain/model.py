@@ -246,7 +246,7 @@ async def resolve_or_create_model_family(
     client,
     org_id: str,
     model_name: str,
-    firmware_model_id: int = None,
+    firmware_model_id: Optional[int] = None,
 ) -> Tuple[str, int]:
     """Resolve an existing AI model family or create a new one.
 
@@ -473,7 +473,7 @@ async def upload_and_register(
     labels: List[str],
     org_id: str,
     user_id: str,
-    firmware_model_id: int = None,
+    firmware_model_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Upload TFL and TXT to Supabase Storage and register in DB.
 

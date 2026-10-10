@@ -14,3 +14,15 @@ select = ["E", "F", "I", "W"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+# Type checking, advisory in CI for now (#225). How to run it: AGENTS.md, "Validate before committing".
+# tests/ is left out: mocks and fixture dicts produce noise, and pytest exercises it anyway.
+# training/ is left out: it is its own image with its own requirements.txt (TensorFlow),
+# none of which is installed where this runs.
+[tool.pyright]
+include = ["app", "scripts"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+# requirements-ml.txt (torch, transformers, hdbscan, umap, speciesnet, bioclip) is imported lazily
+# and is not installed in CI, so an unresolved import is a warning, not an error.
+reportMissingImports = "warning"

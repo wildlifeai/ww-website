@@ -15,6 +15,14 @@ name: E2E (Playwright)
 # preview) and a suite. `full` adds the upload and LoRaWAN specs, which write
 # to the dev database and storage: never point it at production.
 #
+# The full suite also runs on its own (#217) against the dev preview and the
+# dev API: after each successful push deploy of the dev backend
+# (deploy-backend.yml), and nightly at 14:17 UTC (03:17 NZDT, 02:17 NZST).
+# Both triggers only fire from the copy of this file on the default branch.
+# Full runs queue behind each other, never side by side, and end with
+# e2e/cleanup.mjs, which deletes what the run wrote even when it failed.
+# A red full run is a notification, not a gate: nothing depends on it.
+#
 # What a green smoke proves: the bundle Cloudflare built from this commit
 # renders every public page, the seeded user signs in and reaches every
 # authed page, and the demo session is read-only. What it does not prove: the
@@ -23,6 +31,12 @@ name: E2E (Playwright)
 
 on:
   deployment_status:
+  workflow_run:
+    workflows: ['Deploy Backend to Azure Container App']
+    types: [completed]
+    branches: [dev]
+  schedule:
+    - cron: '17 14 * * *'
   pull_request:
     branches: [dev, main]
     paths:
@@ -44,8 +58,10 @@ on:
         options: [smoke, full]
         default: smoke
 
+# A full run gets a group of its own here, so a later smoke on the same ref
+# cannot cancel it half-way; the smoke job's `e2e-full` group queues it instead.
 concurrency:
-  group: e2e-${{ github.event.deployment.sha || github.ref }}
+  group: e2e-${{ github.event.deployment.sha || ((inputs.suite == 'full' || github.event_name == 'schedule' || github.event_name == 'workflow_run') && format('full-{0}', github.run_id)) || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -54,16 +70,27 @@ env:
 
 jobs:
   smoke:
-    name: E2E Smoke
-    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    name: ${{ (inputs.suite == 'full' || github.event_name == 'schedule' || github.event_name == 'workflow_run') && 'E2E Full' || 'E2E Smoke' }}
+    if: >-
+      (github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production'))
+      && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
     runs-on: ubuntu-latest
     # The seeded account's password and the dev service-role key live here
     environment: dev
     timeout-minutes: 30
+    # Two full runs would share the seeded account and the dev rows the cleanup
+    # keys on, so they queue. Any other run is alone in its group.
+    concurrency:
+      group: ${{ (inputs.suite == 'full' || github.event_name == 'schedule' || github.event_name == 'workflow_run') && 'e2e-full' || format('e2e-smoke-{0}', github.run_id) }}
+      cancel-in-progress: false
+    env:
+      E2E_FULL: ${{ inputs.suite == 'full' || github.event_name == 'schedule' || github.event_name == 'workflow_run' }}
     steps:
+      # A scheduled run checks out dev, the branch the dev preview is built from;
+      # a post-deploy run checks out the commit that was deployed.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.deployment.sha || github.sha }}
+          ref: ${{ github.event.deployment.sha || github.event.workflow_run.head_sha || (github.event_name == 'schedule' && 'dev') || github.sha }}
 
       - uses: actions/setup-node@v7
         with:
@@ -74,6 +101,11 @@ jobs:
       - name: Install
         working-directory: e2e
         run: npm ci
+
+      - name: Unit-test the cleanup's filters
+        if: github.event_name == 'pull_request'
+        working-directory: e2e
+        run: npm run test:cleanup
 
       - name: Cache Playwright's Chromium
         id: pw-cache
@@ -92,6 +124,14 @@ jobs:
           echo "api:      $E2E_API_URL"
           test -n "$E2E_BASE_URL" || { echo "::error::no frontend URL: the deployment carried no environment_url"; exit 1; }
 
+      # What the cleanup keys on: the tag the LoRaWAN rows carry, and the time
+      # after which the upload's media rows count as this run's.
+      - name: Mark the run
+        if: env.E2E_FULL == 'true'
+        run: |
+          echo "E2E_RUN_TAG=e2e-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo "E2E_RUN_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
       - name: Run the flows
         working-directory: e2e
         env:
@@ -102,14 +142,43 @@ jobs:
           # (deploy-backend.yml). E2E_PASSWORD overrides it for a dedicated account.
           E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.DEMO_PASSWORD }}
           # The full suite only: the LoRaWAN spec inserts and deletes synthetic rows
-          E2E_SUPABASE_URL: ${{ inputs.suite == 'full' && secrets.SUPABASE_URL || '' }}
-          E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ inputs.suite == 'full' && secrets.SUPABASE_SERVICE_ROLE_KEY || '' }}
+          E2E_SUPABASE_URL: ${{ env.E2E_FULL == 'true' && secrets.SUPABASE_URL || '' }}
+          E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ env.E2E_FULL == 'true' && secrets.SUPABASE_SERVICE_ROLE_KEY || '' }}
         run: |
-          if [ "${{ inputs.suite }}" = "full" ]; then
+          if [ "$E2E_FULL" = "true" ]; then
             npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts specs/03-upload-exif.spec.ts specs/04-lorawan-realtime.spec.ts
           else
             npx playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts
           fi
+
+      # Pass or fail, delete what the full run wrote to the dev database and
+      # storage. cleanup.mjs refuses any project but dev.
+      - name: Clean up the run's rows
+        if: always() && env.E2E_FULL == 'true' && env.E2E_RUN_STARTED_AT != ''
+        working-directory: e2e
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: npm run cleanup
+
+      - name: Results to the job summary
+        if: always() && env.E2E_FULL == 'true'
+        working-directory: e2e
+        env:
+          TRIGGER: ${{ github.event_name }}
+          DEPLOYED: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          total=$(grep -c '<testcase' results.xml 2>/dev/null || true)
+          failed=$(grep -c '<failure' results.xml 2>/dev/null || true)
+          skipped=$(grep -c '<skipped' results.xml 2>/dev/null || true)
+          {
+            echo "### E2E full suite"
+            echo ""
+            echo "Trigger: ${TRIGGER}${DEPLOYED:+, backend deploy of $DEPLOYED}. Frontend $E2E_BASE_URL, API $E2E_API_URL."
+            echo ""
+            echo "Tests ${total:-0}, failed ${failed:-0}, skipped ${skipped:-0}. Screenshots and the HTML report are in the run's artifact."
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # The specs skip the signed-in checks when the password is missing, and a
       # skip must not read as a pass. After the run, not before, so the public
@@ -162,7 +231,9 @@ jobs:
 
   a11y:
     name: A11y of public pages
-    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    if: >-
+      github.event_name != 'schedule' && github.event_name != 'workflow_run'
+      && (github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -216,7 +287,9 @@ jobs:
   # job stays green with a warning annotation, the reports are an artifact.
   lighthouse:
     name: Lighthouse of public pages
-    if: github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production')
+    if: >-
+      github.event_name != 'schedule' && github.event_name != 'workflow_run'
+      && (github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

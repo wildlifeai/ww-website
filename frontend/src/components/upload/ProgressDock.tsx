@@ -14,7 +14,8 @@
  *   failure → shows a "View Logs" link.
  *   The user dismisses the dock manually via the × button.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Link, useNavigate } from 'react-router-dom'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { PipelineStatusBox } from '../toolkit/PipelineStatusBox'
@@ -61,45 +62,42 @@ function fmtHour(h: number): string {
 
 interface Summary { species: number; detections: number; peakHour: number | null }
 
-function UploadSummaryLine({ deploymentIds }: { deploymentIds: string[] }) {
-  const [summary, setSummary] = useState<Summary | null>(null)
-  const [loading, setLoading] = useState(true)
-  const key = deploymentIds.join(',')
+async function fetchUploadSummary(deploymentIds: string[]): Promise<Summary | null> {
+  // Live photos only: a deleted photo's detections leave the summary (#198).
+  const { data, error } = await fetchLiveObservations(supabase, {
+    columns: 'scientific_name, observation_type',
+    mediaColumns: 'timestamp',
+    requirePhoto: true,
+    filter: q => q.in('deployment_id', deploymentIds).eq('source_type', 'ai'),
+  })
+  if (error) return null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = (data ?? []) as any[]
+  const species = new Set(rows.map(r => r.scientific_name).filter(Boolean)).size
+  const detections = rows.filter(r => r.observation_type && r.observation_type !== 'blank').length
+  const hourCounts = new Array(24).fill(0)
+  let any = false
+  for (const r of rows) {
+    const m = Array.isArray(r.media) ? r.media[0] : r.media
+    const ts = m?.timestamp
+    if (!ts) continue
+    const h = new Date(ts).getHours()
+    if (!Number.isNaN(h)) { hourCounts[h]++; any = true }
+  }
+  const peakHour = any ? hourCounts.indexOf(Math.max(...hourCounts)) : null
+  return { species, detections, peakHour }
+}
 
-  useEffect(() => {
-    if (deploymentIds.length === 0) { setLoading(false); return }
-    let cancelled = false
-    setLoading(true)
-    // Live photos only: a deleted photo's detections leave the summary (#198).
-    fetchLiveObservations(supabase, {
-      columns: 'scientific_name, observation_type',
-      mediaColumns: 'timestamp',
-      requirePhoto: true,
-      filter: q => q.in('deployment_id', deploymentIds).eq('source_type', 'ai'),
-    })
-      .then(({ data, error }) => {
-        if (cancelled) return
-        if (error) { setSummary(null); setLoading(false); return }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = (data ?? []) as any[]
-        const species = new Set(rows.map(r => r.scientific_name).filter(Boolean)).size
-        const detections = rows.filter(r => r.observation_type && r.observation_type !== 'blank').length
-        const hourCounts = new Array(24).fill(0)
-        let any = false
-        for (const r of rows) {
-          const m = Array.isArray(r.media) ? r.media[0] : r.media
-          const ts = m?.timestamp
-          if (!ts) continue
-          const h = new Date(ts).getHours()
-          if (!Number.isNaN(h)) { hourCounts[h]++; any = true }
-        }
-        const peakHour = any ? hourCounts.indexOf(Math.max(...hourCounts)) : null
-        setSummary({ species, detections, peakHour })
-        setLoading(false)
-      })
-    return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key])
+function UploadSummaryLine({ deploymentIds }: { deploymentIds: string[] }) {
+  const { data: summary, isPending } = useQuery({
+    queryKey: ['upload-summary', deploymentIds.join(',')],
+    queryFn: () => fetchUploadSummary(deploymentIds),
+    enabled: deploymentIds.length > 0,
+    // Read once per finished upload: a later upload to the same deployments must not open on
+    // this one's numbers.
+    gcTime: 0,
+  })
+  const loading = isPending && deploymentIds.length > 0
 
   if (loading) return <span style={{ fontSize: '0.78rem', opacity: 0.6 }}>Summarising results…</span>
   if (!summary) return null

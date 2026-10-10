@@ -8,6 +8,7 @@ GET  /api/models/sscma/catalog → cached SSCMA model list (sync)
 POST /api/models/pretrained → download + package GitHub model (async)
 GET  /api/models/train/status → is training on, which trainer, dataset limits (sync)
 GET  /api/models/{model_id}/label-map → what each class predicts, plus LM-10 problems (sync)
+PUT  /api/models/{model_id}/label-map → save a label map that passes LM-10, as the caller (sync)
 POST /api/models/train    → train a Species Brain from an Annotations selection (async)
 """
 
@@ -20,8 +21,8 @@ from pydantic import BaseModel
 
 from app.authz import accessible_deployment_ids
 from app.config import settings
-from app.dependencies import get_current_user, get_manager_roles, get_user_client, get_verified_user
-from app.domain.label_map import fetch_model_label_map
+from app.dependencies import get_current_user, get_manager_roles, get_user_client, get_verified_user, require_not_demo
+from app.domain.label_map import fetch_model_label_map, save_model_label_map
 from app.domain.model import next_model_version, resolve_or_create_model_family
 from app.domain.training import media_deployments, training_mode, training_status
 from app.jobs.definitions import convert_model_job, download_github_pretrained_job, download_pretrained_job
@@ -31,7 +32,7 @@ from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.schemas.job import JobCreateResponse
-from app.schemas.model import TrainModelRequest
+from app.schemas.model import LabelMapRequest, TrainModelRequest
 from app.services.blob_store import store_blob
 from app.services.sscma import get_sscma_catalog
 from app.services.supabase_client import create_service_client
@@ -159,7 +160,6 @@ async def convert_model(
         },
         meta=ApiMeta(
             request_id=getattr(request.state, "request_id", None) if request else None,
-            message="Model upload started. Poll the job URL for progress.",
         ),
     )
 
@@ -221,6 +221,37 @@ async def get_label_map(
     data = await asyncio.to_thread(fetch_model_label_map, user_client, str(model_id))
     if data is None:
         raise HTTPException(404, detail="Model not found")
+    return ApiResponse(data=data, meta=ApiMeta(request_id=getattr(request.state, "request_id", None)))
+
+
+LABEL_MAP_FORBIDDEN = "Only a manager of the model's organisation can change its label map."
+
+
+@router.put("/{model_id}/label-map")
+async def put_label_map(
+    model_id: uuid.UUID,
+    body: LabelMapRequest,
+    request: Request,
+    user=Depends(require_not_demo),
+    user_client=Depends(get_user_client),
+):
+    """Save a model's ``label_map`` once it passes LM-10, and return it as the GET does.
+
+    A map that breaks LM-10 is a 422 whose ``detail.problems`` is ``{label: problem}``;
+    nothing is written. A map the database's own LM-10 CHECK refuses is the same 422
+    with the database's message and empty ``problems``. The write runs on the caller's
+    client, so RLS decides who may edit: a refusal is 403, a model the caller cannot
+    see is 404.
+    """
+    outcome, data = await asyncio.to_thread(save_model_label_map, user_client, str(model_id), body.label_map, user.id)
+    if outcome == "invalid":
+        raise HTTPException(422, detail={"message": "The label map breaks LM-10; nothing was saved.", "problems": data})
+    if outcome == "refused":
+        raise HTTPException(422, detail={"message": f"The database refused the label map; nothing was saved. {data}", "problems": {}})
+    if outcome == "not_found":
+        raise HTTPException(404, detail="Model not found")
+    if outcome == "forbidden":
+        raise HTTPException(403, detail=LABEL_MAP_FORBIDDEN)
     return ApiResponse(data=data, meta=ApiMeta(request_id=getattr(request.state, "request_id", None)))
 
 

@@ -10,39 +10,16 @@ import { useHasActiveDeployments } from './hooks/useHasActiveDeployments'
 import { useNotifications, type AppNotification } from './hooks/useNotifications'
 import { InatAutoSync } from './components/settings/InatAutoSync'
 import { useIsAdmin } from './hooks/useIsAdmin'
-import { AdminUsagePage } from './pages/AdminUsagePage'
-import { AdminDevicesPage } from './pages/AdminDevicesPage'
 import { UploadQuotaBanner } from './components/UploadQuotaBanner'
 import { InvitationsBanner } from './components/InvitationsBanner'
 import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
-import { MyDataPage } from './pages/MyDataPage'
-import { ManifestPage } from './pages/ManifestPage'
-import { UploadModelPage } from './pages/UploadModelPage'
-import { UploadDataPage } from './pages/UploadDataPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { PrivacyPolicyPage } from './pages/PrivacyPolicyPage'
 import { TermsOfServicePage } from './pages/TermsOfServicePage'
 import { ResourcesPage } from './pages/ResourcesPage'
 import { FaqPage } from './pages/FaqPage'
-
-// Guides are lazy-loaded so the markdown renderer stays out of the main bundle.
-const GuidesPage = React.lazy(() => import('./pages/GuidesPage'))
-const GuideDetailPage = React.lazy(() => import('./pages/GuideDetailPage'))
-
-import { ReportingPage } from './pages/ReportingPage'
-import { ClusterReviewPage } from './pages/ClusterReviewPage'
-import { UmapExplorerPage } from './pages/UmapExplorerPage'
-import { ReviewQueuePage } from './pages/ReviewQueuePage'
-import { DatasetHealthPage } from './pages/DatasetHealthPage'
-import { AnnotationsPage } from './pages/AnnotationsPage'
-import { InsightsPage } from './pages/InsightsPage'
-import { ToolkitPage } from './pages/ToolkitPage'
-import { FieldPage } from './pages/FieldPage'
-import { NotificationsPage } from './pages/NotificationsPage'
-import { ProcessingHistoryPage } from './pages/ProcessingHistoryPage'
-import { SettingsPage } from './pages/SettingsPage'
-import { UploadLogsPage } from './pages/UploadLogsPage'
+import { GuidesPage } from './pages/GuidesPage'
 import { FourZeroFourPage } from './pages/FourZeroFourPage'
 import { UploadProvider } from './contexts/UploadContext'
 import { DemoGuardProvider, RequireNotDemo } from './components/common/DemoGuard'
@@ -51,6 +28,35 @@ import { UndoToastHost } from './components/common/UndoToast'
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from './lib/apiClient'
 import './styles/index.css'
+
+// The public pages are in the main chunk, so they render without a "Loading…" first (a layout
+// shift Lighthouse counts, #228). A guide is lazy so the markdown renderer stays out of it, and
+// every signed-in page is lazy so a visitor does not download them.
+const GuideDetailPage = React.lazy(() => import('./pages/GuideDetailPage'))
+
+function lazyPage<M extends Record<K, React.ComponentType>, K extends keyof M>(load: () => Promise<M>, name: K) {
+  return React.lazy(() => load().then(m => ({ default: m[name] })))
+}
+
+const AdminUsagePage = lazyPage(() => import('./pages/AdminUsagePage'), 'AdminUsagePage')
+const AdminDevicesPage = lazyPage(() => import('./pages/AdminDevicesPage'), 'AdminDevicesPage')
+const MyDataPage = lazyPage(() => import('./pages/MyDataPage'), 'MyDataPage')
+const ManifestPage = lazyPage(() => import('./pages/ManifestPage'), 'ManifestPage')
+const UploadModelPage = lazyPage(() => import('./pages/UploadModelPage'), 'UploadModelPage')
+const UploadDataPage = lazyPage(() => import('./pages/UploadDataPage'), 'UploadDataPage')
+const ReportingPage = lazyPage(() => import('./pages/ReportingPage'), 'ReportingPage')
+const ClusterReviewPage = lazyPage(() => import('./pages/ClusterReviewPage'), 'ClusterReviewPage')
+const UmapExplorerPage = lazyPage(() => import('./pages/UmapExplorerPage'), 'UmapExplorerPage')
+const ReviewQueuePage = lazyPage(() => import('./pages/ReviewQueuePage'), 'ReviewQueuePage')
+const DatasetHealthPage = lazyPage(() => import('./pages/DatasetHealthPage'), 'DatasetHealthPage')
+const AnnotationsPage = lazyPage(() => import('./pages/AnnotationsPage'), 'AnnotationsPage')
+const InsightsPage = lazyPage(() => import('./pages/InsightsPage'), 'InsightsPage')
+const ToolkitPage = lazyPage(() => import('./pages/ToolkitPage'), 'ToolkitPage')
+const FieldPage = lazyPage(() => import('./pages/FieldPage'), 'FieldPage')
+const NotificationsPage = lazyPage(() => import('./pages/NotificationsPage'), 'NotificationsPage')
+const ProcessingHistoryPage = lazyPage(() => import('./pages/ProcessingHistoryPage'), 'ProcessingHistoryPage')
+const SettingsPage = lazyPage(() => import('./pages/SettingsPage'), 'SettingsPage')
+const UploadLogsPage = lazyPage(() => import('./pages/UploadLogsPage'), 'UploadLogsPage')
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth guard
@@ -494,6 +500,8 @@ export default function App() {
             <ProgressDock />
             <UndoToastHost />
             <Layout>
+              {/* For the lazy pages: a guide and every signed-in page */}
+              <Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', opacity: 0.5 }}>Loading…</div>}>
               <Routes>
               {/* Public */}
               <Route path="/"               element={<HomePage />} />
@@ -506,8 +514,8 @@ export default function App() {
               <Route path="/terms"          element={<TermsOfServicePage />} />
               <Route path="/resources"      element={<ResourcesPage />} />
               <Route path="/faq"            element={<FaqPage />} />
-              <Route path="/guides"         element={<Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', opacity: 0.5 }}>Loading…</div>}><GuidesPage /></Suspense>} />
-              <Route path="/guides/:slug"   element={<Suspense fallback={<div style={{ padding: '2rem', textAlign: 'center', opacity: 0.5 }}>Loading…</div>}><GuideDetailPage /></Suspense>} />
+              <Route path="/guides"         element={<GuidesPage />} />
+              <Route path="/guides/:slug"   element={<GuideDetailPage />} />
 
               {/* Primary nav routes: Toolkit · Annotations · Insights (+ conditional Field later) */}
               <Route path="/toolkit"     element={<RequireAuth><ToolkitPage /></RequireAuth>} />
@@ -554,6 +562,7 @@ export default function App() {
               {/* 404 Page kept at the end of all routes due to wildcard '*' path. */}
               <Route path='*' element={<FourZeroFourPage />} />
             </Routes>
+              </Suspense>
           </Layout>
           </UploadProvider>
           </DemoGuardProvider>

@@ -34,7 +34,7 @@ from PIL import Image
 
 
 def _to_grayscale_small(img: Image.Image, size: Tuple[int, int]) -> np.ndarray:
-    return np.asarray(img.convert("L").resize(size, Image.BILINEAR), dtype=np.uint8)
+    return np.asarray(img.convert("L").resize(size, Image.Resampling.BILINEAR), dtype=np.uint8)
 
 
 def _binary_open_close(mask: np.ndarray) -> np.ndarray:

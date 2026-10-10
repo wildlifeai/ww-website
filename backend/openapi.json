@@ -746,6 +746,22 @@
         "title": "INatPublishRequest",
         "type": "object"
       },
+      "LabelMapRequest": {
+        "description": "A model's whole ``label_map``, keyed by device label; LM-10 runs on it before the write.",
+        "properties": {
+          "label_map": {
+            "additionalProperties": true,
+            "description": "Per-class meaning, see domain/label_map.py",
+            "title": "Label Map",
+            "type": "object"
+          }
+        },
+        "required": [
+          "label_map"
+        ],
+        "title": "LabelMapRequest",
+        "type": "object"
+      },
       "ManifestRequest": {
         "description": "Request to generate a MANIFEST.zip firmware package.",
         "properties": {
@@ -2590,7 +2606,7 @@
     },
     "/api/media/batch": {
       "delete": {
-        "description": "Soft-delete multiple media records (sets deleted_at).\n\nIdempotent: already-deleted media are silently skipped. Runs as the\nrequesting user (not the service role), so RLS decides which rows change:\na photo's uploader while they hold at least project_member on its project\n(ww-backend #277), or a project_admin of the project. Any other id,\nincluding a plain member's request for a photo someone else uploaded,\nchanges 0 rows without an error; ``deleted`` counts only the rows that\nchanged, so ``deleted < requested`` means some were skipped.",
+        "description": "Soft-delete multiple media records (sets deleted_at).\n\nRuns as the requesting user (not the service role), so RLS decides which rows change:\na photo's uploader while they hold at least project_member on its project\n(ww-backend #277), or a project_admin of the project. Any other id, including a plain\nmember's request for a photo someone else uploaded, changes 0 rows without an error, as\ndoes an id already deleted. ``deleted_ids`` lists the rows that changed and\n``skipped_ids`` the rest; ``deleted`` counts ``deleted_ids``.",
         "operationId": "batch_delete_media_api_media_batch_delete",
         "parameters": [
           {
@@ -2641,7 +2657,7 @@
     },
     "/api/media/batch/restore": {
       "post": {
-        "description": "Undo a media delete \u2014 clears ``deleted_at`` where it equals the given timestamp. Runs as the\nuser, so RLS applies the delete rule: the photo's uploader while they hold at least\nproject_member, or a project_admin of the project; other ids change 0 rows without an error.\nScoping by the exact timestamp restores only the photos removed in that delete.",
+        "description": "Undo a media delete, clearing ``deleted_at`` where it equals the given timestamp. Runs as the\nuser, so RLS applies the delete rule: the photo's uploader while they hold at least\nproject_member, or a project_admin of the project; other ids change 0 rows without an error.\nScoping by the exact timestamp restores only the photos removed in that delete.\n``restored_ids`` lists the rows that changed and ``skipped_ids`` the rest.",
         "operationId": "batch_restore_media_api_media_batch_restore_post",
         "parameters": [
           {
@@ -3316,6 +3332,65 @@
           }
         },
         "summary": "Get Label Map",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "description": "Save a model's ``label_map`` once it passes LM-10, and return it as the GET does.\n\nA map that breaks LM-10 is a 422 whose ``detail.problems`` is ``{label: problem}``;\nnothing is written. A map the database's own LM-10 CHECK refuses is the same 422\nwith the database's message and empty ``problems``. The write runs on the caller's\nclient, so RLS decides who may edit: a refusal is 403, a model the caller cannot\nsee is 404.",
+        "operationId": "put_label_map_api_models__model_id__label_map_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelMapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Label Map",
         "tags": [
           "models"
         ]

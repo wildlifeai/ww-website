@@ -11,6 +11,7 @@
  * endpoint 404s and we silently fall back to local-only results.
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { supabase } from '../../config/supabase'
 import { apiClient } from '../../lib/apiClient'
 
@@ -48,11 +49,52 @@ const INPUT: React.CSSProperties = {
   boxSizing: 'border-box',
 }
 
+const NO_SUGGESTIONS: Suggestion[] = []
+
+/** Local taxa first (authoritative, fast), then iNaturalist names the local table lacks. */
+async function searchSpecies(q: string): Promise<Suggestion[]> {
+  // 1. Local taxa table (authoritative, fast)
+  const { data: locals } = await supabase
+    .from('taxa')
+    .select('id, scientific_name, common_name')
+    .or(`scientific_name.ilike.%${q}%,common_name.ilike.%${q}%`)
+    .limit(8)
+
+  const localSuggestions: Suggestion[] = (locals ?? []).map(t => ({
+    id: t.id,
+    scientific_name: t.scientific_name,
+    common_name: t.common_name,
+    isLocal: true,
+  }))
+
+  // 2. iNaturalist autocomplete (best-effort, may be disabled or offline)
+  let inatSuggestions: Suggestion[] = []
+  try {
+    const res = await apiClient.get(`/api/inat/taxa/search?q=${encodeURIComponent(q)}`)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = ((res as any)?.data ?? []) as any[]
+    const localNames = new Set(localSuggestions.map(s => s.scientific_name.toLowerCase()))
+    inatSuggestions = rows
+      .filter(r => r?.name && !localNames.has(String(r.name).toLowerCase()))
+      .slice(0, 6)
+      .map(r => ({
+        id: String(r.id),
+        scientific_name: r.name,
+        common_name: r.preferred_common_name ?? null,
+        isLocal: false,
+      }))
+  } catch {
+    // iNat disabled or unreachable → local-only, no error surfaced.
+  }
+
+  return [...localSuggestions, ...inatSuggestions]
+}
+
 export function SpeciesPicker({ onSelect, placeholder, autoFocus, initialQuery = '', disabled }: Props) {
   const [query, setQuery] = useState(initialQuery)
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  // The query as last searched: it follows `query` once typing pauses for 250 ms.
+  const [term, setTerm] = useState('')
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
   const [registering, setRegistering] = useState(false)
   // Only search (and open the dropdown) once the user has actually typed —
   // otherwise mounting with an initialQuery pops the suggestions unprompted.
@@ -60,56 +102,23 @@ export function SpeciesPicker({ onSelect, placeholder, autoFocus, initialQuery =
   const blurTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Debounced search: local taxa + iNaturalist ────────────────────────────
+  const q = query.trim()
   useEffect(() => {
     if (!touched) return
-    const q = query.trim()
-    if (q.length < 2) { setSuggestions([]); return }
+    const t = setTimeout(() => setTerm(q), 250)
+    return () => clearTimeout(t)
+  }, [q, touched])
 
-    let cancelled = false
-    setLoading(true)
-    const t = setTimeout(async () => {
-      // 1. Local taxa table (authoritative, fast)
-      const { data: locals } = await supabase
-        .from('taxa')
-        .select('id, scientific_name, common_name')
-        .or(`scientific_name.ilike.%${q}%,common_name.ilike.%${q}%`)
-        .limit(8)
-
-      const localSuggestions: Suggestion[] = (locals ?? []).map(t => ({
-        id: t.id,
-        scientific_name: t.scientific_name,
-        common_name: t.common_name,
-        isLocal: true,
-      }))
-
-      // 2. iNaturalist autocomplete (best-effort — may be disabled/offline)
-      let inatSuggestions: Suggestion[] = []
-      try {
-        const res = await apiClient.get(`/api/inat/taxa/search?q=${encodeURIComponent(q)}`)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = ((res as any)?.data ?? []) as any[]
-        const localNames = new Set(localSuggestions.map(s => s.scientific_name.toLowerCase()))
-        inatSuggestions = rows
-          .filter(r => r?.name && !localNames.has(String(r.name).toLowerCase()))
-          .slice(0, 6)
-          .map(r => ({
-            id: String(r.id),
-            scientific_name: r.name,
-            common_name: r.preferred_common_name ?? null,
-            isLocal: false,
-          }))
-      } catch {
-        // iNat disabled or unreachable → local-only, no error surfaced.
-      }
-
-      if (cancelled) return
-      setSuggestions([...localSuggestions, ...inatSuggestions])
-      setLoading(false)
-      setOpen(true)
-    }, 250)
-
-    return () => { cancelled = true; clearTimeout(t); setLoading(false) }
-  }, [query, touched])
+  const searching = touched && q.length >= 2
+  const search = useQuery({
+    queryKey: ['species-search', term],
+    queryFn: () => searchSpecies(term),
+    enabled: searching && term.length >= 2,
+    // Keep the last results on screen while the next search runs.
+    placeholderData: keepPreviousData,
+  })
+  const suggestions = searching ? (search.data ?? NO_SUGGESTIONS) : NO_SUGGESTIONS
+  const loading = searching && (term !== q || search.isFetching)
 
   const choose = useCallback(async (s: Suggestion) => {
     if (s.isLocal) {
@@ -149,7 +158,7 @@ export function SpeciesPicker({ onSelect, placeholder, autoFocus, initialQuery =
         autoFocus={autoFocus}
         disabled={disabled || registering}
         placeholder={registering ? 'Registering taxon…' : (placeholder ?? 'Search species…')}
-        onChange={e => { setTouched(true); setQuery(e.target.value) }}
+        onChange={e => { setTouched(true); setQuery(e.target.value); setOpen(true) }}
         onFocus={() => { if (suggestions.length) setOpen(true) }}
         onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150) }}
         style={INPUT}

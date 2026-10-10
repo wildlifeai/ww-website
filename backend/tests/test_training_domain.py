@@ -198,6 +198,13 @@ class TestDatasetZipAndLabelMap:
         assert m["not rat"]["role"] == BACKGROUND_ROLE
         assert label_map_problems(m) == []  # a trained model always passes LM-10
 
+    def test_label_map_ignores_a_blank_named_class_sharing_a_label(self):
+        # Without the skip the blank class overwrites 'rat' with a target that names
+        # no taxon, which the database's LM-10 CHECK refuses (23514).
+        m = build_label_map([RAT, {"label": "rat", "scientific_name": "  ", "taxon_id": None}], ["not rat", "rat"], "not rat")
+        assert m["rat"]["scientific_name"] == "Rattus rattus"
+        assert label_map_problems(m) == []
+
     def test_firmware_warning_only_when_background_is_index_1(self):
         m = build_label_map([{"label": "gecko", "scientific_name": "x"}], ["gecko", "not gecko"], "not gecko")
         assert "index 1" in firmware_target_warning(["gecko", "not gecko"], m)

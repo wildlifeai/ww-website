@@ -42,6 +42,10 @@ node scripts/validate-docs.js
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
 
+`pyright` in `backend/` (venv active, `requirements-dev.txt` installed) type-checks the backend
+with the `[tool.pyright]` settings in `backend/pyproject.toml`. It is advisory until its backlog
+is cleared (#225): add no new errors in the files you touch.
+
 `ci.yml` runs the same gates on every pull request and adds three that only run there: pytest
 with a statement-coverage floor, a build of the backend's `api` Docker stage that is started and
 asked for `/docs`, and a check that `backend/openapi.json` matches the app (regenerate it with
@@ -60,9 +64,10 @@ as the `frontend/.husky/commit-msg` hook does locally; the rules and what trips 
 [`references/documentation.md`](.agents/skills/references/documentation.md#commit-messages).
 
 The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
-(`.github/workflows/e2e.yml`), and the smoke and demo also run against a whole stack started on
-the runner from the pull request's own backend and frontend (`e2e-full-stack.yml`); what they
-prove and how to read a failure is in
+(`.github/workflows/e2e.yml`), the smoke and demo also run against a whole stack started on
+the runner from the pull request's own backend and frontend (`e2e-full-stack.yml`), and the
+full suite, which writes to dev and cleans up after itself, runs nightly and after each dev
+backend deploy; what they prove and how to read a failure is in
 [`e2e/README.md`](e2e/README.md). They need a running site, so they are not part of the
 local gates above.
 
