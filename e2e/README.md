@@ -48,9 +48,25 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   request: a run Dependabot triggers sees only Dependabot secrets, and the seed password stays
   out of them because that run executes the package versions being bumped. There the sign-in
   check is skipped with a notice, the other smoke and demo checks still gate the bump, and the
-  sign-in check runs on dev once the merge deploys. The `full` suite, by hand only, adds `03` and `04`, which
-  write to the dev database and storage; the LoRaWAN spec takes the `dev` environment's
-  `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+  sign-in check runs on dev once the merge deploys.
+- **E2E Full**, the same job with the `full` suite, adds `03` and `04`, which write to the dev
+  database and storage; the LoRaWAN spec takes the `dev` environment's `SUPABASE_URL` and
+  `SUPABASE_SERVICE_ROLE_KEY`. It runs against the dev preview and the dev API after each
+  successful push deploy of the dev backend (`deploy-backend.yml`), nightly at 14:17 UTC
+  (03:17 NZDT, 02:17 NZST), and by hand. Both automatic triggers fire only from the copy of the
+  workflow on `main`. Full runs queue rather than overlap. Each one ends with
+  `cleanup.mjs`, pass or fail, and writes the test counts and what it deleted to the job
+  summary. A red full run is a notification, nothing waits on it.
+
+  The cleanup finds a run's rows by markers the run owns. LoRaWAN rows carry the run's tag
+  (`e2e-ci-<run id>-<attempt>`) as their `device_eui`; marked rows over an hour old from a
+  run that died go too. The upload's media rows cannot carry a tag (the backend names them),
+  so they are the rows created since the run started, on Drive, in a deployment whose id starts
+  with one of the fixture SD card's folder names; their observations, events and renditions go
+  with them. The Drive originals stay: the `dev` environment has no Drive credentials, and Drive
+  dedups by content, so runs do not add copies. The script refuses any Supabase project but
+  dev, and `npm run test:cleanup` unit-tests its filters (on a pull request that changes `e2e/`).
+  `node cleanup.mjs --dry-run` lists what it would delete.
 - **E2E Full Stack** (`.github/workflows/e2e-full-stack.yml`, #216) runs `01-smoke` and
   `02-demo` against a stack started on the runner, on a pull request that changes `backend/`,
   `frontend/`, `e2e/` or the workflow: a local Supabase from ww-backend's `dev` migrations and
