@@ -85,7 +85,7 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 | `/reporting/:id` | `ReportingPage` | Diel activity, CamtrapDP / Darwin Core exports |
 | `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history |
 | `/notifications` | `NotificationsPage` | Notification inbox — read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router); the unread count drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
-| `/settings` | `SettingsPage` | Account settings |
+| `/settings` | `SettingsPage` | Projects, account, integrations, organisation API keys |
 | `/admin/usage` | `AdminUsagePage` | Per-user usage limits (platform admin) |
 
 **Redirects / legacy**: `/results` → `/insights`, `/other` → `/toolkit`, `/my-data` → `/insights`,

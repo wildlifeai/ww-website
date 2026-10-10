@@ -46,19 +46,27 @@
           "expires_at": {
             "anyOf": [
               {
+                "format": "date-time",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "ISO timestamp \u2014 key expires after this time",
+            "description": "The key stops working after this time. Must be in the future.",
             "title": "Expires At"
           },
           "name": {
             "description": "Human-readable key name",
             "maxLength": 100,
+            "minLength": 1,
             "title": "Name",
+            "type": "string"
+          },
+          "organisation_id": {
+            "description": "Organisation the key belongs to. The caller must be its organisation_manager.",
+            "format": "uuid",
+            "title": "Organisation Id",
             "type": "string"
           },
           "scopes": {
@@ -66,11 +74,13 @@
             "items": {
               "type": "string"
             },
+            "minItems": 1,
             "title": "Scopes",
             "type": "array"
           }
         },
         "required": [
+          "organisation_id",
           "name",
           "scopes"
         ],
@@ -3528,9 +3538,21 @@
     },
     "/api/v1/api-keys": {
       "get": {
-        "description": "List active API keys for the user's organisation.",
+        "description": "List an organisation's active (unrevoked) API keys. Managers only.",
         "operationId": "list_keys_api_v1_api_keys_get",
         "parameters": [
+          {
+            "description": "Organisation whose keys to list",
+            "in": "query",
+            "name": "organisation_id",
+            "required": true,
+            "schema": {
+              "description": "Organisation whose keys to list",
+              "format": "uuid",
+              "title": "Organisation Id",
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -3567,7 +3589,7 @@
         ]
       },
       "post": {
-        "description": "Create a new API key for the user's organisation.\n\nOnly organisation admins can create keys. The raw key is returned\nonce \u2014 it cannot be retrieved again.",
+        "description": "Create an API key for an organisation the caller manages.\n\nThe raw key is returned once. It cannot be retrieved again.",
         "operationId": "create_key_api_v1_api_keys_post",
         "parameters": [
           {
@@ -3618,7 +3640,7 @@
     },
     "/api/v1/api-keys/{key_id}": {
       "delete": {
-        "description": "Revoke an API key.",
+        "description": "Revoke one of an organisation's API keys. Managers only.",
         "operationId": "revoke_key_api_v1_api_keys__key_id__delete",
         "parameters": [
           {
@@ -3626,7 +3648,20 @@
             "name": "key_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Organisation the key belongs to",
+            "in": "query",
+            "name": "organisation_id",
+            "required": true,
+            "schema": {
+              "description": "Organisation the key belongs to",
+              "format": "uuid",
+              "title": "Organisation Id",
               "type": "string"
             }
           },
