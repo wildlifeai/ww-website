@@ -21,6 +21,7 @@ from app.domain.media_resolver import resolve_media
 from app.domain.soft_delete import now_iso, restore_media_as_user, soft_delete_media_as_user
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.services import supabase_client
+from app.services.db_utils import row_of, rows_of
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -51,12 +52,12 @@ async def get_media_image(
     """
     client = supabase_client.create_anon_client()
 
-    result = client.table("media").select("file_path").eq("id", media_id).maybe_single().execute()
+    row = row_of(client.table("media").select("file_path").eq("id", media_id).maybe_single().execute())
 
-    if not result or not result.data:
+    if not row:
         raise HTTPException(status_code=404, detail="Media record not found")
 
-    file_path = result.data.get("file_path", "")
+    file_path = row.get("file_path", "")
 
     resolved = await resolve_media(file_path, size=size)
     if not resolved:
@@ -102,12 +103,12 @@ async def resolve_media_url(
         return _registry_disabled(req_id)
 
     client = supabase_client.create_anon_client()
-    result = client.table("media").select(_REGISTRY_SELECT).eq("id", media_id).maybe_single().execute()
-    if not result or not result.data:
+    row = row_of(client.table("media").select(_REGISTRY_SELECT).eq("id", media_id).maybe_single().execute())
+    if not row:
         return ApiResponse(error=ApiError(code="NOT_FOUND", message="Media not found"), meta=ApiMeta(request_id=req_id))
 
     return ApiResponse(
-        data={"media_id": media_id, "size": size, "url": resolve_url(result.data, size)},
+        data={"media_id": media_id, "size": size, "url": resolve_url(row, size)},
         meta=ApiMeta(request_id=req_id),
     )
 
@@ -136,7 +137,7 @@ async def media_registry(
         .range(offset, offset + page_size - 1)
         .execute()
     )
-    rows = [with_resolved_urls(r) for r in (result.data or [])]
+    rows = [with_resolved_urls(r) for r in rows_of(result)]
     return ApiResponse(
         data={"media": rows, "page": page, "page_size": page_size, "count": len(rows)},
         meta=ApiMeta(request_id=req_id),
@@ -271,7 +272,7 @@ async def run_pipeline_selected(
 
     def _lookup():
         resp = user_client.table("media").select("deployment_id").in_("id", body.media_ids[:1]).limit(1).execute()
-        return resp.data[0]["deployment_id"] if resp.data else None
+        return rows_of(resp)[0]["deployment_id"] if resp.data else None
 
     deployment_id = await asyncio.to_thread(_lookup)
     if not deployment_id:

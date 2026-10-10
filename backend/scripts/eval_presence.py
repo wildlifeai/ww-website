@@ -404,14 +404,15 @@ def render_markdown(results: dict[tuple, Metrics], dry_run: bool, n_unsure: int 
 
 def is_greyscale(data: bytes, max_channel_diff: float = GREYSCALE_MAX_CHANNEL_DIFF) -> bool:
     """True when the frame's colour channels agree within ``max_channel_diff``: a night IR capture."""
+    import numpy as np
     from PIL import Image
 
     img = Image.open(io.BytesIO(data)).convert("RGB")
     img.thumbnail((64, 64))
-    px = list(img.getdata())
-    if not px:
+    px = np.asarray(img, dtype=np.int16).reshape(-1, 3)
+    if not len(px):
         return True
-    diff = sum(max(r, g, b) - min(r, g, b) for r, g, b in px) / len(px)
+    diff = float((px.max(axis=1) - px.min(axis=1)).mean())
     return diff <= max_channel_diff
 
 
@@ -445,16 +446,16 @@ def light_of(data: bytes, exif: Optional[dict] = None) -> tuple[str, str]:
     return ("night_ir" if is_greyscale(data) else "day"), "greyscale"
 
 
-def source_line(strata: dict[str, dict[str, str]], family: str, title: str) -> str:
+def source_line(strata: dict[str, dict[str, StratumValue]], family: str, title: str) -> str:
     """How many frames got each value of ``family`` and how many each source decided (``<family>_source``)."""
 
-    def _counts(by_path: dict[str, str]) -> str:
+    def _counts(by_path: dict[str, StratumValue]) -> str:
         return ", ".join(f"{k} {n}" for k, n in sorted(Counter(by_path.values()).items()))
 
     return f"{title} ({len(strata[family])} frames): {_counts(strata[family])}; decided by {_counts(strata[family + '_source'])}.\n"
 
 
-def light_line(strata: dict[str, dict[str, str]]) -> str:
+def light_line(strata: dict[str, dict[str, StratumValue]]) -> str:
     """How many frames got each light value and how many each source decided."""
     return source_line(strata, "light", "Light")
 

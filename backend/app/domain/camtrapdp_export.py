@@ -271,14 +271,14 @@ async def write_package(
             nonlocal done
             for photo in pending:  # one shared iterator: each photo goes to one worker
                 original = originals.get(photo.media_id)
-                data, why = None, None
+                data = None
                 if original is None:
                     why = "not found in the database"
                 elif not _readable(original.file_path):
                     why = "no stored original"
                 else:
                     data = await fetch_with_retries(original.file_path, fetch, backoff_s=backoff_s)
-                    why = None if data else "could not be read from storage"
+                    why = "could not be read from storage"
                 async with write_lock:
                     if data is not None:
                         check_size(result.photo_bytes + len(data), max_bytes)

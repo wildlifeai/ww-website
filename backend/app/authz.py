@@ -29,6 +29,7 @@ from typing import Literal, Optional
 from fastapi import Depends, HTTPException
 
 from app.dependencies import get_current_user
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 
@@ -74,8 +75,8 @@ def _resolve_org_project(
 
     def _one(table: str, col: str, key: str) -> Optional[str]:
         resp = svc.table(table).select(col).eq("id", key).limit(1).execute()
-        rows = resp.data or []
-        return rows[0][col] if rows else None
+        found = rows_of(resp)
+        return found[0][col] if found else None
 
     if cluster_assignment_id and not deployment_id:
         deployment_id = _one("cluster_assignments", "deployment_id", cluster_assignment_id)
@@ -105,7 +106,7 @@ def _fetch_active_roles(svc, user_id: str) -> list[dict]:
         .is_("deleted_at", "null")
         .execute()
     )
-    return resp.data or []
+    return rows_of(resp)
 
 
 async def assert_access(user_id: str, **resource) -> None:
@@ -136,7 +137,7 @@ async def accessible_deployment_ids(user_id: str, deployment_ids: list[str]) -> 
         # avoids an N+1 when the body lists many deployments.
         resp = svc.table("deployments").select("id, project_id, projects(organisation_id)").in_("id", deployment_ids).execute()
         out: list[str] = []
-        for row in resp.data or []:
+        for row in rows_of(resp):
             proj = row.get("projects")
             if isinstance(proj, list):  # PostgREST may nest a to-one as a 1-element list
                 proj = proj[0] if proj else None
@@ -192,13 +193,14 @@ async def classify_deployment_access(user_id: str, deployment_ids: list[str]) ->
         svc = create_service_client()
         roles = _fetch_active_roles(svc, user_id)
         resp = svc.table("deployments").select("id, project_id, projects(organisation_id)").in_("id", list(id_map.keys())).execute()
-        for row in resp.data or []:
+        for row in rows_of(resp):
             proj = row.get("projects")
             if isinstance(proj, list):  # PostgREST may nest a to-one as a 1-element list
                 proj = proj[0] if proj else None
             org_id = proj.get("organisation_id") if isinstance(proj, dict) else None
             project_id = row.get("project_id")
-            key = id_map.get(row["id"].lower(), row["id"])
+            row_id: str = row["id"]
+            key = id_map.get(row_id.lower(), row_id)
             result[key] = "valid" if _has_access(roles, org_id, project_id) else "no_access"
         return result
 
@@ -246,7 +248,7 @@ async def split_deployments_by_delete_right(user_id: str, deployment_ids: list[s
         resp = svc.table("deployments").select("id, project_id, setup_by").in_("id", ids).execute()
         allowed: list[str] = []
         refused: list[str] = []
-        for row in resp.data or []:
+        for row in rows_of(resp):
             if _may_delete_deployment(roles, user_id, row.get("setup_by"), row.get("project_id")):
                 allowed.append(row["id"])
             else:

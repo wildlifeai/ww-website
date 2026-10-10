@@ -22,6 +22,8 @@ from typing import Awaitable, Callable, Optional
 
 import structlog
 
+from app.services.db_utils import row_of, rows_of
+
 logger = structlog.get_logger()
 
 THUMBNAIL_MAX = 300  # px, longest edge
@@ -203,7 +205,7 @@ async def generate_observation_crops(media_id: str) -> Optional[str]:
             .order("confidence", desc=True)  # first row → hero
             .execute()
         )
-        return (media.data if media else None), obs.data
+        return row_of(media), rows_of(obs)
 
     media_row, obs_rows = await asyncio.to_thread(_fetch)
     if not media_row or not obs_rows:
@@ -350,7 +352,7 @@ async def backfill_thumbnails(
                 .range(len(rows), len(rows) + _FETCH_PAGE - 1)
                 .execute()
             )
-            page = resp.data or []
+            page = rows_of(resp)
             rows.extend(page)
             if len(page) < _FETCH_PAGE:
                 return rows

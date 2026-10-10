@@ -134,19 +134,19 @@ def _storage_client(project: str):
 
 
 def _jobs_client():
-    from google.cloud import run_v2
+    from google.cloud import run_v2  # pyright: ignore[reportAttributeAccessIssue]  (requirements-ml.txt, not installed in CI)
 
     return run_v2.JobsClient()
 
 
 def _executions_client():
-    from google.cloud import run_v2
+    from google.cloud import run_v2  # pyright: ignore[reportAttributeAccessIssue]  (requirements-ml.txt, not installed in CI)
 
     return run_v2.ExecutionsClient()
 
 
 def _run_job_request(job_name: str, env: Dict[str, str], timeout_s: int):
-    from google.cloud import run_v2
+    from google.cloud import run_v2  # pyright: ignore[reportAttributeAccessIssue]  (requirements-ml.txt, not installed in CI)
     from google.protobuf import duration_pb2
 
     container = run_v2.RunJobRequest.Overrides.ContainerOverride(env=[run_v2.EnvVar(name=k, value=v) for k, v in sorted(env.items())])

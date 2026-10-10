@@ -116,3 +116,37 @@ async def test_resolve_crops_concurrent_preserves_order_and_filters(monkeypatch)
     assert [mid for (mid, _d, _b) in out] == ["m1", "m3"]  # m2 dropped, order kept
     assert [dep for (_m, dep, _b) in out] == ["d1", "d2"]
     assert out[0][2] == b"bytes:u1"
+
+
+@pytest.mark.parametrize("model_name", [None, ""])
+async def test_embed_without_a_model_name_uses_the_default_service(monkeypatch, model_name):
+    # A blank model_name in the request used to skip the default service and then
+    # read .model_name off None, so the job died before creating its run.
+    import app.domain.wildlife_brain as wb
+    import app.services.dinov3 as dv
+
+    class FakeDino:
+        model_name = "dinov3-default"
+        version = "hf/dinov3"
+
+    created: dict = {}
+
+    async def fake_create(deployment_id, model, version, created_by):
+        created.update(model=model, version=version)
+        return "run-1"
+
+    async def no_crops(deployment_id):
+        return []
+
+    async def finish(*_args):
+        return None
+
+    monkeypatch.setattr(dv, "get_dinov3_service", FakeDino)
+    monkeypatch.setattr(wb, "_create_embedding_run", fake_create)
+    monkeypatch.setattr(wb, "_fetch_crops", no_crops)
+    monkeypatch.setattr(wb, "_finish_embedding_run", finish)
+
+    out = await wb.embed_and_cluster_deployment("dep-1", model_name=model_name)
+
+    assert created == {"model": "dinov3-default", "version": "hf/dinov3"}
+    assert out["image_count"] == 0

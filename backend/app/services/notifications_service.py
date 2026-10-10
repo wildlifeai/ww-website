@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 
+from app.services.db_utils import rows_of
 from app.services.email_channel import send_email
 from app.services.supabase_client import create_service_client
 
@@ -130,22 +131,20 @@ async def emit_detection_notifications(deployment_id: str, recent_minutes: int =
 
     def _gather() -> tuple[list[tuple[str, str, str]], int]:
         svc = create_service_client()
-        dep = svc.table("deployments").select("project_id, location_name").eq("id", deployment_id).limit(1).execute().data
+        dep = rows_of(svc.table("deployments").select("project_id, location_name").eq("id", deployment_id).limit(1).execute())
         if not dep or not dep[0].get("project_id"):
             return [], 0
         project_id = dep[0]["project_id"]
         location = dep[0].get("location_name") or "a deployment"
 
         since = (datetime.now(timezone.utc) - timedelta(minutes=recent_minutes)).isoformat()
-        recent = (
+        recent = rows_of(
             svc.table("observations")
             .select("id, media_id")
             .eq("deployment_id", deployment_id)
             .in_("source_type", ["ai", "consensus"])
             .gte("created_at", since)
             .execute()
-            .data
-            or []
         )
         recent_ids = {o["id"] for o in recent if o.get("id")}
         media_ids = sorted({o["media_id"] for o in recent if o.get("media_id")})
@@ -153,9 +152,8 @@ async def emit_detection_notifications(deployment_id: str, recent_minutes: int =
         # row can predate the run.
         by_media: dict[str, list[dict]] = {}
         for i in range(0, len(media_ids), 100):
-            rows = (
-                svc.table("observations").select(_PRESENCE_COLUMNS).in_("media_id", media_ids[i : i + 100]).is_("deleted_at", "null").execute().data
-                or []
+            rows = rows_of(
+                svc.table("observations").select(_PRESENCE_COLUMNS).in_("media_id", media_ids[i : i + 100]).is_("deleted_at", "null").execute()
             )
             for o in rows:
                 by_media.setdefault(o["media_id"], []).append(o)

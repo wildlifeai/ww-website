@@ -497,7 +497,7 @@ class GoogleDriveService:
         # Per-file mapping so callers (e.g. CamtrapDP import) can patch the media
         # record's file_path back to gdrive://<id>. Only populated when the caller
         # supplies a ``media_id`` on the file dict.
-        uploaded_files: List[Dict[str, str]] = []
+        uploaded_files: List[Dict[str, Any]] = []
         total_files = len(files)
         completed_count = 0
         seen_folders: set = set()

@@ -26,6 +26,7 @@ from typing import Optional
 import structlog
 
 from app.registries.embedding_registry import ACTIVE_LEARNING_WEIGHTS
+from app.services.db_utils import rows_of
 
 logger = structlog.get_logger()
 
@@ -113,7 +114,7 @@ async def _fetch_observations(deployment_id: str) -> list[dict]:
             .is_("deleted_at", "null")
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     return await asyncio.to_thread(_fetch)
 
@@ -126,7 +127,7 @@ async def recompute_scores(deployment_id: str, progress=None) -> int:
 
     def _fetch_embeddings():
         resp = svc.table("media_embeddings").select("media_id, cluster_confidence, is_outlier").eq("deployment_id", deployment_id).execute()
-        return resp.data or []
+        return rows_of(resp)
 
     embeddings = await asyncio.to_thread(_fetch_embeddings)
     if not embeddings:
@@ -180,7 +181,7 @@ async def get_review_queue(deployment_id: str, limit: int = 50) -> list[dict]:
             .limit(limit)
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch)
     labels = _ai_human_labels(await _fetch_observations(deployment_id))

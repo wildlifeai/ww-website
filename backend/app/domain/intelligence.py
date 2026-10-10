@@ -21,6 +21,8 @@ from typing import Optional
 
 import structlog
 
+from app.services.db_utils import rows_of
+
 logger = structlog.get_logger()
 
 SHIFT_HIGH_THRESHOLD = 0.3
@@ -122,7 +124,7 @@ async def detect_distribution_shift(deployment_id: str, period_a: tuple[str, str
             .is_("deleted_at", "null")
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch)
     hist_a: dict[int, int] = {}
@@ -180,7 +182,7 @@ async def _project_deployment_ids(project_id: str) -> list[str]:
 
     def _fetch():
         resp = svc.table("deployments").select("id").eq("project_id", project_id).is_("deleted_at", "null").execute()
-        return [d["id"] for d in (resp.data or [])]
+        return [d["id"] for d in rows_of(resp)]
 
     return await asyncio.to_thread(_fetch)
 
@@ -195,14 +197,14 @@ async def dataset_health(project_id: str) -> dict:
         return {"project_id": project_id, "deployments": 0, "species": [], "review_funnel": {}, "outlier_rate": None}
 
     def _fetch():
-        obs = (
+        obs = rows_of(
             svc.table("observations")
             .select("scientific_name, review_status, observation_type")
             .in_("deployment_id", deployment_ids)
             .is_("deleted_at", "null")
             .execute()
-        ).data or []
-        emb = (svc.table("media_embeddings").select("is_outlier").in_("deployment_id", deployment_ids).execute()).data or []
+        )
+        emb = rows_of(svc.table("media_embeddings").select("is_outlier").in_("deployment_id", deployment_ids).execute())
         return obs, emb
 
     observations, embeddings = await asyncio.to_thread(_fetch)
@@ -248,7 +250,7 @@ async def list_alerts(project_id: str) -> list[dict]:
             .order("first_seen", desc=True)
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     return await asyncio.to_thread(_fetch)
 
@@ -261,7 +263,7 @@ async def unknown_species(org_id: str) -> list[dict]:
 
     def _fetch():
         resp = svc.table("taxa").select("id, scientific_name, common_name, status").eq("status", "candidate").execute()
-        return resp.data or []
+        return rows_of(resp)
 
     return await asyncio.to_thread(_fetch)
 
@@ -282,7 +284,7 @@ async def occupancy(project_id: str) -> dict:
             .is_("deleted_at", "null")
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch) if deployment_ids else []
     taxa_by_dep: dict[str, set] = {}
@@ -313,7 +315,7 @@ async def accumulation(deployment_id: str) -> dict:
             .is_("deleted_at", "null")
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch)
     rows.sort(key=lambda o: o.get("classification_timestamp") or o.get("created_at") or "")

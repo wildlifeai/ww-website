@@ -28,6 +28,7 @@ from app.dependencies import get_current_user, get_verified_user, require_not_de
 from app.middleware.rate_limit import limiter
 from app.schemas.brain import ConfirmClusterRequest, EmbedRequest, MultiClusterRequest, ReprocessAllRequest, ReprocessRequest, ReviewDecisionRequest
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
+from app.services.db_utils import row_of, rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -101,7 +102,7 @@ async def list_clusters(request: Request, deployment_id: str, user=Depends(get_c
         )
         if not latest.data:
             return None, []
-        run_id = latest.data[0]["id"]
+        run_id = rows_of(latest)[0]["id"]
         clusters = (
             svc.table("cluster_assignments")
             .select("*")
@@ -110,7 +111,7 @@ async def list_clusters(request: Request, deployment_id: str, user=Depends(get_c
             .order("image_count", desc=True)
             .execute()
         )
-        return run_id, clusters.data or []
+        return run_id, rows_of(clusters)
 
     run_id, clusters = await asyncio.to_thread(_fetch)
     return ApiResponse(data={"embedding_run_id": run_id, "clusters": clusters}, meta=ApiMeta(request_id=req_id))
@@ -154,7 +155,7 @@ async def multi_clusters(request: Request, body: MultiClusterRequest, user=Depen
 
         # Keep only the latest run per deployment.
         seen: dict[str, dict] = {}
-        for r in runs_resp.data:
+        for r in rows_of(runs_resp):
             if r["deployment_id"] not in seen:
                 seen[r["deployment_id"]] = r
         latest_runs = list(seen.values())
@@ -162,7 +163,7 @@ async def multi_clusters(request: Request, body: MultiClusterRequest, user=Depen
 
         # 2. Fetch cluster assignments for all runs.
         clusters_resp = svc.table("cluster_assignments").select("*").in_("embedding_run_id", run_ids).order("image_count", desc=True).execute()
-        clusters = clusters_resp.data or []
+        clusters = rows_of(clusters_resp)
 
         # 3. Fetch member media per cluster (with optional confidence filter).
         members_query = (
@@ -173,7 +174,7 @@ async def multi_clusters(request: Request, body: MultiClusterRequest, user=Depen
         if body.min_confidence > 0:
             members_query = members_query.gte("cluster_confidence", body.min_confidence)
         members_resp = members_query.execute()
-        members = members_resp.data or []
+        members = rows_of(members_resp)
 
         # 4. Group by model variant (cross-variant is not meaningful).
         run_model = {r["id"]: r.get("model_name", "unknown") for r in latest_runs}
@@ -216,7 +217,7 @@ async def umap_coords(request: Request, deployment_id: str, user=Depends(get_cur
             .eq("deployment_id", deployment_id)
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     points = await asyncio.to_thread(_fetch)
     return ApiResponse(data={"points": points, "count": len(points)}, meta=ApiMeta(request_id=req_id))
@@ -240,7 +241,7 @@ async def list_outliers(request: Request, deployment_id: str, user=Depends(get_c
             .order("cluster_confidence", desc=False)
             .execute()
         )
-        return resp.data or []
+        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch)
     return ApiResponse(data={"outliers": rows, "count": len(rows)}, meta=ApiMeta(request_id=req_id))
@@ -259,11 +260,11 @@ async def similar(request: Request, media_id: str, n: int = Query(20, ge=1, le=1
 
     def _run_model():
         me = svc.table("media_embeddings").select("embedding_run_id").eq("media_id", media_id).maybe_single().execute()
-        run_id = (me.data or {}).get("embedding_run_id") if me else None
+        run_id = (row_of(me) or {}).get("embedding_run_id")
         if not run_id:
             return None
         run = svc.table("embedding_runs").select("model_name").eq("id", run_id).maybe_single().execute()
-        return (run.data or {}).get("model_name") if run else None
+        return (row_of(run) or {}).get("model_name")
 
     model_name = await asyncio.to_thread(_run_model)
     store = get_vector_service(model_name)  # per-model vector space (falls back to default)
@@ -288,10 +289,9 @@ async def confirm_cluster(request: Request, cluster_assignment_id: str, body: Co
     now = datetime.now(timezone.utc).isoformat()
 
     def _confirm():
-        ca = svc.table("cluster_assignments").select("*").eq("id", cluster_assignment_id).maybe_single().execute()
-        if not ca or not ca.data:
+        assignment = row_of(svc.table("cluster_assignments").select("*").eq("id", cluster_assignment_id).maybe_single().execute())
+        if not assignment:
             return None, 0
-        assignment = ca.data
         members = (
             svc.table("media_embeddings")
             .select("media_id")
@@ -316,7 +316,7 @@ async def confirm_cluster(request: Request, cluster_assignment_id: str, body: Co
                 "embedding_run_id": assignment["embedding_run_id"],
                 "cluster_id": assignment["cluster_id"],
             }
-            for m in (members.data or [])
+            for m in rows_of(members)
         ]
         for i in range(0, len(obs_rows), 50):
             svc.table("observations").insert(obs_rows[i : i + 50]).execute()
@@ -426,7 +426,7 @@ async def compare_runs_endpoint(request: Request, run_a: str = Query(...), run_b
 
     def _run_deployment(run_id: str):
         resp = svc.table("embedding_runs").select("deployment_id").eq("id", run_id).limit(1).execute()
-        rows = resp.data or []
+        rows = rows_of(resp)
         return rows[0]["deployment_id"] if rows else None
 
     for _rid in (run_a, run_b):
@@ -482,12 +482,12 @@ async def review_media(request: Request, media_id: str, body: ReviewDecisionRequ
     review_status = "expert_reviewed" if body.decision == "expert" else "human_reviewed"
 
     def _write():
-        m = svc.table("media").select("deployment_id").eq("id", media_id).maybe_single().execute()
-        if not m or not m.data:
+        media = row_of(svc.table("media").select("deployment_id").eq("id", media_id).maybe_single().execute())
+        if not media:
             return False
         svc.table("observations").insert(
             {
-                "deployment_id": m.data["deployment_id"],
+                "deployment_id": media["deployment_id"],
                 "media_id": media_id,
                 "observation_level": "media",
                 "observation_type": "animal",

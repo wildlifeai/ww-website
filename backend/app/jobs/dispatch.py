@@ -56,7 +56,8 @@ async def enqueue_job(name: str, *args, **kwargs) -> str:
                 # a missing marker only affects autoscaling, never correctness).
                 if job is not None:
                     try:
-                        await pool.lpush(GPU_PENDING_KEY, job.job_id)
+                        # redis-py types each command as `Awaitable[int] | int` for both clients.
+                        await pool.lpush(GPU_PENDING_KEY, job.job_id)  # pyright: ignore[reportGeneralTypeIssues]
                     except Exception as exc:
                         logger.debug("gpu_pending_marker_push_failed", job=name, error=str(exc))
             finally:

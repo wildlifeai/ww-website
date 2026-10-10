@@ -20,7 +20,7 @@ import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Sequence
 
 import numpy as np
 import structlog
@@ -35,11 +35,12 @@ from app.registries.embedding_registry import (
     purity_bucket,
     review_depth_for_purity,
 )
+from app.services.db_utils import rows_of
 
 logger = structlog.get_logger()
 
 
-async def _resolve_crops_concurrent(crops: list[dict], *, concurrency: int = 10) -> list[tuple[str, Optional[str], bytes]]:
+async def _resolve_crops_concurrent(crops: list[dict], *, concurrency: int = 10) -> list[tuple[str, str, bytes]]:
     """Resolve crop URLs to bytes with bounded concurrency, preserving input order.
 
     Returns ``(media_id, deployment_id, image_bytes)`` per successfully-resolved
@@ -57,7 +58,7 @@ async def _resolve_crops_concurrent(crops: list[dict], *, concurrency: int = 10)
             except Exception as exc:  # noqa: BLE001 — one bad crop must not sink the run
                 logger.warning("crop_resolve_failed", media_id=c.get("id"), error=str(exc))
                 return None
-        return (c["id"], c.get("deployment_id"), resolved[0]) if resolved else None
+        return (c["id"], c["deployment_id"], resolved[0]) if resolved else None
 
     results = await asyncio.gather(*[_one(c) for c in crops])
     return [r for r in results if r is not None]
@@ -144,7 +145,7 @@ def build_media_embedding_rows(
     cluster_labels: list[int],
     cluster_probs: list[float],
     purities: dict[int, float],
-    umap_xy: list[tuple[float, float]],
+    umap_xy: Sequence[Sequence[float]],
 ) -> list[dict]:
     """Build media_embeddings upsert rows (pure)."""
     rows: list[dict] = []
@@ -201,7 +202,7 @@ def build_media_embedding_rows_scoped(
     cluster_labels: list[int],
     cluster_probs: list[float],
     purities: dict[int, float],
-    umap_xy: list[tuple[float, float]],
+    umap_xy: Sequence[Sequence[float]],
 ) -> list[dict]:
     """Like ``build_media_embedding_rows`` but each media carries its own deployment_id.
 
@@ -300,7 +301,7 @@ def prepare_cluster_input(embeddings: list[list[float]]) -> list[tuple[float, ..
     return [tuple(float(v) for v in row) for row in normalized]
 
 
-def cluster_hdbscan(embeddings: list[list[float]], preset: str = DEFAULT_HDBSCAN_PRESET) -> tuple[list[int], list[float]]:
+def cluster_hdbscan(embeddings: Sequence[Sequence[float]], preset: str = DEFAULT_HDBSCAN_PRESET) -> tuple[list[int], list[float]]:
     """Cluster embeddings with HDBSCAN. Returns (labels, probabilities).
 
     The preset's ``min_cluster_size`` (15 for 'small') is tuned for full
@@ -412,13 +413,13 @@ async def _fetch_crops(deployment_id: str) -> list[dict]:
             .execute()
         )
         rows = []
-        for r in resp.data or []:
+        for r in rows_of(resp):
             assets = r.get("media_assets")
             if isinstance(assets, list):
                 assets = assets[0] if assets else None
             crop = (assets or {}).get("animal_crop_url")
             if crop:
-                rows.append({"id": r["id"], "crop_url": crop})
+                rows.append({"id": r["id"], "deployment_id": r["deployment_id"], "crop_url": crop})
         return rows
 
     return await asyncio.to_thread(_fetch)
@@ -442,9 +443,11 @@ async def embed_and_cluster_deployment(
         if progress:
             await progress(pct, msg)
 
-    dino = get_dinov3_service() if model_name is None else None
-    resolved_model = model_name or dino.model_name
-    model_version = dino.version if dino else resolved_model
+    if model_name:
+        dino, resolved_model, model_version = None, model_name, model_name
+    else:  # None or a blank name from the request: the configured default
+        dino = get_dinov3_service()
+        resolved_model, model_version = dino.model_name, dino.version
 
     run_id = await _create_embedding_run(deployment_id, resolved_model, model_version, created_by)
     logger.info("wildlife_brain_run_start", deployment_id=deployment_id, run_id=run_id, model=resolved_model)
@@ -527,7 +530,7 @@ async def _resolve_scope_deployments(scope: str, scope_id: Optional[str], owner_
         if scope == "project":
             q = q.eq("project_id", scope_id)
         resp = q.execute()
-        return [r["id"] for r in (resp.data or [])]
+        return [r["id"] for r in rows_of(resp)]
 
     return await asyncio.to_thread(_fetch)
 
@@ -554,7 +557,7 @@ async def _fetch_crops_for_deployments(deployment_ids: list[str], only_unreviewe
                 .not_.is_("media_id", "null")
                 .execute()
             )
-            reviewed = {r["media_id"] for r in (rev.data or []) if r.get("media_id")}
+            reviewed = {r["media_id"] for r in rows_of(rev) if r.get("media_id")}
 
         # Chunk the IN() to keep URLs/queries bounded for large scopes.
         for i in range(0, len(deployment_ids), 50):
@@ -566,7 +569,7 @@ async def _fetch_crops_for_deployments(deployment_ids: list[str], only_unreviewe
                 .is_("deleted_at", "null")
                 .execute()
             )
-            for r in resp.data or []:
+            for r in rows_of(resp):
                 if only_unreviewed and r["id"] in reviewed:
                     continue
                 assets = r.get("media_assets")
@@ -650,9 +653,11 @@ async def embed_and_cluster_scope(
     if scope == "project" and not scope_id:
         raise ValueError("project scope requires scope_id (the project id)")
 
-    dino = get_dinov3_service() if model_name is None else None
-    resolved_model = model_name or dino.model_name
-    model_version = dino.version if dino else resolved_model
+    if model_name:
+        dino, resolved_model, model_version = None, model_name, model_name
+    else:  # None or a blank name from the request: the configured default
+        dino = get_dinov3_service()
+        resolved_model, model_version = dino.model_name, dino.version
 
     # project scope: scope_id must equal project_id (chk_project_scope_match).
     run_project_id = scope_id if scope == "project" else None

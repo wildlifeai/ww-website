@@ -767,7 +767,7 @@ def _content_and_config(
         "automatic_function_calling": types.AutomaticFunctionCallingConfig(disable=True),
     }
     if thinking_level:
-        cfg["thinking_config"] = types.ThinkingConfig(thinking_level=thinking_level)
+        cfg["thinking_config"] = types.ThinkingConfig(thinking_level=types.ThinkingLevel(thinking_level))
     return contents, types.GenerateContentConfig(**cfg)
 
 
@@ -929,6 +929,8 @@ def presence_batch(
     name = getattr(job, "name", None)
     logger.info("gemini_presence_batch_submitted", job=name, requests=len(requests), model=model)
     while _state_name(job) not in _BATCH_DONE_STATES:
+        if name is None:
+            raise RuntimeError("Gemini batch job came back without a name, so it cannot be polled")
         if time.monotonic() - start > max_wait_seconds:
             raise TimeoutError(f"Gemini batch job {name} still {_state_name(job)} after {max_wait_seconds:.0f}s")
         sleep(poll_seconds)

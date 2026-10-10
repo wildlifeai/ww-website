@@ -26,12 +26,14 @@ from dataclasses import dataclass
 from typing import Any, Optional, Sequence
 
 import structlog
+from postgrest import CountMethod
 
 from app.registries.embedding_registry import (
     DEFAULT_SERVER_MODEL,
     EMBEDDING_DIM,
     get_embedding_dim,
 )
+from app.services.db_utils import row_of, rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -178,7 +180,7 @@ class PgVectorService:
 
         def _run() -> list[dict]:
             client = create_service_client()
-            return client.rpc(_MATCH_FN, params).execute().data or []
+            return rows_of(client.rpc(_MATCH_FN, params).execute())
 
         rows = await asyncio.to_thread(_run)
         # `distance` is `embedding <=> query` over non-null vectors, so never NULL in
@@ -197,8 +199,8 @@ class PgVectorService:
 
         def _run() -> Optional[Any]:
             client = create_service_client()
-            res = client.table(_TABLE).select("embedding").eq("media_id", media_id).maybe_single().execute()
-            return (res.data or {}).get("embedding") if res and res.data else None
+            row = row_of(client.table(_TABLE).select("embedding").eq("media_id", media_id).maybe_single().execute())
+            return row.get("embedding") if row else None
 
         return parse_vector(await asyncio.to_thread(_run))
 
@@ -222,7 +224,7 @@ class PgVectorService:
 
         def _run() -> int:
             client = create_service_client()
-            res = client.table(_TABLE).select("media_id", count="exact").eq("embedding_model", self.model_name).limit(1).execute()
+            res = client.table(_TABLE).select("media_id", count=CountMethod.exact).eq("embedding_model", self.model_name).limit(1).execute()
             return res.count or 0
 
         return await asyncio.to_thread(_run)

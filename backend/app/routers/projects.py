@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.authz import project_restore_right
 from app.dependencies import get_user_client, get_verified_user, require_not_demo
 from app.domain.soft_delete import now_iso, restore_project, soft_delete_project_as_user
+from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -43,7 +44,7 @@ async def create_project(
         org_res = svc.table("user_roles").select("scope_id").eq("user_id", user.id).eq("scope_type", "organisation").limit(1).execute()
         if not org_res.data:
             raise HTTPException(status_code=403, detail="You must belong to an organisation to create a project.")
-        org_id = org_res.data[0]["scope_id"]
+        org_id = rows_of(org_res)[0]["scope_id"]
 
         project_id = str(uuid.uuid4())
         svc.table("projects").insert(

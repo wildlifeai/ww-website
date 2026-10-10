@@ -22,6 +22,7 @@ import structlog
 
 from app.config import settings
 from app.registries.model_registry import get_model_config
+from app.services.db_utils import rows_of
 from app.services.http_client import download_url_content
 from app.services.supabase_client import create_service_client
 from app.services.vela import VelaConversionError, check_compiled_model, run_vela_conversion
@@ -147,6 +148,8 @@ def read_io_tensors(model_path: Path) -> Tuple[Optional[TensorFacts], TensorFact
 
     try:
         subgraph = Model.GetRootAs(bytearray(Path(model_path).read_bytes()), 0).Subgraphs(0)
+        if subgraph is None:
+            raise ValueError("no subgraph")
         if not subgraph.OutputsLength():
             raise ValueError("no output tensor")
         inp = facts(subgraph.Tensors(subgraph.Inputs(0))) if subgraph.InputsLength() else None
@@ -271,7 +274,7 @@ async def resolve_or_create_model_family(
             client.table("ai_model_families").select("id, firmware_model_id").eq("firmware_model_id", firmware_model_id).execute
         )
         if global_res.data:
-            family_id = global_res.data[0]["id"]
+            family_id = rows_of(global_res)[0]["id"]
             return family_id, firmware_model_id
 
         # Search by name under the General Organisation
@@ -279,8 +282,8 @@ async def resolve_or_create_model_family(
             client.table("ai_model_families").select("id, firmware_model_id").eq("organisation_id", gen_org_id).eq("name", model_name).execute
         )
         if family_res.data:
-            family_id = family_res.data[0]["id"]
-            db_fw_id = family_res.data[0].get("firmware_model_id")
+            family_id = rows_of(family_res)[0]["id"]
+            db_fw_id = rows_of(family_res)[0].get("firmware_model_id")
             if db_fw_id is None:
                 await asyncio.to_thread(
                     client.table("ai_model_families").update({"firmware_model_id": firmware_model_id}).eq("id", family_id).execute
@@ -296,7 +299,7 @@ async def resolve_or_create_model_family(
             family_insert = await asyncio.to_thread(client.table("ai_model_families").insert(fam_data).execute)
             if not family_insert.data:
                 raise ModelDomainError("Failed to create global AI model family")
-            family_id = family_insert.data[0]["id"]
+            family_id = rows_of(family_insert)[0]["id"]
             return family_id, firmware_model_id
     else:
         # Custom user-uploaded models: search/create under the user's organisation
@@ -305,15 +308,15 @@ async def resolve_or_create_model_family(
         )
 
         if family_res.data:
-            family_id = family_res.data[0]["id"]
-            db_fw_id = family_res.data[0].get("firmware_model_id")
+            family_id = rows_of(family_res)[0]["id"]
+            db_fw_id = rows_of(family_res)[0].get("firmware_model_id")
         else:
             fam_data: Dict[str, Any] = {"organisation_id": org_id, "name": model_name}
             family_insert = await asyncio.to_thread(client.table("ai_model_families").insert(fam_data).execute)
             if not family_insert.data:
                 raise ModelDomainError("Failed to create AI model family")
-            family_id = family_insert.data[0]["id"]
-            db_fw_id = family_insert.data[0].get("firmware_model_id")
+            family_id = rows_of(family_insert)[0]["id"]
+            db_fw_id = rows_of(family_insert)[0].get("firmware_model_id")
 
         if not db_fw_id:
             db_fw_id = 9999
@@ -530,10 +533,10 @@ async def upload_and_register(
             if global_existing.data:
                 logger.info(
                     "precompiled_model_already_exists",
-                    model_id=global_existing.data[0]["id"],
+                    model_id=rows_of(global_existing)[0]["id"],
                     family_id=model_family_id,
                 )
-                return global_existing.data[0]
+                return rows_of(global_existing)[0]
 
         base_storage_path = f"{effective_org_id}/{safe_name}-custom-{safe_version}"
         storage_path_tfl = f"{base_storage_path}/{name_stem}.TFL"
@@ -583,7 +586,7 @@ async def upload_and_register(
         }
 
         if existing.data:
-            model_id = existing.data[0]["id"]
+            model_id = rows_of(existing)[0]["id"]
             response = await asyncio.to_thread(client.table("ai_models").update(model_data).eq("id", model_id).execute)
             logger.info("model_updated", model_id=model_id)
         else:
@@ -593,7 +596,7 @@ async def upload_and_register(
         if not response.data:
             raise ModelDomainError("Database operation returned no data")
 
-        return response.data[0]
+        return rows_of(response)[0]
 
     except Exception as e:
         # Rollback: delete uploaded files from storage
@@ -625,7 +628,7 @@ async def next_model_version(client, org_id: str, model_name: str) -> Tuple[int,
     existing_query = client.table("ai_models").select("version").eq("organisation_id", org_id).eq("name", model_name)
     existing_res = await asyncio.to_thread(existing_query.execute)
     majors = []
-    for r in existing_res.data or []:
+    for r in rows_of(existing_res):
         v = r.get("version")
         if v:
             head = v.split(".")[0]

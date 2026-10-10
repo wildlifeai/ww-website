@@ -336,15 +336,17 @@ def burst_signals(
         raise ValueError(f"motion_fracs has {len(fracs)} entries for a burst of {n} frames")
     if n < 2:
         fracs = [None] * n
-    flags = [has_model_presence(observations_by_media.get(m.get("id"), [])) for m in burst]
+    # A frame without an id has no observations and no SpeciesNet score.
+    ids: list[str] = [m.get("id") or "" for m in burst]
+    flags = [has_model_presence(observations_by_media.get(mid, [])) for mid in ids]
     total = sum(flags)
     bid = burst_id_of(burst)
     conf = speciesnet_max_conf or {}
     return [
         frame_signals(
             m,
-            observations_by_media.get(m.get("id"), []),
-            speciesnet_max_conf=conf.get(m.get("id")),
+            observations_by_media.get(ids[i], []),
+            speciesnet_max_conf=conf.get(ids[i]),
             confidence_threshold=confidence_threshold,
             motion_frac=fracs[i],
             burst_id=bid,

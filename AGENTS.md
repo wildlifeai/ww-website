@@ -34,7 +34,7 @@ Setup detail, env reference and a verification checklist:
 ## Validate before committing
 
 ```bash
-cd backend  && ruff check . && ruff format --check . && pytest
+cd backend  && ruff check . && ruff format --check . && pyright && pytest
 cd frontend && npm run lint && npx tsc -b --noEmit && npm run build && npm run size
 node scripts/validate-docs.js
 ```
@@ -42,9 +42,10 @@ node scripts/validate-docs.js
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
 
-`pyright` in `backend/` (venv active, `requirements-dev.txt` installed) type-checks the backend
-with the `[tool.pyright]` settings in `backend/pyproject.toml`. It is advisory until its backlog
-is cleared (#225): add no new errors in the files you touch.
+`pyright` (from `requirements-dev.txt`) type-checks the backend with the `[tool.pyright]`
+settings in `backend/pyproject.toml` and must report no errors. It resolves imports from the Python on `PATH`, so activate the venv
+first: dozens of unresolved imports (`structlog`, `supabase`) mean it is reading another
+interpreter, and its count is wrong.
 
 `ci.yml` runs the same gates on every pull request and adds three that only run there: pytest
 with a statement-coverage floor, a build of the backend's `api` Docker stage that is started and
