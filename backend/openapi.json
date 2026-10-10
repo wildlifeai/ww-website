@@ -822,6 +822,24 @@
         "title": "EmbedRequest",
         "type": "object"
       },
+      "FillTimezonesRequest": {
+        "properties": {
+          "deployment_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Deployment Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "deployment_ids"
+        ],
+        "title": "FillTimezonesRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3218,6 +3236,59 @@
           }
         },
         "summary": "Batch Restore Deployments",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
+    "/api/deployments/fill-timezones": {
+      "post": {
+        "description": "Give the listed deployments their time zone, where they have coordinates and none (#309).\n\nThe website calls this for the deployments it shows without a zone, so capture times turn\nlocal without an admin backfill: the app creates deployments without one. Any signed-in\nuser, the demo account included, for the deployments they can see; ids they can't see, and\ndeployments with no coordinates, are left out. Returns ``{deployment_id: zone}`` for the ones\nfilled.",
+        "operationId": "fill_timezones_api_deployments_fill_timezones_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FillTimezonesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Fill Timezones",
         "tags": [
           "deployments"
         ]

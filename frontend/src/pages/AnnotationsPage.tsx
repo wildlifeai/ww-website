@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
+import { useFilledTimezones } from '../hooks/useFilledTimezones'
 import { MediaBrowser } from '../components/data/MediaBrowser'
 import { NoProjectSelected } from '../components/common/NoProjectSelected'
 import { supabase } from '../config/supabase'
@@ -20,6 +21,8 @@ interface Deployment {
   project_id: string
   location_name: string | null
   timezone?: string | null
+  latitude?: number | null
+  longitude?: number | null
   deployment_start?: string | null
 }
 
@@ -28,6 +31,7 @@ export function AnnotationsPage() {
   const { queryProjectIds, noProjectSelected } = useProjectSelection()
   const [deployments, setDeployments] = useState<Deployment[]>([])
   const [loading, setLoading] = useState(true)
+  const shown = useFilledTimezones(deployments)
 
   // WS5-T6: read ?deployment=<id> placed by the upload dock "View Annotations" link
   const [searchParams] = useSearchParams()
@@ -49,7 +53,7 @@ export function AnnotationsPage() {
       .in('project_id', queryProjectIds)
 
     ;(async () => {
-      const withTz = await runQuery('id, project_id, location_name, deployment_start, timezone')
+      const withTz = await runQuery('id, project_id, location_name, deployment_start, latitude, longitude, timezone')
       const data = withTz.error
         ? (await runQuery('id, project_id, location_name, deployment_start')).data
         : withTz.data
@@ -69,7 +73,7 @@ export function AnnotationsPage() {
         <p style={{ opacity: 0.5 }}>Loading deployments…</p>
       ) : (
         <MediaBrowser
-          deployments={deployments}
+          deployments={shown}
           initialDeploymentId={initialDeploymentId}
           initialSpecies={initialSpecies}
         />

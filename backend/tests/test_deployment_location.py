@@ -166,3 +166,75 @@ def test_patch_refuses_the_demo_user(api):
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="demo", app_metadata={"is_demo": True})
     assert client.patch(f"/api/deployments/{DEP_ID}/location", json=BODY).status_code == 403
     table.update.assert_not_called()
+
+
+# ── filling missing time zones (#309) ────────────────────────────────────────
+
+OTHER_ID = "e10f7c43-1111-4222-8333-944455557777"
+
+
+def _fill_clients(visible_rows):
+    """A user client whose SELECT answers ``visible_rows``, and a service client to write with."""
+    user = MagicMock()
+    chain = MagicMock()
+    for name in ("select", "in_", "is_", "eq"):
+        getattr(chain, name).return_value = chain
+    chain.not_ = chain
+    chain.execute.return_value = _Result(list(visible_rows))
+    user.table.return_value = chain
+    service = MagicMock()
+    write = MagicMock()
+    write.eq.return_value = write
+    write.is_.return_value = write
+    service.table.return_value.update.return_value = write
+    return user, chain, service, write
+
+
+def test_fill_writes_the_zone_of_each_visible_deployment(monkeypatch):
+    monkeypatch.setattr("app.domain.deployment_location.resolve_timezone", lambda lat, lon: "Pacific/Auckland")
+    from app.domain.deployment_location import fill_missing_timezones
+
+    user, chain, service, write = _fill_clients([{"id": DEP_ID, "latitude": -41.2, "longitude": 174.7}])
+    assert fill_missing_timezones(user, service, [DEP_ID, OTHER_ID]) == {DEP_ID: "Pacific/Auckland"}
+    # The read is the caller's, limited to the ids, empty zones and rows with coordinates.
+    chain.in_.assert_called_once_with("id", [DEP_ID, OTHER_ID])
+    chain.is_.assert_any_call("timezone", "null")
+    chain.is_.assert_any_call("latitude", "null")
+    # The write only fills an empty zone, on the row the read returned.
+    service.table.return_value.update.assert_called_once_with({"timezone": "Pacific/Auckland"})
+    write.eq.assert_called_once_with("id", DEP_ID)
+    write.is_.assert_called_once_with("timezone", "null")
+
+
+def test_fill_skips_coordinates_without_a_zone(monkeypatch):
+    monkeypatch.setattr("app.domain.deployment_location.resolve_timezone", lambda lat, lon: None)
+    from app.domain.deployment_location import fill_missing_timezones
+
+    user, _, service, _ = _fill_clients([{"id": DEP_ID, "latitude": 0.0, "longitude": -160.0}])
+    assert fill_missing_timezones(user, service, [DEP_ID]) == {}
+    service.table.assert_not_called()
+
+
+def test_fill_with_no_ids_reads_nothing():
+    from app.domain.deployment_location import fill_missing_timezones
+
+    user, _, service, _ = _fill_clients([])
+    assert fill_missing_timezones(user, service, []) == {}
+    user.table.assert_not_called()
+
+
+def test_post_fill_timezones_returns_the_filled_zones(api, monkeypatch):
+    client, holder = api
+    user, _, service, _ = _fill_clients([{"id": DEP_ID, "latitude": -41.2, "longitude": 174.7}])
+    holder["client"] = user
+    monkeypatch.setattr("app.routers.deployments.create_service_client", lambda: service)
+    res = client.post("/api/deployments/fill-timezones", json={"deployment_ids": [DEP_ID, DEP_ID]})
+    assert res.status_code == 200
+    assert res.json()["data"] == {DEP_ID: "Pacific/Auckland"}
+
+
+@pytest.mark.parametrize("ids", [["not-a-uuid"], [DEP_ID] * 501])
+def test_post_fill_timezones_rejects_bad_input(api, ids):
+    client, holder = api
+    holder["client"] = MagicMock()
+    assert client.post("/api/deployments/fill-timezones", json={"deployment_ids": ids}).status_code == 422
