@@ -55,7 +55,8 @@ when the user has an active deployment.
 ### Routes
 
 **Public**: `/`, `/login`, `/signup`, `/reset-password`, `/privacy`, `/terms`, `/resources`, `/faq`, `/guides`,
-`/guides/:slug` (both lazy-loaded); `/support` redirects to `/faq`.
+`/guides/:slug` (lazy-loaded); `/support` redirects to `/faq`. The other public pages are in the main
+chunk so they render without a "Loading…" first; every protected page is lazy-loaded.
 
 `/login` and `/signup` are one `LoginPage`: email sign-in (Supabase Auth UI), an email sign-up form
 that sends `given_name` and `family_name` (`lib/signUp.ts`), and Google sign-in on both. With
