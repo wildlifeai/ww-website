@@ -9,7 +9,7 @@ work is run as background jobs.
    (anon key + the user's JWT → the **`authenticated`** Postgres role) and queries tables directly
    with `supabase.from('…')`. Row-Level Security (RLS) scopes every row to the user's projects.
 2. **Backend API (privileged / heavy work).** EXIF parsing, Drive uploads, model conversion, the AI
-   pipeline, LoRaWAN ingestion, and admin-only RPCs go through FastAPI, which uses the
+   pipeline, and admin-only RPCs go through FastAPI, which uses the
    **service-role** key (bypasses RLS) where appropriate.
 
 ## The RLS + GRANT model (read this before debugging "permission denied")
@@ -87,6 +87,13 @@ detection), `flash_led`, and for `time_of_day` a window stored as UTC minutes
 shows the window in the browser's timezone beside the UTC the camera runs on; the conversion is
 `frontend/src/lib/flashSettings.ts`. A save asks for the row back, because RLS turns a
 non-admin's update into 0 rows with no error.
+
+Settings → ✎ Details edits a project's `name`, `description` and `website` as the signed-in user,
+through `frontend/src/lib/projectDetails.ts` (#288). The `projects` UPDATE policy allows a
+project_admin of the project or a ww_admin, so only they see the action, and the save asks for the
+row back in the same way. The columns have no length, format or uniqueness checks. A rename leaves
+the project's Google Drive folder under the old name: later uploads go to a new folder under the
+new name, once the cached folder id expires (24 h, or at once without Redis).
 
 Observation provenance fields (`source_type`, `review_status`, `reviewer_id`, `annotator_id`,
 `classification_method`) are written through one helper, `frontend/src/lib/observations.ts`, so

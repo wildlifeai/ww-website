@@ -32,8 +32,9 @@ Rules:
   from `useProjectSelection` and renders `NoProjectSelected` when nothing is ticked. An empty
   selection means none, never all; the rule lives in `lib/projectSelection.ts` (#214).
 * The project list refetches when the user returns to the tab, at most every 30 s
-  (`lib/tabReturnRefresh.ts`), without a loading state. A website write that creates, deletes or
-  restores a project calls `reloadProjects()`, or the top-bar and upload pickers miss it (#299).
+  (`lib/tabReturnRefresh.ts`), without a loading state. A website write that creates, deletes,
+  restores or renames a project calls `reloadProjects()`, or the top-bar and upload pickers miss
+  it (#299).
 * Read observations for a count, chart or species list through `fetchLiveObservations`
   (`lib/liveObservations.ts`), never a bare `from('observations')`: a deleted photo leaves its
   observations behind ([03-DATA-AND-SYNC](../../../documentation/onboarding/03-DATA-AND-SYNC.md), #198).

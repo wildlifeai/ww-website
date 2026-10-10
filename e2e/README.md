@@ -51,6 +51,17 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   sign-in check runs on dev once the merge deploys. The `full` suite, by hand only, adds `03` and `04`, which
   write to the dev database and storage; the LoRaWAN spec takes the `dev` environment's
   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+- **E2E Full Stack** (`.github/workflows/e2e-full-stack.yml`, #216) runs `01-smoke` and
+  `02-demo` against a stack started on the runner, on a pull request that changes `backend/`,
+  `frontend/`, `e2e/` or the workflow: a local Supabase from ww-backend's `dev` migrations and
+  seed, the pull request's backend under `uvicorn` on `:8000` and its frontend from
+  `vite preview` on `:4173`. It is the only job that tests a pull request's backend through the
+  UI before merge. The job picks a fresh seed password per run, so `tui@ww.org` and the demo
+  account (`demo@wildlife.ai`, which the backend gets as `DEMO_EMAIL`) sign in with a value that
+  only exists on the runner. Its one secret is `WW_BACKEND_READ_TOKEN`, for the ww-backend
+  checkout. It fails on any skipped test, and on failure the `e2e-full-stack-<sha>` artifact
+  holds the report, the screenshots and the backend and `vite preview` logs. To reproduce it
+  locally, follow its steps in order: the workflow is the recipe.
 - **A11y of public pages** runs `05-a11y` with no account and fails on a serious or critical
   violation. It was advisory until #213 cleared the colour-contrast findings (#212).
 - **Lighthouse of public pages** audits `/`, `/login`, `/guides`, `/faq` and `/resources` three

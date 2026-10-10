@@ -75,12 +75,14 @@ def _clear_memory_cache():
 
 
 @pytest.fixture(autouse=True)
-def _no_redis_locks(monkeypatch):
-    """Keep ``services.locks`` in-process: REDIS_URL is set above, but no Redis runs in tests.
+def _no_cross_process_locks(monkeypatch):
+    """Keep ``services.locks`` in-process: no Redis or Supabase runs in tests.
 
-    Without this every ``run_pipeline`` would first time out connecting to localhost:6379.
-    Tests of the Redis path patch ``_redis_client`` themselves.
+    Without this every ``run_pipeline`` would first time out connecting to localhost:6379,
+    or to the test Supabase URL. Tests of the Redis path patch ``_redis_client`` themselves,
+    and tests of the database lease patch ``_lease_client``.
     """
     from app.services import locks
 
     monkeypatch.setattr(locks, "_redis_client", lambda: None)
+    monkeypatch.setattr(locks, "_lease_client", lambda: None)

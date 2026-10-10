@@ -7,7 +7,6 @@ GET /api/media/{media_id}/image?size=full  → full resolution (detail panel)
 """
 
 import asyncio
-from datetime import datetime, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -19,6 +18,7 @@ from app.config import settings
 from app.dependencies import get_current_user, get_user_client, require_not_demo
 from app.domain.media_registry import resolve_url, with_resolved_urls
 from app.domain.media_resolver import resolve_media
+from app.domain.soft_delete import now_iso, restore_media_as_user, soft_delete_media_as_user
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.services import supabase_client
 
@@ -191,25 +191,25 @@ async def batch_delete_media(
 ):
     """Soft-delete multiple media records (sets deleted_at).
 
-    Idempotent: already-deleted media are silently skipped. Runs as the
-    requesting user (not the service role), so RLS decides which rows change:
+    Runs as the requesting user (not the service role), so RLS decides which rows change:
     a photo's uploader while they hold at least project_member on its project
-    (ww-backend #277), or a project_admin of the project. Any other id,
-    including a plain member's request for a photo someone else uploaded,
-    changes 0 rows without an error; ``deleted`` counts only the rows that
-    changed, so ``deleted < requested`` means some were skipped.
+    (ww-backend #277), or a project_admin of the project. Any other id, including a plain
+    member's request for a photo someone else uploaded, changes 0 rows without an error, as
+    does an id already deleted. ``deleted_ids`` lists the rows that changed and
+    ``skipped_ids`` the rest; ``deleted`` counts ``deleted_ids``.
     """
     req_id = getattr(request.state, "request_id", None)
-    now = datetime.now(timezone.utc).isoformat()
-
-    def _delete():
-        result = user_client.table("media").update({"deleted_at": now}).in_("id", body.media_ids).is_("deleted_at", "null").execute()
-        return len(result.data or [])
-
-    deleted = await asyncio.to_thread(_delete)
+    now = now_iso()
+    deleted, skipped = await asyncio.to_thread(soft_delete_media_as_user, user_client, body.media_ids, now)
     return ApiResponse(
         # deleted_at lets the client offer an Undo (POST /batch/restore).
-        data={"deleted": deleted, "requested": len(body.media_ids), "deleted_at": now},
+        data={
+            "deleted": len(deleted),
+            "requested": len(body.media_ids),
+            "deleted_at": now,
+            "deleted_ids": deleted,
+            "skipped_ids": skipped,
+        },
         meta=ApiMeta(request_id=req_id),
     )
 
@@ -228,18 +228,17 @@ async def batch_restore_media(
     user=Depends(get_current_user),
     user_client=Depends(get_user_client),
 ):
-    """Undo a media delete — clears ``deleted_at`` where it equals the given timestamp. Runs as the
+    """Undo a media delete, clearing ``deleted_at`` where it equals the given timestamp. Runs as the
     user, so RLS applies the delete rule: the photo's uploader while they hold at least
     project_member, or a project_admin of the project; other ids change 0 rows without an error.
-    Scoping by the exact timestamp restores only the photos removed in that delete."""
+    Scoping by the exact timestamp restores only the photos removed in that delete.
+    ``restored_ids`` lists the rows that changed and ``skipped_ids`` the rest."""
     req_id = getattr(request.state, "request_id", None)
-
-    def _restore():
-        result = user_client.table("media").update({"deleted_at": None}).in_("id", body.media_ids).eq("deleted_at", body.deleted_at).execute()
-        return len(result.data or [])
-
-    restored = await asyncio.to_thread(_restore)
-    return ApiResponse(data={"restored": restored}, meta=ApiMeta(request_id=req_id))
+    restored, skipped = await asyncio.to_thread(restore_media_as_user, user_client, body.media_ids, body.deleted_at)
+    return ApiResponse(
+        data={"restored": len(restored), "restored_ids": restored, "skipped_ids": skipped},
+        meta=ApiMeta(request_id=req_id),
+    )
 
 
 class RunSelectedRequest(BaseModel):
