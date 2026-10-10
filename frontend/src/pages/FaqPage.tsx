@@ -217,9 +217,37 @@ export function FaqPage() {
       <h3 style={{ marginTop: '2rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>Data & Export</h3>
 
       <FaqItem q="What data formats can I export?">
-        You can export your data as <strong>CSV files</strong> or in <strong>CamtrapDP format</strong> — a standardised
-        camera trap data package used by biodiversity databases worldwide. CamtrapDP exports include monitoring sessions,
-        media records, and observations in a single ZIP file.
+        You can export your data as <strong>CSV files</strong> or as a <strong>CamtrapDP package</strong>, the camera
+        trap data standard that GBIF and the camtrapdp R package read. A CamtrapDP package is one ZIP for one project. It
+        holds:
+        <ul style={{ paddingLeft: '1.25rem', margin: '0.75rem 0' }}>
+          <li>your deployments</li>
+          <li>your photos, as the original files</li>
+          <li>one verdict per photo, the same one the photo grid shows</li>
+        </ul>
+        Large projects take a few minutes to package. You can leave the page while you wait: you get a notification when
+        the package is ready, and the download link is also in Processing history for 24 hours.
+      </FaqItem>
+
+      <FaqItem q="What does a CamtrapDP export leave out?">
+        <ul style={{ paddingLeft: '1.25rem', margin: '0.75rem 0' }}>
+          <li style={{ marginBottom: '0.5rem' }}>
+            <strong>Deployments with no location.</strong> The standard requires a location, so these deployments and
+            their photos are left out. Add a location to a deployment to include it.
+          </li>
+          <li style={{ marginBottom: '0.5rem' }}><strong>Photos with no capture time.</strong></li>
+          <li style={{ marginBottom: '0.5rem' }}>
+            <strong>Photos whose original can't be read.</strong> The package still lists them, and its description
+            names them.
+          </li>
+          <li>
+            <strong>Projects over the size limits.</strong> A project with more than 50,000 photos, or whose originals
+            add up to more than 4 GB, is too big for one package. Ask us at{' '}
+            <a href="mailto:contact@wildlife.ai" style={{ color: 'var(--primary)' }}>contact@wildlife.ai</a>.
+          </li>
+        </ul>
+        Photos that show people are marked as not for public sharing (<code>filePublic</code> false), so a portal that
+        publishes the package can hold them back.
       </FaqItem>
 
       <FaqItem q="Can I upload data from other cameras?">

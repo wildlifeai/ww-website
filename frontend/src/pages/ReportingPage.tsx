@@ -376,7 +376,7 @@ interface ExportCard {
 
 const EXPORT_CARDS: ExportCard[] = [
   { id: 'camtrap', title: 'CamtrapDP Zip Package', icon: '📦', ext: 'zip', format: 'CamtrapDP Package (ZIP)',
-    desc: 'Frictionless Camtrap Data Package with standardised JSON descriptors matching Darwin Core standards.', real: true },
+    desc: "The project's deployments, original photos and verdicts as one Camtrap DP package.", real: true },
   { id: 'events', title: 'Ecological Events CSV', icon: '📊', ext: 'csv', format: 'Ecological Events (CSV)',
     desc: 'Normalised temporal events with observation duration, taxonomic abundance counts and sensor efforts.' },
   { id: 'media', title: 'Media Observations CSV', icon: '📸', ext: 'csv', format: 'Media Observations (CSV)',
