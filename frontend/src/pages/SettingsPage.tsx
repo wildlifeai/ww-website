@@ -7,6 +7,7 @@
 // Tools stay in Toolkit; monitoring stays in Field.
  
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
@@ -32,6 +33,27 @@ interface ProjectRow {
   created_at: string
   deployment_count: number
   organisation_id: string
+}
+
+const NO_PROJECTS: ProjectRow[] = []
+
+async function fetchProjectRows(): Promise<ProjectRow[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, name, description, organisation_id, created_at, deployments(id)')
+    .is('deleted_at', null)
+    .is('deployments.deleted_at', null)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data || []).map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    organisation_id: p.organisation_id,
+    created_at: p.created_at,
+    deployment_count: Array.isArray(p.deployments) ? p.deployments.length : 0,
+  }))
 }
 
 const PANEL_TITLE = {
@@ -61,10 +83,19 @@ export function SettingsPage() {
   const { guard } = useDemoGuard()
   const [searchParams] = useSearchParams()
 
-  const [projects, setProjects] = useState<ProjectRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [projRefresh, setProjRefresh] = useState(0)
+  const queryClient = useQueryClient()
+  const projectsKey = ['settings', 'projects', user?.id]
+  const projectsQuery = useQuery({
+    queryKey: projectsKey,
+    queryFn: fetchProjectRows,
+    enabled: !!user,
+  })
+  const projects = projectsQuery.data ?? NO_PROJECTS
+  const loading = projectsQuery.isPending
+  const error = projectsQuery.error?.message ?? null
+  // Optimistic edits to the list after a create or delete, before any re-read.
+  const editProjects = (edit: (rows: ProjectRow[]) => ProjectRow[]) =>
+    queryClient.setQueryData<ProjectRow[]>(projectsKey, rows => edit(rows ?? []))
 
   // Which projects the user may delete: the database's rule, project_admin of the project or ww_admin.
   const [adminProjectIds, setAdminProjectIds] = useState<Set<string>>(new Set())
@@ -83,34 +114,6 @@ export function SettingsPage() {
   // Per-project slide-over: details, members, capture/AI defaults, or notification rules.
   type PanelKind = 'details' | 'members' | 'defaults' | 'notifications'
   const [panel, setPanel] = useState<{ kind: PanelKind; id: string; name: string; org_id: string } | null>(null)
-
-  useEffect(() => {
-    if (!user) return
-    let cancelled = false
-    setLoading(true)
-    supabase
-      .from('projects')
-      .select('id, name, description, organisation_id, created_at, deployments(id)')
-      .is('deleted_at', null)
-      .is('deployments.deleted_at', null)
-      .order('created_at', { ascending: false })
-      .then(({ data, error: err }) => {
-        if (cancelled) return
-        if (err) { setError(err.message); setLoading(false); return }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows: ProjectRow[] = (data || []).map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description,
-          organisation_id: p.organisation_id,
-          created_at: p.created_at,
-          deployment_count: Array.isArray(p.deployments) ? p.deployments.length : 0,
-        }))
-        setProjects(rows)
-        setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [user, projRefresh])
 
   // Load the user's roles to decide which projects show a Delete action.
   useEffect(() => {
@@ -144,14 +147,14 @@ export function SettingsPage() {
       const res = await apiClient.del(`/api/projects/${target.id}`) as { deleted_at?: string }
       const deletedAt = res?.deleted_at
       setDeleteTarget(null)
-      setProjects(prev => prev.filter(p => p.id !== target.id))
+      editProjects(rows => rows.filter(p => p.id !== target.id))
       reloadProjects()
       if (deletedAt) {
         showUndoToast({
           message: `Deleted project "${target.name}"`,
           onUndo: async () => {
             await apiClient.post(`/api/projects/${target.id}/restore`, { deleted_at: deletedAt })
-            setProjRefresh(x => x + 1)
+            void queryClient.invalidateQueries({ queryKey: projectsKey })
             reloadProjects()
           },
         })
@@ -300,10 +303,10 @@ export function SettingsPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={(p: CreatedProject) => {
-          setProjects(prev => [{
+          editProjects(rows => [{
             id: p.id, name: p.name, description: null, organisation_id: '',
             created_at: new Date().toISOString(), deployment_count: 0,
-          }, ...prev])
+          }, ...rows])
           // The top-bar and upload pickers read the shared list, not this page's (#299).
           reloadProjects()
           setCreateOpen(false)
@@ -334,7 +337,7 @@ export function SettingsPage() {
               <ProjectDetailsPanel
                 projectId={panel.id}
                 onSaved={saved => {
-                  setProjects(prev => prev.map(p => (p.id === saved.id ? { ...p, name: saved.name, description: saved.description } : p)))
+                  editProjects(rows => rows.map(p => (p.id === saved.id ? { ...p, name: saved.name, description: saved.description } : p)))
                   setPanel(prev => (prev && prev.id === saved.id ? { ...prev, name: saved.name } : prev))
                   // The top-bar and upload pickers read the shared list, not this page's (#299).
                   reloadProjects()
