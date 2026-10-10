@@ -51,6 +51,7 @@ On error:
 
 - [System](#system)
 - [Auth](#auth)
+- [Admin](#admin)
 - [Projects](#projects)
 - [Jobs (Async)](#jobs-async)
 - [Manifest Generation](#manifest-generation)
@@ -93,6 +94,17 @@ router exists only to mint the shared read-only demo session server-side. Detail
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/auth/demo-session` | None (rate-limited 10/min per IP) | Mint a session for the shared demo account → `{ access_token, refresh_token }`. Returns `DEMO_DISABLED` when `DEMO_EMAIL`/`DEMO_PASSWORD` are unset on the server |
+
+---
+
+## Admin
+
+Prefix `/api/admin`. System admins only: `401` without a valid JWT, `403` for anyone else.
+Reads every organisation with the service role, because RLS keeps these rows organisation-scoped.
+
+| Method · Path | Description |
+|---|---|
+| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Backs `/admin/devices` |
 
 ---
 

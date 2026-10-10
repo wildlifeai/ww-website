@@ -87,6 +87,7 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 | `/notifications` | `NotificationsPage` | Notification inbox — read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router); the unread count drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
 | `/settings` | `SettingsPage` | Projects, account, integrations, organisation API keys |
 | `/admin/usage` | `AdminUsagePage` | Per-user usage limits (platform admin) |
+| `/admin/devices` | `AdminDevicesPage` | Every device with its organisation and latest deployment, read-only (platform admin) |
 
 **Redirects / legacy**: `/results` → `/insights`, `/other` → `/toolkit`, `/my-data` → `/insights`,
 `/analyse-images` → `/upload-data` (query strings preserved), `/explore/:id` →
@@ -114,9 +115,10 @@ middleware/→ request id, structured logging, rate limiting, CORS
 registries/→ static config (camera configs, model + embedding registries)
 ```
 
-**Routers** (`/api/*`, registered in `app/main.py`): `auth` (demo session), `jobs`, `deployments`,
-`projects`, `exif`, `manifest`, `models`, `media`, `public_api`, `inaturalist`, `clustering`, and,
-each behind its feature flag, `camtrapdp`, `pipeline`, `brain`
+**Routers** (`/api/*`, registered in `app/main.py`): `auth` (demo session), `admin` (system-admin
+device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `models`, `media`,
+`public_api`, `inaturalist`, `clustering`, and, each behind its feature flag, `camtrapdp`,
+`pipeline`, `brain`
 (embeddings/clusters/UMAP/similarity), `qa` (AI-vs-human agreement), `intelligence`
 (dataset health/alerts).
 

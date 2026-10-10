@@ -39,6 +39,7 @@ function lazyPage<M extends Record<K, React.ComponentType>, K extends keyof M>(l
 }
 
 const AdminUsagePage = lazyPage(() => import('./pages/AdminUsagePage'), 'AdminUsagePage')
+const AdminDevicesPage = lazyPage(() => import('./pages/AdminDevicesPage'), 'AdminDevicesPage')
 const MyDataPage = lazyPage(() => import('./pages/MyDataPage'), 'MyDataPage')
 const ManifestPage = lazyPage(() => import('./pages/ManifestPage'), 'ManifestPage')
 const UploadModelPage = lazyPage(() => import('./pages/UploadModelPage'), 'UploadModelPage')
@@ -223,6 +224,17 @@ function AccountMenu({ email, isOrgManager, isAdmin, onLogout, unreadCount, rece
               onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
             >
               📊 User usage
+            </Link>
+          )}
+          {isAdmin && (
+            <Link
+              to="/admin/devices"
+              onClick={() => setOpen(false)}
+              style={itemStyle}
+              onMouseEnter={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'rgba(76,175,80,0.07)')}
+              onMouseLeave={e => ((e.currentTarget as HTMLElement).style.backgroundColor = 'transparent')}
+            >
+              📡 Devices
             </Link>
           )}
           {isOrgManager && (
@@ -509,6 +521,7 @@ export default function App() {
               <Route path="/toolkit"     element={<RequireAuth><ToolkitPage /></RequireAuth>} />
               <Route path="/field"       element={<RequireAuth><FieldPage /></RequireAuth>} />
               <Route path="/admin/usage" element={<RequireAuth><AdminUsagePage /></RequireAuth>} />
+              <Route path="/admin/devices" element={<RequireAuth><AdminDevicesPage /></RequireAuth>} />
               <Route path="/annotations" element={<RequireAuth><AnnotationsPage /></RequireAuth>} />
               <Route path="/insights"    element={<RequireAuth><InsightsPage /></RequireAuth>} />
 
