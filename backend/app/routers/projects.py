@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.authz import assert_project_admin
-from app.dependencies import get_verified_user, require_not_demo
-from app.domain.soft_delete import now_iso, restore_project, soft_delete_project
+from app.authz import project_restore_right
+from app.dependencies import get_user_client, get_verified_user, require_not_demo
+from app.domain.soft_delete import now_iso, restore_project, soft_delete_project_as_user
 from app.services.supabase_client import create_service_client
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -65,17 +65,37 @@ class RestoreProjectRequest(BaseModel):
     deleted_at: str
 
 
-@router.delete("/{project_id}", dependencies=[Depends(require_not_demo)])
-async def delete_project(project_id: str, user: Any = Depends(get_verified_user)) -> Dict[str, Any]:
-    """Soft-delete a project and cascade to its deployments → media → observations.
+_DELETE_RULE = "only a project admin can delete or restore a project"
 
-    Admin-only: requires ``project_admin`` on the project (or org-manager / system). A member or
-    viewer is refused (404). Returns the shared ``deleted_at`` so the client can offer an Undo.
+
+def _project_uuid(project_id: str) -> str:
+    try:
+        return str(uuid.UUID(project_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
+@router.delete("/{project_id}", dependencies=[Depends(require_not_demo)])
+async def delete_project(
+    project_id: str,
+    user: Any = Depends(get_verified_user),
+    user_client: Any = Depends(get_user_client),
+) -> Dict[str, Any]:
+    """Soft-delete a project and cascade to its deployments, media and observations.
+
+    The database decides: ``soft_delete_project`` runs as the caller and allows a
+    ``project_admin`` of the project or ``ww_admin``. Anyone else who can see the project, an
+    organisation manager included, gets ``403``; a project the caller cannot see is ``404``.
+    Returns the shared ``deleted_at`` so the client can offer an Undo.
     """
-    await assert_project_admin(user.id, project_id)
+    pid = _project_uuid(project_id)
     ts = now_iso()
-    await asyncio.to_thread(lambda: soft_delete_project(create_service_client(), project_id, ts))
-    return {"id": project_id, "deleted_at": ts}
+    outcome = await asyncio.to_thread(lambda: soft_delete_project_as_user(user_client, create_service_client(), pid, ts))
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="Project not found")
+    if outcome == "refused":
+        raise HTTPException(status_code=403, detail=f"Not deleted: {_DELETE_RULE}.")
+    return {"id": pid, "deleted_at": ts}
 
 
 @router.post("/{project_id}/restore", dependencies=[Depends(require_not_demo)])
@@ -84,8 +104,19 @@ async def restore_project_endpoint(
     body: RestoreProjectRequest,
     user: Any = Depends(get_verified_user),
 ) -> Dict[str, Any]:
-    """Undo a project delete — clears ``deleted_at`` (== the given timestamp) on the project and the
-    deployments/media/observations that were deleted with it."""
-    await assert_project_admin(user.id, project_id)
-    await asyncio.to_thread(lambda: restore_project(create_service_client(), project_id, body.deleted_at))
-    return {"id": project_id, "restored": True}
+    """Undo a project delete: clears ``deleted_at`` (equal to the given timestamp) on the project
+    and the deployments, media and observations deleted with it.
+
+    Same rule as the delete, a ``project_admin`` or ``ww_admin``. It is checked here in Python
+    (``project_restore_right``) because the database has no restore function (ww-backend #286)
+    and hides a soft-deleted project from the caller's own session. ``403`` for anyone else with
+    a role reaching the project, ``404`` otherwise.
+    """
+    pid = _project_uuid(project_id)
+    right = await project_restore_right(user.id, pid)
+    if right == "not_found":
+        raise HTTPException(status_code=404, detail="Project not found")
+    if right == "refused":
+        raise HTTPException(status_code=403, detail=f"Not restored: {_DELETE_RULE}.")
+    await asyncio.to_thread(lambda: restore_project(create_service_client(), pid, body.deleted_at))
+    return {"id": pid, "restored": True}

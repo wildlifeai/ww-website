@@ -60,7 +60,7 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [projRefresh, setProjRefresh] = useState(0)
 
-  // Which projects the user may delete (project_admin, or an org-manager/system "super" role).
+  // Which projects the user may delete: the database's rule, project_admin of the project or ww_admin.
   const [adminProjectIds, setAdminProjectIds] = useState<Set<string>>(new Set())
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const canDeleteProject = (id: string) => isSuperAdmin || adminProjectIds.has(id)
@@ -118,10 +118,7 @@ export function SettingsPage() {
         let sup = false
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const r of data as any[]) {
-          if (r.scope_type === 'system') sup = true
-          // Org-managers can only see their own org's projects (RLS), so treating them as
-          // able-to-delete-visible-projects is correct; the backend re-checks per project.
-          if (r.scope_type === 'organisation' && r.role === 'organisation_manager') sup = true
+          if (r.scope_type === 'system' && r.role === 'ww_admin') sup = true
           if (r.scope_type === 'project' && r.role === 'project_admin') admins.add(r.scope_id)
         }
         setAdminProjectIds(admins)

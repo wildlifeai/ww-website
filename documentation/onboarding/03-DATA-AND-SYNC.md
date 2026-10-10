@@ -9,7 +9,7 @@ work is run as background jobs.
    (anon key + the user's JWT → the **`authenticated`** Postgres role) and queries tables directly
    with `supabase.from('…')`. Row-Level Security (RLS) scopes every row to the user's projects.
 2. **Backend API (privileged / heavy work).** EXIF parsing, Drive uploads, model conversion, the AI
-   pipeline, LoRaWAN ingestion, and admin-only RPCs go through FastAPI, which uses the
+   pipeline, and admin-only RPCs go through FastAPI, which uses the
    **service-role** key (bypasses RLS) where appropriate.
 
 ## The RLS + GRANT model (read this before debugging "permission denied")

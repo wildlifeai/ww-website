@@ -28,7 +28,7 @@ active engineering hand-offs; **archive** is frozen history. Start with onboardi
 | [embedded-model-lifecycle](resources/embedded-model-lifecycle.md) | End-to-end on-device model flow across website / backend / mobile / firmware |
 | [dual-ai-production-rollout](resources/dual-ai-production-rollout.md) | Runbook to promote dual-AI (Camera AI + Cloud AI / edge reflection) from dev → staging → production, incl. the firmware gating dependency and rollout checklist |
 | [camtrapdp-import](resources/camtrapdp-import.md) | Importing CamtrapDP packages |
-| [lorawan-webhook-setup](resources/lorawan-webhook-setup.md) | ⚠️ **Legacy prototype** — TTN / Chirpstack config for the website's FastAPI webhook, whose parser predates the WW500's FPort-2 TLV format. The **canonical production ingest** is the `lorawan-ingest` edge function in `ww-backend` (`documentation/resources/LORAWAN_INGEST.md`) |
+| [LORAWAN_INGEST](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/LORAWAN_INGEST.md) (ww-backend) | LoRaWAN ingest: network-server setup for the `lorawan-ingest` edge function. The website receives no uplinks |
 | [ui-components](resources/ui-components.md) | Shared frontend design-system primitives |
 | [testing-with-seed-users](resources/testing-with-seed-users.md) | Role-based seed users + access-control validation matrix |
 | [WildlifeWatcher_model_preparation.ipynb](resources/WildlifeWatcher_model_preparation.ipynb) | Notebook: preparing/training a model for the camera before Edge Impulse export. Not maintained with the code — treat as a worked example |

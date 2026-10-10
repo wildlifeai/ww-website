@@ -102,9 +102,11 @@ those milliseconds can still race.
 
 **One run per deployment at a time (#284).** `run_pipeline` holds a per-deployment lock
 (`services/locks.py`) while it reads the media and runs the steps, so a second run waits and then
-sees what the first one wrote. With `REDIS_URL` set the lock is a Redis key with a renewed 10-minute
-TTL and spans the API workers and every ARQ worker; without Redis, or when Redis is unreachable, it
-is an in-process lock only. `POST /api/pipeline/run` does not wait: it returns `PIPELINE_BUSY`.
+sees what the first one wrote. The lock spans processes and has a renewed 10-minute TTL: a Redis key
+when `REDIS_URL` is set, otherwise a lease row in `api_jobs` (`status = 'lock'`, #323), which also
+covers Cloud Run job executions. When Redis or Supabase is unreachable it is an in-process lock only;
+the module docstring has the exact guarantee. `POST /api/pipeline/run` does not wait: it returns
+`PIPELINE_BUSY`.
 The upload job joins a **queued** `ai_pipeline` job on the deployment (under a lock, so chunks that
 arrive together make one); the job stays queued while it is deferred and while it waits for the
 lock, and turns `processing` only when it reads its media. A deployment whose job is already
