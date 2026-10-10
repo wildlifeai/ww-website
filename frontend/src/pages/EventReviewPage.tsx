@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useParams, useNavigate } from 'react-router-dom'
 import { apiClient } from '../lib/apiClient'
 import { supabase } from '../config/supabase'
@@ -146,8 +147,6 @@ export function EventReviewPage() {
   const navigate = useNavigate()
 
   // State
-  const [loading, setLoading] = useState(true)
-  const [events, setEvents] = useState<ObservationEvent[]>([])
   const [selectedEventId, setSelectedEventId] = useState<string>('')
   const [searchTerm, setSearchTerm] = useState('')
   const [speciesFilter, setSpeciesFilter] = useState('all')
@@ -165,13 +164,13 @@ export function EventReviewPage() {
   const [zoomLevel, setZoomLevel] = useState(1.0)
   const [showZoomModal, setShowZoomModal] = useState(false)
 
-  // Load events
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true)
-      // A fresh deck starts its first event's slideshow at the first frame, unzoomed.
-      setCurrentSlideIndex(0)
-      setZoomLevel(1.0)
+  // Load events. Local status and trigger edits go into the query cache, so they
+  // survive re-renders until the next refetch reads the saved values back.
+  const queryClient = useQueryClient()
+  const eventsKey = ['observation-events', deployment_id]
+  const eventsQuery = useQuery({
+    queryKey: eventsKey,
+    queryFn: async (): Promise<ObservationEvent[]> => {
       try {
         // Try fetching observation events from database
         const { data, error } = await supabase
@@ -181,61 +180,64 @@ export function EventReviewPage() {
           .order('event_start', { ascending: true })
 
         if (error) throw error
+        // Fallback to high-fidelity simulated NZ temporal events
+        if (!data || data.length === 0) return MOCK_EVENTS
 
-        if (data && data.length > 0) {
-          // Enrich database data with realistic mock burst paths & details
-          const enriched: ObservationEvent[] = data.map((evt, idx) => {
-            const speciesInfo = getNZSpeciesInfo(evt.scientific_name)
-            return {
-              id: evt.id,
-              deployment_id: evt.deployment_id,
-              scientific_name: evt.scientific_name || 'Unknown Species',
-              nz_code: speciesInfo.code,
-              nz_status: speciesInfo.status,
-              confidence: evt.confidence || 0.8,
-              event_start: evt.event_start,
-              event_end: evt.event_end || evt.event_start,
-              duration_seconds: evt.duration_seconds || 10,
-              status: (evt.status as any) || 'pending',
-              trigger_cause: (evt.trigger_cause as any) || 'Unknown',
-              media: [
-                `https://picsum.photos/800/600?random=db-${idx}-1`,
-                `https://picsum.photos/800/600?random=db-${idx}-2`
-              ],
-              reviewer_diffs: {
-                ai_class: `${evt.scientific_name || 'Species'} (${Math.round((evt.confidence || 0.8) * 100)}%)`,
-                ai_confidence: evt.confidence || 0.8,
-                human_class: `${evt.scientific_name || 'Species'} (100%)`,
-                human_confidence: 1.0,
-                ai_bbox: { x: 0.25, y: 0.25, w: 0.4, h: 0.4 },
-                human_bbox: { x: 0.24, y: 0.24, w: 0.42, h: 0.42 }
-              }
+        // Enrich database data with realistic mock burst paths & details
+        return data.map((evt, idx) => {
+          const speciesInfo = getNZSpeciesInfo(evt.scientific_name)
+          return {
+            id: evt.id,
+            deployment_id: evt.deployment_id,
+            scientific_name: evt.scientific_name || 'Unknown Species',
+            nz_code: speciesInfo.code,
+            nz_status: speciesInfo.status,
+            confidence: evt.confidence || 0.8,
+            event_start: evt.event_start,
+            event_end: evt.event_end || evt.event_start,
+            duration_seconds: evt.duration_seconds || 10,
+            status: (evt.status as any) || 'pending',
+            trigger_cause: (evt.trigger_cause as any) || 'Unknown',
+            media: [
+              `https://picsum.photos/800/600?random=db-${idx}-1`,
+              `https://picsum.photos/800/600?random=db-${idx}-2`
+            ],
+            reviewer_diffs: {
+              ai_class: `${evt.scientific_name || 'Species'} (${Math.round((evt.confidence || 0.8) * 100)}%)`,
+              ai_confidence: evt.confidence || 0.8,
+              human_class: `${evt.scientific_name || 'Species'} (100%)`,
+              human_confidence: 1.0,
+              ai_bbox: { x: 0.25, y: 0.25, w: 0.4, h: 0.4 },
+              human_bbox: { x: 0.24, y: 0.24, w: 0.42, h: 0.42 }
             }
-          })
-          setEvents(enriched)
-          setSelectedEventId(enriched[0].id)
-        } else {
-          // Fallback to high-fidelity simulated NZ temporal events
-          setEvents(MOCK_EVENTS)
-          setSelectedEventId(MOCK_EVENTS[0].id)
-        }
+          }
+        })
       } catch (err) {
         console.error('Failed to load observation events:', err)
-        setEvents(MOCK_EVENTS)
-        setSelectedEventId(MOCK_EVENTS[0].id)
-      } finally {
-        setLoading(false)
+        return MOCK_EVENTS
       }
-    }
-    loadData()
-  }, [deployment_id])
+    },
+  })
+  const loading = eventsQuery.isPending
+  const events = eventsQuery.data ?? []
+  const setEvents = (updated: ObservationEvent[]) => queryClient.setQueryData(eventsKey, updated)
+
+  // Another deployment starts with its first event, at the first frame, unzoomed.
+  const [shownDeployment, setShownDeployment] = useState(deployment_id)
+  if (shownDeployment !== deployment_id) {
+    setShownDeployment(deployment_id)
+    setSelectedEventId('')
+    setCurrentSlideIndex(0)
+    setZoomLevel(1.0)
+  }
 
   // Active selected event
   const selectedEvent = events.find(e => e.id === selectedEventId) || events[0]
+  const activeEventId = selectedEvent?.id ?? ''
 
   // Selecting a different event restarts its burst slideshow at the first frame, unzoomed.
   const selectEvent = (id: string) => {
-    if (id === selectedEventId) return
+    if (id === activeEventId) return
     setSelectedEventId(id)
     setCurrentSlideIndex(0)
     setZoomLevel(1.0)
@@ -481,7 +483,7 @@ export function EventReviewPage() {
               </div>
             ) : (
               filteredEvents.map(evt => {
-                const isActive = evt.id === selectedEventId
+                const isActive = evt.id === activeEventId
                 return (
                   <div
                     key={evt.id}
@@ -492,7 +494,7 @@ export function EventReviewPage() {
                       cursor: 'pointer',
                       border: isActive ? '1px solid var(--primary)' : '1px solid rgba(255,255,255,0.05)',
                       backgroundColor: isActive ? 'rgba(76,175,80,0.06)' : 'var(--surface)',
-                      transition: 'all 0.2s',
+                      transition: 'border-color 0.2s, background-color 0.2s',
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
