@@ -243,7 +243,7 @@ The dev API is tagged **`ww-website-api-dev`** (distinct from the base `ww-websi
 base-only `docker compose up` can't clobber the ~10 GB ML image, which was the recurring cause of
 `No module named 'speciesnet'`.
 
-**Enable the flags** in `.env` (all off by default):
+**Enable the flags** in `.env` (all off by default except `FF_WILDLIFE_BRAIN_ENABLED`):
 
 | Flag | Enables |
 |------|---------|
@@ -251,7 +251,7 @@ base-only `docker compose up` can't clobber the ~10 GB ML image, which was the r
 | `FF_SPECIESNET_ENABLED` | SpeciesNet detect + classify (core observations) |
 | `FF_BIOCLIP_ENABLED` | BioCLIP secondary zero-shot classifier |
 | `FF_MEDIA_REGISTRY_ENABLED` | thumbnails / animal crops (`media_prep`) |
-| `FF_WILDLIFE_BRAIN_ENABLED` | DINOv3 embeddings / clustering |
+| `FF_WILDLIFE_BRAIN_ENABLED` | DINOv3 embeddings / clustering (on by default; skipped without `HF_TOKEN`) |
 
 **Model weights download on the first inference** (SpeciesNet from Kaggle; BioCLIP + DINOv3 from
 HuggingFace), so the first run is slow then cached. For CPU dev set `EMBEDDING_DEVICE=cpu`,

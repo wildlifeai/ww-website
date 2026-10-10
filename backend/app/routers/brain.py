@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.authz import (
     accessible_deployment_ids,
     assert_access,
+    media_org_deployment_ids,
     require_cluster_access,
     require_deployment_access,
     require_media_access,
@@ -247,8 +248,8 @@ async def list_outliers(request: Request, deployment_id: str, user=Depends(get_c
 
 
 @router.get("/similar/{media_id}", dependencies=[Depends(require_media_access)])
-async def similar(request: Request, media_id: str, n: int = Query(20, ge=1, le=100), org_scoped: bool = True, user=Depends(get_current_user)):
-    """pgvector nearest-neighbour search for a media item."""
+async def similar(request: Request, media_id: str, n: int = Query(20, ge=1, le=100), user=Depends(get_current_user)):
+    """pgvector nearest-neighbour search within the media's organisation, over deployments the caller can read."""
     req_id = getattr(request.state, "request_id", None)
     if not settings.FF_WILDLIFE_BRAIN_ENABLED:
         return _disabled(req_id)
@@ -271,8 +272,10 @@ async def similar(request: Request, media_id: str, n: int = Query(20, ge=1, le=1
     if vector is None:
         return ApiResponse(error=ApiError(code="NOT_FOUND", message="No embedding for this media"), meta=ApiMeta(request_id=req_id))
 
-    # Exclude self at the DB level so exactly n neighbours come back.
-    results = await store.search(vector, limit=n, exclude_media_id=media_id)
+    # Exclude self at the DB level so exactly n neighbours come back. An empty scope
+    # matches nothing; it never widens to every organisation.
+    deployment_ids = await media_org_deployment_ids(user.id, media_id)
+    results = await store.search(vector, limit=n, conditions={"deployment_id": deployment_ids}, exclude_media_id=media_id)
     hits = [{"media_id": r.id, "score": r.score, "payload": r.payload} for r in results]
     return ApiResponse(data={"media_id": media_id, "results": hits}, meta=ApiMeta(request_id=req_id))
 

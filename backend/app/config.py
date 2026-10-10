@@ -79,7 +79,13 @@ class Settings(BaseSettings):
             "cloud pipeline's — requires the ww-backend observations.ai_origin column (dual_ai_v0)"
         ),
     )
-    FF_WILDLIFE_BRAIN_ENABLED: bool = Field(False, description="Enable DINOv3 embedding / clustering / similarity endpoints")
+    FF_WILDLIFE_BRAIN_ENABLED: bool = Field(
+        True,
+        description=(
+            "Enable DINOv3 embedding / clustering / similarity endpoints and the embed step after the pipeline. "
+            "On by default (#344); a process that can't embed (no ML stack, HF_TOKEN or GPU) skips the step"
+        ),
+    )
     FF_MEDIA_REGISTRY_ENABLED: bool = Field(False, description="Enable Media Registry thumbnails/crops + resolve endpoints")
     FF_ACTIVE_LEARNING_ENABLED: bool = Field(False, description="Enable active-learning review queue scoring")
     FF_INTELLIGENCE_ENABLED: bool = Field(False, description="Enable conservation intelligence endpoints (health, alerts, shift)")

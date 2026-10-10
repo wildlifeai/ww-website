@@ -146,7 +146,7 @@ A consensus animal no model named is notified as "Unidentified animal".
 
 A second, deeper track (`domain/wildlife_brain.py`, `embedding_lifecycle.py`, `clustering.py`,
 `active_learning.py`), surfaced through the `/api/brain/*`, `/api/intelligence/*`, and `/api/qa/*`
-routers. Gated by `FF_WILDLIFE_BRAIN_ENABLED` / `FF_ACTIVE_LEARNING_ENABLED`.
+routers. Gated by `FF_WILDLIFE_BRAIN_ENABLED` (on by default, #344) / `FF_ACTIVE_LEARNING_ENABLED` (off).
 
 ```
 animal crop ──DINOv3──▶ media_embeddings ──HDBSCAN──▶ clusters (+ outliers)
@@ -164,7 +164,10 @@ animal crop ──DINOv3──▶ media_embeddings ──HDBSCAN──▶ cluste
   [deployment guide → Vector Store](../resources/deployment-guide.md#vector-store--pgvector-supabase)).
   **Auto-run:** after the annotation pipeline finishes, `auto_annotate_deployments` chains
   `auto_embed_deployment` (gated on `FF_WILDLIFE_BRAIN_ENABLED`), so embeddings/clusters exist
-  without a manual `POST /api/brain/embed/{id}` trigger.
+  without a manual `POST /api/brain/embed/{id}` trigger. A process that can't embed (no ML stack,
+  no `HF_TOKEN` for the gated weights, or `EMBEDDING_DEVICE=cuda` without a GPU) skips the step
+  before writing a run (`services/dinov3.py` `unavailable_reason`). What a deployed worker needs:
+  [deployment guide](../resources/deployment-guide.md#wildlife-brain-on-a-deployed-worker).
 - **Clustering**: HDBSCAN groups visually similar crops; outliers flagged. The Annotations grid's
   **Group by → Cluster** reads the `media_id → cluster_id` map from `POST /api/brain/clusters/multi`;
   clusters are confirmed in `ClusterReviewPage` (`/clusters/:id`), which bulk-writes labels with

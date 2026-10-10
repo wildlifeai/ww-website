@@ -307,7 +307,8 @@ and the Download CamtrapDP buttons then fall back to the Edge Function's metadat
 ## Wildlife Brain — Embeddings & Clustering
 
 DINOv3 embeddings → UMAP → HDBSCAN clustering → vector-store similarity, and the active-learning review
-queue. JWT required; gated by **`FF_WILDLIFE_BRAIN_ENABLED`** (returns `FEATURE_DISABLED` when off).
+queue. JWT required; gated by **`FF_WILDLIFE_BRAIN_ENABLED`**, on by default (#344). When it is off the
+router is not mounted, so every `/api/brain` path is a 404.
 Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE.md).
 
 > **Vector store:** these endpoints are backed by **`pgvector` in Supabase** (live since 2026-07-09) —
@@ -323,15 +324,15 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/brain/embed/{deployment_id}` | Embed + cluster a deployment (server mode enqueues a GPU job) |
+| `POST /api/brain/embed/{deployment_id}` | Embed + cluster a deployment (server mode enqueues a GPU job). A worker that can't embed (no ML stack, `HF_TOKEN` or GPU) fails the job with the reason and writes no run |
 | `GET /api/brain/clusters/{deployment_id}` | Clusters from the deployment's latest embedding run |
 | `POST /api/brain/clusters/multi` | Aggregate clusters across deployments — body `{ "deployment_ids": [...], "min_confidence": 0 }`; returns `clusters`, `media_clusters` (media→cluster map), `outlier_media_ids` |
 | `GET /api/brain/umap/{deployment_id}` | Persisted 2-D UMAP scatter coordinates |
 | `GET /api/brain/outliers/{deployment_id}` | HDBSCAN-rejected images (expert-review candidates) |
-| `GET /api/brain/similar/{media_id}` | Vector-store nearest-neighbour search (`?n=20&org_scoped=true`) |
+| `GET /api/brain/similar/{media_id}` | Nearest neighbours (`?n=20`, 1 to 100) among the photos of the anchor's organisation, in deployments the caller can read. `NOT_FOUND` envelope when the photo has no embedding |
 | `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | Confirm a cluster as a taxon → bulk-creates human observations for its members |
 | `GET /api/brain/embedding-runs/{deployment_id}` | List embedding runs (model version, status, image count) |
-| `POST /api/brain/reprocess/deployment/{deployment_id}` | Supersede current runs and re-embed a deployment |
+| `POST /api/brain/reprocess/deployment/{deployment_id}` | Supersede current runs and re-embed a deployment. The worker checks it can embed first, so a failed check leaves the current clusters in place |
 | `POST /api/brain/reprocess/project/{project_id}` | Reprocess every deployment in a project |
 | `POST /api/brain/reprocess/all` | Platform-wide re-embed — default dry-run returns a cost estimate; `confirm=true` executes |
 | `GET /api/brain/compare-runs` | Compare cluster assignments between two runs (`?run_a=&run_b=`) |
