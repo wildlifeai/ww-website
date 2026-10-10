@@ -68,9 +68,10 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   dev, and `npm run test:cleanup` unit-tests its filters (on a pull request that changes `e2e/`).
   `node cleanup.mjs --dry-run` lists what it would delete.
 - **E2E Full Stack** (`.github/workflows/e2e-full-stack.yml`, #216) runs `01-smoke` and
-  `02-demo` against a stack started on the runner, on a pull request that changes `backend/`,
-  `frontend/`, `e2e/` or the workflow: a local Supabase from ww-backend's `dev` migrations and
-  seed, the pull request's backend under `uvicorn` on `:8000` and its frontend from
+  `02-demo` against a stack started on the runner, on every pull request (skipped, which counts
+  as passing, when it changes none of `backend/`, `frontend/`, `e2e/` or the workflow): a local
+  Supabase from ww-backend's `dev` migrations and seed, the pull request's backend under
+  `uvicorn` on `:8000` and its frontend from
   `vite preview` on `:4173`. It is the only job that tests a pull request's backend through the
   UI before merge. The job picks a fresh seed password per run, so `tui@ww.org` and the demo
   account (`demo@wildlife.ai`, which the backend gets as `DEMO_EMAIL`) sign in with a value that
