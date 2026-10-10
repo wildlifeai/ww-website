@@ -77,7 +77,8 @@ Supabase caps every response at 1,000 rows, and a query without `.range()` just 
 1,000 with no error. A deployment can hold more photos than that: the thumbnail backfill read
 1,000 of "Sunset test 2"'s 1,101 and never saw the rest (#208). Any backend loop over a whole
 deployment pages with `.order()` plus `.range()` until a short page, as
-`media_registry.backfill_thumbnails` does.
+`media_registry.backfill_thumbnails` does. A check for known keys looks up only those keys with
+`.in_()` in chunks, as the upload dedup in `jobs.definitions.existing_media_keys` does (#317).
 
 ---
 
@@ -191,6 +192,8 @@ the consensus row included, use `ai_reviewed`.
 `GEMINI_API_KEY` in the root `.env` is on the free tier: 15 requests per minute and 500 per
 day per model, and no Batch API. Run `scripts/eval_presence.py` with `--min-interval 4.2` and
 `--cache` (resumable, never pays twice); a full run of the 700-frame labelled set spans two daily windows, and `--only` runs a subset.
+To re-score what is cached (the stratified tables, a new SpeciesNet dump), add `--cache-only`: no
+call is made and uncached frames stay unanswered.
 
 ---
 
@@ -199,6 +202,11 @@ day per model, and no Batch API. Run `scripts/eval_presence.py` with `--min-inte
 A labels CSV or result cache committed beside a report must not contain a machine path
 (`C:\Users\...`). Write paths relative to the export folder; `eval_presence.py --root` resolves
 them.
+
+A SpeciesNet dump written in the dev Docker image keys its frames `/photos/...`; pass
+`--speciesnet-root /photos` with `--root <export folder>`. In Git Bash prefix the command with
+`MSYS_NO_PATHCONV=1`, or MSYS rewrites `/photos` to a path under the Git install, nothing
+matches and every SpeciesNet frame comes back unanswered.
 
 ---
 

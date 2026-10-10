@@ -314,7 +314,7 @@ timeout: 2400s
 | Scope | Secrets |
 |---|---|
 | Pilot (dev) | `ww-dev-supabase-url`, `ww-dev-supabase-anon-key`, `ww-dev-supabase-service-role-key`, `ww-hf-token`, `ww-dev-google-sa-json`, `ww-dev-google-drive-folder-id`, `ww-dev-general-org-id`, `ww-dev-sentry-dsn` (optional) |
-| Track 2 adds | `ww-website-dotenv`, `ww-dev-demo-email`, `ww-dev-demo-password`, `ww-dev-lorawan-webhook-secret`, `ww-dev-lorawan-ttn-webhook-secret`, `ww-dev-lorawan-chirpstack-webhook-secret`, `ww-dev-inat-client-id`, `ww-dev-inat-client-secret`, and the `ww-prod-*` twins with a **separate** `ww-prod-google-sa-json` |
+| Track 2 adds | `ww-website-dotenv`, `ww-dev-demo-email`, `ww-dev-demo-password`, `ww-dev-inat-client-id`, `ww-dev-inat-client-secret`, and the `ww-prod-*` twins with a **separate** `ww-prod-google-sa-json` |
 | No successor | `AZURE_STORAGE_CONNECTION_STRING`, `pg-conn` |
 
 ## 5. Track 2: the full migration
@@ -329,7 +329,7 @@ Azure is deleted before stage 2.8.
 | 2.2 Dev API | Service `ww-backend-dev` (§1) with service identity `ww-backend-dev@` holding `roles/run.developer` on the job, replacing the pilot key; Cloudflare preview `VITE_API_BASE_URL` to the `run.app` URL (needs a Pages redeploy); `ALLOWED_ORIGINS` unchanged; run the parity audit | Cloudflare env back to the Azure FQDN |
 | 2.3 Observability | Alert on a job execution over 30 min; uptime check on `/health` for both APIs; budget thresholds per project | None |
 | 2.4 Prod API | Service `ww-backend`, min 1, max 3, 0.5 vCPU / 1 GiB, request-based billing, prod Supabase secrets, `DEMO_*`, prod Drive service account split from dev; soak with the staging preview | Delete the service |
-| 2.5 Prod cutover | (a) deploy freeze; (b) `ALLOWED_ORIGINS=https://wildlifewatcher.ai,https://ww-website.pages.dev` (read the Azure value with the audit first); (c) Pages **production** `VITE_API_BASE_URL` to the new URL and a production deploy, no DNS change; (d) verify `/health`, "Try the demo", one upload with AI, LoRaWAN webhooks re-pointed by hand on TTN and Chirpstack; (e) Azure prod app kept idle two weeks. Optional before (c): `api.wildlifewatcher.ai` CNAME to the Cloud Run custom-domain target | Pages env back and redeploy; webhook URLs back |
+| 2.5 Prod cutover | (a) deploy freeze; (b) `ALLOWED_ORIGINS=https://wildlifewatcher.ai,https://ww-website.pages.dev` (read the Azure value with the audit first); (c) Pages **production** `VITE_API_BASE_URL` to the new URL and a production deploy, no DNS change; (d) verify `/health`, "Try the demo", one upload with AI; (e) Azure prod app kept idle two weeks. Optional before (c): `api.wildlifewatcher.ai` CNAME to the Cloud Run custom-domain target | Pages env back and redeploy |
 | 2.6 Prod worker | Same job definition with `ww-prod-*` secrets in the prod project, when prod has real traffic | `CLOUD_RUN_JOB_NAME` empty on the prod API (today's prod behaviour) |
 | 2.7 Retire ARQ | Delete `worker.py`, `GPU_PENDING_KEY` and `arq` once no environment sets `REDIS_URL` | Git revert |
 | 2.8 Azure teardown | After two quiet weeks: delete `WW-AE`; remove `ACR_*`, `AZURE_CREDENTIALS`, `azure-storage-blob`, `aiohttp`, the `AZURE_*` settings; rewrite the living docs (§8); recover or purge the soft-deleted `secrets-staging` vault | None: the point of no return |

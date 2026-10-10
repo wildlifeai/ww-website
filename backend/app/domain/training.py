@@ -323,6 +323,11 @@ def build_label_map(classes: List[dict], labels: List[str], background_label: st
     """
     by_label: Dict[str, dict] = {}
     for c in classes:
+        # A class with a blank name gets no samples (build_samples skips it). Left in,
+        # it could overwrite a same-label class with a target that names no taxon,
+        # which the database's LM-10 CHECK refuses at the very end of a training run.
+        if not (c.get("scientific_name") or "").strip():
+            continue
         by_label[sanitize_label(c["label"])] = {
             "role": TARGET_ROLE,
             "predicts": PREDICTS_TAXON,
