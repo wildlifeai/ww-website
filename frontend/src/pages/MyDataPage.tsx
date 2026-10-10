@@ -8,6 +8,8 @@ import { DeploymentMap } from '../components/data/DeploymentMap'
 import { ObservationReports } from '../components/data/ObservationReports'
 import { MediaBrowser } from '../components/data/MediaBrowser'
 import { NoProjectSelected } from '../components/common/NoProjectSelected'
+import { CamtrapExportStatus } from '../components/data/CamtrapExportStatus'
+import { useCamtrapExport } from '../hooks/useCamtrapExport'
 import { useClusters } from '../hooks/useBrain'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -192,8 +194,7 @@ export function MyDataPage() {
   const [sortCol, setSortCol] = useState<string>('')
   const [sortAsc, setSortAsc] = useState(true)
   const [search, setSearch] = useState('')
-  const [isExporting, setIsExporting] = useState(false)
-  const [exportError, setExportError] = useState<string | null>(null)
+  const camtrapExport = useCamtrapExport()
 
   // ── Fetch projects ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -273,37 +274,6 @@ export function MyDataPage() {
     for (const o of observations) counts[o.deployment_id] = (counts[o.deployment_id] ?? 0) + 1
     return deployments.map(d => ({ ...d, observation_count: counts[d.id] ?? 0 }))
   }, [deployments, observations])
-
-  // ── Download CamtrapDP ZIP ──────────────────────────────────────────────────
-  const downloadCamtrapDP = async () => {
-    if (selectedProjectIds.length !== 1) {
-      setExportError('Please select exactly one project from the global filter to download its CamtrapDP package.')
-      return
-    }
-    const projectId = selectedProjectIds[0]
-    setIsExporting(true)
-    setExportError(null)
-    try {
-      const { data, error: fnErr } = await supabase.functions.invoke('export-camtrap-dp', {
-        body: { project_id: projectId },
-      })
-      if (fnErr) throw new Error(fnErr.message)
-
-      // data is a Blob when the function returns binary
-      const blob = data instanceof Blob ? data : new Blob([data], { type: 'application/zip' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `camtrapdp-${projectId}-${new Date().toISOString().slice(0, 10)}.zip`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Export failed'
-      setExportError(msg)
-    } finally {
-      setIsExporting(false)
-    }
-  }
 
   // ── Sorting / filtering ─────────────────────────────────────────────────────
   const handleSort = (col: string) => {
@@ -429,21 +399,19 @@ export function MyDataPage() {
               <button
                 id="download-camtrapdp-btn"
                 className="btn"
-                onClick={downloadCamtrapDP}
-                disabled={isExporting || selectedProjectIds.length !== 1}
+                onClick={() => camtrapExport.start(selectedProjectIds)}
+                disabled={camtrapExport.running || selectedProjectIds.length !== 1}
                 title={selectedProjectIds.length !== 1 ? 'Select exactly one project from the top right to download CamtrapDP' : 'Download CamtrapDP package (ZIP)'}
                 style={{ padding: '0.5rem 1rem', whiteSpace: 'nowrap', opacity: selectedProjectIds.length !== 1 ? 0.5 : 1 }}
               >
-                {isExporting ? '⏳ Exporting…' : '📦 Download CamtrapDP'}
+                {camtrapExport.running ? '⏳ Exporting…' : '📦 Download CamtrapDP'}
               </button>
             </>
           )}
         </div>
       )}
 
-      {exportError && (
-        <p style={{ color: 'var(--error, #f44336)', fontSize: '0.8125rem', marginBottom: '0.75rem' }}>⚠ {exportError}</p>
-      )}
+      {tab === 'deployments' && <CamtrapExportStatus state={camtrapExport} style={{ marginBottom: '0.75rem' }} />}
 
       {error && <p style={{ color: 'var(--error)' }}>{error}</p>}
       {loading && tab !== 'map' && tab !== 'reports' && <p>Loading…</p>}

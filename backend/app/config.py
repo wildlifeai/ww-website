@@ -51,6 +51,16 @@ class Settings(BaseSettings):
     FF_CLUSTERING_ENABLED: bool = Field(False)
     FF_PUBLIC_API_ENABLED: bool = Field(False)
     FF_CAMTRAPDP_IMPORT_ENABLED: bool = Field(True, description="Enable CamtrapDP package import endpoint")
+    FF_CAMTRAPDP_EXPORT_ENABLED: bool = Field(
+        False,
+        description="POST /api/exports/camtrapdp starts the export job with the original photos (#328). Off: FEATURE_DISABLED",
+    )
+    CAMTRAPDP_EXPORT_BUCKET: str = Field("exports", description="Private Supabase Storage bucket the export ZIPs go to")
+    CAMTRAPDP_EXPORT_MAX_BYTES: int = Field(
+        4 * 1024**3,
+        ge=1,
+        description="Largest export ZIP, spooled on the job's local disk and sent as one standard Storage upload",
+    )
     FF_PIPELINE_ENABLED: bool = Field(False, description="Enable AI pipeline inference endpoints")
 
     # ── v4 Wildlife Brain feature flags ──────────────────────────────

@@ -62,6 +62,7 @@ On error:
 - [Media Registry](#media-registry)
 - [Deployments](#deployments)
 - [CamtrapDP Import](#camtrapdp-import)
+- [CamtrapDP Export](#camtrapdp-export)
 - [Wildlife Brain — Embeddings & Clustering](#wildlife-brain--embeddings--clustering)
 - [Conservation Intelligence](#conservation-intelligence)
 - [QA](#qa)
@@ -275,6 +276,17 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 | `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id` |
 
 > Public-API export of CamtrapDP is `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
+
+---
+
+## CamtrapDP Export
+
+Prefix `/api/exports`. JWT required. Gated by `FF_CAMTRAPDP_EXPORT_ENABLED` (returns `FEATURE_DISABLED` when off,
+and the Download CamtrapDP buttons then fall back to the Edge Function's metadata-only ZIP).
+
+| Method · Path | Description |
+|---|---|
+| `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_member` check decides; `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from Drive with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private `CAMTRAPDP_EXPORT_BUCKET` (default `exports`) under `camtrapdp/<job_id>.zip`, `result_url` is a signed link valid for 24 hours, and exports older than 7 days are deleted when the next one is stored. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
 
 ---
 

@@ -6,6 +6,8 @@ Handles download/upload to Supabase Storage buckets with a
 two-step fallback strategy (SDK → public URL).
 """
 
+from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import structlog
@@ -78,6 +80,74 @@ async def upload_to_storage(bucket: str, path: str, content: bytes, content_type
     except Exception as e:
         logger.error("storage_upload_failed", bucket=bucket, path=path, error=str(e))
         return False
+
+
+async def upload_file_to_storage(bucket: str, path: str, local_path: Path, content_type: str = "application/octet-stream") -> bool:
+    """Upload a file from disk, streamed rather than read into memory first.
+
+    One standard upload, so the bucket's and the project's size limits apply in full.
+    Returns True on success, False on failure.
+    """
+    import asyncio
+
+    client = create_service_client()
+
+    def _upload() -> None:
+        with local_path.open("rb") as fh:
+            client.storage.from_(bucket).upload(path, fh, file_options={"content-type": content_type})
+
+    try:
+        await asyncio.to_thread(_upload)
+        return True
+    except Exception as e:
+        logger.error("storage_upload_failed", bucket=bucket, path=path, error=str(e))
+        return False
+
+
+def signed_download_url(bucket: str, path: str, expires_in: int, filename: str) -> Optional[str]:
+    """A signed URL that downloads ``path`` as ``filename``, or None when signing fails."""
+    client = create_service_client()
+    try:
+        signed = client.storage.from_(bucket).create_signed_url(path, expires_in, {"download": filename})
+    except Exception as e:
+        logger.error("storage_sign_failed", bucket=bucket, path=path, error=str(e))
+        return None
+    return signed.get("signedURL") or signed.get("signedUrl") or None
+
+
+async def delete_older_than(bucket: str, folder: str, cutoff: datetime) -> int:
+    """Delete the files directly in ``folder`` created before ``cutoff``. Returns how many.
+
+    Lists oldest first, a page at a time, and stops at the first file that is new enough.
+    """
+    import asyncio
+
+    client = create_service_client()
+
+    def _sweep() -> int:
+        removed = 0
+        while True:
+            page = client.storage.from_(bucket).list(folder, {"limit": 100, "offset": 0, "sortBy": {"column": "created_at", "order": "asc"}})
+            stale = []
+            for obj in page or []:
+                created = obj.get("created_at")
+                if not obj.get("id") or not created:
+                    continue  # a sub-folder, not a file
+                if datetime.fromisoformat(created.replace("Z", "+00:00")) >= cutoff:
+                    break
+                stale.append(f"{folder}/{obj['name']}")
+            if not stale:
+                return removed
+            client.storage.from_(bucket).remove(stale)
+            removed += len(stale)
+            if len(stale) < len(page):
+                return removed
+
+    try:
+        return await asyncio.to_thread(_sweep)
+    except Exception as e:
+        logger.warning("storage_sweep_failed", bucket=bucket, folder=folder, error=str(e))
+        return 0
 
 
 async def upload_rendition(path: str, content: bytes, content_type: str = "image/jpeg", bucket: Optional[str] = None) -> Optional[str]:
