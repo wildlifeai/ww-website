@@ -16,16 +16,20 @@ the image) and takes a one-key verdict:
         per path wins when the CSV is read back)
     q   quit (progress is already on disk, every verdict is appended and flushed)
 
-Optional strata, number keys pressed AFTER a verdict (they amend the frame just
+Optional strata, keys pressed AFTER a verdict (they amend the frame just
 labelled, which is shown in the status line; each press appends a row, last
 row wins):
 
-    1 tiny  2 small  3 medium  4 large                 animal_size
-    5 clear 6 partial 7 obscured                        visibility
-    8 night_ir 9 low_light 0 motion_blur                conditions (toggle)
+    1 tiny  2 small  3 medium  4 large                              animal_size
+    5 clear 6 partial 7 obscured k camouflaged o border             visibility
+    c close m mid f far n na                                        distance
+    8 night_ir 9 low_light 0 motion_blur r rain g fog v vegetation
+    l lens_obstruction                                              conditions (toggle)
 
-The values are the prompt v2 vocabulary (``services/gemini_presence.py``), so
-a labelled stratum can be compared with the model's own answer.
+Size, the first three visibility values and the conditions are the prompt v2
+vocabulary (``services/gemini_presence.py``), so a labelled stratum can be
+compared with the model's own answer; ``camouflaged``, ``border`` and
+``distance`` are the human strata of the architecture report, section 10.
 
 Frames are grouped into trigger bursts by the one grouper the pipeline uses
 (``app.domain.burst_evidence.group_bursts``, ``--gap`` seconds, default
@@ -37,12 +41,12 @@ diagnostic frames). A burst never spans two folders. The CSV is resumable:
 frames already labelled are skipped.
 
 CSV columns: ``path, burst_id, has_animal, label, labelled_by, labelled_at, notes,
-animal_size, visibility, conditions`` (``has_animal`` is 1/0, blank for
+animal_size, visibility, conditions, distance`` (``has_animal`` is 1/0, blank for
 ``unsure`` and ``person``; ``path`` is absolute here, and may be made relative
-for a committed copy, read back with ``eval_presence.py --root``; the last three are optional and blank unless
-entered). A CSV written before the strata columns existed is widened in place
-(blank strata) the first time it is opened for labelling; reading either shape
-works.
+for a committed copy, read back with ``eval_presence.py --root``; the last four
+are optional and blank unless entered, ``conditions`` a comma list). A CSV
+written before a strata column existed is widened in place (blank strata) the
+first time it is opened for labelling; reading any shape works.
 
 Usage (from ``backend/``, any Python with Pillow)::
 
@@ -75,10 +79,10 @@ from app.domain.exif import parse_exif_from_bytes  # noqa: E402
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp"}
 LEGACY_CSV_COLUMNS = ("path", "burst_id", "has_animal", "label", "labelled_by", "labelled_at", "notes")
-STRATA_COLUMNS = ("animal_size", "visibility", "conditions")
+STRATA_COLUMNS = ("animal_size", "visibility", "conditions", "distance")
 CSV_COLUMNS = LEGACY_CSV_COLUMNS + STRATA_COLUMNS
 LABELS = {"a": "animal", "e": "empty", "u": "unsure", "p": "person"}
-# Number key -> (column, value). Size and visibility are single-valued (a second
+# Key -> (column, value). Size, visibility and distance are single-valued (a second
 # press of the same key clears it); conditions accumulate as a comma list (toggle).
 STRATA_KEYS = {
     "1": ("animal_size", "tiny"),
@@ -88,9 +92,19 @@ STRATA_KEYS = {
     "5": ("visibility", "clear"),
     "6": ("visibility", "partial"),
     "7": ("visibility", "obscured"),
+    "k": ("visibility", "camouflaged"),
+    "o": ("visibility", "border"),
+    "c": ("distance", "close"),
+    "m": ("distance", "mid"),
+    "f": ("distance", "far"),
+    "n": ("distance", "na"),
     "8": ("conditions", "night_ir"),
     "9": ("conditions", "low_light"),
     "0": ("conditions", "motion_blur"),
+    "r": ("conditions", "rain"),
+    "g": ("conditions", "fog"),
+    "v": ("conditions", "vegetation"),
+    "l": ("conditions", "lens_obstruction"),
 }
 
 
@@ -249,7 +263,7 @@ def append_label(csv_path: str, row: dict) -> None:
 
 
 def apply_stratum(row: dict, key: str) -> dict:
-    """A copy of ``row`` with the number key's stratum applied (pure; unknown keys return the row unchanged)."""
+    """A copy of ``row`` with the key's stratum applied (pure; unknown keys return the row unchanged)."""
     if key not in STRATA_KEYS:
         return dict(row)
     column, value = STRATA_KEYS[key]
@@ -326,15 +340,16 @@ def run_ui(bursts: list[Burst], csv_path: str, labelled_by: str, max_width: int 
         root,
         text=(
             "a = animal    e = empty    u = unsure    p = person    b = back    q = quit\n"
-            "after a verdict (optional): 1 tiny 2 small 3 medium 4 large | 5 clear 6 partial 7 obscured | "
-            "8 night_ir 9 low_light 0 motion_blur"
+            "after a verdict (optional): 1 tiny 2 small 3 medium 4 large | "
+            "5 clear 6 partial 7 obscured k camouflaged o border | c close m mid f far n na\n"
+            "conditions (toggle): 8 night_ir 9 low_light 0 motion_blur r rain g fog v vegetation l lens_obstruction"
         ),
         fg="#555",
         justify="left",
     )
     footer.pack(pady=(0, 6))
 
-    state = {"i": 0, "photo": None, "last": None}  # last = the most recent verdict row, target of the number keys
+    state = {"i": 0, "photo": None, "last": None}  # last = the most recent verdict row, target of the strata keys
 
     def show() -> None:
         if state["i"] >= len(queue):
@@ -345,7 +360,7 @@ def run_ui(bursts: list[Burst], csv_path: str, labelled_by: str, max_width: int 
         img = Image.open(frame.path).convert("RGB")
         scale = min(1.0, max_width / img.width)
         if scale < 1.0:
-            img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+            img = img.resize((round(img.width * scale), round(img.height * scale)), Image.Resampling.LANCZOS)
         state["photo"] = ImageTk.PhotoImage(img)
         canvas.configure(image=state["photo"])
         done = total - (len(queue) - state["i"])

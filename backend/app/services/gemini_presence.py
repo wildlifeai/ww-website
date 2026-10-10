@@ -403,7 +403,7 @@ def prepare_single(data: bytes, max_px: int = SINGLE_MAX_PX) -> PreparedImage:
     w, h = img.size
     scale = min(1.0, max_px / max(w, h))
     if scale < 1.0:
-        img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+        img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.Resampling.LANCZOS)
     w, h = img.size
     return PreparedImage(data=_encode_jpeg(img), width=w, height=h, cell_boxes=((0, 0, w, h),))
 
@@ -452,7 +452,7 @@ def prepare_contact_sheet(
         col, row = idx % c, idx // c
         x0, y0 = col * (cw + gutter), row * (ch + gutter)
         img = _open_rgb(data)
-        img.thumbnail((cw, ch), Image.LANCZOS)
+        img.thumbnail((cw, ch), Image.Resampling.LANCZOS)
         ox, oy = x0 + (cw - img.width) // 2, y0 + (ch - img.height) // 2
         sheet.paste(img, (ox, oy))
         boxes.append((ox, oy, ox + img.width, oy + img.height))

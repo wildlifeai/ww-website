@@ -100,7 +100,8 @@ After validation, [`ModelLabelMapper`](../../frontend/src/components/toolkit/Mod
 asks the uploader what each output class means: a **target species** (mapped to a
 taxon via `SpeciesPicker`), a **target type** (a person is `human`) or
 **background/negative** (e.g. `not rat`), and saves it
-to `ai_models.label_map` (jsonb; RLS: organisation_manager). The rules (LM-10) are in
+to `ai_models.label_map` (jsonb; RLS: organisation_manager) through
+`PUT /api/models/{model_id}/label-map`, which refuses a map that breaks LM-10. The rules are in
 [what a class predicts](./ai-model-pipeline.md#what-a-class-predicts-lm-10). Class order comes from
 the model's own `detection_capabilities`, so it stays aligned with the device's
 `labels.txt` (stage 4). This is what lets stage 8 reflect `rat: 87%` as *Rattus

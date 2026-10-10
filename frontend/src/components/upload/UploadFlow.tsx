@@ -140,8 +140,9 @@ export function UploadFlow() {
   }, [staged])
 
   // ── CamtrapDP stage timer ──────────────────────────────────────────────────
+  // handleCamtrapImport resets the stage and the clock before it starts one.
   useEffect(() => {
-    if (!camtrapImporting) { setCamtrapStage(0); setCamtrapElapsed(0); return }
+    if (!camtrapImporting) return
     const start = Date.now()
     const ticker = setInterval(
       () => setCamtrapElapsed(Math.floor((Date.now() - start) / 1000)),
@@ -256,6 +257,8 @@ export function UploadFlow() {
 
   const handleCamtrapImport = async () => {
     if (!zipFile) return
+    setCamtrapStage(0)
+    setCamtrapElapsed(0)
     setCamtrapImporting(true)
     setCamtrapError(null)
     setCamtrapResult(null)

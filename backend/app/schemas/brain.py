@@ -17,9 +17,9 @@ class EmbedRequest(BaseModel):
     """
 
     mode: Literal["server", "client_vectors"] = "server"
-    model_name: Optional[str] = Field(None, description="Embedding variant (defaults to server config)")
-    media_ids: Optional[list[str]] = Field(None, description="client_vectors: media ids aligned with vectors")
-    vectors: Optional[list[list[float]]] = Field(None, description="client_vectors: 1280-d vectors")
+    model_name: Optional[str] = Field(default=None, description="Embedding variant (defaults to server config)")
+    media_ids: Optional[list[str]] = Field(default=None, description="client_vectors: media ids aligned with vectors")
+    vectors: Optional[list[list[float]]] = Field(default=None, description="client_vectors: 1280-d vectors")
 
 
 class ConfirmClusterRequest(BaseModel):
@@ -33,15 +33,15 @@ class ConfirmClusterRequest(BaseModel):
 class ReprocessRequest(BaseModel):
     """Re-embed a deployment/project with an (optional) different model."""
 
-    model_name: Optional[str] = Field(None, description="Embedding variant (defaults to server config)")
+    model_name: Optional[str] = Field(default=None, description="Embedding variant (defaults to server config)")
 
 
 class ReprocessAllRequest(BaseModel):
     """Platform-wide re-embed. Dry-run (default) returns a cost estimate only."""
 
     model_name: Optional[str] = None
-    dry_run: bool = Field(True, description="Estimate cost without executing")
-    confirm: bool = Field(False, description="Must be true to actually run a global re-embed")
+    dry_run: bool = Field(default=True, description="Estimate cost without executing")
+    confirm: bool = Field(default=False, description="Must be true to actually run a global re-embed")
 
 
 class ReviewDecisionRequest(BaseModel):

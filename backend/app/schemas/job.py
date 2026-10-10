@@ -61,7 +61,7 @@ class ProgressEvent(BaseModel):
     the list is trimmed.
     """
 
-    seq: int = Field(0, description="Monotonic sequence number (auto-assigned by store)")
+    seq: int = Field(default=0, description="Monotonic sequence number (auto-assigned by store)")
     type: EventType
     phase: ProgressPhase
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -73,7 +73,7 @@ class ProgressEvent(BaseModel):
     batch_index: Optional[int] = None
     job_id: Optional[str] = None
     child_job_id: Optional[str] = Field(
-        None,
+        default=None,
         description="A spawned follow-on job (e.g. AI analysis offloaded to the GPU worker) the UI should chain onto.",
     )
 

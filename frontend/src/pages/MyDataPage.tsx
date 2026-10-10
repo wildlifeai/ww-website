@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../config/supabase'
 import { fetchLiveObservations } from '../lib/liveObservations'
@@ -173,6 +174,52 @@ interface Observation {
   created_at: string
 }
 
+const NO_PROJECTS: Project[] = []
+const NO_DEPLOYMENTS: Deployment[] = []
+const NO_OBSERVATIONS: Observation[] = []
+
+async function fetchProjects(): Promise<Project[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, name, description, created_at')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
+async function fetchDeployments(projectIds: string[]): Promise<Deployment[]> {
+  // `timezone` may not be deployed yet → retry without it so the page still loads.
+  const baseCols = 'id, project_id, location_name, latitude, longitude, deployment_start, deployment_end, created_at, projects(name), devices(name)'
+  const runQuery = (cols: string) => supabase
+    .from('deployments')
+    .select(cols)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+    .in('project_id', projectIds)
+
+  let { data, error } = await runQuery(`${baseCols}, timezone`)
+  if (error) ({ data, error } = await runQuery(baseCols))
+  if (error) throw new Error(error.message)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data || []).map((d: any) => ({
+    ...d,
+    project_name: d.projects?.name ?? '—',
+    device_name: d.devices?.name ?? '—',
+    projects: undefined,
+    devices: undefined,
+  })) as Deployment[]
+}
+
+async function fetchObservations(deploymentIds: string[]): Promise<Observation[]> {
+  const { data, error } = await fetchLiveObservations<Observation>(supabase, {
+    columns: 'id, deployment_id, scientific_name, observation_type, created_at',
+    filter: q => q.in('deployment_id', deploymentIds),
+  })
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
 type Tab = 'projects' | 'deployments' | 'map' | 'reports' | 'media'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,12 +231,6 @@ export function MyDataPage() {
   const { selectedProjectIds, queryProjectIds, noProjectSelected, clearAll, toggleProject } = useProjectSelection()
   const navigate = useNavigate()
   const [tab, setTab] = useState<Tab>('projects')
-  const [projects, setProjects] = useState<Project[]>([])
-  const [deployments, setDeployments] = useState<Deployment[]>([])
-  const [observations, setObservations] = useState<Observation[]>([])
-  const [loading, setLoading] = useState(true)
-  const [obsLoading, setObsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [selectedDeploymentId, setSelectedDeploymentId] = useState<string | null>(null)
   const [sortCol, setSortCol] = useState<string>('')
   const [sortAsc, setSortAsc] = useState(true)
@@ -197,73 +238,40 @@ export function MyDataPage() {
   const camtrapExport = useCamtrapExport()
 
   // ── Fetch projects ──────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!user) return
-    setLoading(true)
-    setError(null)
-    supabase
-      .from('projects')
-      .select('id, name, description, created_at')
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .then(({ data, error: err }) => {
-        if (err) setError(err.message)
-        else setProjects(data || [])
-        setLoading(false)
-      })
-  }, [user])
+  const projectsQuery = useQuery({
+    queryKey: ['my-data', 'projects', user?.id],
+    queryFn: fetchProjects,
+    enabled: !!user,
+  })
+  const projects = projectsQuery.data ?? NO_PROJECTS
 
   // ── Fetch deployments (with observation counts) ─────────────────────────────
-  useEffect(() => {
-    if (!user || tab === 'projects' || !queryProjectIds) return
-    let cancelled = false
-    setLoading(true)
-    setError(null)
+  const depEnabled = !!user && tab !== 'projects' && !!queryProjectIds
+  const depQuery = useQuery({
+    queryKey: ['my-data', 'deployments', user?.id, queryProjectIds],
+    queryFn: () => fetchDeployments(queryProjectIds ?? []),
+    enabled: depEnabled,
+    // A new selection keeps the last list (shown as loading) until its own arrives.
+    placeholderData: keepPreviousData,
+  })
+  const deployments = depQuery.data ?? NO_DEPLOYMENTS
 
-    // `timezone` may not be deployed yet → retry without it so the page still loads.
-    const baseCols = 'id, project_id, location_name, latitude, longitude, deployment_start, deployment_end, created_at, projects(name), devices(name)'
-    const runQuery = (cols: string) => supabase
-      .from('deployments')
-      .select(cols)
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-      .in('project_id', queryProjectIds)
-
-    ;(async () => {
-      let { data, error: err } = await runQuery(`${baseCols}, timezone`)
-      if (err && !cancelled) ({ data, error: err } = await runQuery(baseCols))
-      if (cancelled) return
-      if (err) { setError(err.message); setLoading(false); return }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rows = (data || []).map((d: any) => ({
-        ...d,
-        project_name: d.projects?.name ?? '—',
-        device_name: d.devices?.name ?? '—',
-        projects: undefined,
-        devices: undefined,
-      })) as Deployment[]
-      setDeployments(rows)
-      setLoading(false)
-    })()
-    return () => { cancelled = true }
-  }, [user, tab, queryProjectIds])
+  // The projects tab reads the project list, every other tab the deployments.
+  const loading = tab === 'projects'
+    ? !!user && projectsQuery.isPending
+    : depEnabled && (depQuery.isPending || depQuery.isPlaceholderData)
+  const error = (tab === 'projects' ? projectsQuery.error : depQuery.error)?.message ?? null
 
   // ── Fetch observations for Map + Reports tabs ───────────────────────────────
-  useEffect(() => {
-    if (!user || (tab !== 'map' && tab !== 'reports') || noProjectSelected) return
-    if (deployments.length === 0) return
-    setObsLoading(true)
-
-    const depIds = deployments.map(d => d.id)
-    fetchLiveObservations<Observation>(supabase, {
-      columns: 'id, deployment_id, scientific_name, observation_type, created_at',
-      filter: q => q.in('deployment_id', depIds),
-    })
-      .then(({ data, error: err }) => {
-        if (!err) setObservations(data || [])
-        setObsLoading(false)
-      })
-  }, [user, tab, noProjectSelected, deployments])
+  const depIds = useMemo(() => deployments.map(d => d.id), [deployments])
+  const obsEnabled = !!user && (tab === 'map' || tab === 'reports') && !noProjectSelected && depIds.length > 0
+  const obsQuery = useQuery({
+    queryKey: ['my-data', 'observations', user?.id, depIds],
+    queryFn: () => fetchObservations(depIds),
+    enabled: obsEnabled,
+  })
+  const observations = obsQuery.data ?? NO_OBSERVATIONS
+  const obsLoading = obsEnabled && obsQuery.isPending
 
   // The deployment tabs show nothing, and query nothing, while no project is selected.
   const showNothing = noProjectSelected && tab !== 'projects'

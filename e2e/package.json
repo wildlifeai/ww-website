@@ -11,7 +11,9 @@
     "e2e:lorawan": "playwright test specs/04-lorawan-realtime.spec.ts",
     "report": "playwright show-report",
     "e2e:a11y": "playwright test specs/05-a11y.spec.ts",
-    "e2e:ci-smoke": "playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts"
+    "e2e:ci-smoke": "playwright test specs/01-smoke.spec.ts specs/02-demo.spec.ts",
+    "cleanup": "node cleanup.mjs",
+    "test:cleanup": "node --test cleanup.test.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",

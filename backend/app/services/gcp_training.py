@@ -128,7 +128,7 @@ def _status_from_execution(execution: Any) -> RunStatus:
 
 
 def _storage_client(project: str):
-    from google.cloud import storage
+    from google.cloud import storage  # pyright: ignore[reportAttributeAccessIssue]  (requirements-ml.txt, not installed in CI)
 
     return storage.Client(project=project)
 

@@ -5,16 +5,20 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localho
 export class ApiError extends Error {
   code: string
   retryable: boolean
+  /** A FastAPI `detail` that is an object, e.g. the label-map route's `{ message, problems }`. */
+  detail?: unknown
 
   constructor(
     code: string,
     message: string,
-    retryable: boolean = false
+    retryable: boolean = false,
+    detail?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
     this.code = code
     this.retryable = retryable
+    this.detail = detail
   }
 }
 
@@ -81,9 +85,9 @@ async function request(path: string, options: RequestInit = {}) {
     const detail = body?.detail
     let message = error.message
     if (detail) {
-      message = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join('; ') : JSON.stringify(detail)
+      message = typeof detail === 'string' ? detail : Array.isArray(detail) ? detail.map((d: any) => d.msg || d.message || JSON.stringify(d)).join('; ') : detail.message || JSON.stringify(detail)
     }
-    throw new ApiError(error.code || `HTTP_${response.status}`, message, error.retryable)
+    throw new ApiError(error.code || `HTTP_${response.status}`, message, error.retryable, detail && typeof detail === 'object' && !Array.isArray(detail) ? detail : undefined)
   }
 
   // Honour the {data, error, meta} envelope: handlers that return an error
@@ -102,6 +106,8 @@ export const apiClient = {
     request(path, { method: 'POST', body: JSON.stringify(data) }),
   patch: (path: string, data?: unknown) =>
     request(path, { method: 'PATCH', body: JSON.stringify(data) }),
+  put: (path: string, data?: unknown) =>
+    request(path, { method: 'PUT', body: JSON.stringify(data) }),
   upload: (path: string, formData: FormData) =>
     request(path, { method: 'POST', body: formData }),
   del: (path: string, data?: any) =>

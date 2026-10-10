@@ -220,8 +220,8 @@ What is on this branch, how to run it, what it measured, what is still open. The
 | `backend/app/schemas/pipeline.py` | `PipelineStepType.GEMINI_PRESENCE`, `EVIDENCE_FUSION`; `PipelineStepResult.input_tokens`, `output_tokens`, `cost_usd`, `counts` |
 | `backend/app/jobs/definitions.py` | `build_pipeline_steps`: Gemini before SpeciesNet, fusion last |
 | `backend/app/config.py` | `FF_GEMINI_PRESENCE_ENABLED`, `GEMINI_API_KEY`, `GEMINI_PRESENCE_MODEL`, `GEMINI_PRESENCE_VARIANT`, `FF_EVIDENCE_FUSION_ENABLED`, `EVIDENCE_FUSION_THRESHOLD`, `BURST_GAP_SECONDS` |
-| `backend/scripts/label_presence.py` | Tkinter labeller, folders in, CSV out, resumable; optional strata columns `animal_size`, `visibility`, `conditions` in the prompt v2 vocabulary |
-| `backend/scripts/eval_presence.py` | Runs the variants over the labelled frames: dry-run cost, `--prompt-version`, `--only` (a subset by file list), `--max-calls`, `--dump-verdicts`, SpeciesNet dump and comparison, recall per stratum (light, burst length, folder, model-reported size and location) |
+| `backend/scripts/label_presence.py` | Tkinter labeller, folders in, CSV out, resumable; optional strata columns `animal_size`, `visibility`, `conditions`, `distance` (architecture report section 10) |
+| `backend/scripts/eval_presence.py` | Runs the variants over the labelled frames: dry-run cost, `--prompt-version`, `--only` (a subset by file list), `--max-calls`, `--cache-only`, `--dump-verdicts`, SpeciesNet dump and comparison, the stratified benchmark of architecture report section 10 |
 | `backend/tests/test_gemini_presence*.py`, `test_label_presence.py`, `test_eval_presence.py`, `test_burst_evidence.py`, `test_evidence_fusion_step.py`, `test_media_evidence.py` | 118 tests, no network, SDK and Supabase client mocked; `test_six_frame_burst_worked_example_section_6_3` pins the architecture report's worked example |
 
 Verified against the Gemini docs on 2026-09-26 (model ids, image tokens, bounding-box format, JSON mode, Batch API, SDK 2.25.0); the sources and rules are in the two service modules' docstrings.
@@ -236,7 +236,7 @@ python scripts/label_presence.py --out labels.csv --by charles \
     "C:/Users/ww/person-test-images-run2/MEDIA" "C:/Users/ww/person-test-images" "C:/Users/ww/sample photos"
 ```
 
-Keys: `a` animal, `e` empty, `u` unsure, `b` back, `q` quit; after a verdict, optional strata 1/2/3/4 tiny/small/medium/large, 5/6/7 clear/partial/obscured, 8/9/0 night_ir/low_light/motion_blur. `--list` prints the bursts without the window. Columns: `path, burst_id, has_animal, label, labelled_by, labelled_at, notes, animal_size, visibility, conditions`; an older CSV is widened in place.
+Keys: `a` animal, `e` empty, `u` unsure, `p` person, `b` back, `q` quit; after a verdict, the optional strata keys listed in the script's docstring and the window footer. `--list` prints the bursts without the window. An older CSV is widened in place to the current columns.
 
 **Estimate the cost, no key:** `python scripts/eval_presence.py labels.csv --dry-run`
 
@@ -253,6 +253,13 @@ python scripts/eval_presence.py labels.csv --variants single,contact_sheet,batch
 ```bash
 python scripts/eval_presence.py labels.csv --dump-speciesnet speciesnet.json
 python scripts/eval_presence.py labels.csv --speciesnet-results speciesnet.json --cache eval_cache.jsonl --out results.md
+```
+
+**The stratified benchmark from the caches**, no API call (`--cache-only`); the dump's Docker paths are re-rooted at the export folder:
+
+```bash
+python scripts/eval_presence.py labels-2026-09-26.csv --root <export folder> --variants single --prompt-version v1 \
+    --cache eval_cache.jsonl --cache-only --speciesnet-results speciesnet.json --speciesnet-root /photos --out strata.md
 ```
 
 **The pipeline**, set on the ARQ worker (the API only needs them when the pipeline runs in-process):
@@ -337,6 +344,21 @@ Of the 11 misses, 5 recovered (`174202`, `181256`, `190648`, `190653`, `193452`)
 
 On the 632 frames v1 and v2 both answered, v2 is 98.8% recall against v1's 98.1% and removes 38 of 39 empty frames against 39. v2 called 68 of 82 person frames an animal while its own description named the human, so production stays on v1. With 41 empty frames the empty-removal column is a few frames either way.
 
+**Stratified benchmark, 2026-10-10** ([#163](https://github.com/wildlifeai/ww-website/issues/163), strata in architecture report section 10). No new calls: the v1 cache and the SpeciesNet dump on the 700 frames, answered frames only, recall with its 95% Wilson interval for every stratum with 30 or more animal frames. Size and border come from one box per animal frame (SpeciesNet's, else Gemini's), so each stratum splits both runs the same way; the 6 frames neither model boxed have no size or border.
+
+| Stratum | Animal frames | Gemini v1 recall | FN | SpeciesNet recall | FN |
+|---|---:|---:|---:|---:|---:|
+| day (whole set) | 577 | 98.1% (96.6 to 98.9%) | 11 | 94.6% (92.5 to 96.2%) | 31 |
+| burst of 3 or more | 568 | 98.1% (96.6 to 98.9%) | 11 | 94.5% (92.4 to 96.1%) | 31 |
+| export `colorado_..._1` | 523 | 98.3% (96.8 to 99.1%) | 9 | 94.8% (92.6 to 96.4%) | 27 |
+| size large (box over 30%) | 175 | 100.0% (97.9 to 100.0%) | 0 | 96.0% (92.0 to 98.0%) | 7 |
+| size medium (10 to 30%) | 332 | 98.8% (96.9 to 99.5%) | 4 | 97.6% (95.3 to 98.8%) | 8 |
+| size small (2 to 10%) | 64 | 98.4% (91.7 to 99.7%) | 1 | 84.4% (73.6 to 91.3%) | 10 |
+| on the border (box within 2% of an edge) | 519 | 99.0% (97.8 to 99.6%) | 5 | 95.8% (93.7 to 97.2%) | 22 |
+| interior | 52 | 100.0% (93.1 to 100.0%) | 0 | 94.2% (84.4 to 98.0%) | 3 |
+
+Too few to report: night IR (2 frames, both empty: no animal frame is night, as #302 found), bursts of 1 or 2 (7 and 2 animal frames), the two 30-frame Colorado exports (27 animal frames each), every deployment but `ad4ca41f` (which holds all 577 animal frames, so the deployment stratum is the whole set), tiny animals (none), and every human stratum (no frame carries one yet). The one finding with separated intervals is SpeciesNet on small animals: 84.4% against 97.6% on medium ones, where Gemini v1 holds 98.4%. Everything else is one Colorado evening, so the strata still need labelled night frames and other deployments before they say anything about them.
+
 **Prompt v3, partial, 2026-10-09.** 36 of a planned 230-frame subset (every person frame, the 7 Colorado frames v2 missed, every empty frame, 100 animal frames drawn with seed 20261009) before the free tier's 500 requests a day ran out; all 36 are Colorado frames (32 animal, 4 empty). On those frames v1, v2 and v3 agree: the same 4 misses (`180016_01`, `180044_01`, `180650_01`, `181231_01`), no false positive. v3 costs 523 tokens per frame (454 in, 48 to 76 out) and $0.22 per 1,000, against 469 and $0.21 for v1 and 711 and $0.35 for v2 on the same frames. The person frames, the point of v3, are not scored yet.
 
 T3 target, for reference: at least 85% of empty frames removed at under 1.5% false negatives; a frame the model failed to answer is kept, so it counts against the filter, never as a lost animal.
@@ -345,6 +367,7 @@ T3 target, for reference: at least 85% of empty frames removed at under 1.5% fal
 
 - Finish the v3 subset run (`--prompt-version v3 --only`, about 194 calls, one free-tier day), person frames first; v3 replaces v1 only if it keeps v1's recall and stops calling people animals.
 - Label more empty frames from real deployments: 41 remain, too few for an empty-removal figure. The batch variant still needs a billed tier.
+- The strata need night IR frames, other deployments and the human strata keys (`visibility`, `distance`, `conditions`) on the hard frames; today every reportable stratum is the one Colorado evening.
 - Run `--dump-speciesnet` inside the dev Docker image over the same CSV so the SpeciesNet row exists and the fusion can be evaluated offline; then fit the weights.
 - ww-backend: the `media_evidence` table ([ww-backend#208](https://github.com/wildlifeai/ww-backend/issues/208)); firmware: the `trigger_id` / `frame_index` EXIF tag ([Seeed#242](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/issues/242)). Until the table exists `near_threshold` is absent for every frame and the signals live only in the log and the consensus row's comment.
 - Done: [#161](https://github.com/wildlifeai/ww-website/issues/161) (#178), both paths reflect the edge model before `run_pipeline`, so `edge_presence` is present at fusion time; [#162](https://github.com/wildlifeai/ww-website/issues/162) (#179), per-crop classification writes its own row.

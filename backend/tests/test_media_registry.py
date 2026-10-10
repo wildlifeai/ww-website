@@ -179,7 +179,20 @@ def test_resolve_route_returns_null_url_for_private_original_without_rendition(m
     assert body["data"] == {"media_id": "m1", "size": "preview", "url": None}
 
 
-# ── Burst grouping (pure) ─────────────────────────────────────────────
+def test_resolve_route_is_not_found_when_maybe_single_finds_no_row(monkeypatch):
+    # supabase-py's maybe_single().execute() returns None, not a response, when no row matches.
+    from app.routers import media as media_router
+
+    client, overrides = _route_client(monkeypatch, None)
+    media_router.supabase_client.create_anon_client().table().execute.return_value = None
+    try:
+        body = client.get("/api/media/m1/resolve").json()
+    finally:
+        _clear(overrides)
+    assert body["error"]["code"] == "NOT_FOUND"
+
+
+# ── Burst grouping (pure)─────────────────────────────────────────────
 
 
 def _row(mid: str, ts):

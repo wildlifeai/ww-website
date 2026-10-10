@@ -5,13 +5,15 @@
 // classes mean: which are target species (predicts: taxon, mapped via
 // SpeciesPicker), which are a type such as a person (predicts: type, an
 // observation_type) and which are background/negative classes. Saved to
-// ai_models.label_map (RLS: organisation_manager). This lets the website reflect
-// on-device predictions as real observations and skip negatives; the rules are
-// LM-10 in backend/app/domain/label_map.py. Labels come from the model's own
+// ai_models.label_map through PUT /api/models/{model_id}/label-map, which refuses a map
+// that breaks LM-10 (backend/app/domain/label_map.py) and writes as the caller (RLS:
+// organisation_manager). This lets the website reflect on-device predictions as real
+// observations and skip negatives. Labels come from the model's own
 // class order (detection_capabilities), so they stay aligned with labels.txt.
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react'
 import { supabase } from '../../config/supabase'
+import { saveLabelMap, type LabelProblems } from '../../lib/labelMap'
 import { SpeciesPicker } from '../data/SpeciesPicker'
 
 // The observation types a class may predict (LM-10): blank is what background means.
@@ -76,6 +78,7 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [problems, setProblems] = useState<LabelProblems>({})
 
   useEffect(() => {
     let cancelled = false
@@ -102,25 +105,40 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
     return () => { cancelled = true }
   }, [modelId])
 
-  const setKind = (label: string, kind: Kind) =>
-    setMap(m => ({ ...m, [label]: withKind(m[label], kind) }))
+  // Editing a label clears the problem the last save reported for it.
+  const edit = (label: string, next: (prev: LabelEntry | undefined) => LabelEntry) => {
+    setMap(m => ({ ...m, [label]: next(m[label]) }))
+    setProblems(p => {
+      const rest = { ...p }
+      delete rest[label]
+      return rest
+    })
+  }
+
+  const setKind = (label: string, kind: Kind) => edit(label, prev => withKind(prev, kind))
 
   const setType = (label: string, observation_type: TargetType) =>
-    setMap(m => ({ ...m, [label]: { ...withKind(m[label], 'type'), observation_type } }))
+    edit(label, prev => ({ ...withKind(prev, 'type'), observation_type }))
 
   const setSpecies = (label: string, sel: { taxon_id: string | null; scientific_name: string; vernacular_name: string | null }) =>
-    setMap(m => ({
-      ...m,
-      [label]: { ...withKind(m[label], 'taxon'), taxon_id: sel.taxon_id, scientific_name: sel.scientific_name, vernacular_name: sel.vernacular_name },
-    }))
+    edit(label, prev => ({ ...withKind(prev, 'taxon'), taxon_id: sel.taxon_id, scientific_name: sel.scientific_name, vernacular_name: sel.vernacular_name }))
 
   const save = async () => {
-    setSaving(true); setMsg(null)
-    const { error } = await supabase.from('ai_models').update({ label_map: map }).eq('id', modelId)
-    setSaving(false)
-    if (error) { setMsg(`Error: ${error.message}`); return }
-    setMsg('Saved ✓')
-    onDone?.()
+    setSaving(true); setMsg(null); setProblems({})
+    try {
+      const refused = await saveLabelMap(modelId, map)
+      if (refused) {
+        setProblems(refused)
+        setMsg('Error: not saved, fix the labels marked below')
+        return
+      }
+      setMsg('Saved ✓')
+      onDone?.()
+    } catch (e) {
+      setMsg(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (loading) return <p style={{ opacity: 0.5, fontSize: '0.85rem' }}>Loading model labels…</p>
@@ -181,6 +199,11 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
                       → <em>{entry.scientific_name}</em>{entry.vernacular_name ? ` (${entry.vernacular_name})` : ''}
                     </div>
                   )}
+                </div>
+              )}
+              {problems[label] && (
+                <div role="alert" style={{ flexBasis: '100%', fontSize: '0.75rem', color: 'var(--error, #ef4444)' }}>
+                  {problems[label]}
                 </div>
               )}
             </div>

@@ -94,7 +94,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
 
     client = create_service_client()
 
-    async def update_model_status(status: str, error_message: str = None, **kwargs):
+    async def update_model_status(status: str, error_message: str | None = None, **kwargs):
         payload = {"status": status, **kwargs}
         if error_message:
             payload["error_message"] = error_message
@@ -256,12 +256,14 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         raise
 
 
-async def _append_model_status(client, model_id: str, job_id: str, status: str, error_message: str = None, training: dict = None, **fields):
+async def _append_model_status(
+    client, model_id: str, job_id: str, status: str, error_message: str | None = None, training: dict | None = None, **fields
+):
     """Set ``ai_models.status`` (+ any columns) and append an entry to ``processing_log``."""
     payload = {"status": status, **fields}
     if error_message:
         payload["error_message"] = error_message
-    log_entry = {"timestamp": datetime.now(timezone.utc).isoformat(), "status": status, "job_id": job_id}
+    log_entry: dict = {"timestamp": datetime.now(timezone.utc).isoformat(), "status": status, "job_id": job_id}
     if error_message:
         log_entry["error"] = error_message
     if training:
@@ -313,7 +315,7 @@ async def train_species_brain_job(job_id: str, user_id: str, model_id: str | Non
     async def tick(msg: str) -> None:
         await update_job(job_id, message=msg)
 
-    async def model_status(status: str, error_message: str = None, training: dict = None, **fields) -> None:
+    async def model_status(status: str, error_message: str | None = None, training: dict | None = None, **fields) -> None:
         if model_id:
             await _append_model_status(client, model_id, job_id, status, error_message=error_message, training=training, **fields)
 

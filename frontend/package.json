@@ -63,9 +63,15 @@
   },
   "size-limit": [
     {
-      "name": "main chunk (everything signed-in, plus the public pages)",
-      "path": "dist/assets/index-*.js",
-      "limit": "520 kB"
+      "name": "first load (the entry and the chunks index.html preloads; signed-in pages are lazy)",
+      "path": [
+        "dist/assets/index-*.js",
+        "dist/assets/jsx-runtime-*.js",
+        "dist/assets/useQuery-*.js",
+        "dist/assets/supabase-*.js",
+        "dist/assets/apiClient-*.js"
+      ],
+      "limit": "190 kB"
     },
     {
       "name": "guide detail (lazy)",
@@ -75,7 +81,7 @@
     {
       "name": "stylesheet",
       "path": "dist/assets/index-*.css",
-      "limit": "8 kB"
+      "limit": "1.5 kB"
     }
   ]
 }
