@@ -22,6 +22,7 @@ import { ProjectMembersPanel } from '../components/data/ProjectMembersPanel'
 import { NotificationRulesPanel } from '../components/settings/NotificationRulesPanel'
 import { ProjectDefaultsPanel } from '../components/settings/ProjectDefaultsPanel'
 import { InaturalistPanel } from '../components/settings/InaturalistPanel'
+import { ApiKeysPanel } from '../components/settings/ApiKeysPanel'
 
 interface ProjectRow {
   id: string
@@ -276,6 +277,7 @@ export function SettingsPage() {
 
       <Section title="Integrations" description="External services linked to your account.">
         <InaturalistPanel />
+        <ApiKeysPanel />
       </Section>
 
       <CreateProjectModal

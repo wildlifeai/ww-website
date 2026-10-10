@@ -2,15 +2,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Public Data API router — /api/v1/* endpoints for external partners.
 
-Authentication via X-API-Key header (organisation-scoped).
+Authentication via X-API-Key header (organisation-scoped). Key management
+(/api/v1/api-keys) uses the JWT and is for the organisation's managers.
 Gated behind FF_PUBLIC_API_ENABLED feature flag.
 """
 
+import uuid
 from typing import Optional
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 
+from app.authz import org_manager_right
 from app.config import settings
 from app.dependencies import get_current_user, require_not_demo
 from app.domain.public_api import (
@@ -22,7 +25,7 @@ from app.domain.public_api import (
     list_observations,
 )
 from app.jobs.store import create_job
-from app.schemas.common import ApiMeta, ApiResponse
+from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.schemas.job import JobCreateResponse
 from app.schemas.public_api import (
     ApiKeyCreate,
@@ -73,33 +76,40 @@ async def require_scope(scope: str):
 # ── API Key Management (JWT auth, not API key auth) ──────────────────
 
 
+def _disabled(request: Request) -> ApiResponse:
+    return ApiResponse(
+        error=ApiError(code="FEATURE_DISABLED", message="The public API is disabled (FF_PUBLIC_API_ENABLED)."),
+        meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
+    )
+
+
+async def _require_org_manager(user_id: str, org_id: str) -> None:
+    """``organisation_manager`` of the organisation (``org_manager_right``): 403 for anyone
+    else with a role reaching it, 404 otherwise."""
+    right = await org_manager_right(user_id, org_id)
+    if right == "not_found":
+        raise HTTPException(404, detail="Organisation not found")
+    if right == "refused":
+        raise HTTPException(403, detail="Only the organisation's managers can manage its API keys")
+
+
 @router.post("/api-keys", dependencies=[Depends(require_not_demo)])
 async def create_key(
     body: ApiKeyCreate,
     request: Request,
     user=Depends(get_current_user),
 ):
-    """Create a new API key for the user's organisation.
+    """Create an API key for an organisation the caller manages.
 
-    Only organisation admins can create keys. The raw key is returned
-    once — it cannot be retrieved again.
+    The raw key is returned once. It cannot be retrieved again.
     """
     if not settings.FF_PUBLIC_API_ENABLED:
-        raise HTTPException(404, detail="Public API is not enabled")
+        return _disabled(request)
 
-    # TODO: Get org_id from user's admin role
-    # For now, use a query param or the user's primary org
+    org_id = str(body.organisation_id)
+    await _require_org_manager(user.id, org_id)
+
     try:
-        from app.services.supabase_client import create_service_client
-
-        client = create_service_client()
-        roles = client.table("user_roles").select("organisation_id, role").eq("user_id", user.id).in_("role", ["admin", "owner"]).execute()
-
-        if not roles.data:
-            raise HTTPException(403, detail="Only organisation admins can create API keys")
-
-        org_id = roles.data[0]["organisation_id"]
-
         raw_key, record = await create_api_key_record(
             org_id=org_id,
             user_id=user.id,
@@ -107,42 +117,35 @@ async def create_key(
             scopes=body.scopes,
             expires_at=body.expires_at,
         )
-
-        return ApiResponse(
-            data=ApiKeyResponse(
-                id=record["id"],
-                name=record["name"],
-                key=raw_key,
-                key_prefix=record["key_prefix"],
-                scopes=record["scopes"],
-                expires_at=record.get("expires_at"),
-                created_at=record.get("created_at"),
-            ).model_dump(),
-            meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
-        )
-
     except ApiKeyError as e:
         raise HTTPException(400, detail=str(e))
+
+    return ApiResponse(
+        data=ApiKeyResponse(
+            id=record["id"],
+            name=record["name"],
+            key=raw_key,
+            key_prefix=record["key_prefix"],
+            scopes=record["scopes"],
+            expires_at=record.get("expires_at"),
+            created_at=record.get("created_at"),
+        ).model_dump(),
+        meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
+    )
 
 
 @router.get("/api-keys")
 async def list_keys(
     request: Request,
+    organisation_id: uuid.UUID = Query(..., description="Organisation whose keys to list"),
     user=Depends(get_current_user),
 ):
-    """List active API keys for the user's organisation."""
+    """List an organisation's active (unrevoked) API keys. Managers only."""
     if not settings.FF_PUBLIC_API_ENABLED:
-        raise HTTPException(404, detail="Public API is not enabled")
+        return _disabled(request)
 
-    from app.services.supabase_client import create_service_client
-
-    client = create_service_client()
-    roles = client.table("user_roles").select("organisation_id").eq("user_id", user.id).in_("role", ["admin", "owner"]).execute()
-
-    if not roles.data:
-        raise HTTPException(403, detail="Only organisation admins can view API keys")
-
-    org_id = roles.data[0]["organisation_id"]
+    org_id = str(organisation_id)
+    await _require_org_manager(user.id, org_id)
     keys = await list_api_keys(org_id)
 
     return ApiResponse(
@@ -153,26 +156,19 @@ async def list_keys(
 
 @router.delete("/api-keys/{key_id}", dependencies=[Depends(require_not_demo)])
 async def revoke_key(
-    key_id: str,
+    key_id: uuid.UUID,
     request: Request,
+    organisation_id: uuid.UUID = Query(..., description="Organisation the key belongs to"),
     user=Depends(get_current_user),
 ):
-    """Revoke an API key."""
+    """Revoke one of an organisation's API keys. Managers only."""
     if not settings.FF_PUBLIC_API_ENABLED:
-        raise HTTPException(404, detail="Public API is not enabled")
+        return _disabled(request)
 
-    from app.services.supabase_client import create_service_client
+    org_id = str(organisation_id)
+    await _require_org_manager(user.id, org_id)
 
-    client = create_service_client()
-    roles = client.table("user_roles").select("organisation_id").eq("user_id", user.id).in_("role", ["admin", "owner"]).execute()
-
-    if not roles.data:
-        raise HTTPException(403, detail="Only organisation admins can revoke API keys")
-
-    org_id = roles.data[0]["organisation_id"]
-    success = await revoke_api_key(key_id, org_id)
-
-    if not success:
+    if not await revoke_api_key(str(key_id), org_id):
         raise HTTPException(404, detail="API key not found or already revoked")
 
     return ApiResponse(

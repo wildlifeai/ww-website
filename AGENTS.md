@@ -69,7 +69,9 @@ local gates above.
 Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 (`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
 ww-backend runs them against its own schema PRs, so a red run can come from either side. To
-run one locally, follow the instructions in its header.
+run one locally, follow the instructions in its header. The backend has one such test,
+`backend/tests/test_api_keys_local_stack.py`: it skips without `WW_TEST_API_URL` and
+`WW_TEST_SERVICE_ROLE_KEY` and CI does not run it, so run it by hand when API key code changes.
 
 ## Non-negotiables
 
