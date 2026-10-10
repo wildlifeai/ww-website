@@ -24,8 +24,15 @@ def test_authorize_job_other_user_hidden_as_404():
 
 
 def test_authorize_job_ownerless_allowed():
-    # Legacy / system / machine API jobs carry no owner — readable by any authed user.
-    _authorize_job(SimpleNamespace(user_id=None), SimpleNamespace(id="anyone"))  # no raise
+    # Legacy and system jobs carry no owner, so any signed-in user may read them.
+    _authorize_job(SimpleNamespace(user_id=None, organisation_id=None), SimpleNamespace(id="anyone"))  # no raise
+
+
+def test_authorize_job_api_key_job_hidden_as_404():
+    # An organisation API key's export: its link is read with that organisation's keys only (#327).
+    with pytest.raises(HTTPException) as exc:
+        _authorize_job(SimpleNamespace(user_id=None, organisation_id="org-1"), SimpleNamespace(id="anyone"))
+    assert exc.value.status_code == 404
 
 
 # ── Media resolver SSRF guard ─────────────────────────────────────────────────

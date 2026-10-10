@@ -40,6 +40,111 @@
         "title": "ApiError",
         "type": "object"
       },
+      "ApiJobOut": {
+        "description": "An export job's state. ``result_url`` is the signed download link once it has finished.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "description": "0.0 to 1.0",
+            "title": "Progress",
+            "type": "number"
+          },
+          "result_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Signed link to the ZIP, valid for 24 hours from when the job finished",
+            "title": "Result Url"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "progress",
+          "created_at"
+        ],
+        "title": "ApiJobOut",
+        "type": "object"
+      },
+      "ApiJobResponse": {
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiJobOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "ApiJobResponse",
+        "type": "object"
+      },
       "ApiKeyCreate": {
         "description": "Request to create a new API key.",
         "properties": {
@@ -379,70 +484,6 @@
           "files"
         ],
         "title": "Body_parse_exif_api_exif_parse_post",
-        "type": "object"
-      },
-      "CamtrapDPExportRequest": {
-        "description": "Request to generate a CamtrapDP data package.",
-        "properties": {
-          "date_from": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Start date (ISO)",
-            "title": "Date From"
-          },
-          "date_to": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "End date (ISO)",
-            "title": "Date To"
-          },
-          "deployment_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Specific deployments to include",
-            "title": "Deployment Ids"
-          },
-          "include_observations": {
-            "default": true,
-            "description": "Include AI detection observations",
-            "title": "Include Observations",
-            "type": "boolean"
-          },
-          "project_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter by project",
-            "title": "Project Id"
-          }
-        },
-        "title": "CamtrapDPExportRequest",
         "type": "object"
       },
       "CamtrapExportRequest": {
@@ -807,6 +848,18 @@
         "title": "INatPublishRequest",
         "type": "object"
       },
+      "JobStatus": {
+        "description": "Lifecycle states for an async job.",
+        "enum": [
+          "queued",
+          "processing",
+          "completed",
+          "completed_with_errors",
+          "failed"
+        ],
+        "title": "JobStatus",
+        "type": "string"
+      },
       "LabelMapRequest": {
         "description": "A model's whole ``label_map``, keyed by device label; LM-10 runs on it before the write.",
         "properties": {
@@ -956,6 +1009,239 @@
         "title": "ManifestRequest",
         "type": "object"
       },
+      "ObservationOut": {
+        "description": "The verdict the website's photo grid shows for one photo (#170).\n\nThe label fields come from the observation the grid's card shows: a person's verdict\nfirst, else the consensus of the AI models, else the first observation. They are null\nwhen no observation names the photo.",
+        "properties": {
+          "ai_origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "edge (the camera's model) or cloud, for an AI label",
+            "title": "Ai Origin"
+          },
+          "behavior": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behavior"
+          },
+          "classification_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "human or machine",
+            "title": "Classification Method"
+          },
+          "classification_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification Probability"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "deployment_id": {
+            "title": "Deployment Id",
+            "type": "string"
+          },
+          "human_reviewed": {
+            "description": "A person has reviewed at least one of the photo's observations",
+            "title": "Human Reviewed",
+            "type": "boolean"
+          },
+          "is_empty": {
+            "description": "The photo shows no animal, person or vehicle",
+            "title": "Is Empty",
+            "type": "boolean"
+          },
+          "life_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Life Stage"
+          },
+          "media_id": {
+            "title": "Media Id",
+            "type": "string"
+          },
+          "observation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The observation the verdict comes from",
+            "title": "Observation Id"
+          },
+          "observation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "animal, human, vehicle, blank or unknown",
+            "title": "Observation Type"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "review_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Status"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scientific Name"
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sex"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ai, human, imported or consensus",
+            "title": "Source Type"
+          },
+          "taxon_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxon Id"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the photo was taken",
+            "title": "Timestamp"
+          },
+          "vernacular_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vernacular Name"
+          }
+        },
+        "required": [
+          "media_id",
+          "deployment_id",
+          "project_id",
+          "is_empty",
+          "human_reviewed"
+        ],
+        "title": "ObservationOut",
+        "type": "object"
+      },
+      "ObservationsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "ObservationsResponse",
+        "type": "object"
+      },
       "PretrainedModelRequest": {
         "properties": {
           "architecture": {
@@ -1088,6 +1374,92 @@
           "media_ids"
         ],
         "title": "RunSelectedRequest",
+        "type": "object"
+      },
+      "TelemetryPoint": {
+        "description": "One LoRaWAN message a camera sent while deployed in one of the organisation's projects.",
+        "properties": {
+          "battery_level": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Battery Level"
+          },
+          "deployment_id": {
+            "title": "Deployment Id",
+            "type": "string"
+          },
+          "model_output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The camera's on-device model output, as the payload carried it",
+            "title": "Model Output"
+          },
+          "sd_card_used_capacity": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sd Card Used Capacity"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the network received the message",
+            "title": "Timestamp"
+          }
+        },
+        "required": [
+          "deployment_id"
+        ],
+        "title": "TelemetryPoint",
+        "type": "object"
+      },
+      "TelemetryResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryPoint"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "TelemetryResponse",
         "type": "object"
       },
       "TrainClassSpec": {
@@ -1290,6 +1662,14 @@
         ],
         "title": "ValidationError",
         "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "description": "An organisation API key, ww_live_...",
+        "in": "header",
+        "name": "X-API-Key",
+        "type": "apiKey"
       }
     }
   },
@@ -3848,7 +4228,7 @@
     },
     "/api/v1/deployments": {
       "get": {
-        "description": "List deployments for the organisation attached to the API key.",
+        "description": "List the deployments in the organisation's projects, newest first.",
         "operationId": "api_list_deployments_api_v1_deployments_get",
         "parameters": [
           {
@@ -3858,6 +4238,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -3868,6 +4249,7 @@
             }
           },
           {
+            "description": "A deployment status value: planned, started or ended",
             "in": "query",
             "name": "status",
             "required": false,
@@ -3880,6 +4262,7 @@
                   "type": "null"
                 }
               ],
+              "description": "A deployment status value: planned, started or ended",
               "title": "Status"
             }
           },
@@ -3889,7 +4272,7 @@
             "required": false,
             "schema": {
               "default": 50,
-              "maximum": 200,
+              "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
@@ -3904,15 +4287,6 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
-              "type": "string"
             }
           }
         ],
@@ -3936,6 +4310,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api List Deployments",
         "tags": [
           "public-api"
@@ -3944,7 +4323,7 @@
     },
     "/api/v1/deployments/{deployment_id}": {
       "get": {
-        "description": "Get a single deployment by ID.",
+        "description": "Get one deployment in the organisation's projects.",
         "operationId": "api_get_deployment_api_v1_deployments__deployment_id__get",
         "parameters": [
           {
@@ -3952,16 +4331,8 @@
             "name": "deployment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Deployment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
               "type": "string"
             }
           }
@@ -3986,6 +4357,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api Get Deployment",
         "tags": [
           "public-api"
@@ -3994,7 +4370,7 @@
     },
     "/api/v1/devices": {
       "get": {
-        "description": "List devices for the organisation.",
+        "description": "List the organisation's own cameras.",
         "operationId": "api_list_devices_api_v1_devices_get",
         "parameters": [
           {
@@ -4003,7 +4379,7 @@
             "required": false,
             "schema": {
               "default": 50,
-              "maximum": 200,
+              "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
@@ -4019,15 +4395,6 @@
               "title": "Offset",
               "type": "integer"
             }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -4050,6 +4417,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api List Devices",
         "tags": [
           "public-api"
@@ -4058,7 +4430,7 @@
     },
     "/api/v1/devices/{device_eui}/telemetry": {
       "get": {
-        "description": "Get telemetry time-series for a specific device.",
+        "description": "A camera's LoRaWAN messages from its deployments in the organisation's projects, newest first.",
         "operationId": "api_device_telemetry_api_v1_devices__device_eui__telemetry_get",
         "parameters": [
           {
@@ -4071,6 +4443,7 @@
             }
           },
           {
+            "description": "ISO 8601; messages received at or after",
             "in": "query",
             "name": "date_from",
             "required": false,
@@ -4083,10 +4456,12 @@
                   "type": "null"
                 }
               ],
+              "description": "ISO 8601; messages received at or after",
               "title": "Date From"
             }
           },
           {
+            "description": "ISO 8601; messages received at or before",
             "in": "query",
             "name": "date_to",
             "required": false,
@@ -4099,6 +4474,7 @@
                   "type": "null"
                 }
               ],
+              "description": "ISO 8601; messages received at or before",
               "title": "Date To"
             }
           },
@@ -4113,22 +4489,15 @@
               "title": "Limit",
               "type": "integer"
             }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
-              "type": "string"
-            }
           }
         ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -4144,6 +4513,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api Device Telemetry",
         "tags": [
           "public-api"
@@ -4152,24 +4526,13 @@
     },
     "/api/v1/export/camtrapdp": {
       "post": {
-        "description": "Export deployment data as a CamtrapDP package (async job).",
+        "description": "Start a CamtrapDP export of one project with its original photos, as the Download button does.\n\nReturns ``{job_id}``; poll ``GET /api/v1/jobs/{job_id}`` for the signed link. Behind\n``FF_CAMTRAPDP_EXPORT_ENABLED``, like the Download button's export.",
         "operationId": "api_export_camtrapdp_api_v1_export_camtrapdp_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CamtrapDPExportRequest"
+                "$ref": "#/components/schemas/CamtrapExportRequest"
               }
             }
           },
@@ -4195,62 +4558,29 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api Export Camtrapdp",
         "tags": [
           "public-api"
         ]
       }
     },
-    "/api/v1/observations": {
+    "/api/v1/jobs/{job_id}": {
       "get": {
-        "description": "List AI detection observations.",
-        "operationId": "api_list_observations_api_v1_observations_get",
+        "description": "A job one of the organisation's keys started: status, progress, and the signed link once done.\n\nAnother organisation's job, or a signed-in user's, answers 404 like a missing one.",
+        "operationId": "api_get_job_api_v1_jobs__job_id__get",
         "parameters": [
           {
-            "in": "query",
-            "name": "deployment_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Deployment Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
+            "in": "path",
+            "name": "job_id",
             "required": true,
             "schema": {
-              "title": "X-Api-Key",
+              "format": "uuid",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -4259,7 +4589,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ApiJobResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -4275,6 +4607,107 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Api Get Job",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/observations": {
+      "get": {
+        "description": "One verdict per photo, as the website's photo grid shows it.\n\nPhotos with at least one observation, in the organisation's projects, in the order they\nwere registered. A page is at most 1,000 photos; page with ``offset``.",
+        "operationId": "api_list_observations_api_v1_observations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "deployment_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Deployment Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservationsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api List Observations",
         "tags": [
           "public-api"

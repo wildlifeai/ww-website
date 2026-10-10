@@ -242,11 +242,14 @@ async def create_job(
     kind: Optional[str] = None,
     label: Optional[str] = None,
     deployment_ids: Optional[List[str]] = None,
+    organisation_id: Optional[str] = None,
 ) -> str:
     """Create a new job entry locally and sync to Supabase.
 
     ``user_id`` is stamped into ``job_data`` so the owner can list their own jobs
-    (`api_jobs` has no owner column — see :func:`list_jobs`). ``kind`` is a coarse
+    (`api_jobs` has no owner column, see :func:`list_jobs`). ``organisation_id`` does the
+    same for a job an organisation's API key started: only that organisation's keys may
+    read it (``GET /api/v1/jobs/{id}``). ``kind`` is a coarse
     category ('upload', 'ai_pipeline', 'export', …) and ``label`` a human summary,
     both surfaced in the processing-history view. ``deployment_ids`` records which
     deployments the job touches so the Annotations grid can show a "being processed"
@@ -267,6 +270,7 @@ async def create_job(
         "current_phase": None,
         "summary": None,
         "user_id": user_id,
+        "organisation_id": organisation_id,
         "kind": kind,
         "label": label,
         "deployment_ids": deployment_ids or [],

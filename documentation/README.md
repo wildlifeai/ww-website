@@ -20,6 +20,7 @@ active engineering hand-offs; **archive** is frozen history. Start with onboardi
 |-----|--------|
 | [AI-ARCHITECTURE](resources/AI-ARCHITECTURE.md) | The three AI layers (Camera AI / Cloud AI / Wildlife Brain): canonical naming, cross-repo contracts, integration map |
 | [api-reference](resources/api-reference.md) | Backend `/api/*` endpoint reference |
+| [public-api-guide](resources/public-api-guide.md) | For partners: API keys, scopes, paging, errors, rate limits and the CamtrapDP export of the `/api/v1` public API, with curl examples |
 | [demo-account](resources/demo-account.md) | Read-only "Try the demo" account: access, 3-layer read-only enforcement, API usage, per-environment seeding |
 | [deployment-guide](resources/deployment-guide.md) | Dev/prod environments, Azure + Cloudflare, CI/CD, vector store (pgvector in Supabase), security checklist |
 | [cloud-infrastructure](resources/cloud-infrastructure.md) | **Inventory + maintenance** of every Azure/Supabase/Cloudflare/Drive resource: what exists, what's essential vs sprawl, quarterly review checklist |

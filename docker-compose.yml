@@ -34,6 +34,7 @@ services:
       - FF_ML_ENABLED=${FF_ML_ENABLED:-false}
       - FF_CLUSTERING_ENABLED=${FF_CLUSTERING_ENABLED:-false}
       - FF_PUBLIC_API_ENABLED=${FF_PUBLIC_API_ENABLED:-false}
+      - PUBLIC_API_RATE_LIMIT_PER_MINUTE=${PUBLIC_API_RATE_LIMIT_PER_MINUTE:-60}
       - FF_PIPELINE_ENABLED=${FF_PIPELINE_ENABLED:-false}
       - FF_ACTIVE_LEARNING_ENABLED=${FF_ACTIVE_LEARNING_ENABLED:-false}
       # Dual AI: reflect the camera's own NN scores from EXIF as edge observations

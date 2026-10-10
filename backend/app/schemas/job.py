@@ -99,6 +99,7 @@ class JobInfo(BaseModel):
 
     job_id: str
     user_id: Optional[str] = Field(None, description="Owner — used to scope status polling to the creator")
+    organisation_id: Optional[str] = Field(None, description="The organisation whose API key started the job; only its keys may read it")
     status: JobStatus = JobStatus.QUEUED
     progress: float = Field(0.0, ge=0.0, le=1.0, description="0.0–1.0 weighted progress")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

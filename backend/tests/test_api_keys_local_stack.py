@@ -82,7 +82,7 @@ def test_create_use_and_revoke_a_key(stack):
     assert used.status_code == 200, used.text
     assert used.json()["data"] == []
     # A scope the key does not carry is refused.
-    assert client.get("/api/v1/observations", headers={"X-API-Key": raw}).status_code == 401
+    assert client.get("/api/v1/observations", headers={"X-API-Key": raw}).status_code == 403
     # last_used_at is a real timestamp once the key has been used.
     row = stack.svc.table("api_keys").select("last_used_at, created_by").eq("id", key["id"]).execute().data[0]
     assert row["last_used_at"] and row["created_by"] == stack.caller.id
