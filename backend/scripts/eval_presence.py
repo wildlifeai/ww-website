@@ -570,7 +570,7 @@ def burst_len_bucket(n: int) -> str:
 def strata_of(
     frames: list[LabelledFrame],
     bursts: list[list[LabelledFrame]],
-    read: Callable[[str], bytes] = None,
+    read: Optional[Callable[[str], bytes]] = None,
     boxes: Optional[dict[str, tuple[float, float, float, float]]] = None,
     model_labels: Optional[dict[str, dict[str, str]]] = None,
 ) -> dict[str, dict[str, StratumValue]]:

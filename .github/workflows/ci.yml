@@ -58,6 +58,20 @@ jobs:
           pip install -r backend/requirements.txt
           pip install -r backend/requirements-dev.txt
 
+      # Advisory (#225): a failure becomes a warning and the job stays green. The
+      # first report was about 1,600 errors, nearly all from supabase-py typing
+      # query rows as a JSON union. Drop continue-on-error once the count is zero.
+      # It runs here because it resolves imports against the install above.
+      - name: Pyright (advisory)
+        id: pyright
+        working-directory: backend
+        continue-on-error: true
+        run: pyright
+
+      - name: Warn when pyright found something
+        if: steps.pyright.outcome == 'failure'
+        run: echo "::warning::pyright found type errors in the backend (advisory for now, issue 225). The step above lists them."
+
       # The floor is a ratchet, not a target: set just under the measured figure
       # so it can only move up. 52% of app/ statements on 2026-10-05, floor 50.
       # Raise it by hand when coverage has genuinely climbed (#226).

@@ -160,7 +160,6 @@ async def convert_model(
         },
         meta=ApiMeta(
             request_id=getattr(request.state, "request_id", None) if request else None,
-            message="Model upload started. Poll the job URL for progress.",
         ),
     )
 
