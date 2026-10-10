@@ -28,12 +28,11 @@ export function missingTimezoneIds(rows: TimezoneRow[]): string[] {
 }
 
 export async function fillTimezones(post: Post, ids: string[]): Promise<Record<string, string>> {
-  const filled: Record<string, string> = {}
-  for (let i = 0; i < ids.length; i += FILL_BATCH) {
-    const res = await post('/api/deployments/fill-timezones', { deployment_ids: ids.slice(i, i + FILL_BATCH) }) as { data?: Record<string, string> }
-    Object.assign(filled, res?.data ?? {})
-  }
-  return filled
+  const batches: string[][] = []
+  for (let i = 0; i < ids.length; i += FILL_BATCH) batches.push(ids.slice(i, i + FILL_BATCH))
+  const answers = await Promise.all(batches.map(batch =>
+    post('/api/deployments/fill-timezones', { deployment_ids: batch }) as Promise<{ data?: Record<string, string> }>))
+  return Object.assign({}, ...answers.map(res => res?.data ?? {}))
 }
 
 /** The rows with the filled zones merged in; the same array when none applies. */
