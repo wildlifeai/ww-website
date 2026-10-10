@@ -16,6 +16,7 @@ from typing import Optional
 
 import structlog
 
+from app.domain.open_deployments import is_open_deployment_conflict
 from app.domain.photo_preprocessing import resolve_timezone
 from app.schemas.camtrapdp import CamtrapImportResult, PendingDriveUpload
 
@@ -276,6 +277,25 @@ def _insert_observations(svc, batch: list[dict], warnings: list[str], what: str 
         return 0
 
 
+def _import_device(svc, org_id: str, user_id: str, name: str) -> str:
+    """The id of the organisation's placeholder device called ``name``, created if it has none.
+
+    Its ``bluetooth_id`` is a uuid5 of the organisation and the name, so a re-import reuses the
+    device and another organisation's camera with the same name gets a device of its own.
+    A device made before the organisation was in the seed (name only) is still reused, but only
+    by its own organisation.
+    """
+    scoped = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{org_id}-{name}"))
+    legacy = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{name}"))
+    existing = svc.table("devices").select("id").in_("bluetooth_id", [scoped, legacy]).eq("organisation_id", org_id).limit(1).execute()
+    if existing.data:
+        logger.info("camtrapdp_import_device_reused", name=name, device_id=existing.data[0]["id"])
+        return existing.data[0]["id"]
+    device_id = str(uuid.uuid4())
+    svc.table("devices").insert({"id": device_id, "name": name, "organisation_id": org_id, "modified_by": user_id, "bluetooth_id": scoped}).execute()
+    return device_id
+
+
 def import_package(
     pkg: CamtrapPackage,
     user_id: str,
@@ -332,27 +352,8 @@ def import_package(
     device_map: dict[str, str] = {}  # cameraID → ww device UUID
 
     for camera_id in camera_ids:
-        device_name = f"[imported] {camera_id}"[:100]  # truncate if needed
-        # Generate a stable bluetooth_id from the camera name so re-imports are idempotent.
-        bt_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{device_name}"))
         try:
-            # First check if a device with this bluetooth_id already exists.
-            existing = svc.table("devices").select("id").eq("bluetooth_id", bt_id).limit(1).execute()
-            if existing.data:
-                device_map[camera_id] = existing.data[0]["id"]
-                logger.info("camtrapdp_import_device_reused", camera_id=camera_id, device_id=existing.data[0]["id"])
-            else:
-                device_uuid = str(uuid.uuid4())
-                svc.table("devices").insert(
-                    {
-                        "id": device_uuid,
-                        "name": device_name,
-                        "organisation_id": org_id,
-                        "modified_by": user_id,
-                        "bluetooth_id": bt_id,
-                    }
-                ).execute()
-                device_map[camera_id] = device_uuid
+            device_map[camera_id] = _import_device(svc, org_id, user_id, f"[imported] {camera_id}"[:100])
         except Exception as e:
             warnings.append(f"Could not create placeholder device for camera '{camera_id}': {e}")
 
@@ -378,27 +379,9 @@ def import_package(
 
         if not device_uuid:
             # Create on-the-fly if missing (fallback for cameras not in the pre-scan set).
-            fallback_name = f"[imported] {camera_id or 'unknown'}"[:100]
-            bt_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{fallback_name}"))
             try:
-                # Reuse if already exists.
-                existing = svc.table("devices").select("id").eq("bluetooth_id", bt_id).limit(1).execute()
-                if existing.data:
-                    device_uuid = existing.data[0]["id"]
-                    device_map[camera_id] = device_uuid
-                    logger.info("camtrapdp_import_device_reused", camera_id=camera_id, device_id=device_uuid)
-                else:
-                    device_uuid = str(uuid.uuid4())
-                    svc.table("devices").insert(
-                        {
-                            "id": device_uuid,
-                            "name": fallback_name,
-                            "organisation_id": org_id,
-                            "modified_by": user_id,
-                            "bluetooth_id": bt_id,
-                        }
-                    ).execute()
-                    device_map[camera_id] = device_uuid
+                device_uuid = _import_device(svc, org_id, user_id, f"[imported] {camera_id or 'unknown'}"[:100])
+                device_map[camera_id] = device_uuid
             except Exception as e:
                 warnings.append(f"Could not create device for deployment '{cdp_id}': {e}")
                 continue
@@ -452,7 +435,25 @@ def import_package(
         row = {k: v for k, v in row.items() if v is not None}
 
         try:
-            svc.table("deployments").insert(row).execute()
+            try:
+                svc.table("deployments").insert(row).execute()
+            except Exception as e:
+                if not is_open_deployment_conflict(e):
+                    raise
+                # The camera already has an open deployment (one per camera, ww-backend #320),
+                # from this package or an earlier import. Keep the data: give this deployment a
+                # placeholder device of its own, which a re-import reuses, and say so.
+                own_name = f"[imported] {camera_id or 'unknown'} ({cdp_id})"[:100]
+                own_device = _import_device(svc, org_id, user_id, own_name)
+                prior = svc.table("deployments").select("id").eq("device_id", own_device).eq("deployment_start", dep_start).limit(1).execute()
+                if prior.data:
+                    dep_id_map[cdp_id] = prior.data[0]["id"]
+                else:
+                    svc.table("deployments").insert({**row, "device_id": own_device}).execute()
+                warnings.append(
+                    f"Camera '{camera_id}' already has an open deployment, so deployment '{cdp_id}' (no deploymentEnd) "
+                    f"was imported under its own placeholder device '{own_name}'."
+                )
             deps_inserted += 1
         except Exception as e:
             # Fail-fast on first deployment error so misconfiguration is caught immediately

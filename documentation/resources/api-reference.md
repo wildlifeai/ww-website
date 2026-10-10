@@ -287,7 +287,7 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id` |
+| `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device of the importing organisation, reused by a re-import and never shared with another organisation. A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
 
 > An API key starts the same export with `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
 
