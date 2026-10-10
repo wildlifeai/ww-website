@@ -40,6 +40,19 @@ from app.services.db_utils import rows_of
 logger = structlog.get_logger()
 
 
+class EmbeddingUnavailableError(RuntimeError):
+    """This process can't embed: no ML stack, no token for the gated weights, or no GPU."""
+
+
+def ensure_embedding_available(model_name: Optional[str] = None) -> None:
+    """Raise :class:`EmbeddingUnavailableError` before a run writes or supersedes anything."""
+    from app.services.dinov3 import unavailable_reason
+
+    reason = unavailable_reason(model_name)
+    if reason:
+        raise EmbeddingUnavailableError(f"Wildlife Brain can't embed in this process: {reason}.")
+
+
 async def _resolve_crops_concurrent(crops: list[dict], *, concurrency: int = 10) -> list[tuple[str, str, bytes]]:
     """Resolve crop URLs to bytes with bounded concurrency, preserving input order.
 
@@ -443,6 +456,7 @@ async def embed_and_cluster_deployment(
         if progress:
             await progress(pct, msg)
 
+    ensure_embedding_available(model_name)
     if model_name:
         dino, resolved_model, model_version = None, model_name, model_name
     else:  # None or a blank name from the request: the configured default
@@ -653,6 +667,7 @@ async def embed_and_cluster_scope(
     if scope == "project" and not scope_id:
         raise ValueError("project scope requires scope_id (the project id)")
 
+    ensure_embedding_available(model_name)
     if model_name:
         dino, resolved_model, model_version = None, model_name, model_name
     else:  # None or a blank name from the request: the configured default

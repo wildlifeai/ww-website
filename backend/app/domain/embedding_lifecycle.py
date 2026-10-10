@@ -111,8 +111,10 @@ async def _supersede_complete_runs(deployment_id: str) -> None:
 
 async def reprocess_deployment(deployment_id: str, model_name: Optional[str] = None, created_by: Optional[str] = None, progress=None) -> dict:
     """Mark current runs superseded, then re-embed + recluster the deployment."""
-    from app.domain.wildlife_brain import embed_and_cluster_deployment
+    from app.domain.wildlife_brain import embed_and_cluster_deployment, ensure_embedding_available
 
+    # Check first: superseding hides the current clusters until the new run completes.
+    ensure_embedding_available(model_name)
     await _supersede_complete_runs(deployment_id)
     logger.info("reprocess_deployment", deployment_id=deployment_id, model=model_name)
     return await embed_and_cluster_deployment(deployment_id, model_name=model_name, created_by=created_by, progress=progress)

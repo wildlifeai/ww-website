@@ -141,6 +141,7 @@ async def test_embed_without_a_model_name_uses_the_default_service(monkeypatch, 
     async def finish(*_args):
         return None
 
+    monkeypatch.setattr(wb, "ensure_embedding_available", lambda *_a: None)
     monkeypatch.setattr(dv, "get_dinov3_service", FakeDino)
     monkeypatch.setattr(wb, "_create_embedding_run", fake_create)
     monkeypatch.setattr(wb, "_fetch_crops", no_crops)

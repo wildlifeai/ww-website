@@ -82,7 +82,7 @@ az containerapp create -n ww-embedding-worker -g WW-AE --environment ww-env \
     GOOGLE_DRIVE_ENABLED=true GOOGLE_DRIVE_FOLDER_ID="<prod Drive root>" \
     FF_ML_ENABLED=true FF_PIPELINE_ENABLED=true FF_SPECIESNET_ENABLED=true \
     FF_BIOCLIP_ENABLED=true FF_PER_CROP_CLASSIFY_ENABLED=true FF_MEDIA_REGISTRY_ENABLED=true \
-    FF_WILDLIFE_BRAIN_ENABLED=false SPECIESNET_RUN_MODE=single_thread LOG_LEVEL=info \
+    FF_WILDLIFE_BRAIN_ENABLED=true SPECIESNET_RUN_MODE=single_thread LOG_LEVEL=info \
     EMBEDDING_DEVICE=cuda BIOCLIP_DEVICE=cuda
 ```
 `FF_ML_ENABLED` **must** be true (else `build_pipeline_steps()` returns `[]` → no AI). `GOOGLE_SERVICE_ACCOUNT_JSON` must be raw JSON, not a list-repr (the `-o tsv` array bug corrupts it — set as a secret, don't round-trip via CLI arrays).

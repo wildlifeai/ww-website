@@ -150,6 +150,39 @@ async def accessible_deployment_ids(user_id: str, deployment_ids: list[str]) -> 
     return await asyncio.to_thread(_check)
 
 
+async def media_org_deployment_ids(user_id: str, media_id: str) -> list[str]:
+    """Deployments in ``media_id``'s organisation that the caller may access.
+
+    Scopes the Wildlife Brain's similarity search: the vector RPC runs as the service
+    role, so without this list it would rank every organisation's photos.
+    """
+
+    def _list() -> list[str]:
+        svc = create_service_client()
+        org_id, _ = _resolve_org_project(svc, media_id=media_id)
+        if not org_id:
+            return []
+        roles = _fetch_active_roles(svc, user_id)
+        out: list[str] = []
+        start = 0
+        while True:  # PostgREST returns at most 1,000 rows a request
+            rows = rows_of(
+                svc.table("deployments")
+                .select("id, project_id, projects!inner(organisation_id)")
+                .eq("projects.organisation_id", org_id)
+                .is_("deleted_at", "null")
+                .order("id")
+                .range(start, start + 999)
+                .execute()
+            )
+            out += [r["id"] for r in rows if _has_access(roles, org_id, r.get("project_id"))]
+            if len(rows) < 1000:
+                return out
+            start += 1000
+
+    return await asyncio.to_thread(_list)
+
+
 def deployment_id_prefix_bounds(prefix: str) -> tuple[str, str] | None:
     """UUID range bounds for an 8-hex camera folder prefix (e.g. ``MEDIA/7785FABB/``).
 
@@ -203,99 +236,6 @@ async def classify_deployment_access(user_id: str, deployment_ids: list[str]) ->
             key = id_map.get(row_id.lower(), row_id)
             result[key] = "valid" if _has_access(roles, org_id, project_id) else "no_access"
         return result
-
-    return await asyncio.to_thread(_check)
-
-
-def _may_delete_deployment(roles: list[dict], user_id: str, setup_by: Optional[str], project_id: Optional[str]) -> bool:
-    """The database's rule for deleting a deployment (``soft_delete_deployment``, ww-backend #266),
-    restated for the one path with no database function to call: undoing a delete.
-
-    Its creator while they hold ``project_member`` (or ``project_admin``) on the project, any
-    ``project_admin`` of the project, or ``ww_admin``. An organisation manager, a project viewer
-    and any other system-scope role are refused, as ``has_project_role`` refuses them. Pure, so
-    the tests pin it to the database's wording."""
-    now = datetime.now(timezone.utc)
-    for r in roles:
-        if not _role_active(r, now):
-            continue
-        scope = r.get("scope_type")
-        role = r.get("role")
-        if scope == "system" and role == "ww_admin":
-            return True
-        if scope == "project" and project_id and r.get("scope_id") == project_id:
-            if role == "project_admin":
-                return True
-            if role == "project_member" and setup_by and setup_by == user_id:
-                return True
-    return False
-
-
-async def split_deployments_by_delete_right(user_id: str, deployment_ids: list[str]) -> tuple[list[str], list[str]]:
-    """Split deployment ids, deleted or not, into ``(allowed, refused)`` by the database's delete
-    rule (``_may_delete_deployment``). Ids that do not exist are in neither list.
-
-    Restoring a deployment runs with the service role, because the SELECT policy hides a
-    soft-deleted row from its own creator and ww-backend has no restore function yet. This check
-    is what keeps Undo to the people the database lets delete."""
-
-    def _check() -> tuple[list[str], list[str]]:
-        ids = list(dict.fromkeys(deployment_ids))
-        if not ids:
-            return [], []
-        svc = create_service_client()
-        roles = _fetch_active_roles(svc, user_id)
-        resp = svc.table("deployments").select("id, project_id, setup_by").in_("id", ids).execute()
-        allowed: list[str] = []
-        refused: list[str] = []
-        for row in rows_of(resp):
-            if _may_delete_deployment(roles, user_id, row.get("setup_by"), row.get("project_id")):
-                allowed.append(row["id"])
-            else:
-                refused.append(row["id"])
-        return allowed, refused
-
-    return await asyncio.to_thread(_check)
-
-
-def _may_delete_project(roles: list[dict], project_id: Optional[str]) -> bool:
-    """The database's rule for deleting a project (``soft_delete_project``), restated for the one
-    path with no database function to call: undoing a delete (ww-backend #286).
-
-    A ``project_admin`` of the project, or ``ww_admin``. An organisation manager, a project member
-    or viewer and any other system-scope role are refused, as ``has_project_role`` refuses them.
-    Pure, so the tests pin it to the database's wording."""
-    now = datetime.now(timezone.utc)
-    for r in roles:
-        if not _role_active(r, now):
-            continue
-        scope = r.get("scope_type")
-        role = r.get("role")
-        if scope == "system" and role == "ww_admin":
-            return True
-        if scope == "project" and project_id and r.get("scope_id") == project_id and role == "project_admin":
-            return True
-    return False
-
-
-async def project_restore_right(user_id: str, project_id: str) -> Literal["allowed", "refused", "not_found"]:
-    """Whether the caller may undo a project delete, by the database's delete rule
-    (``_may_delete_project``).
-
-    ``not_found`` when the project does not exist or the caller holds no role reaching it, so ids
-    in other tenants cannot be probed. ``refused`` when they reach it but may not delete it.
-    Restoring runs with the service role, because the SELECT policy hides a soft-deleted project
-    and ww-backend has no restore function yet."""
-
-    def _check() -> Literal["allowed", "refused", "not_found"]:
-        svc = create_service_client()
-        org_id, pid = _resolve_org_project(svc, project_id=project_id)
-        if pid is None:
-            return "not_found"
-        roles = _fetch_active_roles(svc, user_id)
-        if _may_delete_project(roles, pid):
-            return "allowed"
-        return "refused" if _has_access(roles, org_id, pid) else "not_found"
 
     return await asyncio.to_thread(_check)
 

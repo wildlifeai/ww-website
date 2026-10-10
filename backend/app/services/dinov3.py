@@ -17,6 +17,7 @@ Design (per backend agent skill — services do infra only, no FastAPI):
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 from io import BytesIO
 from typing import Any, Optional, Sequence
 
@@ -33,6 +34,50 @@ def chunk(seq: Sequence, size: int) -> list[list]:
     if size <= 0:
         raise ValueError("batch size must be positive")
     return [list(seq[i : i + size]) for i in range(0, len(seq), size)]
+
+
+# Everything an embedding run imports: DINOv3 itself plus the UMAP and HDBSCAN steps.
+_ML_MODULES = ("torch", "transformers", "umap", "hdbscan")
+
+
+def _missing_ml_modules() -> list[str]:
+    return [m for m in _ML_MODULES if importlib.util.find_spec(m) is None]
+
+
+def _hf_token() -> Optional[str]:
+    """``HF_TOKEN``, else the token ``huggingface-cli login`` stored (what from_pretrained falls back to)."""
+    if settings.HF_TOKEN:
+        return settings.HF_TOKEN
+    try:
+        from huggingface_hub import get_token
+
+        return get_token()
+    except Exception:  # noqa: BLE001, no hub library or no readable token file
+        return None
+
+
+def _cuda_available() -> bool:
+    import torch
+
+    return bool(torch.cuda.is_available())
+
+
+def unavailable_reason(model_name: Optional[str] = None) -> Optional[str]:
+    """Why this process can't compute embeddings for ``model_name``, or None when it can.
+
+    Cheap checks run before an embedding run starts, so a process without the ML stack,
+    the token for gated weights, or the GPU ``EMBEDDING_DEVICE`` names, skips the run
+    instead of downloading every crop and then failing.
+    """
+    missing = _missing_ml_modules()
+    if missing:
+        return f"the ML stack is not installed in this image ({', '.join(missing)})"
+    spec = get_model_spec(model_name or settings.EMBEDDING_DEFAULT_MODEL)
+    if spec.gated and not _hf_token():
+        return f"HF_TOKEN is not set and {spec.hf_model_id} is a gated model"
+    if settings.EMBEDDING_DEVICE.startswith("cuda") and not _cuda_available():
+        return f"EMBEDDING_DEVICE is {settings.EMBEDDING_DEVICE} but no CUDA device is available"
+    return None
 
 
 class DinoV3Service:

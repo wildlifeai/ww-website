@@ -1,17 +1,17 @@
 import asyncio
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from postgrest.exceptions import APIError
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
-from app.authz import assert_access, deployment_id_prefix_bounds, require_system_admin, split_deployments_by_delete_right
+from app.authz import assert_access, deployment_id_prefix_bounds, require_system_admin
 from app.dependencies import get_current_user, get_user_client, get_verified_user, require_not_demo
 from app.domain.deployment_location import apply_location_update, location_update
-from app.domain.soft_delete import now_iso, restore_deployments, soft_delete_deployments_as_user
+from app.domain.soft_delete import check_deleted_at, now_iso, restore_deployments_as_user, soft_delete_deployments_as_user
 from app.schemas.common import ApiResponse
 from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
@@ -129,7 +129,7 @@ class BatchDeploymentIdsRequest(BaseModel):
 
 class RestoreDeploymentsRequest(BaseModel):
     deployment_ids: List[str]
-    deleted_at: str
+    deleted_at: Annotated[str, AfterValidator(check_deleted_at)]
 
 
 _DELETE_RULE = "only the person who set a deployment up, while a project member, or a project admin can delete it"
@@ -145,19 +145,19 @@ async def batch_delete_deployments(
     user: Any = Depends(get_verified_user),
     user_client: Any = Depends(get_user_client),
 ) -> Dict[str, Any]:
-    """Soft-delete deployments (and cascade to their media + observations).
+    """Soft-delete deployments and their media and observations.
 
-    The database decides: each id goes through ``soft_delete_deployment`` as the caller, which
-    allows the deployment's creator while they hold ``project_member``, a ``project_admin`` of
-    the project, or ``ww_admin`` (ww-backend #266). Ids it refuses come back in ``refused_ids``;
-    ids the caller cannot see are skipped. ``403`` when nothing was deleted and something was
-    refused. Returns the shared ``deleted_at`` so the client can offer an Undo.
+    The database decides and cascades: each id goes through ``soft_delete_deployment`` as the
+    caller, which allows the deployment's creator while they hold ``project_member``, a
+    ``project_admin`` of the project, or ``ww_admin`` (ww-backend #266). Ids it refuses come back
+    in ``refused_ids``; ids the caller cannot see are skipped. ``403`` when nothing was deleted
+    and something was refused. Returns the shared ``deleted_at`` so the client can offer an Undo.
     """
     if not body.deployment_ids:
         return {"deleted_at": None, "deployment_ids": [], "refused_ids": []}
 
     ts = now_iso()
-    deleted, refused = await asyncio.to_thread(lambda: soft_delete_deployments_as_user(user_client, create_service_client(), body.deployment_ids, ts))
+    deleted, refused = await asyncio.to_thread(soft_delete_deployments_as_user, user_client, body.deployment_ids, ts)
     if refused and not deleted:
         raise _refusal("deleted", refused)
     return {"deleted_at": ts if deleted else None, "deployment_ids": deleted, "refused_ids": refused}
@@ -167,23 +167,26 @@ async def batch_delete_deployments(
 async def batch_restore_deployments(
     body: RestoreDeploymentsRequest,
     user: Any = Depends(get_verified_user),
+    user_client: Any = Depends(get_user_client),
 ) -> Dict[str, Any]:
-    """Undo a deployment delete — clears ``deleted_at`` (== the given timestamp) on the deployments
-    and the media/observations that were deleted with them.
+    """Undo a deployment delete: clears ``deleted_at`` (equal to the given timestamp) on the
+    deployments and the media and observations deleted with them.
 
-    Same rule as the delete: the creator while a ``project_member``, a ``project_admin``, or
-    ``ww_admin``. It is checked here in Python (``split_deployments_by_delete_right``) because the
-    database has no restore function and hides a soft-deleted row from the caller's own session.
-    Refused ids come back in ``refused_ids``; ``403`` when nothing was restored and something was
-    refused.
+    The database decides: each id goes through ``restore_deployment`` as the caller, under the
+    delete rule. Refused ids come back in ``refused_ids``; unknown ids, and ids with nothing
+    deleted at that timestamp, are not counted. ``403`` when nothing was restored and something
+    was refused. ``409`` when an open deployment's camera has got another open deployment since
+    the delete (one per camera, ww-backend #320): that deployment stays deleted, and the detail
+    says how many others were restored.
     """
     if not body.deployment_ids:
         return {"restored": 0, "refused_ids": []}
-    allowed, refused = await split_deployments_by_delete_right(user.id, body.deployment_ids)
-    if refused and not allowed:
+    restored, refused, cameras = await asyncio.to_thread(restore_deployments_as_user, user_client, body.deployment_ids, body.deleted_at)
+    if cameras:
+        done = f"Restored {len(restored)}, but not all" if restored else "Nothing restored"
+        raise HTTPException(status_code=409, detail=f"{done}: camera '{cameras[0]}' already has an open deployment. End that deployment first.")
+    if refused and not restored:
         raise _refusal("restored", refused)
-
-    restored = await asyncio.to_thread(lambda: restore_deployments(create_service_client(), allowed, body.deleted_at))
     return {"restored": len(restored), "refused_ids": refused}
 
 

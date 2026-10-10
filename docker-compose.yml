@@ -51,7 +51,7 @@ services:
       # Redis (future)
       - REDIS_URL=${REDIS_URL:-}
       # Wildlife Brain (vectors → Supabase pgvector) / Media Registry
-      - FF_WILDLIFE_BRAIN_ENABLED=${FF_WILDLIFE_BRAIN_ENABLED:-false}
+      - FF_WILDLIFE_BRAIN_ENABLED=${FF_WILDLIFE_BRAIN_ENABLED:-true}
       - FF_SPECIESNET_ENABLED=${FF_SPECIESNET_ENABLED:-false}
       - FF_BIOCLIP_ENABLED=${FF_BIOCLIP_ENABLED:-false}
       - BIOCLIP_DEVICE=${BIOCLIP_DEVICE:-cpu}
@@ -94,6 +94,8 @@ services:
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - SUPABASE_MEDIA_BUCKET=${SUPABASE_MEDIA_BUCKET:-media-renditions}
+      # The embed step after the pipeline runs here, so the worker reads the same flag.
+      - FF_WILDLIFE_BRAIN_ENABLED=${FF_WILDLIFE_BRAIN_ENABLED:-true}
       - HF_TOKEN=${HF_TOKEN:-}
       - EMBEDDING_DEFAULT_MODEL=${EMBEDDING_DEFAULT_MODEL:-dinov3-vith}
       - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}

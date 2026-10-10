@@ -82,6 +82,19 @@ deployment pages with `.order()` plus `.range()` until a short page, as
 
 ---
 
+## A camera has one open deployment, checked at commit
+
+`deployments_one_open_per_device` (ww-backend #320) allows one deployment per device with no
+`deployment_end` that is not soft-deleted. It is deferred, so the write that breaks it fails when
+its PostgREST request commits, with `23P01`. The details carry the device id only for the service
+role: under a user session RLS hides the key, so they read "Key conflicts with existing key."
+Anything that inserts an open deployment on an existing device, or clears `deleted_at` or
+`deployment_end`, can hit it. `app/domain/open_deployments.py` recognises it and names the camera
+(with a service-role lookup when the details lack the id): the restores answer `409`, the
+CamtrapDP import gives the deployment its own placeholder device.
+
+---
+
 ## supabase-py types rows as any JSON value
 
 postgrest types `response.data` as a list of any JSON value (None, a string, a list, ...), so
