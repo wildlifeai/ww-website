@@ -972,16 +972,17 @@ async def auto_embed_deployment(deployment_id: str, user_id: str | None = None) 
     """Embed + cluster a deployment's animal crops after annotation (best-effort).
 
     Gated on ``FF_WILDLIFE_BRAIN_ENABLED``; no-op when the Brain is disabled or
-    the deployment has no animal crops yet. Failures are logged, never raised, so
-    a missing GPU / vector store never breaks the upload flow.
+    the deployment has no animal crops yet. A process that can't embed (no ML stack,
+    HF_TOKEN or GPU) skips it with one info log and writes no run. Failures are
+    logged, never raised, so a missing GPU / vector store never breaks the upload flow.
     """
     from app.config import settings
 
     if not settings.FF_WILDLIFE_BRAIN_ENABLED:
         return
-    try:
-        from app.domain.wildlife_brain import embed_and_cluster_deployment
+    from app.domain.wildlife_brain import EmbeddingUnavailableError, embed_and_cluster_deployment
 
+    try:
         t0 = time.monotonic()
         result = await embed_and_cluster_deployment(deployment_id, created_by=user_id)
         duration = time.monotonic() - t0
@@ -995,6 +996,8 @@ async def auto_embed_deployment(deployment_id: str, user_id: str | None = None) 
             duration_seconds=round(duration, 2),
             seconds_per_frame=round(duration / images, 3) if images else None,
         )
+    except EmbeddingUnavailableError as exc:
+        logger.info("auto_embed_skipped", deployment_id=deployment_id, reason=str(exc))
     except Exception as exc:
         logger.warning("auto_embed_failed", deployment_id=deployment_id, error=str(exc))
 

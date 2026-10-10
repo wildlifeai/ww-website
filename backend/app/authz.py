@@ -149,6 +149,39 @@ async def accessible_deployment_ids(user_id: str, deployment_ids: list[str]) -> 
     return await asyncio.to_thread(_check)
 
 
+async def media_org_deployment_ids(user_id: str, media_id: str) -> list[str]:
+    """Deployments in ``media_id``'s organisation that the caller may access.
+
+    Scopes the Wildlife Brain's similarity search: the vector RPC runs as the service
+    role, so without this list it would rank every organisation's photos.
+    """
+
+    def _list() -> list[str]:
+        svc = create_service_client()
+        org_id, _ = _resolve_org_project(svc, media_id=media_id)
+        if not org_id:
+            return []
+        roles = _fetch_active_roles(svc, user_id)
+        out: list[str] = []
+        start = 0
+        while True:  # PostgREST returns at most 1,000 rows a request
+            rows = (
+                svc.table("deployments")
+                .select("id, project_id, projects!inner(organisation_id)")
+                .eq("projects.organisation_id", org_id)
+                .is_("deleted_at", "null")
+                .order("id")
+                .range(start, start + 999)
+                .execute()
+            ).data or []
+            out += [r["id"] for r in rows if _has_access(roles, org_id, r.get("project_id"))]
+            if len(rows) < 1000:
+                return out
+            start += 1000
+
+    return await asyncio.to_thread(_list)
+
+
 def deployment_id_prefix_bounds(prefix: str) -> tuple[str, str] | None:
     """UUID range bounds for an 8-hex camera folder prefix (e.g. ``MEDIA/7785FABB/``).
 

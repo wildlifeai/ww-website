@@ -537,6 +537,48 @@
         "title": "CamtrapExportRequest",
         "type": "object"
       },
+      "ConfirmClusterRequest": {
+        "description": "Confirm an HDBSCAN cluster as a taxon (bulk-labels its member media).",
+        "properties": {
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Denormalised name when taxon_id unknown",
+            "title": "Scientific Name"
+          },
+          "taxon_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Taxon UUID (preferred)",
+            "title": "Taxon Id"
+          },
+          "vernacular_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vernacular Name"
+          }
+        },
+        "title": "ConfirmClusterRequest",
+        "type": "object"
+      },
       "CreateDeploymentRequest": {
         "properties": {
           "deployment_end": {
@@ -717,6 +759,67 @@
           "location_name"
         ],
         "title": "DeploymentLocationRequest",
+        "type": "object"
+      },
+      "EmbedRequest": {
+        "description": "Request to embed + cluster a deployment.\n\n``mode='server'`` enqueues a GPU embedding job. ``mode='client_vectors'``\naccepts vectors computed in-browser (WebGPU); HDBSCAN/UMAP still run server-side.",
+        "properties": {
+          "media_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "client_vectors: media ids aligned with vectors",
+            "title": "Media Ids"
+          },
+          "mode": {
+            "default": "server",
+            "enum": [
+              "server",
+              "client_vectors"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Embedding variant (defaults to server config)",
+            "title": "Model Name"
+          },
+          "vectors": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "client_vectors: 1280-d vectors",
+            "title": "Vectors"
+          }
+        },
+        "title": "EmbedRequest",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1009,6 +1112,32 @@
         "title": "ManifestRequest",
         "type": "object"
       },
+      "MultiClusterRequest": {
+        "description": "Request to aggregate clusters across multiple deployments.\n\nOnly deployments that share the same embedding model variant can be\nmeaningfully clustered together (ViT-H and ViT-S are different vector spaces).",
+        "properties": {
+          "deployment_ids": {
+            "description": "Deployment UUIDs to aggregate clusters for",
+            "items": {
+              "type": "string"
+            },
+            "title": "Deployment Ids",
+            "type": "array"
+          },
+          "min_confidence": {
+            "default": 0.0,
+            "description": "Minimum cluster_confidence to include an image",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Min Confidence",
+            "type": "number"
+          }
+        },
+        "required": [
+          "deployment_ids"
+        ],
+        "title": "MultiClusterRequest",
+        "type": "object"
+      },
       "ObservationOut": {
         "description": "The verdict the website's photo grid shows for one photo (#170).\n\nThe label fields come from the observation the grid's card shows: a person's verdict\nfirst, else the consensus of the AI models, else the first observation. They are null\nwhen no observation names the photo.",
         "properties": {
@@ -1283,6 +1412,55 @@
         "title": "PretrainedModelRequest",
         "type": "object"
       },
+      "ReprocessAllRequest": {
+        "description": "Platform-wide re-embed. Dry-run (default) returns a cost estimate only.",
+        "properties": {
+          "confirm": {
+            "default": false,
+            "description": "Must be true to actually run a global re-embed",
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "default": true,
+            "description": "Estimate cost without executing",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Name"
+          }
+        },
+        "title": "ReprocessAllRequest",
+        "type": "object"
+      },
+      "ReprocessRequest": {
+        "description": "Re-embed a deployment/project with an (optional) different model.",
+        "properties": {
+          "model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Embedding variant (defaults to server config)",
+            "title": "Model Name"
+          }
+        },
+        "title": "ReprocessRequest",
+        "type": "object"
+      },
       "RestoreDeploymentsRequest": {
         "properties": {
           "deleted_at": {
@@ -1338,6 +1516,57 @@
           "deleted_at"
         ],
         "title": "RestoreProjectRequest",
+        "type": "object"
+      },
+      "ReviewDecisionRequest": {
+        "description": "A reviewer's decision on a single media item (Review Queue).",
+        "properties": {
+          "decision": {
+            "default": "approve",
+            "enum": [
+              "approve",
+              "reassign",
+              "expert"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Confirmed species (AI label for approve; new name for reassign)",
+            "title": "Scientific Name"
+          },
+          "taxon_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxon Id"
+          },
+          "vernacular_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vernacular Name"
+          }
+        },
+        "title": "ReviewDecisionRequest",
         "type": "object"
       },
       "RunSelectedRequest": {
@@ -1742,6 +1971,910 @@
         "summary": "Create Demo Session",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/brain/backup": {
+      "post": {
+        "description": "Vector-store DR. Retained for compatibility; a no-op now that embeddings live\nin Postgres (pgvector) under Supabase PITR \u2014 the job completes with nothing to do.",
+        "operationId": "backup_embeddings_endpoint_api_brain_backup_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Backup Embeddings Endpoint",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/clusters/multi": {
+      "post": {
+        "description": "Aggregate clusters across multiple deployments.\n\nReturns clusters from each deployment's latest completed embedding run,\ngrouped by model variant (ViT-H vs ViT-S are separate vector spaces).\nOptionally filters member media by cluster_confidence >= min_confidence.",
+        "operationId": "multi_clusters_api_brain_clusters_multi_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MultiClusterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Multi Clusters",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/clusters/{cluster_assignment_id}/confirm": {
+      "post": {
+        "description": "Confirm a cluster as a taxon \u2014 bulk-creates human observations for members.",
+        "operationId": "confirm_cluster_api_brain_clusters__cluster_assignment_id__confirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster_assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Cluster Assignment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmClusterRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Cluster",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/clusters/{deployment_id}": {
+      "get": {
+        "description": "List HDBSCAN clusters for the deployment's latest embedding run.",
+        "operationId": "list_clusters_api_brain_clusters__deployment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Clusters",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/compare-runs": {
+      "get": {
+        "description": "Compare cluster assignments between two embedding runs.",
+        "operationId": "compare_runs_endpoint_api_brain_compare_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "run_a",
+            "required": true,
+            "schema": {
+              "title": "Run A",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "run_b",
+            "required": true,
+            "schema": {
+              "title": "Run B",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Compare Runs Endpoint",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/embed/{deployment_id}": {
+      "post": {
+        "description": "Embed + cluster a deployment. Server mode enqueues a GPU job.",
+        "operationId": "embed_deployment_api_brain_embed__deployment_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/EmbedRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Embed Deployment",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/embedding-runs/{deployment_id}": {
+      "get": {
+        "description": "List embedding runs for a deployment (model version, status, image count).",
+        "operationId": "embedding_runs_api_brain_embedding_runs__deployment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Embedding Runs",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/outliers/{deployment_id}": {
+      "get": {
+        "description": "HDBSCAN-rejected images (candidate expert-review queue).",
+        "operationId": "list_outliers_api_brain_outliers__deployment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Outliers",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/recalculate-al-scores/{deployment_id}": {
+      "post": {
+        "description": "Enqueue an active-learning score recompute for a deployment.",
+        "operationId": "recalculate_al_scores_api_brain_recalculate_al_scores__deployment_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recalculate Al Scores",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/reprocess/all": {
+      "post": {
+        "description": "Platform-wide re-embed. Default dry-run returns a cost estimate; executing requires confirm=true.",
+        "operationId": "reprocess_all_endpoint_api_brain_reprocess_all_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReprocessAllRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reprocess All Endpoint",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/reprocess/deployment/{deployment_id}": {
+      "post": {
+        "description": "Supersede current runs and re-embed a deployment (new embedding_run).",
+        "operationId": "reprocess_deployment_endpoint_api_brain_reprocess_deployment__deployment_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReprocessRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reprocess Deployment Endpoint",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/reprocess/project/{project_id}": {
+      "post": {
+        "description": "Reprocess all deployments in a project.",
+        "operationId": "reprocess_project_endpoint_api_brain_reprocess_project__project_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReprocessRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reprocess Project Endpoint",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/review-queue/{deployment_id}": {
+      "get": {
+        "description": "Media ranked by active_learning_score DESC, with AI label + score reasons.",
+        "operationId": "review_queue_api_brain_review_queue__deployment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Queue",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/review/{media_id}": {
+      "post": {
+        "description": "Record a reviewer decision on one media item (creates a human observation).",
+        "operationId": "review_media_api_brain_review__media_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "title": "Media Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Media",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/similar/{media_id}": {
+      "get": {
+        "description": "pgvector nearest-neighbour search within the media's organisation, over deployments the caller can read.",
+        "operationId": "similar_api_brain_similar__media_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "title": "Media Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "n",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "N",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Similar",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/umap/{deployment_id}": {
+      "get": {
+        "description": "UMAP scatter data for the deployment (stable persisted coords).",
+        "operationId": "umap_coords_api_brain_umap__deployment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Umap Coords",
+        "tags": [
+          "brain"
         ]
       }
     },

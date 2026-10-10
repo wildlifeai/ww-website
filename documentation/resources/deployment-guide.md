@@ -195,7 +195,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 | `FF_PIPELINE_ENABLED=true` | Inference endpoints. |
 | `FF_SPECIESNET_ENABLED=true` (+ `SPECIESNET_RUN_MODE`) | SpeciesNet detector+classifier. **Runs in the ARQ worker, not the API image (`--target api`)** — confirm the worker container is deployed with the same flags + `REDIS_URL` + GPU. |
 | `FF_MEDIA_REGISTRY_ENABLED=true` | Thumbnails / animal crops (the **Labels** view is empty without crops). |
-| `FF_BIOCLIP_ENABLED`, `FF_WILDLIFE_BRAIN_ENABLED` (+ `HF_TOKEN` for the gated DINOv3 weights, `EMBEDDING_*`; the vector store is **pgvector** in Supabase — no `QDRANT_*` vars, Qdrant is removed) | BioCLIP + DINOv3 embeddings / clustering. See [Vector Store](#vector-store--pgvector-supabase). |
+| `FF_BIOCLIP_ENABLED`, `FF_WILDLIFE_BRAIN_ENABLED` (+ `HF_TOKEN` for the gated DINOv3 weights, `EMBEDDING_*`; the vector store is **pgvector** in Supabase — no `QDRANT_*` vars, Qdrant is removed) | BioCLIP + DINOv3 embeddings / clustering. See [Vector Store](#vector-store--pgvector-supabase) and [Wildlife Brain on a deployed worker](#wildlife-brain-on-a-deployed-worker). |
 | `FF_MODEL_TRAINING_ENABLED` (+ `EDGE_IMPULSE_API_KEY`, `EDGE_IMPULSE_PROJECT_ID`) | Species Brain training from the Annotations page. The job runs on the **worker** when `REDIS_URL` is set, so set all three there as well as on the API; without the credentials the action only exports a dataset ZIP. |
 | `FF_PER_CROP_CLASSIFY_ENABLED` | Per-detection (per-crop) species — one observation per animal, BioCLIP refines each crop. **Requires the GPU worker**; default off (collapses per image when off). |
 
@@ -469,6 +469,48 @@ Three facts differ from the obvious guess, so check them before you touch anythi
 
 Setting `REDIS_URL` on the API is the single switch that flips dispatch from in-process to ARQ offload,
 so **the worker must already be consuming the queue before you set it**, or jobs queue unprocessed.
+
+### Wildlife Brain on a deployed worker
+
+`FF_WILDLIFE_BRAIN_ENABLED` defaults to `true` (#344), but an app that sets the variable keeps its
+value, so check the API and the worker (`scripts/parity_audit.py` prints the `FF_*` values). The
+embed step runs on the worker, after the pipeline, and needs:
+
+| Setting | Why |
+|---|---|
+| `FF_WILDLIFE_BRAIN_ENABLED=true` on the API and the worker | The API mounts `/api/brain`; the worker runs the embed after each annotation job |
+| `HF_TOKEN` (`secretref:hf-token`) | `dinov3-vith` weights are gated on HuggingFace. The token's account must have accepted access to `facebook/dinov3-vith16plus-pretrain-lvd1689m`. `deploy-backend.yml` syncs the secret from the `HF_TOKEN` GitHub secret and warns when it is missing |
+| `EMBEDDING_DEVICE=cuda` | The code default is `cpu`; the `gpu-t4` worker sets `cuda` |
+| `EMBEDDING_DEFAULT_MODEL` unset or `dinov3-vith` | 1280-d vectors; `dinov3-vits` is a different vector space |
+| `FF_MEDIA_REGISTRY_ENABLED=true` | The embed reads the animal crops the pipeline writes |
+| `--memory 16Gi` | ViT-H loads next to SpeciesNet and BioCLIP |
+
+A worker missing the ML stack, the token or the GPU logs `auto_embed_skipped` with the reason and
+writes no `embedding_runs` row; an explicit `POST /api/brain/embed` job fails with that reason.
+The embed writes `embedding_runs`, `media_embeddings` and `cluster_assignments` with the service
+role, so those tables need ww-backend's service-role grants: a missing grant fails every run with
+`permission denied for table embedding_runs` (42501) in `auto_embed_failed`. Change a worker variable
+with `az containerapp revision copy -n <worker> -g WW-AE --set-env-vars ...`, never `update` (it has
+blanked the KEDA query), then run the runbook's
+[verification](prod-worker-provisioning-runbook.md#verification).
+
+**Run time and cost per deployment.** Only photos with an animal crop are embedded, so count
+`media_assets.animal_crop_url` for the deployment, not its photos. Then:
+
+```text
+embed seconds = t_load + crops x seconds_per_frame
+cost          = embed seconds x the gpu-t4 per-second rate
+```
+
+`seconds_per_frame` and `duration_seconds` are on the worker's `auto_embed_complete` log line
+(#171). `t_load` is the weights download and load on a fresh replica: the worker scales to zero, so
+a cold run pays it again. Neither is measured on the T4 yet, nor is the per-second rate (the
+[evidence pipeline report](../development%20reports/2026-09_evidence-pipeline-architecture/README.md)
+lists it as unknown). Measure one deployment with a known crop count on staging and take the rate
+from Cost Management for that hour. The `POST /api/brain/reprocess/all` dry run uses placeholder
+constants (75 ms per image, US$3 an hour in `embedding_lifecycle.py`), not measurements. The
+[GCP pilot report §6.2](../development%20reports/2026-09_gcp-pilot-and-migration/README.md#62-the-worker-cost-per-photo)
+has the same method worked through for the whole pipeline.
 
 ### Verifying the split works
 
