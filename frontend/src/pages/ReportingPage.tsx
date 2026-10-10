@@ -1,8 +1,13 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useCallback, useRef, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { VegaChart } from '../components/ui/VegaChart'
 import { VEGA_CONFIG } from '../lib/vegaSpec'
 import { supabase } from '../config/supabase'
+import { fetchLiveObservations } from '../lib/liveObservations'
+import { useCamtrapExport } from '../hooks/useCamtrapExport'
+import { CamtrapExportStatus } from '../components/data/CamtrapExportStatus'
+import { useAuth } from '../hooks/useAuth'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -97,102 +102,96 @@ function csvFromRows(rows: ObsRow[], activeSpecies: string[]): string {
 // Charts tab
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ChartsTab({ deploymentId }: { deploymentId: string }) {
-  const [rows, setRows] = useState<ObsRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [chartType, setChartType] = useState<ChartType>('bar')
-  const [selectedSpecies, setSelectedSpecies] = useState<Set<string>>(new Set())
-  const chartRef = useRef<HTMLDivElement>(null)
-
+interface ChartsData {
+  rows: ObsRow[]
   // Context for the zero-observation state: a deployment with photos and no
   // detections is a real monitoring result ("nothing came past"), so the page
   // shows the period and effort instead of a bare "no data" void.
-  const [zeroContext, setZeroContext] = useState<{
-    start: string | null
-    end: string | null
-    mediaCount: number
-  } | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  zeroContext: { start: string | null; end: string | null; mediaCount: number }
+}
 
-  useEffect(() => {
-    setLoading(true)
-    Promise.all([
-      supabase
-        .from('observations')
-        .select('created_at, scientific_name, observation_type')
-        .eq('deployment_id', deploymentId)
-        .is('deleted_at', null)
-        .not('scientific_name', 'is', null)
-        .order('created_at'),
-      supabase
-        .from('deployments')
-        .select('deployment_start, deployment_end')
-        .eq('id', deploymentId)
-        .single(),
-      supabase
-        .from('media')
-        .select('id', { count: 'exact', head: true })
-        .eq('deployment_id', deploymentId)
-        .is('deleted_at', null),
-    ]).then(([obs, dep, media]) => {
-      // supabase-js resolves failures into { error } rather than rejecting -
-      // without this check a permissions or network failure would render as
-      // "0 animal observations", a false zero (review, #113).
-      const err = obs.error || dep.error || media.error
-      if (err) {
-        setLoadError(err.message)
-        setLoading(false)
-        return
-      }
-      setLoadError(null)
-      setRows(obs.data || [])
-      setZeroContext({
-        start: dep.data?.deployment_start ?? null,
-        end: dep.data?.deployment_end ?? null,
-        mediaCount: media.count ?? 0,
-      })
-      setLoading(false)
-    })
-      // supabase-js resolves query errors into { error } (handled above), so
-      // a rejection here is an exception in the .then callback or a genuine
-      // transport failure. Route it into the same error card - clearing only
-      // the spinner would fall through to the zero state, a false zero.
-      .catch((e: unknown) => {
-        setLoadError(e instanceof Error ? e.message : String(e))
-        setLoading(false)
-      })
-  }, [deploymentId])
+async function fetchChartsData(deploymentId: string): Promise<ChartsData> {
+  const [obs, dep, media] = await Promise.all([
+    fetchLiveObservations<ObsRow>(supabase, {
+      columns: 'created_at, scientific_name, observation_type',
+      filter: q => q.eq('deployment_id', deploymentId).not('scientific_name', 'is', null),
+      order: { column: 'created_at' },
+    }),
+    supabase
+      .from('deployments')
+      .select('deployment_start, deployment_end')
+      .eq('id', deploymentId)
+      .single(),
+    supabase
+      .from('media')
+      .select('id', { count: 'exact', head: true })
+      .eq('deployment_id', deploymentId)
+      .is('deleted_at', null),
+  ])
+  // supabase-js resolves failures into { error } rather than rejecting -
+  // without this check a permissions or network failure would render as
+  // "0 animal observations", a false zero (review, #113). A rejection lands
+  // in the same error card through the query's error.
+  const err = obs.error || dep.error || media.error
+  if (err) throw new Error(err.message)
+  return {
+    rows: obs.data || [],
+    zeroContext: {
+      start: dep.data?.deployment_start ?? null,
+      end: dep.data?.deployment_end ?? null,
+      mediaCount: media.count ?? 0,
+    },
+  }
+}
 
-  const allSpecies = [...new Set(rows.map((r) => r.scientific_name!).filter(Boolean))].sort()
+const NO_ROWS: ObsRow[] = []
 
-  useEffect(() => {
-    if (allSpecies.length > 0 && selectedSpecies.size === 0) {
-      setSelectedSpecies(new Set(allSpecies.slice(0, 6)))
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allSpecies.join(',')])
+function ChartsTab({ deploymentId }: { deploymentId: string }) {
+  const { user } = useAuth()
+  const query = useQuery({
+    queryKey: ['reporting', 'charts', user?.id, deploymentId],
+    queryFn: () => fetchChartsData(deploymentId),
+  })
+  const loading = query.isPending
+  const loadError = query.isError ? query.error.message : null
+  const rows = query.data?.rows ?? NO_ROWS
+  const zeroContext = query.data?.zeroContext ?? null
+  const [chartType, setChartType] = useState<ChartType>('bar')
+  // null until the user ticks or unticks one: the first six species are shown by default.
+  const [pickedSpecies, setPickedSpecies] = useState<Set<string> | null>(null)
+  const chartRef = useRef<HTMLDivElement>(null)
 
-  const activeSpecies = allSpecies.filter((s) => selectedSpecies.has(s))
+  const allSpecies = useMemo(
+    () => [...new Set(rows.flatMap((r) => (r.scientific_name ? [r.scientific_name] : [])))].sort(),
+    [rows],
+  )
 
-  const toggleSpecies = (sp: string) =>
-    setSelectedSpecies((prev) => {
-      const next = new Set(prev)
-      if (next.has(sp)) { next.delete(sp) } else { next.add(sp) }
-      return next
-    })
+  const selectedSpecies = useMemo(
+    () => pickedSpecies ?? new Set(allSpecies.slice(0, 6)),
+    [pickedSpecies, allSpecies],
+  )
+
+  const activeSpecies = useMemo(
+    () => allSpecies.filter((s) => selectedSpecies.has(s)),
+    [allSpecies, selectedSpecies],
+  )
+
+  const toggleSpecies = (sp: string) => {
+    const next = new Set(selectedSpecies)
+    if (next.has(sp)) { next.delete(sp) } else { next.add(sp) }
+    setPickedSpecies(next)
+  }
 
   // Filtered rows for the chart (only active species)
   const filteredRows = useMemo(
     () => rows.filter((r) => r.scientific_name && activeSpecies.includes(r.scientific_name)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rows, activeSpecies.join(',')],
+    [rows, activeSpecies],
   )
 
   // Vega-Lite spec — rebuilds only when data, active species, or chart type changes
   const spec = useMemo(
     () => buildObsSpec(filteredRows, activeSpecies, chartType),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filteredRows, activeSpecies.join(','), chartType],
+    [filteredRows, activeSpecies, chartType],
   )
 
   const downloadCsv = () => {
@@ -391,35 +390,27 @@ function ExportsTab({ deploymentId }: { deploymentId: string }) {
   const [toast, setToast] = useState<string | null>(null)
   const [logs, setLogs] = useState<Array<{ id: string; format: string; created_at: string }>>([])
 
+  const camtrapExport = useCamtrapExport()
+  const { start: startCamtrap } = camtrapExport
+
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 4000) }
 
   const trigger = useCallback(async (card: ExportCard) => {
+    if (card.real) {
+      // The whole project, as before; progress and errors show in CamtrapExportStatus.
+      const { data: dep } = await supabase.from('deployments').select('project_id').eq('id', deploymentId).single()
+      if (dep) await startCamtrap([dep.project_id])
+      else showToast('Export failed: Deployment not found')
+      return
+    }
     setBusy(card.id)
     try {
-      if (card.real) {
-        const { data: dep } = await supabase
-          .from('deployments')
-          .select('project_id')
-          .eq('id', deploymentId)
-          .single()
-        if (!dep) throw new Error('Deployment not found')
-        const { data, error } = await supabase.functions.invoke('export-camtrap-dp', {
-          body: { project_id: dep.project_id },
-        })
-        if (error) throw new Error(error.message)
-        const blob = data instanceof Blob ? data : new Blob([data], { type: 'application/zip' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url
-        a.download = `camtrapdp-${dep.project_id}-${toIso(new Date())}.zip`
-        a.click(); URL.revokeObjectURL(url)
-      } else {
-        const content = `deployment_id,format\n${deploymentId},${card.format}`
-        const blob = new Blob([content], { type: 'text/plain' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a'); a.href = url
-        a.download = `${card.id}-${deploymentId}.${card.ext}`
-        a.click(); URL.revokeObjectURL(url)
-      }
+      const content = `deployment_id,format\n${deploymentId},${card.format}`
+      const blob = new Blob([content], { type: 'text/plain' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url
+      a.download = `${card.id}-${deploymentId}.${card.ext}`
+      a.click(); URL.revokeObjectURL(url)
       const entry = { id: `exp-${Date.now()}`, format: card.format, created_at: new Date().toISOString() }
       setLogs((prev) => [entry, ...prev.slice(0, 9)])
       showToast(`${card.format} downloaded`)
@@ -428,7 +419,7 @@ function ExportsTab({ deploymentId }: { deploymentId: string }) {
     } finally {
       setBusy(null)
     }
-  }, [deploymentId])
+  }, [deploymentId, startCamtrap])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -439,7 +430,7 @@ function ExportsTab({ deploymentId }: { deploymentId: string }) {
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
         {EXPORT_CARDS.map((card) => {
-          const isBusy = busy === card.id
+          const isBusy = busy === card.id || (!!card.real && camtrapExport.running)
           return (
             <div
               key={card.id}
@@ -471,6 +462,7 @@ function ExportsTab({ deploymentId }: { deploymentId: string }) {
           )
         })}
       </div>
+      <CamtrapExportStatus state={camtrapExport} />
       {logs.length > 0 && (
         <div className="glass-card" style={{ padding: '1.25rem' }}>
           <h4 style={{ marginTop: 0, marginBottom: '0.75rem', fontSize: '0.875rem' }}>Recent downloads</h4>

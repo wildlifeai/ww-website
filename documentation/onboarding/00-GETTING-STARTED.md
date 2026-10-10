@@ -13,12 +13,12 @@ FastAPI ──▶ Azure Blob (temp image buffer) ──▶ async job ──▶ G
 
 - The **frontend** reads/writes most data **directly from Supabase** (scoped by RLS) and calls the
   **backend** only for work the browser can't do: EXIF parsing, Drive uploads, model conversion,
-  the AI pipeline, LoRaWAN webhooks, and a few privileged RPCs.
+  the AI pipeline, and a few privileged RPCs.
 - The **backend** is layered **router → domain → service** (see [02-CODEBASE-GUIDE](./02-CODEBASE-GUIDE.md)).
 
 ## Prerequisites
 
-- Node.js 20 (LTS) or higher
+- Node.js 22 (LTS) or higher
 - Python 3.11+
 - A Supabase project with the Wildlife Watcher schema (owned by `ww-backend`)
 - _(optional)_ Docker + Docker Compose

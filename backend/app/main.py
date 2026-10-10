@@ -20,16 +20,17 @@ from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import limiter
 from app.middleware.request_id import RequestIDMiddleware
 from app.routers import (
+    admin,
     auth,
     brain,
     camtrapdp,
     clustering,
     deployments,
     exif,
+    exports,
     inaturalist,
     intelligence,
     jobs,
-    lorawan,
     manifest,
     media,
     models,
@@ -86,7 +87,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Wildlife Watcher API",
-    description="V2 backend — async job system, LoRaWAN ingestion, model conversion",
+    description="V2 backend — async job system, model conversion",
     version="2.0.0",
     lifespan=lifespan,
 )
@@ -148,12 +149,13 @@ async def unhandled_exception_handler(request, exc):
 
 # ── Routers ──────────────────────────────────────────────────────────
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(jobs.router)
 app.include_router(deployments.router)
 app.include_router(projects.router)
 app.include_router(exif.router)
-app.include_router(lorawan.router)
 app.include_router(manifest.router)
+app.include_router(exports.router)
 app.include_router(models.router)
 app.include_router(media.router)
 app.include_router(public_api.router)

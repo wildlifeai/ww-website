@@ -8,6 +8,7 @@ domain mapping to CamtrapDP observation rows — all without the heavy
 """
 
 from app.domain.pipeline import (
+    DetectionCutoffs,
     build_crop_classification_observation,
     build_speciesnet_observations,
     rollup_taxon,
@@ -412,3 +413,181 @@ async def test_per_crop_run_inserts_beside_speciesnet_and_never_updates_it(monke
     assert [(r["media_id"], r["source_model_version"], r["bbox_x"]) for r in inserted] == [("m1", "bioclip-v1", 0.1)]
     assert deleted == [({"m1"}, "bioclip-v1")]
     assert result.observations_created == 1
+
+
+# ── Whole-frame and vehicle box rules (#285) ──────────────────────────────────
+
+_RULES = DetectionCutoffs(whole_frame_area=0.9, whole_frame_min_confidence=0.5, drop_vehicles=True)
+_WHOLE = (0.0, 0.0, 1.0, 1.0)
+
+
+def test_whole_frame_rule_drops_a_low_confidence_box_of_any_class():
+    for obs_type in ("animal", "human", "unknown"):
+        assert _RULES.drop_reason(_det(0.47, _WHOLE, obs_type=obs_type)) == "whole_frame"
+    # 0.95 x 0.95 = 0.9025 of the frame is over the 0.9 cutoff.
+    assert _RULES.drop_reason(_det(0.3, (0.02, 0.02, 0.95, 0.95))) == "whole_frame"
+
+
+def test_whole_frame_rule_cutoffs():
+    # An animal at the lens fills the frame: kept at or above the confidence cutoff.
+    assert _RULES.drop_reason(_det(0.5, _WHOLE)) is None
+    assert _RULES.drop_reason(_det(0.49, _WHOLE)) == "whole_frame"
+    # Exactly 0.9 of the frame is not "more than" 0.9, and a box with no bbox is never whole-frame.
+    assert _RULES.drop_reason(_det(0.3, (0.0, 0.0, 0.9, 1.0))) is None
+    assert _RULES.drop_reason(_det(0.3, None)) is None
+    assert _RULES.drop_reason(_det(0.3, (0.1, 0.1, 0.2, 0.2))) is None
+
+
+def test_vehicle_rule_drops_every_vehicle_and_only_vehicles():
+    small = (0.1, 0.1, 0.57, 0.8)  # the planter and fence: under the whole-frame cutoff
+    assert _RULES.drop_reason(_det(0.4, small, obs_type="vehicle", category="3")) == "vehicle"
+    assert _RULES.drop_reason(_det(0.95, _WHOLE, obs_type="vehicle", category="3")) == "vehicle"
+    # Both rules: a whole-frame vehicle under 0.5 is a whole-frame drop.
+    assert _RULES.drop_reason(_det(0.3, _WHOLE, obs_type="vehicle", category="3")) == "whole_frame"
+    assert _RULES.drop_reason(_det(0.3, small, obs_type="human", category="2")) is None
+    # Switched off, a vehicle is held only to the whole-frame rule.
+    keep = DetectionCutoffs(whole_frame_area=0.9, whole_frame_min_confidence=0.5, drop_vehicles=False)
+    assert keep.drop_reason(_det(0.4, small, obs_type="vehicle", category="3")) is None
+
+
+def test_default_cutoffs_drop_nothing():
+    assert DetectionCutoffs().drop_reason(_det(0.21, _WHOLE, obs_type="vehicle", category="3")) is None
+
+
+def test_cutoffs_come_from_settings_unless_the_run_overrides():
+    from app.config import settings
+
+    assert (settings.SPECIESNET_WHOLE_FRAME_AREA, settings.SPECIESNET_WHOLE_FRAME_MIN_CONFIDENCE, settings.SPECIESNET_DROP_VEHICLES) == (
+        0.9,
+        0.5,
+        True,
+    )
+    assert DetectionCutoffs.from_config({}) == _RULES
+    assert DetectionCutoffs.from_config({"drop_vehicles": False}).drop_vehicles is False
+    assert DetectionCutoffs.from_config(_RULES.as_config()) == _RULES
+    assert _RULES.as_config() == {"whole_frame_area": 0.9, "whole_frame_min_confidence": 0.5, "drop_vehicles": True}
+    assert _RULES.audit() == "frame_area=0.90 frame_conf=0.50 vehicle=dropped"
+    assert DetectionCutoffs().audit() == "frame_area=1.00 frame_conf=0.00 vehicle=kept"
+
+
+def test_max_conf_leaves_out_the_dropped_boxes_but_keeps_sub_threshold_ones():
+    from app.domain.pipeline import speciesnet_evidence_signals
+
+    scene = _pred(_det(0.47, _WHOLE, obs_type="vehicle", category="3"), _det(0.45, _WHOLE, obs_type="human", category="2"))
+    assert speciesnet_evidence_signals(scene, [{"observation_type": "blank"}], _RULES)["speciesnet_max_conf"] == 0.0
+    # Without the cutoffs the scene boxes count, as before #285.
+    assert speciesnet_evidence_signals(scene, [{"observation_type": "blank"}])["speciesnet_max_conf"] == 0.47
+    # A small sub-threshold animal still feeds near_threshold.
+    faint = _pred(_det(0.95, _WHOLE, obs_type="vehicle", category="3"), _det(0.14, (0.4, 0.5, 0.1, 0.1)))
+    assert speciesnet_evidence_signals(faint, [{"observation_type": "blank"}], _RULES)["speciesnet_max_conf"] == 0.14
+
+
+def test_rules_keep_the_animal_and_drop_the_scene_boxes():
+    pred = _pred(
+        _det(0.47, _WHOLE, obs_type="vehicle", category="3"),
+        _det(0.4, (0.0, 0.0, 0.57, 1.0), obs_type="vehicle", category="3"),
+        _det(0.3, _WHOLE, obs_type="human", category="2"),
+        _det(0.45, (0.4, 0.5, 0.1, 0.1)),
+    )
+    rows = build_speciesnet_observations({"id": "m"}, "dep", pred, "v", "t", confidence_threshold=0.2, cutoffs=_RULES)
+    assert [(r["observation_type"], r["confidence"], r["count"]) for r in rows] == [("animal", 0.45, 1)]
+
+
+def test_every_detection_dropped_gives_the_blank_row():
+    pred = _pred(_det(0.47, _WHOLE, obs_type="vehicle", category="3"), _det(0.55, (0.0, 0.0, 0.6, 0.9), obs_type="vehicle", category="3"))
+    for per_detection in (False, True):
+        rows = build_speciesnet_observations(
+            {"id": "m"}, "dep", pred, "v", "t", confidence_threshold=0.2, per_detection=per_detection, cutoffs=_RULES
+        )
+        assert len(rows) == 1 and rows[0]["observation_type"] == "blank" and "bbox_x" not in rows[0]
+    # Without the rules (the pure default) the same photo is a vehicle, as before #285.
+    assert build_speciesnet_observations({"id": "m"}, "dep", pred, "v", "t", confidence_threshold=0.2)[0]["observation_type"] == "vehicle"
+
+
+async def test_speciesnet_step_applies_the_rules_and_counts_the_drops(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.config import settings
+    from app.domain import media_resolver, pipeline
+    from app.services import media_evidence, speciesnet_service
+
+    svc = MagicMock()
+    monkeypatch.setattr(pipeline, "create_service_client", lambda: svc)
+    monkeypatch.setattr(pipeline, "delete_superseded_ai_observations", lambda *a: None)
+    evidence = []
+    monkeypatch.setattr(media_evidence, "write_signals", lambda _svc, rows, _dep: evidence.extend(rows) or len(rows))
+    monkeypatch.setattr(settings, "FF_PER_CROP_CLASSIFY_ENABLED", False)
+
+    async def resolve(url, size="full"):
+        return b"jpeg", "image/jpeg"
+
+    monkeypatch.setattr(media_resolver, "resolve_media", resolve)
+
+    class Service:
+        async def predict(self, paths):
+            by_id = {p.replace("\\", "/").rsplit("/", 1)[-1].split(".")[0]: p for p in paths}
+            return [
+                ImagePrediction(by_id["night"], [_det(0.47, _WHOLE, obs_type="vehicle", category="3")], None, None, None),
+                ImagePrediction(by_id["fence"], [_det(0.4, (0.0, 0.0, 0.57, 1.0), obs_type="vehicle", category="3")], None, None, None),
+                ImagePrediction(by_id["cat"], [_det(0.8, (0.4, 0.5, 0.1, 0.1))], "Felis catus", "Domestic Cat", 0.9),
+            ]
+
+    monkeypatch.setattr(speciesnet_service, "get_speciesnet_service", lambda: Service())
+
+    media = [{"id": i, "file_path": f"p/{i}.jpg"} for i in ("night", "fence", "cat")]
+    result = await pipeline.SpeciesNetStep().run(media, "dep", {"confidence_threshold": 0.2})
+
+    inserted = [r for call in svc.table.return_value.insert.call_args_list for r in call.args[0]]
+    assert {r["media_id"]: r["observation_type"] for r in inserted} == {"night": "blank", "fence": "blank", "cat": "animal"}
+    assert result.counts["dropped_whole_frame"] == 1 and result.counts["dropped_vehicle"] == 1
+    max_conf = {r["media_id"]: r["value"] for r in evidence if r["signal"] == "speciesnet_max_conf"}
+    assert max_conf == {"night": 0.0, "fence": 0.0, "cat": 0.8}
+
+
+async def test_run_pipeline_records_the_effective_cutoffs():
+    """#285: annotation_runs.config carries the cutoffs, and every step sees the same values."""
+    from unittest.mock import patch
+
+    from app.domain import pipeline
+    from app.schemas.pipeline import PipelineStepResult, PipelineStepType
+
+    dep = "00000000-0000-0000-0000-0000000000d1"
+    inserted: dict[str, list] = {}
+
+    class Query:
+        def __init__(self, name):
+            self.name, self.rows = name, ([{"id": "m1", "deployment_id": dep, "file_path": "f.jpg"}] if name == "media" else [])
+
+        def __getattr__(self, attr):
+            if attr == "not_":
+                return self
+            return lambda *a, **k: self
+
+        def insert(self, payload):
+            inserted.setdefault(self.name, []).append(payload)
+            return self
+
+        def execute(self):
+            return type("Result", (), {"data": self.rows})()
+
+    class Svc:
+        def table(self, name):
+            return Query(name)
+
+    seen = []
+
+    class Step:
+        step_type = PipelineStepType.SPECIESNET
+
+        async def run(self, media, deployment_id, config):
+            seen.append(dict(config))
+            return PipelineStepResult(step=self.step_type, media_processed=len(media))
+
+    with patch.object(pipeline, "create_service_client", lambda: Svc()), patch.object(pipeline, "get_step", lambda t: Step()):
+        await pipeline.run_pipeline(
+            dep, [PipelineStepType.SPECIESNET], confidence_threshold=0.3, config={"drop_vehicles": False}, only_unannotated=False
+        )
+
+    expected = {"confidence_threshold": 0.3, "whole_frame_area": 0.9, "whole_frame_min_confidence": 0.5, "drop_vehicles": False}
+    assert {k: inserted["annotation_runs"][0]["config"][k] for k in expected} == expected
+    assert {k: seen[0][k] for k in expected} == expected

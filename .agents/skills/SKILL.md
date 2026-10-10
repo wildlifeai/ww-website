@@ -18,7 +18,7 @@ The `ww-website` repository is a multi-service platform consisting of:
 * Python FastAPI backend
 * Shared Supabase data layer
 * Image analysis and AI tooling
-* LoRaWAN telemetry ingestion
+* LoRaWAN telemetry display (ingest is ww-backend's `lorawan-ingest`)
 * Firmware and manifest management workflows
 
 > **Canonical Documentation**
@@ -47,7 +47,7 @@ The `ww-website` repository is a multi-service platform consisting of:
 | `frontend/`, a hook, or the API client | [references/frontend.md](references/frontend.md) |
 | `.env`, Docker, line endings or file encoding | [references/environment-and-files.md](references/environment-and-files.md) |
 | Something that looks like a bug in your own code | [references/gotchas.md](references/gotchas.md) |
-| Documentation, validation, or your own commit hygiene | [references/documentation.md](references/documentation.md) |
+| Documentation, validation, commit messages, or your own commit hygiene | [references/documentation.md](references/documentation.md) |
 | The UI design system | [`.agents/DESIGN.md`](../DESIGN.md) |
 | Writing a user guide | [`guide-author/SKILL.md`](guide-author/SKILL.md) |
 

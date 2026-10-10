@@ -58,6 +58,20 @@ jobs:
           pip install -r backend/requirements.txt
           pip install -r backend/requirements-dev.txt
 
+      # Advisory (#225): a failure becomes a warning and the job stays green. The
+      # first report was about 1,600 errors, nearly all from supabase-py typing
+      # query rows as a JSON union. Drop continue-on-error once the count is zero.
+      # It runs here because it resolves imports against the install above.
+      - name: Pyright (advisory)
+        id: pyright
+        working-directory: backend
+        continue-on-error: true
+        run: pyright
+
+      - name: Warn when pyright found something
+        if: steps.pyright.outcome == 'failure'
+        run: echo "::warning::pyright found type errors in the backend (advisory for now, issue 225). The step above lists them."
+
       # The floor is a ratchet, not a target: set just under the measured figure
       # so it can only move up. 52% of app/ statements on 2026-10-05, floor 50.
       # Raise it by hand when coverage has genuinely climbed (#226).
@@ -88,10 +102,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build the api stage
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: backend
           file: backend/Dockerfile
@@ -129,7 +143,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -160,7 +174,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -173,7 +187,7 @@ jobs:
         run: npm run build
 
       # Budgets in frontend/package.json ("size-limit"), brotli-compressed as
-      # Cloudflare serves it: the main chunk is 489 kB today against 500 kB. A pull request that
+      # Cloudflare serves it: the first load is 187 kB today against 190 kB. A pull request that
       # pushes a chunk over its limit fails here with the delta; raising a
       # limit is a visible change in the same pull request (#227).
       - name: Bundle size budget
@@ -189,7 +203,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       # No install: the script only uses Node built-ins.
       - name: Validate documentation paths and links

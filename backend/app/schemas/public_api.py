@@ -6,9 +6,14 @@ These schemas define the external-facing data contract for partner
 platforms (Wildlife Insights, TRAPPER, EcoSecrets, GBIF).
 """
 
-from typing import Any, Dict, List, Optional
+import uuid
+from datetime import datetime
+from typing import Annotated, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
+
+from app.schemas.common import ApiResponse
+from app.schemas.job import JobStatus
 
 # ── API Key Management ───────────────────────────────────────────────
 
@@ -16,9 +21,10 @@ from pydantic import BaseModel, Field
 class ApiKeyCreate(BaseModel):
     """Request to create a new API key."""
 
-    name: str = Field(..., description="Human-readable key name", max_length=100)
-    scopes: List[str] = Field(..., description="Permission scopes (e.g. 'deployments:read')")
-    expires_at: Optional[str] = Field(None, description="ISO timestamp — key expires after this time")
+    organisation_id: uuid.UUID = Field(..., description="Organisation the key belongs to. The caller must be its organisation_manager.")
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)] = Field(..., description="Human-readable key name")
+    scopes: List[str] = Field(..., min_length=1, description="Permission scopes (e.g. 'deployments:read')")
+    expires_at: Optional[datetime] = Field(None, description="The key stops working after this time. Must be in the future.")
 
 
 class ApiKeyResponse(BaseModel):
@@ -45,92 +51,75 @@ class ApiKeyInfo(BaseModel):
     created_at: Optional[str] = None
 
 
-# ── Deployment ───────────────────────────────────────────────────────
-
-
-class DeploymentOut(BaseModel):
-    """Deployment record for external consumption."""
-
-    id: str
-    project_id: Optional[str] = None
-    project_name: Optional[str] = None
-    device_id: Optional[str] = None
-    device_name: Optional[str] = None
-    location_name: Optional[str] = None
-    latitude: Optional[float] = None
-    longitude: Optional[float] = None
-    deployment_start: Optional[str] = None
-    deployment_end: Optional[str] = None
-    camera_model: Optional[str] = None
-    camera_height: Optional[float] = None
-    capture_method: Optional[str] = None
-    status: Optional[str] = None
-    notes: Optional[str] = None
-    created_at: Optional[str] = None
-
-
-# ── Device ───────────────────────────────────────────────────────────
-
-
-class DeviceOut(BaseModel):
-    """Device record for external consumption."""
-
-    id: str
-    name: Optional[str] = None
-    bluetooth_id: Optional[str] = None
-    lorawan_device_eui: Optional[str] = None
-    organisation_id: Optional[str] = None
-    status: Optional[str] = None
-    created_at: Optional[str] = None
-
-
 # ── Telemetry ────────────────────────────────────────────────────────
 
 
 class TelemetryPoint(BaseModel):
-    """A single telemetry data point from LoRaWAN."""
+    """One LoRaWAN message a camera sent while deployed in one of the organisation's projects."""
 
-    timestamp: str
-    battery_level: Optional[float] = None
-    sd_card_used_capacity: Optional[float] = None
-    model_output: Optional[Dict[str, Any]] = None
+    timestamp: Optional[str] = Field(None, description="When the network received the message")
+    deployment_id: str
+    battery_level: Optional[int] = None
+    sd_card_used_capacity: Optional[int] = None
+    model_output: Optional[str] = Field(None, description="The camera's on-device model output, as the payload carried it")
 
 
-# ── Observations (AI detections) ─────────────────────────────────────
+class TelemetryResponse(ApiResponse):
+    data: List[TelemetryPoint] = Field(default_factory=list)
+
+
+# ── Observations: one verdict per photo ──────────────────────────────
 
 
 class ObservationOut(BaseModel):
-    """An AI detection observation from LoRaWAN model output."""
+    """The verdict the website's photo grid shows for one photo (#170).
 
-    id: str
-    device_eui: Optional[str] = None
-    deployment_id: Optional[str] = None
-    detection_class: Optional[str] = None
-    confidence: Optional[float] = None
-    timestamp: Optional[str] = None
-    raw_output: Optional[Dict[str, Any]] = None
+    The label fields come from the observation the grid's card shows: a person's verdict
+    first, else the consensus of the AI models, else the first observation. They are null
+    when no observation names the photo.
+    """
+
+    media_id: str
+    deployment_id: str
+    project_id: str
+    timestamp: Optional[str] = Field(None, description="When the photo was taken")
+    is_empty: bool = Field(..., description="The photo shows no animal, person or vehicle")
+    human_reviewed: bool = Field(..., description="A person has reviewed at least one of the photo's observations")
+    observation_id: Optional[str] = Field(None, description="The observation the verdict comes from")
+    observation_type: Optional[str] = Field(None, description="animal, human, vehicle, blank or unknown")
+    scientific_name: Optional[str] = None
+    vernacular_name: Optional[str] = None
+    taxon_id: Optional[str] = None
+    count: Optional[int] = None
+    life_stage: Optional[str] = None
+    sex: Optional[str] = None
+    behavior: Optional[str] = None
+    classification_method: Optional[str] = Field(None, description="human or machine")
+    classification_probability: Optional[float] = None
+    review_status: Optional[str] = None
+    source_type: Optional[str] = Field(None, description="ai, human, imported or consensus")
+    ai_origin: Optional[str] = Field(None, description="edge (the camera's model) or cloud, for an AI label")
 
 
-# ── CamtrapDP Export ─────────────────────────────────────────────────
+class ObservationsResponse(ApiResponse):
+    data: List[ObservationOut] = Field(default_factory=list)
 
 
-class CamtrapDPExportRequest(BaseModel):
-    """Request to generate a CamtrapDP data package."""
-
-    project_id: Optional[str] = Field(None, description="Filter by project")
-    deployment_ids: Optional[List[str]] = Field(None, description="Specific deployments to include")
-    date_from: Optional[str] = Field(None, description="Start date (ISO)")
-    date_to: Optional[str] = Field(None, description="End date (ISO)")
-    include_observations: bool = Field(True, description="Include AI detection observations")
+# ── Jobs ─────────────────────────────────────────────────────────────
 
 
-# ── Query Parameters ─────────────────────────────────────────────────
+class ApiJobOut(BaseModel):
+    """An export job's state. ``result_url`` is the signed download link once it has finished."""
+
+    job_id: str
+    status: JobStatus
+    progress: float = Field(..., description="0.0 to 1.0")
+    message: Optional[str] = None
+    error: Optional[str] = None
+    result_url: Optional[str] = Field(None, description="Signed link to the ZIP, valid for 24 hours from when the job finished")
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
 
-class PaginationParams(BaseModel):
-    """Standard pagination parameters."""
-
-    limit: int = Field(50, ge=1, le=200, description="Number of records per page")
-    offset: int = Field(0, ge=0, description="Offset for pagination")
-    order_by: str = Field("created_at", description="Field to sort by")
-    order_dir: str = Field("desc", description="Sort direction: 'asc' or 'desc'")
+class ApiJobResponse(ApiResponse):
+    data: Optional[ApiJobOut] = None

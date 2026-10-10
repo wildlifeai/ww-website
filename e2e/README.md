@@ -44,19 +44,49 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   `E2E_EMAIL` (a repository variable, `tui@ww.org` by default) with the `dev` environment's
   `E2E_PASSWORD` secret, falling back to its `DEMO_PASSWORD`: every seeded user shares
   ww-backend's seed password, which the backend deploy already keeps there for the demo
-  account. The job stops with a clear message when neither is set. The `full` suite, by hand only, adds `03` and `04`, which
-  write to the dev database and storage; the LoRaWAN spec takes the `dev` environment's
-  `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+  account. The job stops with a clear message when neither is set, except on a Dependabot pull
+  request: a run Dependabot triggers sees only Dependabot secrets, and the seed password stays
+  out of them because that run executes the package versions being bumped. There the sign-in
+  check is skipped with a notice, the other smoke and demo checks still gate the bump, and the
+  sign-in check runs on dev once the merge deploys.
+- **E2E Full**, the same job with the `full` suite, adds `03` and `04`, which write to the dev
+  database and storage; the LoRaWAN spec takes the `dev` environment's `SUPABASE_URL` and
+  `SUPABASE_SERVICE_ROLE_KEY`. It runs against the dev preview and the dev API after each
+  successful push deploy of the dev backend (`deploy-backend.yml`), nightly at 14:17 UTC
+  (03:17 NZDT, 02:17 NZST), and by hand. Both automatic triggers fire only from the copy of the
+  workflow on `main`. Full runs queue rather than overlap. Each one ends with
+  `cleanup.mjs`, pass or fail, and writes the test counts and what it deleted to the job
+  summary. A red full run is a notification, nothing waits on it.
+
+  The cleanup finds a run's rows by markers the run owns. LoRaWAN rows carry the run's tag
+  (`e2e-ci-<run id>-<attempt>`) as their `device_eui`; marked rows over an hour old from a
+  run that died go too. The upload's media rows cannot carry a tag (the backend names them),
+  so they are the rows created since the run started, on Drive, in a deployment whose id starts
+  with one of the fixture SD card's folder names; their observations, events and renditions go
+  with them. The Drive originals stay: the `dev` environment has no Drive credentials, and Drive
+  dedups by content, so runs do not add copies. The script refuses any Supabase project but
+  dev, and `npm run test:cleanup` unit-tests its filters (on a pull request that changes `e2e/`).
+  `node cleanup.mjs --dry-run` lists what it would delete.
+- **E2E Full Stack** (`.github/workflows/e2e-full-stack.yml`, #216) runs `01-smoke` and
+  `02-demo` against a stack started on the runner, on a pull request that changes `backend/`,
+  `frontend/`, `e2e/` or the workflow: a local Supabase from ww-backend's `dev` migrations and
+  seed, the pull request's backend under `uvicorn` on `:8000` and its frontend from
+  `vite preview` on `:4173`. It is the only job that tests a pull request's backend through the
+  UI before merge. The job picks a fresh seed password per run, so `tui@ww.org` and the demo
+  account (`demo@wildlife.ai`, which the backend gets as `DEMO_EMAIL`) sign in with a value that
+  only exists on the runner. Its one secret is `WW_BACKEND_READ_TOKEN`, for the ww-backend
+  checkout. It fails on any skipped test, and on failure the `e2e-full-stack-<sha>` artifact
+  holds the report, the screenshots and the backend and `vite preview` logs. To reproduce it
+  locally, follow its steps in order: the workflow is the recipe.
 - **A11y of public pages** runs `05-a11y` with no account and fails on a serious or critical
   violation. It was advisory until #213 cleared the colour-contrast findings (#212).
 - **Lighthouse of public pages** audits `/`, `/login`, `/guides`, `/faq` and `/resources` three
-  times each on the desktop preset, against the budgets in `lighthouserc.json`: performance 80,
-  accessibility 95, best practices 90. The SEO score is collected and shown in the report but not
-  asserted: Cloudflare preview deployments send `X-Robots-Tag: noindex`, which caps it near 50
-  whatever the page does. Advisory for now (#228): a page under budget is a
-  warning annotation on the run and the HTML reports are in the `lighthouse-<sha>` artifact,
-  with the performance audits naming what to fix (the main chunk first). Blocking once the pages
-  meet the budgets, the way the a11y job went.
+  times each on the desktop preset, against the budgets in `lighthouserc.json`: performance 90,
+  accessibility 95, best practices 95, SEO 90. The SEO score leaves out `is-crawlable`:
+  Cloudflare preview deployments send `X-Robots-Tag: noindex`, which fails it whatever the page
+  does, so a `noindex` in production is not caught here. Advisory for now (#228): a page under
+  budget is a warning annotation on the run and the HTML reports are in the `lighthouse-<sha>`
+  artifact. Blocking once a dev run meets the budgets, the way the a11y job went.
 
 The two Playwright jobs fail when the junit report holds nothing but skipped tests: the specs skip themselves
 when their env is missing, so a missing secret would otherwise read as a pass. The dev API

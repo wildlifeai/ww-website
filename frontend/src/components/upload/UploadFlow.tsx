@@ -20,9 +20,9 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useDragAndDrop } from '../../hooks/useDragAndDrop'
 import { apiClient } from '../../lib/apiClient'
 import { UnassignedTriage } from './UnassignedTriage'
-import { buildSessions, cardFolderOf, resolutionBreakdown, unresolvedFileIndices } from './unassignedSessions'
+import { buildSessions, cardFolderOf, resolutionBreakdown, unresolvedFileIndices, withoutTestPhotos } from './unassignedSessions'
 import type { ResolutionStatus } from './unassignedSessions'
-import { readDeploymentIds } from '../../lib/exifDeploymentId'
+import { readCameraExif } from '../../lib/exifDeploymentId'
 import { supabase } from '../../config/supabase'
 import { useUploadStore, type UploadDeployment, type PendingUpload } from '../../contexts/UploadContext'
 import { useProjectSelection } from '../../hooks/useProjectSelection'
@@ -96,6 +96,8 @@ export function UploadFlow() {
   const [exifIds, setExifIds] = useState<(string | null)[]>([])
   // Progress of that read, or null once it has landed (or nothing is staged).
   const [exifRead, setExifRead] = useState<{ done: number; total: number } | null>(null)
+  // WW500 test photos (no deployment set on the camera) dropped from the selection (#287).
+  const [testPhotosSkipped, setTestPhotosSkipped] = useState(0)
   // Bumped on every new selection so a read still running for the previous
   // selection cannot write its ids over the new one.
   const selectionRef = useRef(0)
@@ -138,8 +140,9 @@ export function UploadFlow() {
   }, [staged])
 
   // ── CamtrapDP stage timer ──────────────────────────────────────────────────
+  // handleCamtrapImport resets the stage and the clock before it starts one.
   useEffect(() => {
-    if (!camtrapImporting) { setCamtrapStage(0); setCamtrapElapsed(0); return }
+    if (!camtrapImporting) return
     const start = Date.now()
     const ticker = setInterval(
       () => setCamtrapElapsed(Math.floor((Date.now() - start) / 1000)),
@@ -164,6 +167,7 @@ export function UploadFlow() {
     setFilePaths([])
     setExifIds([])
     setExifRead(null)
+    setTestPhotosSkipped(0)
     setZipFile(null)
     setSelectionError(null)
     setInvalidDeployments({})
@@ -199,11 +203,18 @@ export function UploadFlow() {
     // file heads, but a card of a few thousand frames still takes a moment, so
     // the page shows progress and resolves by folder alone until this lands.
     setExifRead({ done: 0, total: images.length })
-    const ids = await readDeploymentIds(images, 8, (done, total) => {
+    const exif = await readCameraExif(images, 8, (done, total) => {
       if (selectionRef.current !== token) return
       if (done === total || done % 25 === 0) setExifRead({ done, total })
     })
     if (selectionRef.current !== token) return
+
+    // WW500 test photos, taken before a deployment was set on the camera, are
+    // left out here, before anything is uploaded or offered for assignment (#287).
+    const { files: kept, paths: keptPaths, exifIds: ids, skipped } = withoutTestPhotos(images, paths, exif)
+    setFiles(kept)
+    setFilePaths(keptPaths)
+    setTestPhotosSkipped(skipped)
     setExifIds(ids)
     setExifRead(null)
 
@@ -211,7 +222,7 @@ export function UploadFlow() {
     // match none of the user's deployments. /validate accepts both forms.
     const known = new Set(deployments.map((d) => d.id.toLowerCase()))
     const unknownExifIds = Array.from(new Set(ids.filter((id): id is string => !!id && !known.has(id))))
-    const folderPrefixes = Array.from(new Set(paths.map(cardFolderOf).filter(Boolean) as string[]))
+    const folderPrefixes = Array.from(new Set(keptPaths.flatMap((p) => cardFolderOf(p) ?? [])))
     const unknownPrefixes = folderPrefixes.filter(
       (id) => !deployments.some((d) => d.id.toUpperCase().startsWith(id)),
     )
@@ -246,6 +257,8 @@ export function UploadFlow() {
 
   const handleCamtrapImport = async () => {
     if (!zipFile) return
+    setCamtrapStage(0)
+    setCamtrapElapsed(0)
     setCamtrapImporting(true)
     setCamtrapError(null)
     setCamtrapResult(null)
@@ -269,6 +282,22 @@ export function UploadFlow() {
       setCamtrapImporting(false)
     }
   }
+
+  const uploadMode: 'idle' | 'images' | 'camtrapdp' =
+    zipFile ? 'camtrapdp' : files.length > 0 ? 'images' : 'idle'
+
+  // Files whose deployment cannot be resolved from their EXIF id or the card's
+  // folder structure. These are the ones the backend would silently drop (no
+  // deployment_id -> not stored -> no media row), so they go through triage.
+  const unresolvedIndices = useMemo(
+    () => (uploadMode === 'images' ? unresolvedFileIndices(files, filePaths, exifIds, deployments) : []),
+    [files, filePaths, exifIds, deployments, uploadMode],
+  )
+
+  const triageSessions = useMemo(
+    () => (unresolvedIndices.length ? buildSessions(files, filePaths, unresolvedIndices, exifIds) : []),
+    [files, filePaths, unresolvedIndices, exifIds],
+  )
 
   const handleUpload = async (
     sessionAssignments?: { deploymentId: string; indices: number[] }[],
@@ -328,9 +357,6 @@ export function UploadFlow() {
   // ── Derived stats ──────────────────────────────────────────────────────────
   const { isDragging, bind } = useDragAndDrop(processFiles)
 
-  const uploadMode: 'idle' | 'images' | 'camtrapdp' =
-    zipFile ? 'camtrapdp' : files.length > 0 ? 'images' : 'idle'
-
   // Per-file deployment resolution, EXIF first (exact id), folder prefix second.
   // Returns undefined when neither names a deployment the user can see.
   const resolveDeploymentId = (i: number): string | undefined => {
@@ -361,18 +387,6 @@ export function UploadFlow() {
     .filter(([, s]) => s === 'no_access')
     .map(([id]) => id)
 
-  // Files whose deployment cannot be resolved from their EXIF id or the card's
-  // folder structure. These are the ones the backend would silently drop (no
-  // deployment_id -> not stored -> no media row), so they go through triage.
-  const unresolvedIndices = useMemo(
-    () => (uploadMode === 'images' ? unresolvedFileIndices(files, filePaths, exifIds, deployments) : []),
-    [files, filePaths, exifIds, deployments, uploadMode],
-  )
-
-  const triageSessions = useMemo(
-    () => (unresolvedIndices.length ? buildSessions(files, filePaths, unresolvedIndices, exifIds) : []),
-    [files, filePaths, unresolvedIndices, exifIds],
-  )
   // Per-deployment fate of the selection, shown before Upload and carried into
   // triage so the photos that already matched are named there too.
   const breakdown = useMemo(
@@ -406,6 +420,12 @@ export function UploadFlow() {
   const CHECK_LABEL: React.CSSProperties = {
     display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', cursor: 'pointer',
   }
+
+  const testPhotosNote = testPhotosSkipped > 0 && (
+    <div className="upload-note" role="status">
+      {testPhotosSkipped} test photo{testPhotosSkipped !== 1 ? 's' : ''} skipped (no deployment set on the camera)
+    </div>
+  )
 
   // ── Deployment triage (photos the backend would otherwise drop) ──────────
   if (showTriage) {
@@ -469,6 +489,7 @@ export function UploadFlow() {
               ⚠ {selectionError}
             </div>
           )}
+          {testPhotosNote}
         </>
       )}
 
@@ -513,6 +534,8 @@ export function UploadFlow() {
               </ul>
             </div>
           )}
+
+          {testPhotosNote}
 
           {/* Drive storage note: images always sync to Google Drive by default */}
           <div style={{

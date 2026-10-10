@@ -38,10 +38,12 @@ async def list_user_jobs(
 def _authorize_job(job, user) -> None:
     """404 if the job isn't the caller's. Hidden (not 403) so job ids can't be probed.
 
-    Owner-less jobs (legacy / system / machine API jobs that carry no ``user_id``)
-    are readable by any authenticated user; per-user jobs are scoped to the owner.
+    Owner-less jobs (legacy / system jobs that carry no ``user_id``) are readable by
+    any authenticated user; per-user jobs are scoped to the owner. A job an
+    organisation's API key started is read with that organisation's keys
+    (``GET /api/v1/jobs/{id}``), never here: its result is that organisation's data.
     """
-    if job.user_id and job.user_id != user.id:
+    if (job.user_id and job.user_id != user.id) or (not job.user_id and job.organisation_id):
         raise HTTPException(status_code=404, detail="Job not found")
 
 

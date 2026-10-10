@@ -29,15 +29,37 @@ Usage (from ``backend/``, ``GEMINI_API_KEY`` in the root ``.env`` for live runs)
     python scripts/eval_presence.py labels.csv --dump-speciesnet speciesnet.json
     python scripts/eval_presence.py labels.csv --speciesnet-results speciesnet.json --dry-run
 
+    # the same dump with and without the whole-frame and vehicle box rules (#285)
+    python scripts/eval_presence.py labels.csv --variants "" --speciesnet-results speciesnet.json --speciesnet-rules
+
+    # a new prompt on a chosen subset only (one path per line, as in the CSV)
+    python scripts/eval_presence.py labels.csv --variants single --prompt-version v3 --only subset.txt \\
+        --cache eval_cache_v3.jsonl --min-interval 4.2
+
+    # the stratified benchmark from caches only, never an API call; the SpeciesNet
+    # dump was written in Docker, so its /photos paths are re-rooted at --root
+    python scripts/eval_presence.py labels.csv --root <export folder> --variants single --prompt-version v1 \\
+        --cache eval_cache.jsonl --cache-only --speciesnet-results speciesnet.json --speciesnet-root /photos
+
 ``--cache`` is a JSONL of every live call keyed by (model, variant, frames,
 prompt version), so re-running after a crash or adding a model never pays twice
 for the same frames. A v1 cache is never reused for a v2 run: the key carries
 ``--prompt-version`` (v1 keys keep the original shape so the 2026-09-28 cache
-still resumes a ``--prompt-version v1`` run).
+still resumes a ``--prompt-version v1`` run). ``--cache-only`` makes no live
+call at all: uncached frames stay unanswered. ``--only`` restricts every run to
+the frames a file lists, so a prompt can be tried on a subset without editing
+the labels.
 
-Besides the headline table the script reports recall per stratum that needs no
-extra labels: night IR vs day (from the frame's greyscale ratio), burst length
-(1 / 2 / 3+ from the CSV's burst ids) and the top-level folder of each frame.
+Besides the headline table the script reports recall per stratum (the
+architecture report's section 10), each with its count and a 95% Wilson
+interval, and "too few" below ``MIN_STRATUM_ANIMAL_FRAMES`` animal frames.
+Automatic: night IR vs day (``light_of``: the flash, else the WW500 exposure,
+else the greyscale ratio), burst length (1 / 2 / 3+), the top-level folder, the
+EXIF deployment, and the animal's size and border position from a box
+(SpeciesNet's, else Gemini's, else the v2 labels). Human, from the labeller's
+optional columns: ``visibility``, ``distance`` and ``conditions``; a human
+``animal_size``, ``border`` visibility or ``night_ir`` condition overrides the
+automatic value. A line per derived stratum counts what decided it.
 ``--dump-verdicts`` writes every frame's verdict with the v2 structured fields.
 """
 
@@ -51,14 +73,16 @@ import os
 import statistics
 import sys
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from typing import Callable, Iterable, Optional, Union
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.domain.burst_evidence import DEFAULT_GAP_SECONDS  # noqa: E402
 from app.domain.burst_evidence import group_bursts as group_media_bursts  # noqa: E402
+from app.domain.exif import parse_exif_from_bytes  # noqa: E402
 from app.services import gemini_presence as gp  # noqa: E402
 from app.services.gemini_pricing import DEFAULT_MODEL, PRICE_READ_ON, PRICE_SOURCE_URL  # noqa: E402
 from scripts.label_presence import make_frame, media_row  # noqa: E402
@@ -68,7 +92,34 @@ T3_MAX_FALSE_NEGATIVE_RATE = 0.015
 
 # A frame whose colour channels differ by less than this (mean absolute
 # difference on 0-255, after downscaling) is treated as greyscale, i.e. night IR.
+# Only for frames without flash or exposure metadata: the WW500's HM0360 is
+# monochrome, so every frame it takes is greyscale (#302).
 GREYSCALE_MAX_CHANNEL_DIFF = 3.0
+
+# Exposure (``exposure_of``: integration lines x analog gain x digital gain) at or
+# above which a WW500 frame without a fired flash counts as night_ir: full
+# integration (376 lines), analog code 4 (16x) and digital gain 2x, so the AE has
+# run past the analog gain and is spending digital gain. Chosen from the labelled
+# set (2026-09-26, Tommy_WW_Tests left out): integration is 376 lines on all 658
+# frames with a MakerNote, and on the Colorado deployment the analog code climbs
+# from 1 at 17:30 to 4 at 20:15 local time, daylight to dusk. The highest
+# ambient-lit exposure is 6,110 (376, code 4, digital 65); the one frame above the
+# cut (376, code 4, digital 192, ae_mean 5, not converged) is black. The firmware's
+# flash rule (lightSensor.c, analog code above 2) would put 94 of these ambient-lit
+# frames in night_ir.
+LOW_LIGHT_MIN_EXPOSURE = 376 * 16 * 2
+
+# A stratum's recall is reported as a number only from this many answered animal
+# frames (its empty removal from this many empty frames); below, "too few".
+MIN_STRATUM_ANIMAL_FRAMES = 30
+WILSON_Z = 1.959964  # two-sided 95%
+
+# Box area over frame area at which the size stratum steps up: the prompt v2
+# vocabulary (tiny under 2%, small to 10%, medium to 30%, large above), so a box,
+# a Gemini label and a human label land in the same four values.
+SIZE_AREA_CUTS = ((0.02, "tiny"), (0.10, "small"), (0.30, "medium"))
+# A box within this share of the frame from any edge is on the border.
+BORDER_MARGIN = 0.02
 
 
 # ── Data ─────────────────────────────────────────────────────────────
@@ -80,6 +131,11 @@ class LabelledFrame:
     burst_id: str
     has_animal: Optional[bool]  # None = unsure or person
     label: str = ""
+    # The labeller's optional human strata (blank / empty unless entered).
+    animal_size: str = ""
+    visibility: str = ""
+    distance: str = ""
+    conditions: tuple[str, ...] = ()
 
 
 @dataclass
@@ -102,6 +158,8 @@ class FrameOutcome:
     evidence: list[str] = field(default_factory=list)
     description: str = ""
     prompt_version: str = ""
+    has_person: Optional[bool] = None  # v3 only
+    bbox: Optional[tuple[float, float, float, float]] = None  # (x, y, w, h) on 0-1, the animal the model found
 
 
 @dataclass
@@ -150,6 +208,8 @@ def read_labels(csv_path: str, root: Optional[str] = None) -> list[LabelledFrame
     """Last row per path wins; frames come back in CSV order of their labeller burst id then path.
 
     A relative ``path`` (a committed copy of the CSV) is resolved against ``root``.
+    The optional strata columns are read when present (``conditions`` split on
+    commas or semicolons); a CSV without them reads as blank strata.
     """
     rows: dict[str, dict] = {}
     with open(csv_path, newline="", encoding="utf-8") as fh:
@@ -164,9 +224,42 @@ def read_labels(csv_path: str, root: Optional[str] = None) -> list[LabelledFrame
         raw = (row.get("has_animal") or "").strip()
         truth = None if raw == "" else raw in ("1", "true", "True")
         label = (row.get("label") or "").strip()
-        frames.append(LabelledFrame(path=path, burst_id=row.get("burst_id") or path, has_animal=truth, label=label))
+        conditions = tuple(c.strip() for c in (row.get("conditions") or "").replace(";", ",").split(",") if c.strip())
+        frames.append(
+            LabelledFrame(
+                path=path,
+                burst_id=row.get("burst_id") or path,
+                has_animal=truth,
+                label=label,
+                animal_size=(row.get("animal_size") or "").strip(),
+                visibility=(row.get("visibility") or "").strip(),
+                distance=(row.get("distance") or "").strip(),
+                conditions=conditions,
+            )
+        )
     frames.sort(key=lambda f: (f.burst_id, f.path))
     return frames
+
+
+def read_only_list(path: str, root: Optional[str] = None) -> set[str]:
+    """Normalised paths from an ``--only`` file: one per line, ``#`` comments and blanks skipped, relative ones resolved against ``root``."""
+    out: set[str] = set()
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            entry = line.strip()
+            if not entry or entry.startswith("#"):
+                continue
+            if root and not os.path.isabs(entry):
+                entry = os.path.join(root, entry)
+            out.add(os.path.normpath(entry))
+    return out
+
+
+def filter_only(bursts: list[list[LabelledFrame]], only: Optional[set[str]]) -> list[list[LabelledFrame]]:
+    """``bursts`` keeping only the frames in ``only`` (None keeps everything); bursts left empty are dropped."""
+    if only is None:
+        return bursts
+    return [b for b in ([f for f in b if f.path in only] for b in bursts) if b]
 
 
 def compute_bursts(frames: list[LabelledFrame], gap_seconds: float = DEFAULT_GAP_SECONDS) -> list[list[LabelledFrame]]:
@@ -273,7 +366,10 @@ def person_line(outcomes_by_run: dict[tuple, list[FrameOutcome]], person_paths: 
     for key, outs in outcomes_by_run.items():
         answered = [o for o in outs if o.path in person_paths and o.predicted is not None]
         called = sum(1 for o in answered if o.predicted)
-        parts.append(f"{' / '.join(str(k) for k in key)}: {called} of {len(answered)} answered")
+        part = f"{' / '.join(str(k) for k in key)}: {called} of {len(answered)} answered"
+        if any(o.has_person is not None for o in answered):  # v3 reports people on their own
+            part += f", has_person on {sum(1 for o in answered if o.has_person)}"
+        parts.append(part)
     return f"\nPerson frames ({len(person_paths)}, not counted above), called animal by " + "; ".join(parts) + ".\n"
 
 
@@ -319,6 +415,138 @@ def is_greyscale(data: bytes, max_channel_diff: float = GREYSCALE_MAX_CHANNEL_DI
     return diff <= max_channel_diff
 
 
+def exposure_of(exif: dict) -> Optional[float]:
+    """Integration lines x analog x digital gain from the WW500 MakerNote fields, or None without them.
+
+    The analog code (ANALOG_GAIN bits 4-6, ``hm0360_md.c``) is read as a power of
+    two and the digital gain as 64 = 1x. An all-zero read (no sensor) is None.
+    """
+    lines, analog, digital = (exif.get(k) for k in ("integration_lines", "analog_gain", "digital_gain"))
+    if not lines or analog is None or not digital:
+        return None
+    return lines * 2**analog * digital / 64
+
+
+def light_of(data: bytes, exif: Optional[dict] = None) -> tuple[str, str]:
+    """``(night_ir | day, source)`` for one frame, from the first source it carries.
+
+    ``flash``: EXIF Flash (or the MakerNote copy) says the flash fired, night_ir; a
+    flash that did not fire decides nothing, since the flash can be switched off.
+    ``exposure``: the WW500 MakerNote AE fields against ``LOW_LIGHT_MIN_EXPOSURE``.
+    ``greyscale``: the channel ratio, for frames with neither (other cameras).
+    ``exif`` is the parsed EXIF when the caller already has it.
+    """
+    exif = parse_exif_from_bytes(data) if exif is None else exif
+    if exif.get("flash_fired"):
+        return "night_ir", "flash"
+    exposure = exposure_of(exif)
+    if exposure is not None:
+        return ("night_ir" if exposure >= LOW_LIGHT_MIN_EXPOSURE else "day"), "exposure"
+    return ("night_ir" if is_greyscale(data) else "day"), "greyscale"
+
+
+def source_line(strata: dict[str, dict[str, str]], family: str, title: str) -> str:
+    """How many frames got each value of ``family`` and how many each source decided (``<family>_source``)."""
+
+    def _counts(by_path: dict[str, str]) -> str:
+        return ", ".join(f"{k} {n}" for k, n in sorted(Counter(by_path.values()).items()))
+
+    return f"{title} ({len(strata[family])} frames): {_counts(strata[family])}; decided by {_counts(strata[family + '_source'])}.\n"
+
+
+def light_line(strata: dict[str, dict[str, str]]) -> str:
+    """How many frames got each light value and how many each source decided."""
+    return source_line(strata, "light", "Light")
+
+
+def wilson_interval(k: int, n: int, z: float = WILSON_Z) -> Optional[tuple[float, float]]:
+    """The Wilson score interval for ``k`` successes in ``n`` trials, or None when ``n`` is 0."""
+    if n <= 0:
+        return None
+    p = k / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / denom
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
+def deployment_of(exif: dict) -> str:
+    """The first 8 characters of the EXIF deployment id (as the upload matches it), or ``no_id``."""
+    dep = str(exif.get("deployment_id") or "").lower()
+    return "no_id" if not dep or set(dep) <= {"0", "-"} else dep[:8]
+
+
+def size_class(bbox: tuple[float, float, float, float]) -> str:
+    """The prompt v2 size word for a box (x, y, w, h on 0-1) by its share of the frame, ``SIZE_AREA_CUTS``."""
+    area = max(0.0, bbox[2]) * max(0.0, bbox[3])
+    return next((name for cut, name in SIZE_AREA_CUTS if area < cut), "large")
+
+
+def on_border(bbox: tuple[float, float, float, float], margin: float = BORDER_MARGIN) -> bool:
+    """True when the box comes within ``margin`` of any frame edge."""
+    x, y, w, h = bbox
+    return x <= margin or y <= margin or x + w >= 1 - margin or y + h >= 1 - margin
+
+
+def size_of(frame: LabelledFrame, bbox, model_size: Optional[str]) -> tuple[str, str]:
+    """``(size, source)``: the human label, else the box, else Gemini's v2 label, else unknown."""
+    if frame.animal_size:
+        return frame.animal_size, "human"
+    if bbox is not None:
+        return size_class(bbox), "box"
+    if model_size and model_size != "none":
+        return model_size, "gemini"
+    return "unknown", "none"
+
+
+def border_of(frame: LabelledFrame, bbox, model_location: Optional[str]) -> tuple[str, str]:
+    """``(border | interior, source)``: human ``border`` visibility, else the box, else Gemini's v2 location."""
+    if frame.visibility == "border":
+        return "border", "human"
+    if bbox is not None:
+        return ("border" if on_border(bbox) else "interior"), "box"
+    if model_location in ("edge", "corner"):
+        return "border", "gemini"
+    if model_location == "centre":
+        return "interior", "gemini"
+    return "unknown", "none"
+
+
+def boxes_of(outcomes_by_run: dict[tuple, list[FrameOutcome]]) -> dict[str, tuple[float, float, float, float]]:
+    """One animal box per frame from every run: SpeciesNet's first (a detector box), else the first Gemini box."""
+    out: dict[str, tuple[float, float, float, float]] = {}
+    ordered = sorted(outcomes_by_run.items(), key=lambda kv: kv[0][0] != "speciesnet")
+    for _key, outs in ordered:
+        for o in outs:
+            if o.bbox is not None and o.predicted and o.path not in out:
+                out[o.path] = o.bbox
+    return out
+
+
+def model_labels_of(outcomes_by_run: dict[tuple, list[FrameOutcome]]) -> dict[str, dict[str, str]]:
+    """``{path: {size, location}}`` from the first run that gave a v2 label (not ``none``) for the frame."""
+    out: dict[str, dict[str, str]] = {}
+    for outs in outcomes_by_run.values():
+        for o in outs:
+            for attr in ("size", "location"):
+                value = getattr(o, attr)
+                if value and value != "none":
+                    out.setdefault(o.path, {}).setdefault(attr, value)
+    return out
+
+
+HUMAN_FAMILIES = ("visibility", "distance", "conditions")
+# A stratum value: one word, or a tuple for a multi-valued column (``conditions``).
+StratumValue = Union[str, tuple[str, ...]]
+
+
+def human_line(frames: list[LabelledFrame]) -> str:
+    """How many frames carry each optional human column (a human stratum is only as big as its labels)."""
+    animal = [f for f in frames if f.has_animal]
+    counts = [f"{c} {sum(1 for f in animal if getattr(f, c))}" for c in ("animal_size",) + HUMAN_FAMILIES]
+    return f"Human strata labelled on {len(animal)} animal frames: {', '.join(counts)}.\n"
+
+
 def top_folder_of(paths: Iterable[str]) -> Callable[[str], str]:
     """A function giving each path's first directory below the common root of all ``paths``."""
     normed = [os.path.normpath(p) for p in paths]
@@ -339,36 +567,72 @@ def burst_len_bucket(n: int) -> str:
     return "1" if n <= 1 else ("2" if n == 2 else "3+")
 
 
-def strata_of(frames: list[LabelledFrame], bursts: list[list[LabelledFrame]], read: Callable[[str], bytes] = None) -> dict[str, dict[str, str]]:
-    """``{stratum family: {path: stratum value}}`` for every frame: ``light``, ``burst_len``, ``folder``."""
+def strata_of(
+    frames: list[LabelledFrame],
+    bursts: list[list[LabelledFrame]],
+    read: Optional[Callable[[str], bytes]] = None,
+    boxes: Optional[dict[str, tuple[float, float, float, float]]] = None,
+    model_labels: Optional[dict[str, dict[str, str]]] = None,
+) -> dict[str, dict[str, StratumValue]]:
+    """``{stratum family: {path: stratum value}}``, the families of the architecture report's section 10.
+
+    Every frame: ``light`` (a human ``night_ir`` condition first), ``burst_len``,
+    ``folder``, ``deployment``. Animal frames only: ``size`` and ``border`` from
+    :func:`size_of` and :func:`border_of` (``boxes`` from :func:`boxes_of`,
+    ``model_labels`` from :func:`model_labels_of`). Frames that carry the human
+    column only: ``visibility``, ``distance``, ``conditions`` (a tuple, so a frame
+    counts in each of its conditions). ``light``, ``size`` and ``border`` each
+    have a ``<family>_source`` family saying what decided the value.
+    """
     read = read or (lambda p: open(p, "rb").read())
+    boxes = boxes or {}
+    model_labels = model_labels or {}
     sizes: dict[str, int] = {f.path: len(b) for b in bursts for f in b}
     top = top_folder_of([f.path for f in frames]) if frames else (lambda p: "(root)")
-    light: dict[str, str] = {}
+    out: dict[str, dict[str, StratumValue]] = {
+        k: {} for k in ("light", "light_source", "burst_len", "folder", "deployment", "size", "size_source", "border", "border_source")
+    }
     for f in frames:
         try:
-            light[f.path] = "night_ir" if is_greyscale(read(f.path)) else "day"
+            data = read(f.path)
+            exif = parse_exif_from_bytes(data)
+            light = light_of(data, exif)
+            out["deployment"][f.path] = deployment_of(exif)
         except Exception:
-            light[f.path] = "unknown"
-    return {
-        "light": light,
-        "burst_len": {f.path: burst_len_bucket(sizes.get(f.path, 1)) for f in frames},
-        "folder": {f.path: top(f.path) for f in frames},
-    }
+            light = ("unknown", "unreadable")
+            out["deployment"][f.path] = "unknown"
+        out["light"][f.path], out["light_source"][f.path] = ("night_ir", "human") if "night_ir" in f.conditions else light
+        out["burst_len"][f.path] = burst_len_bucket(sizes.get(f.path, 1))
+        out["folder"][f.path] = top(f.path)
+        if f.has_animal:
+            labels = model_labels.get(f.path, {})
+            out["size"][f.path], out["size_source"][f.path] = size_of(f, boxes.get(f.path), labels.get("size"))
+            out["border"][f.path], out["border_source"][f.path] = border_of(f, boxes.get(f.path), labels.get("location"))
+    for family in HUMAN_FAMILIES:
+        by_path = {f.path: getattr(f, family) for f in frames if getattr(f, family)}
+        if by_path:
+            out[family] = by_path
+    return out
 
 
-def metrics_by_stratum(outcomes: list[FrameOutcome], strata: dict[str, dict[str, str]]) -> dict[str, dict[str, Metrics]]:
+def metrics_by_stratum(outcomes: list[FrameOutcome], strata: dict[str, dict[str, StratumValue]]) -> dict[str, dict[str, Metrics]]:
     """``{family: {value: Metrics}}`` over the outcomes, sorted by value.
 
-    Besides the frame-derived families in ``strata`` the model's own v2 labels
-    give two more, ``gemini_size`` and ``gemini_location`` (animal frames only,
-    the label the model returned, so a miss lands in ``none``).
+    A frame missing from a family is left out of it, a tuple value counts the
+    frame in each of its values, and the ``*_source`` families are skipped (the
+    source lines count them). Besides the families in ``strata`` the model's own
+    v2 labels give two more, ``gemini_size`` and ``gemini_location`` (animal
+    frames only, the label the model returned, so a miss lands in ``none``).
     """
     out: dict[str, dict[str, Metrics]] = {}
     for family, by_path in strata.items():
+        if family.endswith("_source"):
+            continue
         groups: dict[str, list[FrameOutcome]] = {}
         for o in outcomes:
-            groups.setdefault(by_path.get(o.path, "unknown"), []).append(o)
+            value = by_path.get(o.path)
+            for v in (value,) if isinstance(value, str) else (value or ()):
+                groups.setdefault(v, []).append(o)
         out[family] = {value: compute_metrics(g) for value, g in sorted(groups.items())}
     for family, attr in (("gemini_size", "size"), ("gemini_location", "location")):
         groups = {}
@@ -380,20 +644,38 @@ def metrics_by_stratum(outcomes: list[FrameOutcome], strata: dict[str, dict[str,
     return out
 
 
-def render_strata_markdown(per_run: dict[tuple, dict[str, dict[str, Metrics]]]) -> str:
-    """One table per (variant, model, prompt): recall and empty-removal per stratum."""
+def _floored(value: Optional[float], n: int, floor: int = MIN_STRATUM_ANIMAL_FRAMES) -> str:
+    """A rate as a percentage from ``floor`` frames, "too few" below, "n/a" with none."""
+    return "n/a" if not n else (_pct(value) if n >= floor else "too few")
+
+
+def _interval(m: Metrics, floor: int = MIN_STRATUM_ANIMAL_FRAMES) -> str:
+    n = m.tp + m.fn
+    ci = wilson_interval(m.tp, n) if n >= floor else None
+    return "" if ci is None else f"{100 * ci[0]:.1f} to {100 * ci[1]:.1f}%"
+
+
+def render_strata_markdown(per_run: dict[tuple, dict[str, dict[str, Metrics]]], floor: int = MIN_STRATUM_ANIMAL_FRAMES) -> str:
+    """One table per (variant, model, prompt): recall with its 95% Wilson interval and empty removal per stratum.
+
+    A rate is a number only from ``floor`` frames of its class (animal for recall,
+    empty for empty removed); the counts are always shown.
+    """
     blocks = []
     for key, families in per_run.items():
         variant, model, prompt = _key3(key)
         lines = [
             f"**{variant} / {model}" + (f" / prompt {prompt}**" if prompt else "**"),
             "",
-            "| Stratum | Value | Frames | Animal | Recall (animal) | FN | Empty removed |",
-            "|---|---|---:|---:|---:|---:|---:|",
+            "| Stratum | Value | Frames | Animal | Recall (animal) | 95% interval | FN | Empty removed |",
+            "|---|---|---:|---:|---:|---:|---:|---:|",
         ]
         for family, values in families.items():
             for value, m in values.items():
-                lines.append(f"| {family} | {value} | {m.frames} | {m.animal_frames} | {_pct(m.recall)} | {m.fn} | {_pct(m.empty_removed)} |")
+                lines.append(
+                    f"| {family} | {value} | {m.frames} | {m.animal_frames} | {_floored(m.recall, m.tp + m.fn, floor)} | "
+                    f"{_interval(m, floor)} | {m.fn} | {_floored(m.empty_removed, m.tn + m.fp, floor)} |"
+                )
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks) + ("\n" if blocks else "")
 
@@ -451,14 +733,27 @@ def _outcomes_from_result(unit: list[LabelledFrame], result_rec: dict) -> list[F
             evidence=list((v or {}).get("evidence") or []),
             description=(v or {}).get("description") or "",
             prompt_version=result_rec.get("prompt_version", "v1"),
+            has_person=None if v is None else v.get("has_person"),
+            bbox=_bbox((v or {}).get("bbox")),
         )
         for f, v in zip(unit, verdicts)
     ]
 
 
+def _bbox(raw) -> Optional[tuple[float, float, float, float]]:
+    """A stored (x, y, w, h) box as a 4-tuple of floats, or None."""
+    if not raw or len(raw) != 4:
+        return None
+    try:
+        return tuple(float(c) for c in raw)  # type: ignore[return-value]
+    except (TypeError, ValueError):
+        return None
+
+
 def _verdict_record(v: gp.PresenceVerdict) -> dict:
     return {
         "has_animal": v.has_animal,
+        "has_person": v.has_person,
         "confidence": v.confidence,
         "description": v.description,
         "bbox": v.bbox,
@@ -573,6 +868,7 @@ def dump_verdicts(outcomes_by_run: dict[tuple, list[FrameOutcome]], out_path: st
             o.path: {
                 "truth": o.truth,
                 "predicted": o.predicted,
+                "has_person": o.has_person,
                 "confidence": o.confidence,
                 "animal_visibility": o.visibility,
                 "animal_size": o.size,
@@ -589,17 +885,69 @@ def dump_verdicts(outcomes_by_run: dict[tuple, list[FrameOutcome]], out_path: st
         json.dump(payload, fh, indent=1)
 
 
-def speciesnet_outcomes(frames: list[LabelledFrame], results_path: str) -> list[FrameOutcome]:
-    """Per-frame SpeciesNet verdicts from a ``--dump-speciesnet`` file: ``{path: {has_animal, ...}}``."""
+def apply_box_rules(verdict: dict, threshold: float, cutoffs) -> dict:
+    """``verdict`` with ``has_animal``/``confidence`` recomputed from its raw detections after the box rules (#285).
+
+    ``cutoffs`` is a ``domain.pipeline.DetectionCutoffs``; a verdict without
+    ``detections`` (an older dump) is returned unchanged.
+    """
+    from types import SimpleNamespace
+
+    detections = verdict.get("detections")
+    if detections is None:
+        return verdict
+    animal = []
+    for d in detections:
+        det = SimpleNamespace(observation_type=d.get("type"), confidence=float(d.get("confidence") or 0.0), bbox=d.get("bbox"))
+        if det.observation_type == "animal" and det.confidence >= threshold and cutoffs.drop_reason(det) is None:
+            animal.append(det.confidence)
+    return {**verdict, "has_animal": bool(animal), "confidence": max(animal, default=None)}
+
+
+def rebase_path(path: str, old_root: Optional[str], new_root: Optional[str]) -> str:
+    """``path`` moved from under ``old_root`` to under ``new_root`` (either separator); unchanged when it is not under ``old_root``."""
+    if not old_root:
+        return os.path.normpath(path)
+    p, old = path.replace("\\", "/"), old_root.replace("\\", "/").rstrip("/") + "/"
+    if not p.startswith(old):
+        return os.path.normpath(path)
+    rel = p[len(old) :]
+    return os.path.normpath(os.path.join(new_root, rel) if new_root else rel)
+
+
+def _top_animal_box(v: dict, threshold: float) -> Optional[tuple[float, float, float, float]]:
+    """The box of the most confident animal detection at or above ``threshold`` in a dumped verdict."""
+    animal = [d for d in v.get("detections") or [] if d.get("type") == "animal" and float(d.get("confidence") or 0.0) >= threshold]
+    return _bbox(max(animal, key=lambda d: float(d.get("confidence") or 0.0))["bbox"]) if animal else None
+
+
+def speciesnet_outcomes(
+    frames: list[LabelledFrame], results_path: str, cutoffs=None, dump_root: Optional[str] = None, root: Optional[str] = None
+) -> list[FrameOutcome]:
+    """Per-frame SpeciesNet verdicts from a ``--dump-speciesnet`` file: ``{path: {has_animal, ...}}``.
+
+    With ``cutoffs`` the verdict is recomputed from the dumped detections at the
+    dump's threshold with the box rules applied (``apply_box_rules``). A dump
+    written elsewhere (the Docker image's ``/photos``) is matched by re-rooting
+    its paths from ``dump_root`` to ``root``. Each outcome carries the box of the
+    most confident animal detection at the threshold, for the size strata.
+    """
     with open(results_path, encoding="utf-8") as fh:
         data = json.load(fh)
-    verdicts = {os.path.normpath(k): v for k, v in data.get("frames", data).items()}
+    verdicts = {rebase_path(k, dump_root, root): v for k, v in data.get("frames", data).items()}
+    threshold = float(data.get("threshold", 0.2)) if "frames" in data else 0.2
     out = []
     for f in frames:
         v = verdicts.get(f.path)
+        if v is not None and cutoffs is not None:
+            v = apply_box_rules(v, threshold, cutoffs)
         out.append(
             FrameOutcome(
-                path=f.path, truth=f.has_animal, predicted=None if v is None else bool(v.get("has_animal")), confidence=(v or {}).get("confidence")
+                path=f.path,
+                truth=f.has_animal,
+                predicted=None if v is None else bool(v.get("has_animal")),
+                confidence=(v or {}).get("confidence"),
+                bbox=None if v is None else _top_animal_box(v, threshold),
             )
         )
     return out
@@ -641,6 +989,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--variants", default="single,contact_sheet,batch", help="comma-separated: single, contact_sheet, batch")
     ap.add_argument("--models", default=DEFAULT_MODEL, help="comma-separated Gemini model ids (each needs a price row)")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N labelled frames (rounded up to whole bursts)")
+    ap.add_argument(
+        "--only",
+        default=None,
+        metavar="PATHS_TXT",
+        help="use only the frames listed in this file, one path per line as in the CSV (relative ones resolved against --root)",
+    )
     ap.add_argument("--gap", type=float, default=DEFAULT_GAP_SECONDS, help="burst gap in seconds for the contact sheet and the burst_len stratum")
     ap.add_argument("--dry-run", action="store_true", help="estimate tokens and cost only; no API call")
     ap.add_argument("--cache", default=None, help="JSONL cache of live call results (resumable, never pays twice)")
@@ -654,14 +1008,36 @@ def main(argv: Optional[list[str]] = None) -> int:
         help=f"prompt/schema version (default {gp.PROMPT_VERSION}); part of the cache key",
     )
     ap.add_argument("--max-calls", type=int, default=None, help="cap on NEW live calls per (variant, model) this run; the rest stay unanswered")
+    ap.add_argument("--cache-only", action="store_true", help="never call the API: score the cached answers only, uncached frames stay unanswered")
     ap.add_argument("--dump-verdicts", default=None, metavar="OUT_JSON", help="write every frame's verdict with the structured fields")
     ap.add_argument("--no-strata", action="store_true", help="skip the per-stratum recall tables (they open every frame once)")
     ap.add_argument("--speciesnet-results", default=None, help="JSON from --dump-speciesnet, adds a SpeciesNet row")
+    ap.add_argument(
+        "--speciesnet-root",
+        default=None,
+        help="folder the dump's paths were written under (e.g. /photos in Docker); they are re-rooted at --root to match the labels",
+    )
     ap.add_argument("--dump-speciesnet", default=None, metavar="OUT_JSON", help="run SpeciesNet over the frames and write verdicts (ML deps needed)")
     ap.add_argument("--speciesnet-threshold", type=float, default=0.2, help="detection confidence for --dump-speciesnet")
+    ap.add_argument(
+        "--speciesnet-rules",
+        action="store_true",
+        help="add a second SpeciesNet row with the whole-frame and vehicle box rules applied (cutoffs from the SPECIESNET_* settings)",
+    )
     args = ap.parse_args(argv)
+    if args.cache_only:
+        if not args.cache and args.variants.strip():
+            ap.error("--cache-only needs --cache (or --variants '' for SpeciesNet alone)")
+        args.max_calls = 0
 
-    bursts = apply_limit(compute_bursts(read_labels(args.labels, args.root), args.gap), args.limit)
+    bursts = all_bursts = compute_bursts(read_labels(args.labels, args.root), args.gap)
+    if args.only:
+        only = read_only_list(args.only, args.root)
+        bursts = filter_only(bursts, only)
+        found = sum(len(b) for b in bursts)
+        if found < len(only):
+            print(f"--only: {len(only) - found} listed path(s) are not in the labels", file=sys.stderr)
+    bursts = apply_limit(bursts, args.limit)
     frames = [f for b in bursts for f in b]
 
     def _scored(f: LabelledFrame) -> bool:  # animal/empty for the metrics, person for its own line
@@ -671,7 +1047,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     person_paths = {f.path for f in frames if f.label == "person"}
     scored = [f for f in frames if _scored(f)]
     scored_bursts = [b for b in ([f for f in b if _scored(f)] for b in bursts) if b]
-    labelled_bursts = [b for b in ([f for f in b if f.has_animal is not None] for b in bursts) if b]
     n_unsure = len(frames) - len(scored)
     print(
         f"{len(frames)} frames ({len(labelled)} labelled, {len(person_paths)} person, {n_unsure} unsure) in {len(bursts)} bursts",
@@ -705,18 +1080,45 @@ def main(argv: Optional[list[str]] = None) -> int:
             outcomes_by_run[(variant, model, args.prompt_version)] = outcomes
             results[(variant, model, args.prompt_version)] = compute_metrics(outcomes)
     if args.speciesnet_results:
-        sn = speciesnet_outcomes(labelled, args.speciesnet_results)
+        sn = speciesnet_outcomes(labelled, args.speciesnet_results, dump_root=args.speciesnet_root, root=args.root)
+        matched = sum(1 for o in sn if o.predicted is not None)
+        print(f"SpeciesNet dump matched {matched} of {len(sn)} labelled frames", file=sys.stderr)
+        if not matched:
+            print("  no path matched: a dump written elsewhere needs --speciesnet-root (and --root)", file=sys.stderr)
         outcomes_by_run[("speciesnet", "speciesnet (local)")] = sn
         results[("speciesnet", "speciesnet (local)")] = compute_metrics(sn)
+        if args.speciesnet_rules:
+            from app.domain.pipeline import DetectionCutoffs
+
+            cutoffs = DetectionCutoffs.from_config({})
+            sn_rules = speciesnet_outcomes(labelled, args.speciesnet_results, cutoffs, dump_root=args.speciesnet_root, root=args.root)
+            key = ("speciesnet", f"speciesnet + box rules ({cutoffs.audit()})")
+            outcomes_by_run[key] = sn_rules
+            results[key] = compute_metrics(sn_rules)
 
     table = render_markdown(results, args.dry_run, n_unsure)
     if not args.dry_run:
         table += person_line(outcomes_by_run, person_paths)
     if not args.dry_run and not args.no_strata and labelled:
-        strata = strata_of(labelled, labelled_bursts)
+        # Burst length comes from the whole labelled set, so --only does not shorten a burst.
+        # Size and border are frame properties, so every run is split by the same box.
+        strata = strata_of(
+            labelled,
+            [b for b in ([f for f in b if f.has_animal is not None] for b in all_bursts) if b],
+            boxes=boxes_of(outcomes_by_run),
+            model_labels=model_labels_of(outcomes_by_run),
+        )
         # Only frames that were actually answered say anything about a stratum.
         per_run = {key: metrics_by_stratum([o for o in outs if o.predicted is not None], strata) for key, outs in outcomes_by_run.items()}
-        table += "\n### Recall by stratum (answered frames only)\n\n" + render_strata_markdown(per_run)
+        table += (
+            f"\n### Recall by stratum (answered frames only, a number from {MIN_STRATUM_ANIMAL_FRAMES} frames, 95% Wilson interval)\n\n"
+            + light_line(strata)
+            + source_line(strata, "size", "Size (animal frames)")
+            + source_line(strata, "border", "Border (animal frames)")
+            + human_line(labelled)
+            + "\n"
+            + render_strata_markdown(per_run)
+        )
     if args.dump_verdicts:
         dump_verdicts(outcomes_by_run, args.dump_verdicts)
         print(f"verdicts written to {args.dump_verdicts}", file=sys.stderr)

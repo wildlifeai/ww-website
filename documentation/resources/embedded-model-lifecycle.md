@@ -97,9 +97,12 @@ class index *i* must resolve to `labels[i]`.
 
 ## 3. Label mapping (website)
 After validation, [`ModelLabelMapper`](../../frontend/src/components/toolkit/ModelLabelMapper.tsx)
-asks the uploader what each output class means — **target species** (mapped to a
-taxon via `SpeciesPicker`) or **background/negative** (e.g. `not rat`) — and saves it
-to `ai_models.label_map` (jsonb; RLS: organisation_manager). Class order comes from
+asks the uploader what each output class means: a **target species** (mapped to a
+taxon via `SpeciesPicker`), a **target type** (a person is `human`) or
+**background/negative** (e.g. `not rat`), and saves it
+to `ai_models.label_map` (jsonb; RLS: organisation_manager) through
+`PUT /api/models/{model_id}/label-map`, which refuses a map that breaks LM-10. The rules are in
+[what a class predicts](./ai-model-pipeline.md#what-a-class-predicts-lm-10). Class order comes from
 the model's own `detection_capabilities`, so it stays aligned with the device's
 `labels.txt` (stage 4). This is what lets stage 8 reflect `rat: 87%` as *Rattus
 rattus* and skip negatives. Disambiguates labels like a bare `rat`.
@@ -145,8 +148,9 @@ models are complementary, not exclusive.
 [`backend/app/domain/edge_reflection.py`](../../backend/app/domain/edge_reflection.py)
 turns `user_comment_fields` into observations tagged `ai_origin='edge'` (with
 `source_model_version = '{firmware_model_id}V{version_number}'`, matching the deployed
-`.TFL` filename), mapped to taxa via `label_map`; background/negative classes and
-sub-threshold scores are skipped. Runs inside the Drive upload job as soon as the media rows
+`.TFL` filename), typed by what each class predicts in `label_map` (a taxon class an
+`animal` row with its taxon, a type class its `observation_type`, so `person` is `human`);
+background/negative classes, behaviour classes and sub-threshold scores are skipped. Runs inside the Drive upload job as soon as the media rows
 are registered (before the cloud pipeline, and regardless of the `run_ai` opt-out; the camera
 already decided in the field, so its result should not wait minutes for SpeciesNet), and again
 after the annotation pipeline (`auto_annotate_deployments`, idempotent), replace-don't-append

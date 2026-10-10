@@ -242,11 +242,14 @@ async def create_job(
     kind: Optional[str] = None,
     label: Optional[str] = None,
     deployment_ids: Optional[List[str]] = None,
+    organisation_id: Optional[str] = None,
 ) -> str:
     """Create a new job entry locally and sync to Supabase.
 
     ``user_id`` is stamped into ``job_data`` so the owner can list their own jobs
-    (`api_jobs` has no owner column — see :func:`list_jobs`). ``kind`` is a coarse
+    (`api_jobs` has no owner column, see :func:`list_jobs`). ``organisation_id`` does the
+    same for a job an organisation's API key started: only that organisation's keys may
+    read it (``GET /api/v1/jobs/{id}``). ``kind`` is a coarse
     category ('upload', 'ai_pipeline', 'export', …) and ``label`` a human summary,
     both surfaced in the processing-history view. ``deployment_ids`` records which
     deployments the job touches so the Annotations grid can show a "being processed"
@@ -267,6 +270,7 @@ async def create_job(
         "current_phase": None,
         "summary": None,
         "user_id": user_id,
+        "organisation_id": organisation_id,
         "kind": kind,
         "label": label,
         "deployment_ids": deployment_ids or [],
@@ -339,30 +343,36 @@ async def list_jobs(user_id: str, limit: int = 50) -> List[dict]:
         return []
 
 
-async def find_queued_ai_jobs() -> List[dict]:
-    """**Queued** ``ai_pipeline`` jobs → ``[{job_id, deployment_ids}]`` (from Supabase).
+async def find_active_ai_jobs() -> List[dict]:
+    """Queued and processing ``ai_pipeline`` jobs → ``[{job_id, status, deployment_ids}]`` (from Supabase).
 
     Used to coalesce the upload flow's AI fan-out: a chunked upload (N batches) previously
     enqueued N annotate jobs for the *same* deployment, each paying the model's fixed
-    per-run cost. Deployments covered by a still-queued AI job are skipped — that job
-    fetches its media when it *starts*, so it will include the images just registered.
-    (``processing`` jobs are deliberately excluded: they may have already fetched their
-    media list and would miss later registrations.)
+    per-run cost. A deployment covered by a **queued** job is skipped: that job reads its
+    media only once it holds the deployment (it turns 'processing' at that moment), so it
+    will include the images just registered. A deployment covered only by a
+    **processing** job gets one follow-up job, which every later chunk then reuses (#284).
     """
 
     def _run() -> List[dict]:
         client = create_service_client()
-        resp = client.table("api_jobs").select("id, job_data").eq("status", JobStatus.QUEUED.value).eq("job_data->>kind", "ai_pipeline").execute()
+        resp = (
+            client.table("api_jobs")
+            .select("id, status, job_data")
+            .in_("status", [JobStatus.QUEUED.value, JobStatus.PROCESSING.value])
+            .eq("job_data->>kind", "ai_pipeline")
+            .execute()
+        )
         out = []
         for row in resp.data or []:
             jd = row.get("job_data") or {}
-            out.append({"job_id": row["id"], "deployment_ids": jd.get("deployment_ids") or []})
+            out.append({"job_id": row["id"], "status": row.get("status") or jd.get("status"), "deployment_ids": jd.get("deployment_ids") or []})
         return out
 
     try:
         return await asyncio.to_thread(_run)
     except Exception as e:
-        logger.warning("find_queued_ai_jobs_failed", error=str(e))
+        logger.warning("find_active_ai_jobs_failed", error=str(e))
         return []
 
 
@@ -508,6 +518,7 @@ async def update_summary(
     skipped_inc: int = 0,
     failed_inc: int = 0,
     started_at: Optional[datetime] = None,
+    test_photos_skipped: Optional[int] = None,
 ) -> None:
     lock = _summary_locks.setdefault(job_id, asyncio.Lock())
 
@@ -534,6 +545,8 @@ async def update_summary(
         summary["failed"] += failed_inc
         if started_at is not None:
             summary["started_at"] = started_at.isoformat()
+        if test_photos_skipped is not None:
+            summary["test_photos_skipped"] = test_photos_skipped
 
         data["summary"] = summary
         data["updated_at"] = datetime.now(timezone.utc).isoformat()

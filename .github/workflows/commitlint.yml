@@ -1,0 +1,49 @@
+name: Commitlint
+
+# Every commit in a pull request follows Conventional Commits, under the rules in
+# frontend/commitlint.config.js (the same as ww-mobile-app). The frontend/.husky/commit-msg
+# hook runs the same check locally. Merge commits are skipped by commitlint's default ignores.
+
+on:
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One run per pull request; a fresh push cancels the stale run.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commitlint:
+    name: Commit messages
+    # A dev -> main release carries every dev commit since the last release, and each one
+    # was already checked on its own pull request into dev. Linting them again only
+    # re-reports what dev accepted, so the release pull request skips the job, which a
+    # required check counts as passing.
+    if: github.head_ref != 'dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Validate the pull request's commits
+        working-directory: frontend
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: npx commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose

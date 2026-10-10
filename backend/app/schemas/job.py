@@ -61,7 +61,7 @@ class ProgressEvent(BaseModel):
     the list is trimmed.
     """
 
-    seq: int = Field(0, description="Monotonic sequence number (auto-assigned by store)")
+    seq: int = Field(default=0, description="Monotonic sequence number (auto-assigned by store)")
     type: EventType
     phase: ProgressPhase
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -73,7 +73,7 @@ class ProgressEvent(BaseModel):
     batch_index: Optional[int] = None
     job_id: Optional[str] = None
     child_job_id: Optional[str] = Field(
-        None,
+        default=None,
         description="A spawned follow-on job (e.g. AI analysis offloaded to the GPU worker) the UI should chain onto.",
     )
 
@@ -89,6 +89,8 @@ class ProgressSummary(BaseModel):
     uploaded: int = 0
     skipped: int = 0
     failed: int = 0
+    # WW500 test photos (no deployment set on the camera) left out before upload (#287).
+    test_photos_skipped: int = 0
     started_at: Optional[datetime] = None
 
 
@@ -97,6 +99,7 @@ class JobInfo(BaseModel):
 
     job_id: str
     user_id: Optional[str] = Field(None, description="Owner — used to scope status polling to the creator")
+    organisation_id: Optional[str] = Field(None, description="The organisation whose API key started the job; only its keys may read it")
     status: JobStatus = JobStatus.QUEUED
     progress: float = Field(0.0, ge=0.0, le=1.0, description="0.0–1.0 weighted progress")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

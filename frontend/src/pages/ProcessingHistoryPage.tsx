@@ -80,8 +80,14 @@ function JobRow({ job }: { job: JobSummary }) {
           {job.error && (
             <div style={{ color: '#ef4444', fontSize: '0.75rem', marginBottom: '0.5rem' }}>Error: {job.error}</div>
           )}
+          {detail?.result_url && (detail.status === 'completed' || detail.status === 'completed_with_errors') && (
+            <div style={{ fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+              {detail.message && <span style={{ opacity: 0.75 }}>{detail.message} </span>}
+              <a href={detail.result_url} style={{ color: 'var(--primary)' }}>Download</a>
+            </div>
+          )}
           {isLoading && <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>Loading log…</div>}
-          {detail && detail.events.length === 0 && !job.error && (
+          {detail && detail.events.length === 0 && !job.error && !detail.result_url && (
             <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>No log lines recorded for this job.</div>
           )}
           {detail && detail.events.length > 0 && (

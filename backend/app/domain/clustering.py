@@ -61,7 +61,7 @@ class ClusterResult:
 
 
 def _to_grayscale_small(img: Image.Image, size: Tuple[int, int]) -> np.ndarray:
-    return np.asarray(img.convert("L").resize(size, Image.BILINEAR), dtype=np.uint8)
+    return np.asarray(img.convert("L").resize(size, Image.Resampling.BILINEAR), dtype=np.uint8)
 
 
 def compute_dhash(img: Image.Image, hash_size: int = 8) -> int:

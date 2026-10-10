@@ -13,6 +13,9 @@ Complete endpoint reference for the Wildlife Watcher V2 API.
 
 **Authentication:** JWT Bearer token from Supabase Auth (required for protected endpoints).
 
+> LoRaWAN uplinks do not come through this API. Network servers post to ww-backend's
+> `lorawan-ingest` edge function, see [LORAWAN_INGEST](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/LORAWAN_INGEST.md).
+
 **Response Format:** All endpoints return a standard envelope:
 
 ```json
@@ -48,18 +51,19 @@ On error:
 
 - [System](#system)
 - [Auth](#auth)
+- [Admin](#admin)
 - [Projects](#projects)
 - [Jobs (Async)](#jobs-async)
 - [Manifest Generation](#manifest-generation)
 - [Model Conversion](#model-conversion)
 - [EXIF Parsing](#exif-parsing)
-- [LoRaWAN Webhooks](#lorawan-webhooks)
 - [iNaturalist Integration](#inaturalist-integration)
 - [Image Clustering](#image-clustering)
 - [AI Pipeline](#ai-pipeline)
 - [Media Registry](#media-registry)
 - [Deployments](#deployments)
 - [CamtrapDP Import](#camtrapdp-import)
+- [CamtrapDP Export](#camtrapdp-export)
 - [Wildlife Brain — Embeddings & Clustering](#wildlife-brain--embeddings--clustering)
 - [Conservation Intelligence](#conservation-intelligence)
 - [QA](#qa)
@@ -94,6 +98,17 @@ router exists only to mint the shared read-only demo session server-side. Detail
 
 ---
 
+## Admin
+
+Prefix `/api/admin`. System admins only: `401` without a valid JWT, `403` for anyone else.
+Reads every organisation with the service role, because RLS keeps these rows organisation-scoped.
+
+| Method · Path | Description |
+|---|---|
+| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Backs `/admin/devices` |
+
+---
+
 ## Projects
 
 Prefix `/api/projects`. JWT required. **Reads go direct to Supabase** under RLS
@@ -103,15 +118,16 @@ that need service-role cascades or admin checks.
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/projects` | JWT | Create a project in the caller's organisation — body `{ name, description? }` |
-| `DELETE /api/projects/{project_id}` | JWT · `project_admin` | Soft-delete, cascading to deployments → media → observations. Returns the shared `deleted_at` so the client can offer Undo. Members/viewers get `404` |
-| `POST /api/projects/{project_id}/restore` | JWT · `project_admin` | Undo a soft-delete using that `deleted_at` |
+| `DELETE /api/projects/{project_id}` | JWT · `project_admin` or `ww_admin` | Soft-delete, cascading to deployments → media → observations. The database decides: `soft_delete_project` runs as the caller and allows a `project_admin` of the project or `ww_admin`. Anyone else who can see the project, an organisation manager included, gets `403`; a project the caller cannot see is `404`. Returns the shared `deleted_at` so the client can offer Undo |
+| `POST /api/projects/{project_id}/restore` | JWT · `project_admin` or `ww_admin` | Undo that delete, body `{ deleted_at }`. Same rule, checked in the API because the database has no restore function (ww-backend #286). `403` for anyone else with a role reaching the project, `404` otherwise |
 
 ---
 
 ## Jobs (Async)
 
 Long-running operations (manifest, model conversion, pipeline, embedding) return a `job_id`
-immediately; poll these to track progress. Job IDs are unguessable UUIDs (no auth). Prefix `/api/jobs`.
+immediately; poll these to track progress. JWT required: a user's jobs are its own, owner-less system jobs
+are readable by any signed-in user, and an API key's jobs are read with `GET /api/v1/jobs/{job_id}`. Prefix `/api/jobs`.
 
 | Method · Path | Description |
 |---|---|
@@ -152,6 +168,8 @@ Architecture: [AI Model Pipeline](./ai-model-pipeline.md). Prefix `/api/models`.
 | `GET /api/models/pretrained/catalog` | None | Built-in pretrained registry (architectures, resolutions, labels) |
 | `GET /api/models/sscma/catalog` | None | SSCMA model catalog (cached 1 h) |
 | `GET /api/models/managed-orgs` | JWT | Orgs where the user is `organisation_manager` |
+| `GET /api/models/{model_id}/label-map` | JWT, read as the caller (RLS) | What a model's classes assert → `{ model_id, name, labels, label_map, predicts, problems }`. `label_map` is the stored map with `predicts` filled in for targets that predate it; `predicts` lists what the valid targets predict (`taxon`, `type`); `problems` is LM-10 over the stored map, empty when valid. 404 for a model the caller cannot see. Rules: [AI Model Pipeline, what a class predicts](./ai-model-pipeline.md#what-a-class-predicts-lm-10) |
+| `PUT /api/models/{model_id}/label-map` | JWT, written as the caller (RLS: org-manager), not the demo | Save a model's whole label map, body `{ label_map }` → the same shape as the GET. A map that breaks LM-10 is a 422 with `detail: { message, problems: { <label>: <problem> } }` and nothing is written; a map the database's LM-10 CHECK refuses is the same 422 with the database's message and empty `problems`. 403 when RLS refuses the write, 404 for a model the caller cannot see |
 | `GET /api/models/train/status` | JWT | Whether training is on (`FF_MODEL_TRAINING_ENABLED`), the trainer `mode` (`edge_impulse` \| `export_only`) and the dataset limits the UI validates against |
 | `POST /api/models/train` | JWT (verified) · org-manager, 10/min | Train a Species Brain from an Annotations selection. Body `{ media_ids, model_name, classes: [{ label, scientific_name, … }], include_background?, background_label?, image_size? (96\|160), colour?, epochs?, organisation_id? }` → `{ job_id, model_id, mode, poll_url }`. Every image must be in a deployment the caller can read. See [species-brain-training-spec](../development%20reports/species-brain-training-spec.md) |
 
@@ -164,28 +182,12 @@ image-upload pipeline — see [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/exif/parse` | Form `files[]` (+ optional `paths[]`, `upload_to_drive`, `assigned_deployment_id`, `run_ai`) → per-file parsed EXIF; buffers bytes to Azure + enqueues the Drive upload job. `assigned_deployment_id` binds photos that carry no valid deployment ID; `run_ai` (default `true`) gates the post-upload AI pipeline + Wildlife Brain. Response `drive_upload` tells you whether anything was actually stored — clients **must** treat `{enabled: false}` (`reason: server_disabled` = `GOOGLE_DRIVE_ENABLED` unset, or `not_requested`) and `{status: "skipped", reason: "no_deployment_id"}` as *nothing saved* (media rows are only created by the Drive job); `{status: "error"}` = not authenticated; otherwise it carries the enqueued `job_id` |
+| `POST /api/exif/parse` | Form `files[]` (+ optional `paths[]`, `upload_to_drive`, `assigned_deployment_id`, `run_ai`) → per-file parsed EXIF; buffers bytes to Azure + enqueues the Drive upload job. `assigned_deployment_id` binds photos that carry no valid deployment ID; `run_ai` (default `true`) gates the post-upload AI pipeline + Wildlife Brain. Response `drive_upload` tells you whether anything was actually stored, clients **must** treat `{enabled: false}` (`reason: server_disabled` = `GOOGLE_DRIVE_ENABLED` unset, or `not_requested`) and `{status: "skipped", reason: "no_deployment_id"}` as *nothing saved* (media rows are only created by the Drive job); `{status: "error"}` = not authenticated; otherwise it carries the enqueued `job_id`. WW500 test photos (EXIF `Make` "Wildlife.ai" with no `Deployment_ID`, or the all-zero id) are never stored, even under `assigned_deployment_id`; their image entries carry `exif.test_photo: true`, and `test_photos_skipped` counts them in the response and the job summary (ww-website#287) |
 
 **Key extracted fields:** `deployment_id` (firmware tag `0xF200` → `UserComment` → `Custom_Data`),
 `latitude`/`longitude` (GPS DMS→decimal), `date` (Original → Create → DateTime), `Make`/`Model`,
 and `temperature_c`/`battery_pct` (parsed from `UserComment` telemetry). The full set lands in
 `media.exif_metadata`.
-
----
-
-## LoRaWAN Webhooks
-
-Receive device uplinks from LoRaWAN network servers. Webhooks authenticate with the
-**`X-Webhook-Secret`** header (`LORAWAN_TTN_WEBHOOK_SECRET` / `LORAWAN_CHIRPSTACK_WEBHOOK_SECRET` /
-`LORAWAN_WEBHOOK_SECRET`); query endpoints use JWT. Gated by `FF_LORAWAN_WEBHOOKS_ENABLED`. Prefix
-`/api/lorawan`. Payload formats + network-server config: [LoRaWAN Webhook Setup](./lorawan-webhook-setup.md).
-
-| Method · Path | Auth | Description |
-|---|---|---|
-| `POST /api/lorawan/webhook/ttn` | `X-Webhook-Secret` | TTN v3 uplink → parsed battery / SD-card / model-output |
-| `POST /api/lorawan/webhook/chirpstack` | `X-Webhook-Secret` | Chirpstack v4 uplink |
-| `GET /api/lorawan/messages` | JWT | Org-scoped parsed-message list |
-| `GET /api/lorawan/messages/{device_eui}/latest` | JWT | Latest parsed message for a device EUI |
 
 ---
 
@@ -238,7 +240,7 @@ Run inference + ecological event/effort computation on a deployment. Gated by `F
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/pipeline/run` | Run the pipeline — body `{ deployment_id, steps?, confidence_threshold?, config?, only_unannotated? }`. Steps: `media_prep`, `speciesnet`, `animal_crop`, `bioclip`. Returns per-step + aggregate counts and records an `annotation_run` |
+| `POST /api/pipeline/run` | Run the pipeline, body `{ deployment_id, steps?, confidence_threshold?, config?, only_unannotated? }`. Steps: `media_prep`, `speciesnet`, `animal_crop`, `bioclip`. Returns per-step + aggregate counts and records an `annotation_run`. Error `PIPELINE_BUSY` (retryable) when another run holds the deployment; the request does not wait |
 | `POST /api/pipeline/events/cluster` | Group observations into ecological events by temporal gap — body `{ deployment_id, gap_minutes?, min_images? }` |
 | `POST /api/pipeline/effort/{deployment_id}` | Compute + store effort (trap-nights, uptime, false-trigger rate) |
 | `GET /api/pipeline/effort/{deployment_id}` | Retrieve cached effort stats |
@@ -255,24 +257,27 @@ endpoints are gated by `FF_MEDIA_REGISTRY_ENABLED`. All return the standard `Api
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/media/{media_id}/image` | Serve/proxy a media image (`?size=thumb\|full`); resolves public files / signed URLs |
-| `GET /api/media/{media_id}/resolve` | Resolve a media id to a displayable URL (rendition or signed original) |
-| `GET /api/media/registry/{deployment_id}` | Rendition status for a deployment's media |
+| `GET /api/media/{media_id}/image` | Serve/proxy a media image (`?size=thumb\|full`); resolves public files / signed URLs. Needs the Bearer header, so a plain `<img>` cannot load it |
+| `GET /api/media/{media_id}/resolve` | Resolve a media id to a URL an `<img>` can load (`?size=thumbnail\|preview\|original`): a rendition or a public original, `null` when only a private original exists |
+| `GET /api/media/registry/{deployment_id}` | A deployment's media with `thumbnail_url`, `preview_url` and `original_url` resolved as for `/resolve`, each `null` when only a private original exists. Cluster Review and the Review Queue read it |
 | `POST /api/media/thumbnails/{deployment_id}` | Make the missing thumbnails/previews for a deployment (async job, in the caller's job list, progress per 25 photos). The grid's Retry on a "No thumbnail" card calls it |
-| `DELETE /api/media/batch` | Soft-delete media by id list — body `{ "media_ids": [...] }` |
+| `DELETE /api/media/batch` | Soft-delete media by id list, body `{ "media_ids": [...] }`. Runs as the caller, so RLS changes only photos they uploaded (while at least `project_member`) or any photo in a project they administer; other ids, and ids already deleted, are skipped without an error. Returns `{ deleted, requested, deleted_at, deleted_ids, skipped_ids }`; `deleted_at` is shared by the batch, for Undo. `POST /api/media/batch/restore` (body `{ media_ids, deleted_at }`) undoes it under the same rule and returns `{ restored, restored_ids, skipped_ids }` |
 | `POST /api/media/run-selected` | Run the AI pipeline on a media subset — body `{ "media_ids": [...], "steps": [...] }` |
 
 ---
 
 ## Deployments
 
-Deployment helpers used by the upload flow. JWT required. Prefix `/api/deployments`.
+Deployment helpers used by the upload flow and Insights. JWT required. Prefix `/api/deployments`.
 
 | Method · Path | Description |
 |---|---|
 | `POST /api/deployments` | Create a deployment (+ placeholder device) in a project you can access — body `{ project_id, name?, id?, location_name?, latitude?, longitude?, deployment_start?, deployment_end? }`. Backs the "assign/create a deployment at upload" flow: pass the new id as `assigned_deployment_id` to `/api/exif/parse` to bind photos that carry no valid deployment ID. `id` (a UUID) creates the row under the id the camera stamped into the photos' EXIF, so the phone that configured the camera converges on it when it syncs; `400` if not a UUID, `409` if it already exists |
+| `PATCH /api/deployments/{deployment_id}/location` | Correct a deployment's location as the signed-in user (Insights > Deployments, Edit location). Body `{ location_name, location_description, latitude, longitude, altitude, accuracy }`, every field written, so `null` clears it; `timezone` is recomputed from the coordinates. Runs on the caller's client, so RLS decides: the creator while still a project member, or a project admin. `403` when RLS refuses (0 rows), `404` when the caller cannot see the deployment, `422` for an invalid body. Returns the stored location columns |
 | `POST /api/deployments/validate` | Resolve deployment ids to `valid` / `no_access` / `not_found` — the upload pre-check that drives the warning banners. Accepts full UUIDs (from EXIF `0xF200`) and 8-hex card-folder prefixes. Body `{ "deployment_ids": ["e10f7c43-…", "7785FABB", …] }` |
-| `POST /api/deployments/backfill-timezones` | Derive `deployments.timezone` from GPS for rows missing it (idempotent) |
+| `DELETE /api/deployments/batch` | Soft-delete deployments and their media and observations, body `{ "deployment_ids": [...] }`. The database decides: each id goes through `soft_delete_deployment` as the caller, which allows the deployment's creator while a `project_member`, a `project_admin` of the project, or `ww_admin`. Returns `{ deleted_at, deployment_ids, refused_ids }`; ids the caller cannot see are skipped, and `403` when every visible id was refused. `deleted_at` is shared by the whole batch, for Undo |
+| `POST /api/deployments/batch/restore` | Undo that delete, body `{ deployment_ids, deleted_at }`. Same rule, checked in the API because the database has no restore function. Returns `{ restored, refused_ids }`, `403` when every id was refused |
+| `POST /api/deployments/backfill-timezones` | System admins only (`403` otherwise, demo included). Derive `deployments.timezone` from GPS for rows missing it, across every organisation (idempotent) |
 
 ---
 
@@ -284,7 +289,18 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 |---|---|
 | `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id` |
 
-> Public-API export of CamtrapDP is `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
+> An API key starts the same export with `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
+
+---
+
+## CamtrapDP Export
+
+Prefix `/api/exports`. JWT required. Gated by `FF_CAMTRAPDP_EXPORT_ENABLED` (returns `FEATURE_DISABLED` when off,
+and the Download CamtrapDP buttons then fall back to the Edge Function's metadata-only ZIP).
+
+| Method · Path | Description |
+|---|---|
+| `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_member` check decides; `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from Drive with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private `CAMTRAPDP_EXPORT_BUCKET` (default `exports`) under `camtrapdp/<job_id>.zip`, `result_url` is a signed link valid for 24 hours, and exports older than 7 days are deleted when the next one is stored. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
 
 ---
 
@@ -362,20 +378,45 @@ Prefix `/api/qa`. JWT required.
 ## Public Data API (v1)
 
 Token-authenticated **read** API for external integrations. Data endpoints authenticate with an
-**`X-API-Key`** header (not the JWT) carrying a `<resource>:read` scope; the key-management endpoints
-use the normal JWT. Gated by **`FF_PUBLIC_API_ENABLED`**. Prefix `/api/v1`.
+**`X-API-Key`** header (not the JWT); the key-management endpoints use the normal JWT. Gated by
+**`FF_PUBLIC_API_ENABLED`**; while it is off the data endpoints answer 404 and the key-management
+endpoints answer a `FEATURE_DISABLED` error. Prefix `/api/v1`. For partners, with curl examples:
+the [Public API guide](./public-api-guide.md).
+
+**API keys** belong to one organisation. Only an `organisation_manager` of that organisation
+(`scope_type = 'organisation'`) may create, list or revoke them, and the caller names the
+organisation (`organisation_id`) on every call. Its `organisation_member`s and system-scope roles,
+`ww_admin` included, get 403; anyone else gets 404, so other organisations cannot be probed. The demo
+account cannot create or revoke. Organisation managers do this in Settings, Integrations.
+
+- A key is `ww_live_` plus 32 hex characters. It is returned once, at creation. ww-backend's
+  `api_keys` table stores only its SHA-256 hex and the first 16 characters (`key_prefix`).
+- `scopes` needs at least one of `deployments:read`, `devices:read`, `telemetry:read`,
+  `observations:read`, `export:camtrapdp`, `models:read` (no endpoint yet). `expires_at` is
+  optional and must be in the future; a time without a zone is read as UTC.
+- A missing, revoked or expired key gets 401, a key without the endpoint's scope 403. Each
+  accepted call sets the key's `last_used_at`.
+- **Organisation scoping.** The queries run with the service role, so `domain/public_api.py` is
+  what keeps organisations apart. A deployment's organisation is its project's; deleted rows, and
+  rows under a deleted deployment or project, are left out. Another organisation's id answers 404.
+- **Paging.** The lists take `limit` (at most 1,000, PostgREST's row cap, so one page is one
+  request; more answers 422) and `offset`, and return `meta.total` and `meta.page`.
+- **Rate limit** per key, not per address: `PUBLIC_API_RATE_LIMIT_PER_MINUTE` (default 60) calls a
+  minute across the data endpoints, and 5 exports a minute. Over it: 429 with `Retry-After`.
+  Counted in the slowapi limiter's storage, so per API process.
 
 | Method · Path | Auth | Description |
 |---|---|---|
-| `POST /api/v1/api-keys` | JWT | Create an API key (the secret is returned **once**) |
-| `GET /api/v1/api-keys` | JWT | List your API keys (metadata only, no secrets) |
-| `DELETE /api/v1/api-keys/{key_id}` | JWT | Revoke an API key |
-| `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | List deployments (filter `?project_id=&status=&limit=&offset=`) |
-| `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | Deployment detail |
-| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | List devices |
-| `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | Device LoRaWAN telemetry |
-| `GET /api/v1/observations` | `X-API-Key` · `observations:read` | List observations (filterable) |
-| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | Export a CamtrapDP package |
+| `POST /api/v1/api-keys` | JWT · organisation manager | Create a key. Body `{organisation_id, name, scopes, expires_at?}`; the raw key is in `data.key`, **once** |
+| `GET /api/v1/api-keys?organisation_id=` | JWT · organisation manager | List the organisation's unrevoked keys: name, `key_prefix`, scopes, created, last used, expiry. Never the key or its hash |
+| `DELETE /api/v1/api-keys/{key_id}?organisation_id=` | JWT · organisation manager | Revoke a key (sets `revoked_at`); 404 if the organisation has no such unrevoked key |
+| `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | Deployments in the organisation's projects, newest first, with `project_name`, `device_name` and `status` (`planned`, `started`, `ended`). Filters `?project_id=&status=&limit=&offset=` |
+| `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | One of those deployments |
+| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The organisation's own cameras (`devices.organisation_id`), newest first |
+| `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | The camera's `lorawan_messages` whose deployment is in one of the organisation's projects (ww-backend#323), newest first, with the parsed `battery_level`, `sd_card_used_capacity` and `model_output`. `?date_from=&date_to=&limit=` (≤ 1,000). An EUI with none answers `[]` |
+| `GET /api/v1/observations` | `X-API-Key` · `observations:read` | One verdict per live photo with at least one live observation, chosen as the grid's `photoVerdict` chooses it (#170; `photo_verdict` is its port): the label fields of the observation the card shows, `is_empty`, and `human_reviewed` when any observation is reviewed. Photos in `media.created_at` then `id` order, their observations in `created_at` order. `?project_id=&deployment_id=&limit=&offset=` |
+| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | The [CamtrapDP export](#camtrapdp-export) job for the key's organisation: the same body and package, with `export-camtrap-dp` called with the service role and `organisation_id` (ww-backend#290). 404 for a project outside the organisation, and while `FF_CAMTRAPDP_EXPORT_ENABLED` is off. Returns `{ job_id }` |
+| `GET /api/v1/jobs/{job_id}` | `X-API-Key` · `export:camtrapdp` | A job one of the organisation's keys started (`organisation_id` in `api_jobs.job_data`): `status`, `progress`, `message`, `error`, `result_url`. Any other job answers 404; `/api/jobs/{id}` does not serve these jobs to signed-in users |
 
 ---
 

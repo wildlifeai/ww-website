@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useProjectSelection } from '../../hooks/useProjectSelection'
+import { projectPickerLabel } from '../../lib/projectSelection'
 import { Folder, ChevronDown, CheckSquare, Square, Settings2 } from 'lucide-react'
 
 const MENU_WIDTH = 250
@@ -52,15 +53,6 @@ export function GlobalProjectSelector() {
 
   if (isLoading || projects.length === 0) return null
 
-  const getButtonLabel = () => {
-    if (selectedProjectIds.length === 0) return 'All Projects'
-    if (selectedProjectIds.length === projects.length) return 'All Projects'
-    if (selectedProjectIds.length === 1) {
-      return projects.find(p => p.id === selectedProjectIds[0])?.name || '1 Project'
-    }
-    return `${selectedProjectIds.length} Projects`
-  }
-
   return (
     <div className="relative" ref={dropdownRef} style={{ position: 'relative' }}>
       <button
@@ -81,7 +73,7 @@ export function GlobalProjectSelector() {
       >
         <Folder size={16} style={{ opacity: 0.7 }} />
         <span style={{ maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {getButtonLabel()}
+          {projectPickerLabel(projects, selectedProjectIds)}
         </span>
         <ChevronDown size={14} style={{ opacity: 0.5 }} />
       </button>

@@ -10,10 +10,12 @@
  * Projects & members moved to Settings (P2).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { supabase } from '../config/supabase'
+import { fetchLiveObservations } from '../lib/liveObservations'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { FilterSelect } from '../components/ui/ControlBar'
 import { Ribbon, type RibbonGroupDef } from '../components/ui/Ribbon'
@@ -23,6 +25,7 @@ import { LiveInsightsBanner } from '../components/data/LiveInsightsBanner'
 import { DeploymentBulkActions } from '../components/data/DeploymentBulkActions'
 import { type DeploymentRow } from '../components/data/DeploymentActionRow'
 import { useUploadStore } from '../contexts/UploadContext'
+import { NoProjectSelected } from '../components/common/NoProjectSelected'
 
 interface Observation {
   id: string
@@ -54,6 +57,50 @@ function activeDaysOf(start: string | null, end: string | null): number {
   return Math.max(1, Math.round((e - s) / 86_400_000))
 }
 
+const NO_DEPLOYMENTS: DeploymentRow[] = []
+const NO_OBSERVATIONS: Observation[] = []
+
+/**
+ * The selected projects' deployments. A deep-linked ?deployment= is always included, even
+ * when its project isn't selected, so it never lands on an empty report; with no project
+ * ids it is the only one.
+ */
+async function fetchDeployments(projectIds: string[] | null, deploymentParam: string): Promise<DeploymentRow[]> {
+  let query = supabase
+    .from('deployments')
+    .select('id, project_id, location_name, latitude, longitude, deployment_start, deployment_end, created_at, projects(name), devices(name)')
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false })
+
+  if (!projectIds) {
+    query = query.eq('id', deploymentParam)
+  } else if (deploymentParam) {
+    query = query.or(`project_id.in.(${projectIds.join(',')}),id.eq.${deploymentParam}`)
+  } else {
+    query = query.in('project_id', projectIds)
+  }
+
+  const { data, error } = await query
+  if (error) throw new Error(error.message)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data || []).map((d: any) => ({
+    ...d,
+    project_name: d.projects?.name ?? '—',
+    device_name:  d.devices?.name  ?? '—',
+    projects: undefined,
+    devices:  undefined,
+  })) as DeploymentRow[]
+}
+
+async function fetchObservations(deploymentIds: string[]): Promise<Observation[]> {
+  const { data, error } = await fetchLiveObservations<Observation>(supabase, {
+    columns: 'id, deployment_id, scientific_name, observation_type, created_at',
+    filter: q => q.in('deployment_id', deploymentIds),
+  })
+  if (error) throw new Error(error.message)
+  return data || []
+}
+
 const VIEW_BTN = (active: boolean): React.CSSProperties => ({
   padding: '0.3rem 0.7rem', fontSize: '0.78rem', cursor: 'pointer', whiteSpace: 'nowrap',
   border: '1px solid var(--border)', borderRadius: 'var(--radius)',
@@ -63,18 +110,9 @@ const VIEW_BTN = (active: boolean): React.CSSProperties => ({
 
 export function InsightsPage() {
   const { user } = useAuth()
-  const { selectedProjectIds } = useProjectSelection()
+  const { queryProjectIds, noProjectSelected } = useProjectSelection()
   const { isActive: uploadActive, phase: uploadPhase } = useUploadStore()
   const [searchParams, setSearchParams] = useSearchParams()
-
-  // While an upload is processing, tick periodically so the observations query refetches
-  // and partial AI results stream into the reports/map without a manual page refresh.
-  const [liveTick, setLiveTick] = useState(0)
-  useEffect(() => {
-    if (!uploadActive) return
-    const t = setInterval(() => setLiveTick(x => x + 1), 8000)
-    return () => clearInterval(t)
-  }, [uploadActive])
 
   const rawTab = searchParams.get('tab')
   const tab: InsightsTab = rawTab === 'deployments' || rawTab === 'map' ? rawTab : 'reports'
@@ -93,103 +131,69 @@ export function InsightsPage() {
     return /^[0-9a-fA-F-]{36}$/.test(d) ? d : ''
   })()
 
-  const [deployments,  setDeployments]  = useState<DeploymentRow[]>([])
-  const [observations, setObservations] = useState<Observation[]>([])
-  const [depLoading,   setDepLoading]   = useState(false)
-  const [obsLoading,   setObsLoading]   = useState(false)
-  const [error,        setError]        = useState<string | null>(null)
   const [selectedDepId, setSelectedDepId] = useState<string | null>(null)
   const [selectedDeps, setSelectedDeps] = useState<Set<string>>(new Set())
   const [mapMetric, setMapMetric] = useState<MapMetric>('total')
   const [mapShowAbsent, setMapShowAbsent] = useState(true)
 
-  // Tracks the last observations-query key so the live refresh can skip the loading flash.
-  const obsKeyRef = useRef('')
-  // Bumped after a deployment delete/undo to refetch the list.
-  const [depRefresh, setDepRefresh] = useState(0)
-
-  const [reportFilterDep, setReportFilterDepState]    = useState(deploymentParam)
   const [reportFilterSpecies, setReportFilterSpecies] = useState('')
   const [mapFilterSpecies, setMapFilterSpecies]       = useState('')
 
-  // The Reports ▸ Deployment filter is mirrored in the URL so the view is
-  // shareable/bookmarkable and arrivals via ?deployment= land pre-focused.
+  // The Reports ▸ Deployment filter lives in the URL, so the view is
+  // shareable/bookmarkable, arrivals via ?deployment= land pre-focused, and
+  // back/forward moves it.
+  const reportFilterDep = deploymentParam
   const setReportFilterDep = (id: string) => {
-    setReportFilterDepState(id)
     const next = new URLSearchParams(searchParams)
     if (id) next.set('deployment', id)
     else next.delete('deployment')
     setSearchParams(next, { replace: true })
   }
-  // Reflect external URL changes (back/forward, a new deep-link) into the filter.
-  useEffect(() => { setReportFilterDepState(deploymentParam) }, [deploymentParam])
+
+  // With nothing selected the page shows only a deep-linked ?deployment=, or the empty state.
+  const linkOnly = noProjectSelected && !!deploymentParam
+  const showNothing = noProjectSelected && !deploymentParam
 
   // Load deployments (both tabs use them) ──────────────────────────────────
-  useEffect(() => {
-    if (!user) return
-    let cancelled = false
-    setDepLoading(true)
-    setError(null)
-
-    let query = supabase
-      .from('deployments')
-      .select('id, project_id, location_name, latitude, longitude, deployment_start, deployment_end, created_at, projects(name), devices(name)')
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false })
-
-    if (selectedProjectIds.length > 0) {
-      // Honour the project selection, but always include a deep-linked deployment
-      // even when its project isn't currently selected, so ?deployment= never
-      // lands on an empty report.
-      if (deploymentParam) {
-        query = query.or(`project_id.in.(${selectedProjectIds.join(',')}),id.eq.${deploymentParam}`)
-      } else {
-        query = query.in('project_id', selectedProjectIds)
-      }
-    }
-
-    query.then(({ data, error: err }) => {
-      if (cancelled) return
-      if (err) { setError(err.message); setDepLoading(false); return }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rows = (data || []).map((d: any) => ({
-        ...d,
-        project_name: d.projects?.name ?? '—',
-        device_name:  d.devices?.name  ?? '—',
-        projects: undefined,
-        devices:  undefined,
-      })) as DeploymentRow[]
-      setDeployments(rows)
-      setDepLoading(false)
-    })
-    return () => { cancelled = true }
-  }, [user, selectedProjectIds, deploymentParam, depRefresh])
+  const queryClient = useQueryClient()
+  const depEnabled = !!user && (!!queryProjectIds || linkOnly)
+  const depQuery = useQuery({
+    queryKey: ['insights', 'deployments', user?.id, queryProjectIds, deploymentParam],
+    queryFn: () => fetchDeployments(queryProjectIds, deploymentParam),
+    enabled: depEnabled,
+    // A new selection keeps the last list until its own arrives, so the reports hold their
+    // data instead of flashing empty; the deployments tab shows its loading state meanwhile.
+    placeholderData: keepPreviousData,
+  })
+  const deployments = depQuery.data ?? NO_DEPLOYMENTS
+  const depLoading = depEnabled && (depQuery.isPending || depQuery.isPlaceholderData)
+  const error = depQuery.error?.message ?? null
+  // After a deployment delete/undo, location edit or move.
+  const refreshDeployments = () => {
+    void queryClient.invalidateQueries({ queryKey: ['insights', 'deployments'] })
+  }
 
   // Load observations (reports always; map view when shown) ─────────────────
+  const depIds = useMemo(() => deployments.map(d => d.id), [deployments])
+  const obsEnabled = !!user && !showNothing && (tab === 'reports' || tab === 'map') && depIds.length > 0
+  const obsQuery = useQuery({
+    queryKey: ['insights', 'observations', user?.id, depIds],
+    queryFn: () => fetchObservations(depIds),
+    enabled: obsEnabled,
+    // While an upload is processing, refetch periodically so partial AI results stream into
+    // the reports/map without a manual page refresh. A refetch keeps the data on screen, so
+    // it never flashes "Loading…" over live data.
+    refetchInterval: uploadActive ? 8000 : false,
+  })
+  const observations = obsQuery.data ?? NO_OBSERVATIONS
+  const obsLoading = obsEnabled && obsQuery.isPending
+  // Each upload phase change (notably the end of classification) reads the results once more.
+  const lastUploadPhase = useRef(uploadPhase)
   useEffect(() => {
-    if (!user) return
-    if (tab !== 'reports' && tab !== 'map') return
-    if (deployments.length === 0) return
-    let cancelled = false
-    // Only show the loading state for a genuine (re)load — not the 8s background refresh
-    // while an upload classifies, which would otherwise flash "Loading…" over live data.
-    const key = `${tab}|${deployments.map(d => d.id).join(',')}`
-    const background = key === obsKeyRef.current
-    obsKeyRef.current = key
-    if (!background) setObsLoading(true)
-    supabase
-      .from('observations')
-      .select('id, deployment_id, scientific_name, observation_type, created_at')
-      .in('deployment_id', deployments.map(d => d.id))
-      .is('deleted_at', null)
-      .then(({ data, error: err }) => {
-        if (cancelled) return
-        if (!err) setObservations(data || [])
-        setObsLoading(false)
-      })
-    return () => { cancelled = true }
-    // liveTick + uploadPhase drive the live refresh while an upload is being classified.
-  }, [user, tab, deployments, liveTick, uploadPhase])
+    if (lastUploadPhase.current === uploadPhase) return
+    lastUploadPhase.current = uploadPhase
+    void queryClient.invalidateQueries({ queryKey: ['insights', 'observations'] })
+  }, [uploadPhase, queryClient])
 
   // Map markers: per-deployment detection count (optionally for one species),
   // effort-normalised to a per-active-day rate, and present/absent flags.
@@ -227,14 +231,16 @@ export function InsightsPage() {
 
   // Default map focus: the most recently *finished* deployment of the selected project(s),
   // so the map opens on the latest completed survey rather than the whole-world centroid.
+  // "Finished" is judged against the time the page opened: reading the clock during
+  // render would give a different answer on every re-render.
+  const [openedAt] = useState(Date.now)
   const defaultFocusId = useMemo(() => {
-    const now = Date.now()
     const finished = deployments
       .filter(d => d.latitude != null && d.longitude != null && d.deployment_end &&
-        new Date(d.deployment_end).getTime() <= now)
+        new Date(d.deployment_end).getTime() <= openedAt)
       .sort((a, b) => new Date(b.deployment_end!).getTime() - new Date(a.deployment_end!).getTime())
     return finished[0]?.id ?? null
-  }, [deployments])
+  }, [deployments, openedAt])
 
   const filteredObservations = useMemo(() => {
     let obs = observations
@@ -311,6 +317,8 @@ export function InsightsPage() {
     ) }]
   }
 
+  if (showNothing) return <NoProjectSelected />
+
   return (
     <div>
       {/* Live AI-classification banner — appears while a just-started upload is being analysed. */}
@@ -353,7 +361,9 @@ export function InsightsPage() {
               rows={deployments}
               onClear={() => setSelectedDeps(new Set())}
               onShowMap={() => setTab('map')}
-              onDeleted={() => { setSelectedDeps(new Set()); setDepRefresh(x => x + 1) }}
+              onDeleted={() => { setSelectedDeps(new Set()); refreshDeployments() }}
+              onEdited={refreshDeployments}
+              onMoved={() => { setSelectedDeps(new Set()); refreshDeployments() }}
             />
             <DataTable<DeploymentRow>
               columns={deploymentColumns}

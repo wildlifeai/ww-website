@@ -5,10 +5,12 @@
 import struct
 
 from app.domain.exif import (
+    EXIF_TAGS,
     _apply_camera_fields,
     _apply_user_comment_fields,
     _camera_variant_from_model,
     _extract_deployment_id,
+    _format_value,
     _strip_nul,
     match_deployment,
     parse_exif_from_bytes,
@@ -85,6 +87,73 @@ class TestParseExifFromBytes:
         """First two bytes must be FF D8."""
         result = parse_exif_from_bytes(b"\xff\xd9rest")
         assert "error" in result
+
+
+def _tiff(e: str, ifds: list) -> bytes:
+    """A TIFF body in byte order ``e`` (``"<"`` II, ``">"`` MM), IFD0 first.
+
+    Each IFD is a list of ``(tag, type, values)``: bytes for ASCII, ints for
+    SHORT/LONG, ``(num, denom)`` pairs for RATIONAL. A pointer tag (0x8769,
+    0x8825) takes the index of the IFD it points at.
+    """
+    ifd_at, pos = [], 8
+    for entries in ifds:
+        ifd_at.append(pos)
+        pos += 2 + 12 * len(entries) + 4
+    out = (b"II" if e == "<" else b"MM") + struct.pack(e + "HI", 42, 8)
+    data = b""
+    for entries in ifds:
+        out += struct.pack(e + "H", len(entries))
+        for tag, type_id, values in entries:
+            if tag in (0x8769, 0x8825):
+                raw, count = struct.pack(e + "I", ifd_at[values]), 1
+            elif type_id == 2:
+                raw, count = values, len(values)
+            elif type_id == 5:
+                raw, count = b"".join(struct.pack(e + "II", n, d) for n, d in values), len(values)
+            else:
+                raw, count = b"".join(struct.pack(e + {3: "H", 4: "I"}[type_id], v) for v in values), len(values)
+            field = raw.ljust(4, b"\x00") if len(raw) <= 4 else struct.pack(e + "I", pos + len(data))
+            if len(raw) > 4:
+                data += raw
+            out += struct.pack(e + "HHI", tag, type_id, count) + field
+        out += struct.pack(e + "I", 0)
+    return out + data
+
+
+class TestByteOrder:
+    """II and MM files decode to the same values (ww-website#318)."""
+
+    IFDS = [
+        [(0x0110, 2, b"WW500 RP3\x00"), (0x8769, 4, 1), (0x8825, 4, 2)],
+        [(0x9209, 3, [1]), (0x8827, 3, [800]), (0x829A, 5, [(1, 125)])],
+        [
+            (0x0001, 2, b"S\x00"),
+            (0x0002, 5, [(41, 1), (17, 1), (30, 1)]),
+            (0x0003, 2, b"E\x00"),
+            (0x0004, 5, [(174, 1), (46, 1), (12, 1)]),
+        ],
+    ]
+
+    def test_little_and_big_endian_agree(self, monkeypatch):
+        # ISO and ExposureTime are not stored by default; register them to read them back.
+        monkeypatch.setitem(EXIF_TAGS, 0x8827, "ISO")
+        monkeypatch.setitem(EXIF_TAGS, 0x829A, "ExposureTime")
+        little, big = (parse_exif_from_bytes(_make_minimal_jpeg_with_exif(_tiff(e, self.IFDS))) for e in "<>")
+        assert big == little
+        assert little["Flash"] == 1 and little["flash_fired"] is True  # MM read as LE gave 256
+        assert little["ISO"] == 800
+        assert little["ExposureTime"] == 1 / 125
+        assert little["GPS_Latitude"] == [41.0, 17.0, 30.0]
+        assert (little["latitude"], little["longitude"]) == (-41.291667, 174.77)
+        assert little["camera_variant"] == "RP3"
+
+    def test_signed_and_long_values_follow_byte_order(self):
+        for e in "<>":
+            assert _format_value(struct.pack(e + "h", -5), 8, e) == -5
+            assert _format_value(struct.pack(e + "i", -70000), 9, e) == -70000
+            assert _format_value(struct.pack(e + "I", 70000), 4, e) == 70000
+            assert _format_value(struct.pack(e + "ii", -1, 3), 10, e) == -1 / 3
 
 
 class TestExtractDeploymentId:

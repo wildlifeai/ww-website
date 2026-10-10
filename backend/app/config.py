@@ -30,15 +30,6 @@ class Settings(BaseSettings):
     )
     RATE_LIMIT_PER_MINUTE: int = Field(60, description="Default per-IP rate limit")
 
-    # ── LoRaWAN Webhooks ─────────────────────────────────────────────
-    LORAWAN_WEBHOOK_SECRET: str = Field("", description="Generic LoRaWAN webhook shared secret")
-    LORAWAN_TTN_WEBHOOK_SECRET: str = Field("", description="TTN-specific webhook secret")
-    LORAWAN_CHIRPSTACK_WEBHOOK_SECRET: str = Field("", description="Chirpstack-specific webhook secret")
-
-    # ── Public API ───────────────────────────────────────────────────
-    PUBLIC_API_ENABLED: bool = Field(False, description="Enable /api/v1/* endpoints")
-    API_KEY_HASH_ROUNDS: int = Field(12, description="bcrypt rounds for API key hashing")
-
     # ── Demo account ─────────────────────────────────────────────────
     # Credentials for the shared read-only demo user (seeded by
     # scripts/seed_demo.py). The /api/auth/demo-session endpoint is
@@ -54,9 +45,19 @@ class Settings(BaseSettings):
     FF_INAT_ENABLED: bool = Field(False)
     FF_ML_ENABLED: bool = Field(False)
     FF_CLUSTERING_ENABLED: bool = Field(False)
-    FF_LORAWAN_WEBHOOKS_ENABLED: bool = Field(True)
-    FF_PUBLIC_API_ENABLED: bool = Field(False)
+    FF_PUBLIC_API_ENABLED: bool = Field(False, description="Enable the public API (/api/v1/*) and its key management")
+    PUBLIC_API_RATE_LIMIT_PER_MINUTE: int = Field(60, ge=1, description="Calls a minute one API key may make to the /api/v1 data endpoints")
     FF_CAMTRAPDP_IMPORT_ENABLED: bool = Field(True, description="Enable CamtrapDP package import endpoint")
+    FF_CAMTRAPDP_EXPORT_ENABLED: bool = Field(
+        False,
+        description="POST /api/exports/camtrapdp starts the export job with the original photos (#328). Off: FEATURE_DISABLED",
+    )
+    CAMTRAPDP_EXPORT_BUCKET: str = Field("exports", description="Private Supabase Storage bucket the export ZIPs go to")
+    CAMTRAPDP_EXPORT_MAX_BYTES: int = Field(
+        4 * 1024**3,
+        ge=1,
+        description="Largest export ZIP, spooled on the job's local disk and sent as one standard Storage upload",
+    )
     FF_PIPELINE_ENABLED: bool = Field(False, description="Enable AI pipeline inference endpoints")
 
     # ── v4 Wildlife Brain feature flags ──────────────────────────────
@@ -175,6 +176,28 @@ class Settings(BaseSettings):
     GEMINI_PRESENCE_VARIANT: str = Field(
         "single",
         description="Token-saving variant: 'single' (one downscaled frame per call), 'contact_sheet' (one burst per call), 'batch' (Batch API)",
+    )
+
+    # ── SpeciesNet box filters (beside the run's confidence_threshold) ──
+    # MegaDetector inside SpeciesNet answers an empty night scene with a box round the
+    # whole frame, often "vehicle" (#285). These drop such boxes before the photo label
+    # and presence are built; the run's config can override each one, and the evidence
+    # fusion audit line records the values used.
+    SPECIESNET_WHOLE_FRAME_AREA: float = Field(
+        0.9,
+        ge=0.0,
+        le=1.0,
+        description="Box area, as a fraction of the frame, above which a low-confidence detection is dropped (any class)",
+    )
+    SPECIESNET_WHOLE_FRAME_MIN_CONFIDENCE: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="A box larger than SPECIESNET_WHOLE_FRAME_AREA is kept only at or above this confidence (an animal at the lens)",
+    )
+    SPECIESNET_DROP_VEHICLES: bool = Field(
+        True,
+        description="Drop every vehicle detection: vehicles never matter to a deployment, and night IR scenes score up to 0.95 as one",
     )
 
     # ── Evidence fusion (consensus verdict per frame) ─────────────────

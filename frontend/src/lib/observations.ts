@@ -82,6 +82,52 @@ export function aiOriginMeta(o: ObservationStatusFields): AiOriginMeta | null {
   return { icon: '☁', label: 'Cloud AI', title: 'Cloud pipeline prediction (SpeciesNet / Wildlife Brain)' }
 }
 
+// ── Photo verdict ────────────────────────────────────────────────────────────
+
+/** Fields the photo verdict reads; every surface's row type satisfies it. */
+export interface PresenceFields extends ObservationStatusFields {
+  observation_type?: string | null
+  scientific_name?: string | null
+}
+
+export interface PhotoVerdict<T> {
+  /** The row whose name and confidence the card shows, or null. */
+  labelObs: T | null
+  /** The photo shows as Empty. */
+  isEmpty: boolean
+}
+
+/**
+ * Which verdict a photo's card shows (#170). A human verdict wins. Otherwise the
+ * evidence-fusion consensus row (`source_type='consensus'`) decides presence: blank
+ * shows Empty, anything else takes its name from the first named per-model row. With
+ * neither, the first row, as before the consensus existed. A consensus row a reviewer
+ * confirmed is a human verdict, but a reviewed per-model row is preferred as the label.
+ * The public API's `photo_verdict` (backend/app/domain/public_api.py) is a port: change both.
+ */
+export function photoVerdict<T extends PresenceFields>(obs: readonly T[]): PhotoVerdict<T> {
+  const reviewed = obs.filter(isHumanReviewed)
+  const human = reviewed.find(o => o.source_type !== 'consensus') ?? reviewed[0]
+  const consensus = obs.find(o => o.source_type === 'consensus')
+  if (!human && consensus) {
+    if (consensus.observation_type === 'blank') return { labelObs: null, isEmpty: true }
+    const named = obs.find(o => o.source_type !== 'consensus' && o.observation_type !== 'blank' && !!o.scientific_name)
+    return { labelObs: named ?? null, isEmpty: false }
+  }
+  const top = human ?? obs[0] ?? null
+  return { labelObs: top, isEmpty: !!top && !top.scientific_name && top.observation_type === 'blank' }
+}
+
+/**
+ * The rows Confirm stamps human reviewed when no observation is selected (#301): the
+ * per-model AI labels not yet reviewed, including older machine rows with no `source_type`.
+ * The consensus row is a derived machine verdict and keeps `ai_reviewed`; the photo's verdict
+ * follows the human row first.
+ */
+export function confirmAllTargets<T extends ObservationStatusFields>(obs: readonly T[]): T[] {
+  return obs.filter(o => isAiLabel(o) && o.source_type !== 'consensus' && !isHumanReviewed(o))
+}
+
 // ── Boxes ────────────────────────────────────────────────────────────────────
 
 export interface ObservationBox {
@@ -107,6 +153,11 @@ export function groupByBox<T extends ObservationBox>(obs: T[]): T[][] {
     else groups.set(key, [o])
   }
   return [...groups.values()]
+}
+
+/** What a viewer calls an observation: its common name, else its species, else its type. */
+export function observationLabel(o: { vernacular_name?: string | null; scientific_name: string | null; observation_type: string | null }): string {
+  return o.vernacular_name || o.scientific_name || o.observation_type || 'Unlabelled'
 }
 
 // ── Provenance builders ──────────────────────────────────────────────────────

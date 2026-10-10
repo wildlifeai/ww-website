@@ -40,10 +40,15 @@
         "title": "ApiError",
         "type": "object"
       },
-      "ApiKeyCreate": {
-        "description": "Request to create a new API key.",
+      "ApiJobOut": {
+        "description": "An export job's state. ``result_url`` is the signed download link once it has finished.",
         "properties": {
-          "expires_at": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error": {
             "anyOf": [
               {
                 "type": "string"
@@ -52,13 +57,121 @@
                 "type": "null"
               }
             ],
-            "description": "ISO timestamp \u2014 key expires after this time",
+            "title": "Error"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "progress": {
+            "description": "0.0 to 1.0",
+            "title": "Progress",
+            "type": "number"
+          },
+          "result_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Signed link to the ZIP, valid for 24 hours from when the job finished",
+            "title": "Result Url"
+          },
+          "status": {
+            "$ref": "#/components/schemas/JobStatus"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "progress",
+          "created_at"
+        ],
+        "title": "ApiJobOut",
+        "type": "object"
+      },
+      "ApiJobResponse": {
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiJobOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "ApiJobResponse",
+        "type": "object"
+      },
+      "ApiKeyCreate": {
+        "description": "Request to create a new API key.",
+        "properties": {
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The key stops working after this time. Must be in the future.",
             "title": "Expires At"
           },
           "name": {
             "description": "Human-readable key name",
             "maxLength": 100,
+            "minLength": 1,
             "title": "Name",
+            "type": "string"
+          },
+          "organisation_id": {
+            "description": "Organisation the key belongs to. The caller must be its organisation_manager.",
+            "format": "uuid",
+            "title": "Organisation Id",
             "type": "string"
           },
           "scopes": {
@@ -66,11 +179,13 @@
             "items": {
               "type": "string"
             },
+            "minItems": 1,
             "title": "Scopes",
             "type": "array"
           }
         },
         "required": [
+          "organisation_id",
           "name",
           "scopes"
         ],
@@ -371,155 +486,55 @@
         "title": "Body_parse_exif_api_exif_parse_post",
         "type": "object"
       },
-      "CamtrapDPExportRequest": {
-        "description": "Request to generate a CamtrapDP data package.",
+      "CamtrapExportRequest": {
+        "description": "One project, narrowed as ww-backend's export-camtrap-dp narrows it.",
         "properties": {
           "date_from": {
             "anyOf": [
               {
+                "format": "date-time",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Start date (ISO)",
+            "description": "Deployments that started at or after this time",
             "title": "Date From"
           },
           "date_to": {
             "anyOf": [
               {
+                "format": "date-time",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "End date (ISO)",
+            "description": "Deployments that started at or before this time",
             "title": "Date To"
           },
           "deployment_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Specific deployments to include",
-            "title": "Deployment Ids"
-          },
-          "include_observations": {
-            "default": true,
-            "description": "Include AI detection observations",
-            "title": "Include Observations",
-            "type": "boolean"
+            "description": "Only these deployments of the project",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Deployment Ids",
+            "type": "array"
           },
           "project_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Filter by project",
-            "title": "Project Id"
-          }
-        },
-        "title": "CamtrapDPExportRequest",
-        "type": "object"
-      },
-      "ChirpstackDeviceInfo": {
-        "properties": {
-          "applicationId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Applicationid"
-          },
-          "applicationName": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Applicationname"
-          },
-          "devEui": {
-            "title": "Deveui",
+            "format": "uuid",
+            "title": "Project Id",
             "type": "string"
-          },
-          "deviceName": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Devicename"
           }
         },
         "required": [
-          "devEui"
+          "project_id"
         ],
-        "title": "ChirpstackDeviceInfo",
-        "type": "object"
-      },
-      "ChirpstackUplink": {
-        "description": "Chirpstack v4 uplink webhook payload.",
-        "properties": {
-          "data": {
-            "description": "Base64-encoded payload",
-            "title": "Data",
-            "type": "string"
-          },
-          "deviceInfo": {
-            "$ref": "#/components/schemas/ChirpstackDeviceInfo"
-          },
-          "fPort": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fport"
-          },
-          "time": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Time"
-          }
-        },
-        "required": [
-          "deviceInfo",
-          "data"
-        ],
-        "title": "ChirpstackUplink",
+        "title": "CamtrapExportRequest",
         "type": "object"
       },
       "CreateDeploymentRequest": {
@@ -628,6 +643,80 @@
           "name"
         ],
         "title": "CreateProjectRequest",
+        "type": "object"
+      },
+      "DeploymentLocationRequest": {
+        "description": "The whole location of one deployment. Every field is written, so a blank clears it.",
+        "properties": {
+          "accuracy": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accuracy"
+          },
+          "altitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Altitude"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": -90.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "location_description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Description"
+          },
+          "location_name": {
+            "title": "Location Name",
+            "type": "string"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "maximum": 180.0,
+                "minimum": -180.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          }
+        },
+        "required": [
+          "location_name"
+        ],
+        "title": "DeploymentLocationRequest",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -757,6 +846,34 @@
           "media_ids"
         ],
         "title": "INatPublishRequest",
+        "type": "object"
+      },
+      "JobStatus": {
+        "description": "Lifecycle states for an async job.",
+        "enum": [
+          "queued",
+          "processing",
+          "completed",
+          "completed_with_errors",
+          "failed"
+        ],
+        "title": "JobStatus",
+        "type": "string"
+      },
+      "LabelMapRequest": {
+        "description": "A model's whole ``label_map``, keyed by device label; LM-10 runs on it before the write.",
+        "properties": {
+          "label_map": {
+            "additionalProperties": true,
+            "description": "Per-class meaning, see domain/label_map.py",
+            "title": "Label Map",
+            "type": "object"
+          }
+        },
+        "required": [
+          "label_map"
+        ],
+        "title": "LabelMapRequest",
         "type": "object"
       },
       "ManifestRequest": {
@@ -890,6 +1007,239 @@
           }
         },
         "title": "ManifestRequest",
+        "type": "object"
+      },
+      "ObservationOut": {
+        "description": "The verdict the website's photo grid shows for one photo (#170).\n\nThe label fields come from the observation the grid's card shows: a person's verdict\nfirst, else the consensus of the AI models, else the first observation. They are null\nwhen no observation names the photo.",
+        "properties": {
+          "ai_origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "edge (the camera's model) or cloud, for an AI label",
+            "title": "Ai Origin"
+          },
+          "behavior": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behavior"
+          },
+          "classification_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "human or machine",
+            "title": "Classification Method"
+          },
+          "classification_probability": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Classification Probability"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "deployment_id": {
+            "title": "Deployment Id",
+            "type": "string"
+          },
+          "human_reviewed": {
+            "description": "A person has reviewed at least one of the photo's observations",
+            "title": "Human Reviewed",
+            "type": "boolean"
+          },
+          "is_empty": {
+            "description": "The photo shows no animal, person or vehicle",
+            "title": "Is Empty",
+            "type": "boolean"
+          },
+          "life_stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Life Stage"
+          },
+          "media_id": {
+            "title": "Media Id",
+            "type": "string"
+          },
+          "observation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The observation the verdict comes from",
+            "title": "Observation Id"
+          },
+          "observation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "animal, human, vehicle, blank or unknown",
+            "title": "Observation Type"
+          },
+          "project_id": {
+            "title": "Project Id",
+            "type": "string"
+          },
+          "review_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Status"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scientific Name"
+          },
+          "sex": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sex"
+          },
+          "source_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ai, human, imported or consensus",
+            "title": "Source Type"
+          },
+          "taxon_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxon Id"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the photo was taken",
+            "title": "Timestamp"
+          },
+          "vernacular_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vernacular Name"
+          }
+        },
+        "required": [
+          "media_id",
+          "deployment_id",
+          "project_id",
+          "is_empty",
+          "human_reviewed"
+        ],
+        "title": "ObservationOut",
+        "type": "object"
+      },
+      "ObservationsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "ObservationsResponse",
         "type": "object"
       },
       "PretrainedModelRequest": {
@@ -1026,62 +1376,10 @@
         "title": "RunSelectedRequest",
         "type": "object"
       },
-      "TTNEndDeviceIds": {
+      "TelemetryPoint": {
+        "description": "One LoRaWAN message a camera sent while deployed in one of the organisation's projects.",
         "properties": {
-          "application_ids": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Application Ids",
-            "type": "object"
-          },
-          "dev_eui": {
-            "title": "Dev Eui",
-            "type": "string"
-          },
-          "device_id": {
-            "title": "Device Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "device_id",
-          "dev_eui"
-        ],
-        "title": "TTNEndDeviceIds",
-        "type": "object"
-      },
-      "TTNUplink": {
-        "description": "The Things Network v3 uplink webhook payload.",
-        "properties": {
-          "end_device_ids": {
-            "$ref": "#/components/schemas/TTNEndDeviceIds"
-          },
-          "received_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Received At"
-          },
-          "uplink_message": {
-            "$ref": "#/components/schemas/TTNUplinkMessage"
-          }
-        },
-        "required": [
-          "end_device_ids",
-          "uplink_message"
-        ],
-        "title": "TTNUplink",
-        "type": "object"
-      },
-      "TTNUplinkMessage": {
-        "properties": {
-          "f_port": {
+          "battery_level": {
             "anyOf": [
               {
                 "type": "integer"
@@ -1090,45 +1388,78 @@
                 "type": "null"
               }
             ],
-            "title": "F Port"
+            "title": "Battery Level"
           },
-          "frm_payload": {
-            "description": "Base64-encoded frame payload",
-            "title": "Frm Payload",
+          "deployment_id": {
+            "title": "Deployment Id",
             "type": "string"
           },
-          "rx_metadata": {
+          "model_output": {
             "anyOf": [
               {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Rx Metadata"
+            "description": "The camera's on-device model output, as the payload carried it",
+            "title": "Model Output"
           },
-          "settings": {
+          "sd_card_used_capacity": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Settings"
+            "title": "Sd Card Used Capacity"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the network received the message",
+            "title": "Timestamp"
           }
         },
         "required": [
-          "frm_payload"
+          "deployment_id"
         ],
-        "title": "TTNUplinkMessage",
+        "title": "TelemetryPoint",
+        "type": "object"
+      },
+      "TelemetryResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryPoint"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "TelemetryResponse",
         "type": "object"
       },
       "TrainClassSpec": {
@@ -1332,15 +1663,66 @@
         "title": "ValidationError",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "description": "An organisation API key, ww_live_...",
+        "in": "header",
+        "name": "X-API-Key",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
-    "description": "V2 backend \u2014 async job system, LoRaWAN ingestion, model conversion",
+    "description": "V2 backend \u2014 async job system, model conversion",
     "title": "Wildlife Watcher API",
     "version": "2.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/devices": {
+      "get": {
+        "description": "Every live device with its organisation and latest live deployment (read-only, #343).\n\nSystem admins only (``403`` otherwise): devices stay organisation-scoped under RLS\n(ww-backend#313), so this is the one place a ``ww_admin`` sees them all.",
+        "operationId": "admin_list_devices_api_admin_devices_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Admin List Devices",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/auth/demo-session": {
       "post": {
         "description": "Mint a session for the shared demo account.\n\nUnauthenticated by design \u2014 this is the \"Try the demo\" button. The\nendpoint self-disables when DEMO_EMAIL/DEMO_PASSWORD are not configured.",
@@ -1553,7 +1935,7 @@
     },
     "/api/deployments/backfill-timezones": {
       "post": {
-        "description": "Resolve and persist ``deployments.timezone`` for deployments that lack it.\n\nIdempotent maintenance task: for every deployment with coordinates but no\ntimezone, derive the IANA zone from latitude/longitude (timezonefinder) and\nstore it so the UI can render capture times in local time. Run once after the\ntimezone column is deployed; new CamtrapDP imports populate it automatically.",
+        "description": "Resolve and persist ``deployments.timezone`` for deployments that lack it.\n\nIdempotent maintenance task: for every deployment with coordinates but no\ntimezone, derive the IANA zone from latitude/longitude (timezonefinder) and\nstore it so the UI can render capture times in local time. New CamtrapDP imports\npopulate it automatically.\n\nSystem admins only (``403`` otherwise, and for the demo account): it is a service-role\nwrite across every organisation's deployments, so no project role is enough (#309).",
         "operationId": "backfill_timezones_api_deployments_backfill_timezones_post",
         "parameters": [
           {
@@ -1600,7 +1982,7 @@
     },
     "/api/deployments/batch": {
       "delete": {
-        "description": "Soft-delete deployments (and cascade to their media + observations).\n\nRequires write access (project_admin/member, org-manager, or system) on **every** project the\nselected deployments belong to. Deployments the caller can't write are refused (404). Returns\nthe shared ``deleted_at`` so the client can offer an Undo.",
+        "description": "Soft-delete deployments (and cascade to their media + observations).\n\nThe database decides: each id goes through ``soft_delete_deployment`` as the caller, which\nallows the deployment's creator while they hold ``project_member``, a ``project_admin`` of\nthe project, or ``ww_admin`` (ww-backend #266). Ids it refuses come back in ``refused_ids``;\nids the caller cannot see are skipped. ``403`` when nothing was deleted and something was\nrefused. Returns the shared ``deleted_at`` so the client can offer an Undo.",
         "operationId": "batch_delete_deployments_api_deployments_batch_delete",
         "parameters": [
           {
@@ -1655,7 +2037,7 @@
     },
     "/api/deployments/batch/restore": {
       "post": {
-        "description": "Undo a deployment delete \u2014 clears ``deleted_at`` (== the given timestamp) on the deployments\nand the media/observations that were deleted with them.",
+        "description": "Undo a deployment delete \u2014 clears ``deleted_at`` (== the given timestamp) on the deployments\nand the media/observations that were deleted with them.\n\nSame rule as the delete: the creator while a ``project_member``, a ``project_admin``, or\n``ww_admin``. It is checked here in Python (``split_deployments_by_delete_right``) because the\ndatabase has no restore function and hides a soft-deleted row from the caller's own session.\nRefused ids come back in ``refused_ids``; ``403`` when nothing was restored and something was\nrefused.",
         "operationId": "batch_restore_deployments_api_deployments_batch_restore_post",
         "parameters": [
           {
@@ -1761,6 +2143,68 @@
         ]
       }
     },
+    "/api/deployments/{deployment_id}/location": {
+      "patch": {
+        "description": "Correct a deployment's location as the signed-in user, with ``timezone`` recomputed.\n\nRuns on the caller's client, so RLS decides: the deployment's creator while they hold\nproject_member on its project, or a project_admin. A refusal is 403, a deployment the caller\ncannot see is 404. Returns the location columns as the database now holds them.",
+        "operationId": "update_deployment_location_api_deployments__deployment_id__location_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentLocationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Deployment Location",
+        "tags": [
+          "deployments"
+        ]
+      }
+    },
     "/api/exif/parse": {
       "post": {
         "description": "Parse EXIF metadata from one or more uploaded JPEG files.\n\nOptionally uploads images to Supabase Storage and enqueues an\nasync Google Drive upload job.\n\nForm fields\n-----------\nfiles : List[UploadFile]\n    JPEG image files to analyse.\npaths : List[str], optional\n    Relative paths from folder upload (e.g. ``MEDIA/655BC4E5/IMAGES.000/file.JPG``).\n    Used to extract deployment IDs from the SD card folder hierarchy.\nproject_id : str, optional\n    User-selected project ID for Drive folder organisation.\ndeployment_id : str, optional\n    User-selected deployment ID for Drive subfolder organisation.\nupload_to_drive : bool, optional\n    Whether to enqueue a Drive upload job (default ``False``).\nrun_ai : bool, optional\n    Whether to run the AI pipeline + Wildlife Brain after upload (default ``True``).\n    ``False`` uploads/archives only \u2014 no SpeciesNet/embedding.",
@@ -1816,6 +2260,57 @@
         "summary": "Parse Exif",
         "tags": [
           "exif"
+        ]
+      }
+    },
+    "/api/exports/camtrapdp": {
+      "post": {
+        "description": "Start a CamtrapDP export of one project with its original photos.\n\nThe job calls ww-backend's export-camtrap-dp as the caller, so its project-membership\ncheck decides. The 404 here only saves a job for a project in another organisation.",
+        "operationId": "start_camtrapdp_export_api_exports_camtrapdp_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CamtrapExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Camtrapdp Export",
+        "tags": [
+          "exports"
         ]
       }
     },
@@ -2523,201 +3018,6 @@
         ]
       }
     },
-    "/api/lorawan/messages": {
-      "get": {
-        "description": "List LoRaWAN messages for the authenticated user's org/project.\n\nTODO: Implement with Supabase RLS query scoped to user's org.",
-        "operationId": "list_messages_api_lorawan_messages_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Messages",
-        "tags": [
-          "lorawan"
-        ]
-      }
-    },
-    "/api/lorawan/messages/{device_eui}/latest": {
-      "get": {
-        "description": "Get the latest parsed LoRaWAN message for a device.\n\nTODO: Query lorawan_parsed_messages with RLS.",
-        "operationId": "latest_message_api_lorawan_messages__device_eui__latest_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "device_eui",
-            "required": true,
-            "schema": {
-              "title": "Device Eui",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Latest Message",
-        "tags": [
-          "lorawan"
-        ]
-      }
-    },
-    "/api/lorawan/webhook/chirpstack": {
-      "post": {
-        "description": "Receive a Chirpstack v4 uplink webhook.",
-        "operationId": "receive_chirpstack_webhook_api_lorawan_webhook_chirpstack_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Webhook-Secret",
-            "required": false,
-            "schema": {
-              "default": "",
-              "title": "X-Webhook-Secret",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChirpstackUplink"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Receive Chirpstack Webhook",
-        "tags": [
-          "lorawan"
-        ]
-      }
-    },
-    "/api/lorawan/webhook/ttn": {
-      "post": {
-        "description": "Receive a TTN v3 uplink webhook.",
-        "operationId": "receive_ttn_webhook_api_lorawan_webhook_ttn_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Webhook-Secret",
-            "required": false,
-            "schema": {
-              "default": "",
-              "title": "X-Webhook-Secret",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TTNUplink"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Receive Ttn Webhook",
-        "tags": [
-          "lorawan"
-        ]
-      }
-    },
     "/api/manifest/branches": {
       "get": {
         "description": "Return available branches from the Grove Vision AI firmware repo.\n\nProxied through the backend to avoid CORS issues on the frontend.",
@@ -2798,7 +3098,7 @@
     },
     "/api/media/batch": {
       "delete": {
-        "description": "Soft-delete multiple media records (sets deleted_at).\n\nIdempotent: already-deleted media are silently skipped. Runs as the\nrequesting user (not the service role) so RLS restricts the update to\nmedia in projects where they hold project_member \u2014 IDs outside their\nprojects are silently ignored, never deleted.",
+        "description": "Soft-delete multiple media records (sets deleted_at).\n\nRuns as the requesting user (not the service role), so RLS decides which rows change:\na photo's uploader while they hold at least project_member on its project\n(ww-backend #277), or a project_admin of the project. Any other id, including a plain\nmember's request for a photo someone else uploaded, changes 0 rows without an error, as\ndoes an id already deleted. ``deleted_ids`` lists the rows that changed and\n``skipped_ids`` the rest; ``deleted`` counts ``deleted_ids``.",
         "operationId": "batch_delete_media_api_media_batch_delete",
         "parameters": [
           {
@@ -2849,7 +3149,7 @@
     },
     "/api/media/batch/restore": {
       "post": {
-        "description": "Undo a media delete \u2014 clears ``deleted_at`` where it equals the given timestamp. Runs as the\nuser so RLS keeps it to their own projects; scoping by the exact timestamp restores only the\nphotos removed in that delete.",
+        "description": "Undo a media delete, clearing ``deleted_at`` where it equals the given timestamp. Runs as the\nuser, so RLS applies the delete rule: the photo's uploader while they hold at least\nproject_member, or a project_admin of the project; other ids change 0 rows without an error.\nScoping by the exact timestamp restores only the photos removed in that delete.\n``restored_ids`` lists the rows that changed and ``skipped_ids`` the rest.",
         "operationId": "batch_restore_media_api_media_batch_restore_post",
         "parameters": [
           {
@@ -2900,7 +3200,7 @@
     },
     "/api/media/registry/{deployment_id}": {
       "get": {
-        "description": "Paginated media list with pre-resolved URLs \u2014 primary source for the grid.",
+        "description": "Paginated media list with pre-resolved URLs, null where only the private original exists.",
         "operationId": "media_registry_api_media_registry__deployment_id__get",
         "parameters": [
           {
@@ -3140,7 +3440,7 @@
     },
     "/api/media/{media_id}/resolve": {
       "get": {
-        "description": "Return a display URL for a media item regardless of storage provider.",
+        "description": "Return a URL a plain ``<img>`` can load for a media item, regardless of storage provider.\n\n``url`` is null when the photo has no rendition yet and its original is private.",
         "operationId": "resolve_media_url_api_media__media_id__resolve_get",
         "parameters": [
           {
@@ -3478,6 +3778,116 @@
         ]
       }
     },
+    "/api/models/{model_id}/label-map": {
+      "get": {
+        "description": "A model's ``label_map``, what its classes predict (``taxon`` | ``type``) and LM-10 problems.\n\nRead-only and read as the caller (RLS on ``ai_models``), so a model the caller\ncannot see is a 404, the same as one that does not exist.",
+        "operationId": "get_label_map_api_models__model_id__label_map_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Label Map",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "description": "Save a model's ``label_map`` once it passes LM-10, and return it as the GET does.\n\nA map that breaks LM-10 is a 422 whose ``detail.problems`` is ``{label: problem}``;\nnothing is written. A map the database's own LM-10 CHECK refuses is the same 422\nwith the database's message and empty ``problems``. The write runs on the caller's\nclient, so RLS decides who may edit: a refusal is 403, a model the caller cannot\nsee is 404.",
+        "operationId": "put_label_map_api_models__model_id__label_map_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Model Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LabelMapRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Label Map",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/projects": {
       "post": {
         "description": "Create a project in the caller's organisation.\n\nThe caller becomes ``project_admin`` automatically via the ``handle_new_project`` DB trigger\n(which reads ``created_by``), mirroring the CamtrapDP import. Requires the user to belong to\nan organisation. ``get_verified_user`` blocks the demo/unverified accounts.",
@@ -3535,7 +3945,7 @@
     },
     "/api/projects/{project_id}": {
       "delete": {
-        "description": "Soft-delete a project and cascade to its deployments \u2192 media \u2192 observations.\n\nAdmin-only: requires ``project_admin`` on the project (or org-manager / system). A member or\nviewer is refused (404). Returns the shared ``deleted_at`` so the client can offer an Undo.",
+        "description": "Soft-delete a project and cascade to its deployments, media and observations.\n\nThe database decides: ``soft_delete_project`` runs as the caller and allows a\n``project_admin`` of the project or ``ww_admin``. Anyone else who can see the project, an\norganisation manager included, gets ``403``; a project the caller cannot see is ``404``.\nReturns the shared ``deleted_at`` so the client can offer an Undo.",
         "operationId": "delete_project_api_projects__project_id__delete",
         "parameters": [
           {
@@ -3589,7 +3999,7 @@
     },
     "/api/projects/{project_id}/restore": {
       "post": {
-        "description": "Undo a project delete \u2014 clears ``deleted_at`` (== the given timestamp) on the project and the\ndeployments/media/observations that were deleted with it.",
+        "description": "Undo a project delete: clears ``deleted_at`` (equal to the given timestamp) on the project\nand the deployments, media and observations deleted with it.\n\nSame rule as the delete, a ``project_admin`` or ``ww_admin``. It is checked here in Python\n(``project_restore_right``) because the database has no restore function (ww-backend #286)\nand hides a soft-deleted project from the caller's own session. ``403`` for anyone else with\na role reaching the project, ``404`` otherwise.",
         "operationId": "restore_project_endpoint_api_projects__project_id__restore_post",
         "parameters": [
           {
@@ -3653,9 +4063,21 @@
     },
     "/api/v1/api-keys": {
       "get": {
-        "description": "List active API keys for the user's organisation.",
+        "description": "List an organisation's active (unrevoked) API keys. Managers only.",
         "operationId": "list_keys_api_v1_api_keys_get",
         "parameters": [
+          {
+            "description": "Organisation whose keys to list",
+            "in": "query",
+            "name": "organisation_id",
+            "required": true,
+            "schema": {
+              "description": "Organisation whose keys to list",
+              "format": "uuid",
+              "title": "Organisation Id",
+              "type": "string"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -3692,7 +4114,7 @@
         ]
       },
       "post": {
-        "description": "Create a new API key for the user's organisation.\n\nOnly organisation admins can create keys. The raw key is returned\nonce \u2014 it cannot be retrieved again.",
+        "description": "Create an API key for an organisation the caller manages.\n\nThe raw key is returned once. It cannot be retrieved again.",
         "operationId": "create_key_api_v1_api_keys_post",
         "parameters": [
           {
@@ -3743,7 +4165,7 @@
     },
     "/api/v1/api-keys/{key_id}": {
       "delete": {
-        "description": "Revoke an API key.",
+        "description": "Revoke one of an organisation's API keys. Managers only.",
         "operationId": "revoke_key_api_v1_api_keys__key_id__delete",
         "parameters": [
           {
@@ -3751,7 +4173,20 @@
             "name": "key_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Organisation the key belongs to",
+            "in": "query",
+            "name": "organisation_id",
+            "required": true,
+            "schema": {
+              "description": "Organisation the key belongs to",
+              "format": "uuid",
+              "title": "Organisation Id",
               "type": "string"
             }
           },
@@ -3793,7 +4228,7 @@
     },
     "/api/v1/deployments": {
       "get": {
-        "description": "List deployments for the organisation attached to the API key.",
+        "description": "List the deployments in the organisation's projects, newest first.",
         "operationId": "api_list_deployments_api_v1_deployments_get",
         "parameters": [
           {
@@ -3803,6 +4238,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -3813,6 +4249,7 @@
             }
           },
           {
+            "description": "A deployment status value: planned, started or ended",
             "in": "query",
             "name": "status",
             "required": false,
@@ -3825,6 +4262,7 @@
                   "type": "null"
                 }
               ],
+              "description": "A deployment status value: planned, started or ended",
               "title": "Status"
             }
           },
@@ -3834,7 +4272,7 @@
             "required": false,
             "schema": {
               "default": 50,
-              "maximum": 200,
+              "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
@@ -3849,15 +4287,6 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
-              "type": "string"
             }
           }
         ],
@@ -3881,6 +4310,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api List Deployments",
         "tags": [
           "public-api"
@@ -3889,7 +4323,7 @@
     },
     "/api/v1/deployments/{deployment_id}": {
       "get": {
-        "description": "Get a single deployment by ID.",
+        "description": "Get one deployment in the organisation's projects.",
         "operationId": "api_get_deployment_api_v1_deployments__deployment_id__get",
         "parameters": [
           {
@@ -3897,16 +4331,8 @@
             "name": "deployment_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Deployment Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
               "type": "string"
             }
           }
@@ -3931,6 +4357,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api Get Deployment",
         "tags": [
           "public-api"
@@ -3939,7 +4370,7 @@
     },
     "/api/v1/devices": {
       "get": {
-        "description": "List devices for the organisation.",
+        "description": "List the organisation's own cameras.",
         "operationId": "api_list_devices_api_v1_devices_get",
         "parameters": [
           {
@@ -3948,7 +4379,7 @@
             "required": false,
             "schema": {
               "default": 50,
-              "maximum": 200,
+              "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
@@ -3964,15 +4395,6 @@
               "title": "Offset",
               "type": "integer"
             }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
-              "type": "string"
-            }
           }
         ],
         "responses": {
@@ -3995,6 +4417,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api List Devices",
         "tags": [
           "public-api"
@@ -4003,7 +4430,7 @@
     },
     "/api/v1/devices/{device_eui}/telemetry": {
       "get": {
-        "description": "Get telemetry time-series for a specific device.",
+        "description": "A camera's LoRaWAN messages from its deployments in the organisation's projects, newest first.",
         "operationId": "api_device_telemetry_api_v1_devices__device_eui__telemetry_get",
         "parameters": [
           {
@@ -4016,6 +4443,7 @@
             }
           },
           {
+            "description": "ISO 8601; messages received at or after",
             "in": "query",
             "name": "date_from",
             "required": false,
@@ -4028,10 +4456,12 @@
                   "type": "null"
                 }
               ],
+              "description": "ISO 8601; messages received at or after",
               "title": "Date From"
             }
           },
           {
+            "description": "ISO 8601; messages received at or before",
             "in": "query",
             "name": "date_to",
             "required": false,
@@ -4044,6 +4474,7 @@
                   "type": "null"
                 }
               ],
+              "description": "ISO 8601; messages received at or before",
               "title": "Date To"
             }
           },
@@ -4058,22 +4489,15 @@
               "title": "Limit",
               "type": "integer"
             }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
-              "type": "string"
-            }
           }
         ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TelemetryResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -4089,6 +4513,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api Device Telemetry",
         "tags": [
           "public-api"
@@ -4097,24 +4526,13 @@
     },
     "/api/v1/export/camtrapdp": {
       "post": {
-        "description": "Export deployment data as a CamtrapDP package (async job).",
+        "description": "Start a CamtrapDP export of one project with its original photos, as the Download button does.\n\nReturns ``{job_id}``; poll ``GET /api/v1/jobs/{job_id}`` for the signed link. Behind\n``FF_CAMTRAPDP_EXPORT_ENABLED``, like the Download button's export.",
         "operationId": "api_export_camtrapdp_api_v1_export_camtrapdp_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-API-Key",
-            "required": true,
-            "schema": {
-              "title": "X-Api-Key",
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CamtrapDPExportRequest"
+                "$ref": "#/components/schemas/CamtrapExportRequest"
               }
             }
           },
@@ -4140,62 +4558,29 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api Export Camtrapdp",
         "tags": [
           "public-api"
         ]
       }
     },
-    "/api/v1/observations": {
+    "/api/v1/jobs/{job_id}": {
       "get": {
-        "description": "List AI detection observations.",
-        "operationId": "api_list_observations_api_v1_observations_get",
+        "description": "A job one of the organisation's keys started: status, progress, and the signed link once done.\n\nAnother organisation's job, or a signed-in user's, answers 404 like a missing one.",
+        "operationId": "api_get_job_api_v1_jobs__job_id__get",
         "parameters": [
           {
-            "in": "query",
-            "name": "deployment_id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Deployment Id"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-API-Key",
+            "in": "path",
+            "name": "job_id",
             "required": true,
             "schema": {
-              "title": "X-Api-Key",
+              "format": "uuid",
+              "title": "Job Id",
               "type": "string"
             }
           }
@@ -4204,7 +4589,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ApiJobResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -4220,6 +4607,107 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
+        "summary": "Api Get Job",
+        "tags": [
+          "public-api"
+        ]
+      }
+    },
+    "/api/v1/observations": {
+      "get": {
+        "description": "One verdict per photo, as the website's photo grid shows it.\n\nPhotos with at least one observation, in the organisation's projects, in the order they\nwere registered. A page is at most 1,000 photos; page with ``offset``.",
+        "operationId": "api_list_observations_api_v1_observations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "deployment_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Deployment Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObservationsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "summary": "Api List Observations",
         "tags": [
           "public-api"

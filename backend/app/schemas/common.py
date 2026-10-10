@@ -18,8 +18,8 @@ class ApiError(BaseModel):
 
     code: str = Field(..., description="Machine-readable error code")
     message: str = Field(..., description="Human-readable error message")
-    retryable: bool = Field(False, description="Whether the client should retry")
-    details: Optional[str] = Field(None, description="Extra diagnostic info")
+    retryable: bool = Field(default=False, description="Whether the client should retry")
+    details: Optional[str] = Field(default=None, description="Extra diagnostic info")
 
 
 class ApiMeta(BaseModel):

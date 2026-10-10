@@ -217,7 +217,7 @@ Individual model versions with storage paths and metadata.
 | `file_hash` | text | SHA-256 hash of the `.TFL` binary |
 | `file_size_bytes` | integer | Combined size of TFL + TXT |
 | `detection_capabilities` | **`text[]`** | Ordered class-label list extracted from the model (e.g. `{not rat, rat}`). The canonical label record. |
-| `label_map` | `jsonb` | Per-class interpretation set by the uploader: target species (→ taxon) vs background/negative. See [Labels](#labels). |
+| `label_map` | `jsonb` | Per-class meaning set by the uploader: a target predicts a taxon or a type, or the class is background/negative. See [Labels](#labels). |
 | `processing_log` | jsonb | Array of status transition entries |
 
 **Status Lifecycle:**
@@ -242,7 +242,7 @@ row, and flow through to the device:
 |---|---|---|
 | `detection_capabilities` (`text[]`) | the **ordered class list** (e.g. `{not rat, rat}`) — the canonical record | conversion worker, extracted from the model |
 | `labels_path` → `.TXT` in storage | the **deployable labels file** (one label per line, in class order) | conversion worker |
-| `label_map` (`jsonb`) | per-class **meaning** — target species (with `taxon_id`/names) vs background/negative | uploader, via the post-validation `ModelLabelMapper` |
+| `label_map` (`jsonb`) | per-class **meaning**: a target predicts a taxon or a type, or the class is background/negative ([below](#what-a-class-predicts-lm-10)) | uploader, via the post-validation `ModelLabelMapper`; the training job for a Species Brain |
 
 **Origin → device:** labels are extracted from the uploaded model (for Edge Impulse,
 `deployment-metadata.json` / `model_variables.h`) during conversion, written to both
@@ -251,6 +251,43 @@ row, and flow through to the device:
 Keeping `labels.txt` in the model's own class order is what keeps device, website, and
 `label_map` aligned. Full cross-repo flow:
 [Embedded Model Lifecycle](./embedded-model-lifecycle.md).
+
+### What a class predicts (LM-10)
+
+In v1 a target class predicts a **taxon** or a **type**
+([#135](https://github.com/wildlifeai/ww-website/issues/135), decided 9 Oct 2026):
+
+```jsonc
+"rat":     { "role": "target", "predicts": "taxon", "taxon_id": "<uuid>", "scientific_name": "Rattus rattus" },
+"person":  { "role": "target", "predicts": "type",  "observation_type": "human" },
+"not rat": { "role": "background" }
+```
+
+**LM-10:** a target resolves to exactly one observation field with a controlled value. A
+`taxon` class names a `taxon_id` or a `scientific_name`. A `type` class names an
+`observation_type` of `animal`, `human` or `vehicle`; `blank` and `unknown` are rejected, since a
+class meaning "nothing here" is a background class. Any other `predicts`, `behavior` included, is
+rejected: a behaviour prediction is not an observation, so it does not mint one.
+
+A target saved before `predicts` existed has no key and is read as `taxon`, which is what edge
+reflection did with every target before: an `animal` row carrying the class's taxon. A person
+class saved that way still reflects as an animal until it is re-saved as a type.
+
+Edge reflection writes what the class predicts: a taxon class an `animal` row with its taxon, a
+type class its `observation_type` with no taxon (a person is `human`, never `Homo sapiens`). A
+behaviour class, a type with no detection value and a label missing from the map write nothing. An
+unnamed taxon class still writes an `animal` row with no taxon, as before, and LM-10 reports it.
+
+The rules live in `backend/app/domain/label_map.py`. LM-10 is reported by
+`GET /api/models/{model_id}/label-map` and **enforced on a save** by
+`PUT /api/models/{model_id}/label-map` ([API reference](./api-reference.md#model-conversion)),
+which `ModelLabelMapper` saves through: a map with a behaviour class, an unnamed taxon class or a
+type class without `animal`, `human` or `vehicle` is refused, and the mapper shows the problem
+under each label ([#324](https://github.com/wildlifeai/ww-website/issues/324)). It also holds for
+every map the training job writes. The database enforces the same rules with the
+`ai_models_label_map_lm10` CHECK (`public.label_map_problems`,
+[ww-backend#292](https://github.com/wildlifeai/ww-backend/issues/292)), so a write
+straight through PostgREST is refused too; the two copies change together.
 
 ---
 

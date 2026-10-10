@@ -4,7 +4,8 @@
 // ProjectDefaultsPanel — per-project capture + AI defaults (Settings).
 // Sets projects.capture_method_id (default triggering method), projects.model_id
 // (default AI model), the burst, projects.photos_per_trigger and photo_interval_milliseconds
-// (lib/burstCapture.ts), and the capture flash, projects.flash_* (lib/flashSettings.ts).
+// (lib/burstCapture.ts), the on-device detection threshold, projects.detection_threshold_pct
+// (lib/detectionThreshold.ts), and the capture flash, projects.flash_* (lib/flashSettings.ts).
 // Writes are gated by RLS to project admins. RLS turns a refused update into 0 rows with no
 // error, so a save asks for the row back and shows what the database holds.
 /* eslint-disable react-hooks/set-state-in-effect */
@@ -12,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { supabase } from '../../config/supabase'
 import { burstCostNote, formatInterval, photoCountOptions, photoIntervalOptions } from '../../lib/burstCapture'
+import { clampThreshold, DETECTION_THRESHOLD_PCT } from '../../lib/detectionThreshold'
 import {
   defaultWindow, describeUtc, FLASH_LEDS, FLASH_MODES, localOffsetMinutes, windowFromLocal, windowToLocal,
   type FlashLed, type FlashMode, type FlashWindow,
@@ -24,6 +26,7 @@ interface Project {
   model_id: string | null
   photos_per_trigger: number
   photo_interval_milliseconds: number
+  detection_threshold_pct: number
   flash_mode: FlashMode
   flash_led: FlashLed
   flash_window_start_minutes_utc: number | null
@@ -35,7 +38,7 @@ const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
 
 const PROJECT_COLUMNS =
   'id, name, capture_method_id, model_id, photos_per_trigger, photo_interval_milliseconds, ' +
-  'flash_mode, flash_led, flash_window_start_minutes_utc, flash_window_minutes'
+  'detection_threshold_pct, flash_mode, flash_led, flash_window_start_minutes_utc, flash_window_minutes'
 
 function storedWindow(p: Project): FlashWindow | null {
   return p.flash_window_start_minutes_utc == null || p.flash_window_minutes == null
@@ -81,7 +84,8 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
     return () => { cancelled = true }
   }, [user, projectId])
 
-  const save = async (id: string, patch: Partial<Project>) => {
+  // Resolves true when the database took the change.
+  const save = async (id: string, patch: Partial<Project>): Promise<boolean> => {
     const { data, error } = await supabase.from('projects').update(patch).eq('id', id).select(PROJECT_COLUMNS)
     const saved = (data as Project[] | null)?.[0]
     if (saved) setProjects(prev => prev.map(p => (p.id === id ? saved : p)))
@@ -90,6 +94,16 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
       : saved ? 'Saved ✓' : 'You need the Project Admin role to change this.'
     setMsg(m => ({ ...m, [id]: text }))
     setTimeout(() => setMsg(m => ({ ...m, [id]: '' })), 2500)
+    return !!saved
+  }
+
+  // The input shows what is saved: an out-of-range entry snaps into 50 to 99, and a refused save
+  // puts the stored value back.
+  const saveThreshold = async (p: Project, input: HTMLInputElement) => {
+    const pct = clampThreshold(input.value, p.detection_threshold_pct)
+    input.value = String(pct)
+    if (pct === p.detection_threshold_pct) return
+    if (!(await save(p.id, { detection_threshold_pct: pct }))) input.value = String(p.detection_threshold_pct)
   }
 
   const offset = localOffsetMinutes()
@@ -174,6 +188,23 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
           {burstCostNote(p.photos_per_trigger) && (
             <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>{burstCostNote(p.photos_per_trigger)}</div>
           )}
+          <label style={{ ...FIELD, marginTop: '0.85rem' }}>
+            <span style={{ opacity: 0.7 }}>Detection threshold (%)</span>
+            <input
+              key={p.detection_threshold_pct}
+              type="number"
+              min={DETECTION_THRESHOLD_PCT.min}
+              max={DETECTION_THRESHOLD_PCT.max}
+              step={1}
+              defaultValue={p.detection_threshold_pct}
+              onBlur={e => saveThreshold(p, e.currentTarget)}
+              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+              style={{ ...sel, minWidth: 0, width: 90 }}
+            />
+          </label>
+          <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>
+            Minimum confidence for the camera to record a detection, {DETECTION_THRESHOLD_PCT.min} to {DETECTION_THRESHOLD_PCT.max}. Default {DETECTION_THRESHOLD_PCT.default}%.
+          </div>
           <FlashControls p={p} sel={sel} offset={offset} timezone={BROWSER_TIMEZONE} onMode={saveFlashMode} onLed={led => save(p.id, { flash_led: led })} onWindow={saveWindow} />
           {msg[p.id] && (
             <div style={{ fontSize: '0.72rem', marginTop: '0.4rem', color: msg[p.id].startsWith('Saved') ? 'var(--success)' : 'var(--error)' }}>

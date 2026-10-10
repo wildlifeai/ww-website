@@ -8,7 +8,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 
 | Area | Package | Version | Notes |
 |------|---------|---------|-------|
-| Framework | `react` / `react-dom` | 19.2 | Function components + hooks only |
+| Framework | `react` / `react-dom` | 19.3 | Function components + hooks only |
 | Build | `vite` | 8 | Dev server + `tsc -b && vite build` |
 | Language | `typescript` | ~6.0 | `strict` mode; `tsc -b --noEmit` gate (plain `tsc --noEmit` checks nothing here) |
 | Routing | `react-router-dom` | 7.14 | `useSearchParams`, `NavLink`, nested routes |
@@ -18,7 +18,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | Charts | `vega-embed` (Vega-Lite) | 7 | All charts — Recharts fully removed |
 | Maps | `leaflet` + `react-leaflet` | 1.9 / 5 | Deployment maps |
 | Icons / QR | `lucide-react`, `qrcode.react` | — | UI icons, app-store QR |
-| Tooling | `eslint` 9, `typescript-eslint` 8, `husky` 9, `lint-staged` 16 | — | Lint + pre-commit |
+| Tooling | `eslint` 9, `typescript-eslint` 8, `husky` 9, `lint-staged` 16, `commitlint` 20 | — | Lint + pre-commit, commit messages |
 
 **Conventions**: no Tailwind — components use inline `style={{}}` objects with CSS variables
 (`--primary`, `--surface`, `--border`, `--radius`). Shared primitives live in
@@ -40,7 +40,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | Hosted VLM | `google-genai` (Gemini API SDK) | animal-presence filter step (`services/gemini_presence.py`); no torch, ships in the lean API image; prices and token rules in `services/gemini_pricing.py` |
 | Logging | `structlog` | structured JSON logs |
 | Errors | `sentry-sdk` | optional, via `SENTRY_DSN` |
-| Lint/test | `ruff`, `pytest` | `pyproject.toml` config (line length 100) |
+| Lint/test | `ruff`, `pytest`, `pyright` | `pyproject.toml` config (line length 150); pyright is advisory in CI (#225) |
 
 ## External services
 
@@ -53,7 +53,6 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | **Google Drive** | Permanent image archive (`gdrive://` originals) | `GOOGLE_DRIVE_ENABLED` |
 | **Vector store** | DINOv3 embeddings for the Wildlife Brain (similarity / clustering). **`pgvector` in the Supabase Postgres** — no new vendor; live since 2026-07-09. Vectors live in `media_embeddings.embedding`; the former Qdrant container has been **removed**. See [Deployment Guide → Vector Store](../resources/deployment-guide.md#vector-store--pgvector-supabase) | `FF_WILDLIFE_BRAIN_ENABLED` |
 | **iNaturalist** | Taxa autocomplete + lineage registration, observation publishing + community-ID sync | `FF_INAT_ENABLED` |
-| **TTN / Chirpstack** | LoRaWAN uplink webhooks | `FF_LORAWAN_WEBHOOKS_ENABLED` |
 | **Sentry** | Error tracking | `SENTRY_DSN` |
 | **Edge Impulse** | Trains Species Brains (on-camera classifiers) from an Annotations selection: Studio + ingestion APIs driven by `services/edge_impulse.py`. Without credentials the action packages a dataset ZIP instead | `FF_MODEL_TRAINING_ENABLED` + `EDGE_IMPULSE_API_KEY` / `EDGE_IMPULSE_PROJECT_ID` (set on the **worker** too) |
 
@@ -66,16 +65,16 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_INAT_ENABLED` | `false` | iNaturalist endpoints |
 | `FF_ML_ENABLED` | `false` | ML-assisted classification — **must** be true or `build_pipeline_steps()` returns `[]` |
 | `FF_CLUSTERING_ENABLED` | `false` | ⚠️ **Declared but not wired** — nothing reads it; `/api/clustering` (legacy perceptual-hash) is registered unconditionally in `main.py`. Either gate the router or drop the flag |
-| `FF_LORAWAN_WEBHOOKS_ENABLED` | `true` | LoRaWAN webhook ingestion |
 | `FF_PUBLIC_API_ENABLED` | `false` | Public data API (`/api/v1/*`) |
 | `FF_CAMTRAPDP_IMPORT_ENABLED` | `true` | CamtrapDP package import |
+| `FF_CAMTRAPDP_EXPORT_ENABLED` | `false` | CamtrapDP export with the original photos (`POST /api/exports/camtrapdp`); needs the private `CAMTRAPDP_EXPORT_BUCKET`, which the job reads, so set it and `CAMTRAPDP_EXPORT_MAX_BYTES` on the **worker** too |
 | `FF_PIPELINE_ENABLED` | `false` | AI pipeline inference endpoints |
 | `FF_SPECIESNET_ENABLED` | `false` | SpeciesNet detector+classifier step |
 | `FF_BIOCLIP_ENABLED` | `false` | BioCLIP secondary/zero-shot classifier step |
 | `FF_PER_CROP_CLASSIFY_ENABLED` | `false` | One AI observation per detection (not collapsed per image) — requires the GPU worker; see [04-AI-PIPELINE](./04-AI-PIPELINE.md) |
 | `FF_EDGE_REFLECT_ENABLED` | `false`¹ | Reflect the camera's on-device (Camera AI) EXIF predictions as `ai_origin='edge'` observations (¹ **on** for dev). See [dual-ai-production-rollout](../resources/dual-ai-production-rollout.md) |
 | `FF_MOTION_ROI_FALLBACK_ENABLED` | `false` | Motion-ROI crop fallback when SpeciesNet finds no bbox |
-| `FF_GEMINI_PRESENCE_ENABLED` | `false` | Gemini animal-presence step before SpeciesNet (one `animal`/`blank` row per frame, `source_model_version` = the Gemini model id, prompt v2 structured evidence in `observation_comments`); needs `GEMINI_API_KEY`, tuned by `GEMINI_PRESENCE_MODEL` / `GEMINI_PRESENCE_VARIANT`. Set on the **worker**. See the [false-negatives report §6](../development%20reports/2026-09_false-negatives-and-vlm-audit/README.md) |
+| `FF_GEMINI_PRESENCE_ENABLED` | `false` | Gemini animal-presence step before SpeciesNet (one `animal`/`blank` row per frame, `source_model_version` = the Gemini model id, prompt v1 with its one-sentence description in `observation_comments`); needs `GEMINI_API_KEY`, tuned by `GEMINI_PRESENCE_MODEL` / `GEMINI_PRESENCE_VARIANT`. Set on the **worker**. See the [false-negatives report §6](../development%20reports/2026-09_false-negatives-and-vlm-audit/README.md) |
 | `FF_EVIDENCE_FUSION_ENABLED` | `false` | Evidence-fusion step, last in the pipeline: one `source_type='consensus'` row per frame (`evidence_fusion_v1`) from the SpeciesNet, Gemini and edge rows plus burst motion; tuned by `EVIDENCE_FUSION_THRESHOLD` (0.5) and `BURST_GAP_SECONDS` (10, shared with motion ROI and the contact sheet). Set on the **worker**. Design: [evidence-pipeline architecture](../development%20reports/2026-09_evidence-pipeline-architecture/README.md); results: [false-negatives report §6](../development%20reports/2026-09_false-negatives-and-vlm-audit/README.md) |
 | `FF_WILDLIFE_BRAIN_ENABLED` | `false` | DINOv3 embedding / clustering / similarity |
 | `FF_LOCAL_EMBEDDING_ENABLED` | `false` | Accept client-computed (WebGPU) embedding vectors |

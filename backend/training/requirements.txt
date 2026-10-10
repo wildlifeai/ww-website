@@ -2,5 +2,5 @@
 # TensorFlow is preinstalled in the base image (tensorflow/tensorflow:2.21.0-gpu);
 # the pin here keeps a local `pip install -r requirements.txt` on the same version.
 tensorflow==2.21.0               # Keras 3 API, tf.lite converter + interpreter (released 2026-03-06)
-google-cloud-storage==3.15.0     # gs:// dataset download and artefact upload (released 2026-09-24)
+google-cloud-storage==3.16.0     # gs:// dataset download and artefact upload (released 2026-09-24)
 Pillow==12.3.0                   # image decoding, fit-short resize (released 2026-07-01)

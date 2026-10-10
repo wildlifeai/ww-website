@@ -18,6 +18,8 @@ from app.jobs.store import (
     complete_phase,
     create_job,
     emit_event,
+    find_active_ai_jobs,
+    flush_pending_syncs,
     get_job,
     job_heartbeat,
     set_job_deployments,
@@ -92,7 +94,7 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
 
     client = create_service_client()
 
-    async def update_model_status(status: str, error_message: str = None, **kwargs):
+    async def update_model_status(status: str, error_message: str | None = None, **kwargs):
         payload = {"status": status, **kwargs}
         if error_message:
             payload["error_message"] = error_message
@@ -254,12 +256,14 @@ async def convert_model_job(job_id: str, user_id: str, model_id: str):
         raise
 
 
-async def _append_model_status(client, model_id: str, job_id: str, status: str, error_message: str = None, training: dict = None, **fields):
+async def _append_model_status(
+    client, model_id: str, job_id: str, status: str, error_message: str | None = None, training: dict | None = None, **fields
+):
     """Set ``ai_models.status`` (+ any columns) and append an entry to ``processing_log``."""
     payload = {"status": status, **fields}
     if error_message:
         payload["error_message"] = error_message
-    log_entry = {"timestamp": datetime.now(timezone.utc).isoformat(), "status": status, "job_id": job_id}
+    log_entry: dict = {"timestamp": datetime.now(timezone.utc).isoformat(), "status": status, "job_id": job_id}
     if error_message:
         log_entry["error"] = error_message
     if training:
@@ -311,7 +315,7 @@ async def train_species_brain_job(job_id: str, user_id: str, model_id: str | Non
     async def tick(msg: str) -> None:
         await update_job(job_id, message=msg)
 
-    async def model_status(status: str, error_message: str = None, training: dict = None, **fields) -> None:
+    async def model_status(status: str, error_message: str | None = None, training: dict | None = None, **fields) -> None:
         if model_id:
             await _append_model_status(client, model_id, job_id, status, error_message=error_message, training=training, **fields)
 
@@ -539,56 +543,92 @@ async def generate_manifest_job(job_id: str, params: dict):
         raise
 
 
-async def export_camtrapdp_job(job_id: str, org_id: str, params: dict):
-    """Export deployment data as CamtrapDP package."""
-    logger.info("job_start", job_type="export_camtrapdp", job_id=job_id)
-    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1)
+async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: dict):
+    """CamtrapDP package with the original photos (#328), saved privately behind a signed link.
+
+    ``selection`` is an ``ExportSelection`` and ``caller`` an ``ExportCaller`` as dicts: a user's
+    token for the Download buttons, or an organisation id for an API key (#327). The work is in
+    ``domain/camtrapdp_export.py``. The ZIP is built in a temporary directory removed at the end.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from app.config import settings
+    from app.domain import camtrapdp_export as export
+
+    logger.info("job_start", job_type="export_camtrapdp_originals", job_id=job_id)
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.02, message="Reading the project's records…")
+    sel = export.ExportSelection(**selection)
+    last_write = 0.0
+
+    async def on_message(msg: str, progress: float) -> None:
+        await update_job(job_id, progress=progress, message=msg)
+
+    async def on_progress(done: int, total: int, failed: int) -> None:
+        nonlocal last_write
+        if done < total and time.monotonic() - last_write < 2.0:
+            return
+        last_write = time.monotonic()
+        tail = f", {failed} could not be read" if failed else ""
+        await update_job(job_id, progress=0.1 + 0.8 * done / max(total, 1), message=f"Added {done - failed} of {total} photos{tail}…")
 
     try:
-        from app.domain.public_api import generate_camtrapdp_package
-        from app.services.storage import upload_to_storage
-        from app.services.supabase_client import create_service_client
-
-        package_bytes = await generate_camtrapdp_package(
-            org_id=org_id,
-            project_id=params.get("project_id"),
-            deployment_ids=params.get("deployment_ids"),
-            date_from=params.get("date_from"),
-            date_to=params.get("date_to"),
-            include_observations=params.get("include_observations", True),
-        )
-
-        await update_job(job_id, progress=0.8)
-
-        result_path = f"temp/exports/{job_id}/camtrap-dp.zip"
-        uploaded = await upload_to_storage("firmware", result_path, package_bytes, "application/zip")
-
-        if uploaded:
-            client = create_service_client()
-            try:
-                signed = client.storage.from_("firmware").create_signed_url(
-                    result_path,
-                    expires_in=3600,  # 1 hour for exports
+        async with job_heartbeat(job_id):
+            with tempfile.TemporaryDirectory(prefix="camtrapdp-") as tmp:
+                zip_path, result = await export.build_export(
+                    sel,
+                    export.ExportCaller(**caller),
+                    Path(tmp),
+                    max_bytes=settings.CAMTRAPDP_EXPORT_MAX_BYTES,
+                    on_message=on_message,
+                    on_progress=on_progress,
                 )
-                result_url = signed.get("signedURL", result_path)
-            except Exception:
-                result_url = result_path
-
-            await update_job(
-                job_id,
-                status=JobStatus.COMPLETED,
-                progress=1.0,
-                result_url=result_url,
-            )
-        else:
-            await update_job(job_id, status=JobStatus.FAILED, error="Failed to upload export")
-
-        logger.info("job_complete", job_type="export_camtrapdp", job_id=job_id)
-
-    except Exception as e:
+                await update_job(job_id, progress=0.92, message="Saving the export…")
+                filename = export.export_filename(sel.project_id)
+                url = await export.store_export(zip_path, job_id, filename, settings.CAMTRAPDP_EXPORT_BUCKET)
+    except export.ExportError as e:
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
-        logger.error("job_failed", job_type="export_camtrapdp", job_id=job_id, error=str(e))
-        raise
+        logger.warning("job_failed", job_type="export_camtrapdp_originals", job_id=job_id, error=str(e))
+        return
+    except Exception as e:
+        await update_job(job_id, status=JobStatus.FAILED, error="The export failed. Try again later.")
+        logger.error("job_failed", job_type="export_camtrapdp_originals", job_id=job_id, error=str(e))
+        return
+
+    missing = len(result.missing)
+    msg = f"{result.written} of {result.photos} photos in the package"
+    if missing:
+        msg += f". {missing} could not be read and are named in its description"
+    await update_job(
+        job_id,
+        status=JobStatus.COMPLETED_WITH_ERRORS if missing else JobStatus.COMPLETED,
+        progress=1.0,
+        result_url=url,
+        message=msg + ". The link works for 24 hours.",
+    )
+    logger.info("job_complete", job_type="export_camtrapdp_originals", job_id=job_id, photos=result.photos, missing=missing, bytes=result.photo_bytes)
+    await _notify_export_ready(job_id, sel.project_id, msg)
+
+
+async def _notify_export_ready(job_id: str, project_id: str, body: str) -> None:
+    """In-app notification for the export's owner, pointing at Processing history (best-effort)."""
+    job = await get_job(job_id)
+    if not job or not job.user_id:
+        return  # an organisation API key's export has no user to tell
+    from app.services.supabase_client import create_service_client
+
+    row = {
+        "user_id": job.user_id,
+        "project_id": project_id,
+        "type": "system",
+        "title": "Your CamtrapDP export is ready",
+        "body": body + ". Download it from Processing history within 24 hours.",
+        "data": {"job_id": job_id, "link": "/processing"},
+    }
+    try:
+        await asyncio.to_thread(lambda: create_service_client().table("notifications").insert(row).execute())
+    except Exception as exc:  # noqa: BLE001 - the link is on the job either way
+        logger.warning("export_notification_skipped", job_id=job_id, error=str(exc))
 
 
 async def download_pretrained_job(job_id: str, user_id: str, sscma_uuid: str, org_id: str, custom_name: str = "", custom_desc: str = ""):
@@ -678,6 +718,118 @@ def _is_uuid(value: object) -> bool:
         return False
 
 
+# Keys per `.in_()` lookup. 50 hashes of 64 hex chars keep the URL near 3.5 KB, the size of
+# the 100-UUID chunks used elsewhere, well under the proxy's request-line limit.
+_DEDUP_CHUNK = 50
+
+
+def unregistered_uploads(svc, candidates: list[dict]) -> list[dict]:
+    """The uploaded files with no media row yet in their deployment, by file_hash or gdrive:// path.
+
+    A photo that appears twice in the batch is kept once, at its first occurrence.
+    """
+    keys = existing_media_keys(svc, candidates)
+    seen: set[tuple[str, str, str]] = set()
+    fresh: list[dict] = []
+    for uf in candidates:
+        own = [("path", f"gdrive://{uf['file_id']}")]
+        if uf.get("file_hash"):
+            own.append(("hash", uf["file_hash"]))
+        batch_keys = [(uf["deployment_id"], *k) for k in own]
+        if any(k in keys for k in own) or any(k in seen for k in batch_keys):
+            continue
+        seen.update(batch_keys)
+        fresh.append(uf)
+    return fresh
+
+
+def existing_media_keys(svc, candidates: list[dict]) -> set[tuple[str, str]]:
+    """Return the ("hash", file_hash) and ("path", file_path) keys the candidates already have.
+
+    Looks up only the candidates' own hashes and gdrive:// paths, per deployment and in chunks,
+    so the read stays small however many photos the deployment holds. A full read of the
+    deployment stopped at PostgREST's 1,000-row cap and let re-uploads duplicate (#317).
+    Soft-deleted rows count, as they always have. A failed lookup skips that chunk's dedup.
+    """
+    by_dep: dict[str, tuple[set[str], set[str]]] = {}
+    for uf in candidates:
+        hashes, paths = by_dep.setdefault(uf["deployment_id"], (set(), set()))
+        if uf.get("file_hash"):
+            hashes.add(uf["file_hash"])
+        paths.add(f"gdrive://{uf['file_id']}")
+
+    keys: set[tuple[str, str]] = set()
+    for dep in sorted(by_dep):
+        for column, values in zip(("file_hash", "file_path"), by_dep[dep]):
+            ordered = sorted(values)
+            for i in range(0, len(ordered), _DEDUP_CHUNK):
+                try:
+                    rows = (
+                        svc.table("media")
+                        .select("file_hash, file_path")
+                        .eq("deployment_id", dep)
+                        .in_(column, ordered[i : i + _DEDUP_CHUNK])
+                        .execute()
+                        .data
+                        or []
+                    )
+                except Exception as exc:
+                    logger.warning("media_dedup_lookup_failed", deployment_id=dep, column=column, error=str(exc))
+                    rows = []
+                for r in rows:
+                    if r.get("file_hash"):
+                        keys.add(("hash", r["file_hash"]))
+                    if r.get("file_path"):
+                        keys.add(("path", r["file_path"]))
+    return keys
+
+
+def plan_ai_coalescing(dep_ids: list[str], active_jobs: list[dict]) -> tuple[list[str], dict[str, str], dict[str, str]]:
+    """Split an upload's deployments by the AI jobs already on them (#284).
+
+    ``active_jobs`` is :func:`app.jobs.store.find_active_ai_jobs`. Returns the deployments
+    that need a new job, ``{deployment: queued job it joins}``, and ``{deployment:
+    processing job}`` for the new job's deployments that one is already running on, so
+    the new job is that run's follow-up. A processing job may already have read its media,
+    so it never covers a deployment on its own; a queued one has not.
+    """
+    queued: dict[str, str] = {}
+    processing: dict[str, str] = {}
+    for job in active_jobs:
+        into = queued if job.get("status") == JobStatus.QUEUED.value else processing
+        for d in job.get("deployment_ids") or []:
+            into.setdefault(d, job["job_id"])
+    new = [d for d in dep_ids if d not in queued]
+    covered = {d: queued[d] for d in dep_ids if d in queued}
+    following = {d: processing[d] for d in new if d in processing}
+    return new, covered, following
+
+
+async def reserve_ai_job(dep_ids: list[str], user_id: str | None) -> tuple[str | None, list[str], dict[str, str], dict[str, str]]:
+    """Create the ``ai_pipeline`` job an upload chunk needs, or find the queued one it joins.
+
+    Returns ``(new job id or None, its deployments, covered, following)`` as in
+    :func:`plan_ai_coalescing`. The check and the create run under one lock
+    (``services.locks``, across processes through Redis or the database), and the new row is written
+    through to Supabase before the lock is let go, so two chunks that arrive together
+    cannot both create a job for one deployment (#284).
+    """
+    from app.services.locks import exclusive  # noqa: PLC0415
+
+    async with exclusive("ai-coalesce", ttl_seconds=60):
+        new_dep_ids, covered, following = plan_ai_coalescing(dep_ids, await find_active_ai_jobs())
+        if not new_dep_ids:
+            return None, new_dep_ids, covered, following
+        ai_job_id = await create_job(
+            user_id=user_id,
+            kind="ai_pipeline",
+            label=f"AI analysis — {len(new_dep_ids)} deployment(s)",
+            deployment_ids=new_dep_ids,
+        )
+        await flush_pending_syncs(ai_job_id)
+        return ai_job_id, new_dep_ids, covered, following
+
+
 def build_pipeline_steps() -> list:
     """Build the ordered pipeline step list from the enabled feature flags.
 
@@ -743,6 +895,21 @@ async def auto_annotate_deployments(
         "bioclip": "Identifying species",
         "evidence_fusion": "Combining the evidence per frame",
     }
+    step_names = [s.value for s in steps]
+
+    started = False
+
+    async def _on_start() -> None:
+        # The job turns 'processing' only once it holds its first deployment: until then
+        # (deferred, or waiting for a run already on the deployment) later upload chunks
+        # still see it 'queued' and join it (#284). Awaited to Supabase, so a chunk that
+        # read 'queued' had registered its photos before this run reads the media.
+        nonlocal started
+        if started or not job_id:
+            return
+        started = True
+        await update_job(job_id, status=JobStatus.PROCESSING, current_phase=ProgressPhase.AI_PIPELINE)
+        await flush_pending_syncs(job_id)
 
     # Heartbeat api_jobs.updated_at across the whole run: a single long step (e.g.
     # SpeciesNet over thousands of images) writes no progress between on_step calls,
@@ -760,6 +927,16 @@ async def auto_annotate_deployments(
                 label = step_labels.get(step_name, step_name)
                 await update_job(job_id, progress=min(0.99, frac), message=f"🔬 {label} — deployment {_i + 1}/{total}")
 
+            # Within a step that reports it (media preparation), so the bar moves during the
+            # thumbnails instead of sitting at the step's start (#286).
+            async def _on_progress(step_name: str, done: int, step_media: int, _i: int = i) -> None:
+                if not job_id or not step_media or not total:
+                    return
+                step_idx = step_names.index(step_name)
+                frac = (_i + (step_idx + done / step_media) / len(steps)) / total
+                label = step_labels.get(step_name, step_name)
+                await update_job(job_id, progress=min(0.99, frac), message=f"🔬 {label}, {done} of {step_media}, deployment {_i + 1}/{total}")
+
             try:
                 logger.info("auto_annotate_start", deployment_id=dep_id, steps=[s.value for s in steps])
                 # Reflect the camera's own EXIF scores as edge observations before the
@@ -774,6 +951,8 @@ async def auto_annotate_deployments(
                     steps=steps,
                     user_id=user_id,
                     on_step=_on_step if job_id else None,
+                    on_progress=_on_progress if job_id else None,
+                    on_start=_on_start,
                     force=force,
                     media_ids=media_ids,
                 )
@@ -832,9 +1011,9 @@ async def annotate_deployments_job(
 
     The actual work (``run_pipeline`` per deployment + detection notifications + DINOv3
     embed/cluster) lives in :func:`auto_annotate_deployments`; this is the thin
-    job-status wrapper around it.
+    job-status wrapper around it. The job stays 'queued' until ``run_pipeline`` holds
+    its first deployment, which then marks it 'processing'.
     """
-    await update_job(job_id, status=JobStatus.PROCESSING, current_phase=ProgressPhase.AI_PIPELINE)
     try:
         await auto_annotate_deployments(deployment_ids, user_id=user_id, job_id=job_id, force=force, media_ids=media_ids)
         await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message="AI analysis complete")
@@ -882,6 +1061,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         job_id,
         total=total_files,
         started_at=datetime.now(timezone.utc),
+        test_photos_skipped=int(payload.get("test_photos_skipped") or 0),
     )
     await emit_event(
         job_id,
@@ -1184,18 +1364,6 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         # e.g. back-filled). Because upload_file now returns Drive-skipped duplicates
         # too, this also *back-fills* a media row for an image that's in Drive but has
         # no DB row yet — so re-upload is self-healing instead of stranding images.
-        existing_keys: set = set()
-        for dep in sorted({uf["deployment_id"] for uf in candidates}):
-            try:
-                rows = svc.table("media").select("file_hash, file_path").eq("deployment_id", dep).execute().data or []
-            except Exception:
-                rows = []
-            for r in rows:
-                if r.get("file_hash"):
-                    existing_keys.add(("hash", r["file_hash"]))
-                if r.get("file_path"):
-                    existing_keys.add(("path", r["file_path"]))
-
         media_rows = [
             {
                 "id": str(_uuid.uuid4()),
@@ -1210,8 +1378,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                 # settings, NN scores) — None is dropped by the chunk filter below.
                 "exif_metadata": uf.get("exif"),
             }
-            for uf in candidates
-            if ("hash", uf.get("file_hash")) not in existing_keys and ("path", f"gdrive://{uf['file_id']}") not in existing_keys
+            for uf in unregistered_uploads(svc, candidates)
         ]
         media_created = 0
         if media_rows:
@@ -1423,34 +1590,25 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             from datetime import timedelta  # noqa: PLC0415
 
             from app.jobs.dispatch import enqueue_job  # noqa: PLC0415
-            from app.jobs.store import find_queued_ai_jobs  # noqa: PLC0415
 
             await start_phase(job_id, ProgressPhase.AI_PIPELINE)
 
             # Debounced coalescing. A chunked upload sends ~18 requests (10 images each), each
-            # firing its own AI job → a queue full of redundant runs. The fix is two parts:
-            #   1) Enqueue the AI job **deferred** by ANNOTATE_DEBOUNCE_SECONDS. During that window
-            #      the api_jobs row stays 'queued' AND the worker hasn't fetched media yet — so all
-            #      later chunks (2) find it and reuse it, and when it finally runs every image is
-            #      already registered. (Previously the job completed in ~1s, before the next chunk
-            #      could coalesce, so nothing deduped.)
-            #   2) Reuse any still-queued AI job covering the deployment instead of enqueuing again.
-            # Net: one AI run per deployment per upload instead of ~18. run_pipeline's unannotated
-            # scoping keeps even a stray extra run a cheap no-op.
-            active_ai = await find_queued_ai_jobs()
-            covered: dict[str, str] = {}
-            for j in active_ai:
-                for d in j["deployment_ids"]:
-                    covered.setdefault(d, j["job_id"])
-            new_dep_ids = [d for d in _dep_ids if d not in covered]
-
-            if new_dep_ids:
-                ai_job_id = await create_job(
-                    user_id=_user_id,
-                    kind="ai_pipeline",
-                    label=f"AI analysis — {len(new_dep_ids)} deployment(s)",
-                    deployment_ids=new_dep_ids,
-                )
+            # firing its own AI job → a queue full of redundant runs. The fix is three parts:
+            #   1) Enqueue the AI job **deferred** by ANNOTATE_DEBOUNCE_SECONDS. The api_jobs row
+            #      stays 'queued' through that window AND while it waits for a run already on the
+            #      deployment (run_pipeline's per-deployment lock); it turns 'processing' only when
+            #      it reads its media. So all later chunks (2) find it and reuse it, and when it
+            #      runs every image is already registered.
+            #   2) Reuse any queued AI job covering the deployment instead of enqueuing again. A
+            #      deployment covered only by a 'processing' job gets one follow-up job, which
+            #      later chunks join through (2) (#284).
+            #   3) reserve_ai_job holds a lock across the check and the create, so concurrent
+            #      chunks cannot both create one.
+            # Net: one AI run per deployment per upload, plus at most one follow-up for the
+            # photos that arrive while it runs.
+            ai_job_id, new_dep_ids, covered, following = await reserve_ai_job(_dep_ids, _user_id)
+            if ai_job_id:
                 await enqueue_job(
                     "annotate_deployments_job",
                     ai_job_id,
@@ -1458,6 +1616,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                     _user_id,
                     _defer_by=timedelta(seconds=ANNOTATE_DEBOUNCE_SECONDS),
                 )
+                follow_note = f", after the run already going (job {next(iter(following.values()))[:8]}) finishes" if following else ""
                 await emit_event(
                     job_id,
                     ProgressEvent(
@@ -1465,7 +1624,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                         phase=ProgressPhase.AI_PIPELINE,
                         child_job_id=ai_job_id,
                         message=(
-                            f"🛰️ Queued AI analysis for {len(new_dep_ids)} deployment(s) on the AI worker "
+                            f"🛰️ Queued AI analysis for {len(new_dep_ids)} deployment(s) on the AI worker{follow_note} "
                             f"— track it in Processing history (job {ai_job_id[:8]})"
                         ),
                     ),
@@ -1676,7 +1835,7 @@ JOBS = [
     convert_model_job,
     train_species_brain_job,
     generate_manifest_job,
-    export_camtrapdp_job,
+    export_camtrapdp_originals_job,
     download_pretrained_job,
     download_github_pretrained_job,
     upload_drive_images_job,

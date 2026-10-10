@@ -83,6 +83,65 @@ def test_default_threshold_applies_when_label_map_has_none():
     assert len(at) == 1
 
 
+PERSON_MODEL = {
+    **MODEL,
+    "name": "Person Detection",
+    "ai_model_families": {"firmware_model_id": 20},
+    "version_number": 1,
+    "label_map": {
+        "no person": {"role": "background"},
+        "person": {"role": "target", "predicts": "type", "observation_type": "human"},
+    },
+}
+
+
+def test_taxon_class_writes_an_animal_with_its_taxon():
+    model = {**MODEL, "label_map": {**MODEL["label_map"], "rat": {**MODEL["label_map"]["rat"], "predicts": "taxon"}}}
+    (row,) = build_edge_observations(_media({"rat": "90%"}), "dep-1", model, "t")
+    assert row["observation_type"] == "animal"
+    assert row["taxon_id"] == "22222222-2222-2222-2222-222222222222"
+    assert row["scientific_name"] == "Rattus rattus"
+    assert row["vernacular_name"] == "Ship rat"
+
+
+def test_type_person_class_writes_a_human_not_an_animal():
+    """#135: the camera's person detections were typed animal."""
+    (row,) = build_edge_observations(_media({"person": "91%", "no person": "9%"}), "dep-1", PERSON_MODEL, "t")
+    assert row["observation_type"] == "human"
+    assert row["taxon_id"] is None and row["scientific_name"] is None and row["vernacular_name"] is None
+    assert row["ai_origin"] == "edge"
+    assert row["source_model_version"] == "20V1"
+    assert row["classification_probability"] == 0.91
+
+
+def test_type_class_with_empty_or_blank_type_writes_nothing():
+    for obs_type in (None, "", "  ", "blank", "unknown"):
+        model = {**PERSON_MODEL, "label_map": {"person": {"role": "target", "predicts": "type", "observation_type": obs_type}}}
+        assert build_edge_observations(_media({"person": "95%"}), "dep-1", model, "t") == [], obs_type
+
+
+def test_behaviour_class_writes_nothing():
+    model = {**MODEL, "label_map": {"grooming": {"role": "target", "predicts": "behavior", "behavior": "grooming"}}}
+    assert build_edge_observations(_media({"grooming": "99%"}), "dep-1", model, "t") == []
+
+
+def test_label_the_label_map_does_not_know_writes_nothing():
+    assert build_edge_observations(_media({"cat": "99%"}), "dep-1", PERSON_MODEL, "t") == []
+
+
+def test_mixed_model_types_each_class_by_what_it_predicts():
+    model = {
+        **MODEL,
+        "label_map": {
+            "rat": {"role": "target", "predicts": "taxon", "scientific_name": "Rattus rattus"},
+            "person": {"role": "target", "predicts": "type", "observation_type": "human"},
+            "other": {"role": "background"},
+        },
+    }
+    rows = build_edge_observations(_media({"rat": "60%", "person": "70%", "other": "5%"}), "dep-1", model, "t")
+    assert sorted((r["observation_type"], r["scientific_name"]) for r in rows) == [("animal", "Rattus rattus"), ("human", None)]
+
+
 def test_no_user_comment_fields_yields_no_rows():
     assert build_edge_observations({"id": "m", "exif_metadata": None}, "d", MODEL, "t") == []
     assert build_edge_observations({"id": "m", "exif_metadata": {}}, "d", MODEL, "t") == []

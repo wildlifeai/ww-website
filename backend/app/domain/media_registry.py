@@ -4,8 +4,7 @@
 
 The UI never reads ``storage_key`` or guesses where a file lives. It calls
 ``resolve_url`` (a thumbnail/preview URL served from the public Supabase Storage
-bucket, with graceful fallback to the proxy endpoint) and lets the registry hide
-the storage provider.
+bucket, or a public original) and lets the registry hide the storage provider.
 
 Generation (thumbnails, previews, animal crops) writes the small derivatives to
 the public ``media-renditions`` Supabase Storage bucket and records the URLs in
@@ -50,36 +49,41 @@ def _assets(media_row: dict) -> dict:
     return a or {}
 
 
-def _original_url(media_row: dict, size: str) -> Optional[str]:
-    """A working URL for the original: the public URL if any, else the proxy."""
+def _public_original_url(media_row: dict) -> Optional[str]:
+    """The original's URL when it is public (http/https), else None.
+
+    A private original (``gdrive://`` and the like) is only reachable through the
+    auth-gated ``/api/media/{id}/image`` proxy, which a plain ``<img>`` cannot load
+    (no Authorization header, #305), so the registry never hands that URL out. A
+    client that holds a token fetches the proxy itself.
+    """
     file_path = media_row.get("file_path") or ""
     if file_path.startswith(("http://", "https://")):
         return file_path
-    media_id = media_row.get("id")
-    if not media_id:
-        return None
-    proxy_size = "thumb" if size == "thumbnail" else "full"
-    return f"/api/media/{media_id}/image?size={proxy_size}"
+    return None
 
 
 def resolve_url(media_row: dict, size: str = "thumbnail") -> Optional[str]:
-    """Resolve a media row to a display URL for the requested size.
+    """Resolve a media row to a URL a plain ``<img>`` can load, or None.
 
-    Fallback chains (so the UI always gets *something* loadable):
-    - ``thumbnail`` → thumbnail_url → preview_url → original (proxy if private)
-    - ``preview``   → preview_url   → original (full; never the tiny thumbnail)
-    - ``original``  → original file URL (public) or the proxy endpoint
+    Fallback chains:
+    - ``thumbnail`` → thumbnail_url → preview_url → public original
+    - ``preview``   → preview_url   → public original (never the tiny thumbnail)
+    - ``original``  → public original
+
+    None means there is no rendition yet and the original is private: the UI shows
+    its no-thumbnail placeholder.
     """
     assets = _assets(media_row)
     if size == "thumbnail":
-        return assets.get("thumbnail_url") or assets.get("preview_url") or _original_url(media_row, "thumbnail")
+        return assets.get("thumbnail_url") or assets.get("preview_url") or _public_original_url(media_row)
     if size == "preview":
-        return assets.get("preview_url") or _original_url(media_row, "preview")
-    return _original_url(media_row, "original")
+        return assets.get("preview_url") or _public_original_url(media_row)
+    return _public_original_url(media_row)
 
 
 def with_resolved_urls(media_row: dict) -> dict:
-    """Return the row plus pre-resolved thumbnail/preview/original URLs (for the grid)."""
+    """Return the row plus pre-resolved thumbnail/preview/original URLs, each possibly None."""
     return {
         **media_row,
         "thumbnail_url": resolve_url(media_row, "thumbnail"),
@@ -199,7 +203,7 @@ async def generate_observation_crops(media_id: str) -> Optional[str]:
             .order("confidence", desc=True)  # first row → hero
             .execute()
         )
-        return media.data, obs.data
+        return (media.data if media else None), obs.data
 
     media_row, obs_rows = await asyncio.to_thread(_fetch)
     if not media_row or not obs_rows:

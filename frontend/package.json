@@ -23,37 +23,39 @@
     "@fontsource/inter": "^5.3.0",
     "@supabase/auth-ui-react": "^0.4.7",
     "@supabase/auth-ui-shared": "^0.1.8",
-    "@supabase/supabase-js": "^2.103.0",
-    "@tanstack/react-query": "^5.99.0",
-    "@types/leaflet": "^1.9.21",
+    "@supabase/supabase-js": "^2.117.2",
+    "@tanstack/react-query": "^5.104.1",
+    "@types/leaflet": "^1.9.22",
     "leaflet": "^1.9.4",
-    "lucide-react": "^1.8.0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
+    "lucide-react": "^1.52.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "react-leaflet": "^5.0.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.4",
     "remark-gfm": "^4.0.1",
-    "vega-embed": "^7.1.0"
+    "vega-embed": "^7.3.0"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.5.3",
+    "@commitlint/config-conventional": "^20.5.3",
     "@eslint/js": "^9.39.4",
     "@size-limit/file": "^11.2.0",
     "@types/node": "^24.12.2",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^9.39.4",
-    "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.5.2",
-    "globals": "^17.4.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.7",
+    "globals": "^17.13.0",
     "husky": "^9.1.7",
-    "lint-staged": "^16.4.0",
+    "lint-staged": "^17.6.0",
     "size-limit": "^11.2.0",
     "typescript": "~6.0.2",
-    "typescript-eslint": "^8.58.0",
-    "vite": "^8.0.4",
-    "vitest": "^4.1.10"
+    "typescript-eslint": "^8.71.0",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3"
   },
   "overrides": {
     "react": "$react",
@@ -61,9 +63,15 @@
   },
   "size-limit": [
     {
-      "name": "main chunk (everything signed-in, plus the public pages)",
-      "path": "dist/assets/index-*.js",
-      "limit": "500 kB"
+      "name": "first load (the entry and the chunks index.html preloads; signed-in pages are lazy)",
+      "path": [
+        "dist/assets/index-*.js",
+        "dist/assets/jsx-runtime-*.js",
+        "dist/assets/useQuery-*.js",
+        "dist/assets/supabase-*.js",
+        "dist/assets/apiClient-*.js"
+      ],
+      "limit": "190 kB"
     },
     {
       "name": "guide detail (lazy)",
@@ -73,7 +81,7 @@
     {
       "name": "stylesheet",
       "path": "dist/assets/index-*.css",
-      "limit": "8 kB"
+      "limit": "1.5 kB"
     }
   ]
 }

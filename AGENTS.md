@@ -13,7 +13,7 @@ This file is only the quickstart.
 ## Run it
 
 Both services share **one `.env` at the repo root** (`frontend/vite.config.ts` loads `../`;
-the backend reads `../.env` before `backend/.env`). Node 20+, Python 3.11+.
+the backend reads `../.env` before `backend/.env`). Node 22+, Python 3.11+.
 
 ```bash
 cd backend  && python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
@@ -42,6 +42,10 @@ node scripts/validate-docs.js
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
 
+`pyright` in `backend/` (venv active, `requirements-dev.txt` installed) type-checks the backend
+with the `[tool.pyright]` settings in `backend/pyproject.toml`. It is advisory until its backlog
+is cleared (#225): add no new errors in the files you touch.
+
 `ci.yml` runs the same gates on every pull request and adds three that only run there: pytest
 with a statement-coverage floor, a build of the backend's `api` Docker stage that is started and
 asked for `/docs`, and a check that `backend/openapi.json` matches the app (regenerate it with
@@ -53,17 +57,27 @@ pull requests, on pushes to dev and weekly; its findings are code scanning alert
 tab, and it is advisory until it is made a required check (#229). `dependency-audit.yml` runs
 `npm audit` on the frontend and `e2e/` and `pip-audit` on the backend, advisory on a pull request
 that changes a lockfile or a requirements file and blocking on its Monday run; Dependabot opens
-the grouped bump PRs.
+the grouped bump PRs. The lint toolchain and `size-limit` each come as one group, majors included,
+because their packages peer-depend on each other's version and cannot install one at a time.
+`commitlint.yml` checks every commit message in a pull request against Conventional Commits,
+as the `frontend/.husky/commit-msg` hook does locally; the rules and what trips them are in
+[`references/documentation.md`](.agents/skills/references/documentation.md#commit-messages).
 
 The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
-(`.github/workflows/e2e.yml`); what they prove and how to read a failure is in
+(`.github/workflows/e2e.yml`), the smoke and demo also run against a whole stack started on
+the runner from the pull request's own backend and frontend (`e2e-full-stack.yml`), and the
+full suite, which writes to dev and cleans up after itself, runs nightly and after each dev
+backend deploy; what they prove and how to read a failure is in
 [`e2e/README.md`](e2e/README.md). They need a running site, so they are not part of the
 local gates above.
 
 Frontend `*.integration.test.ts` files skip under `npm test`. They run in CI
 (`backend-integration.yml`) against a local stack built from ww-backend's `dev`, and
 ww-backend runs them against its own schema PRs, so a red run can come from either side. To
-run one locally, follow the instructions in its header.
+run one locally, follow the instructions in its header. The backend has two such tests,
+`backend/tests/test_api_keys_local_stack.py` and `backend/tests/test_public_api_local_stack.py`:
+they skip without `WW_TEST_API_URL` and `WW_TEST_SERVICE_ROLE_KEY` and CI does not run them, so
+run them by hand when API key or `/api/v1` code changes.
 
 ## Non-negotiables
 

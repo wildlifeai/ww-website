@@ -35,13 +35,25 @@ per image derived from `review_status` (`lib/observations.ts`):
 
 A card with no thumbnail yet shows **Processing…** while its deployment has a queued or running
 job, or for 10 minutes after the photo was registered. After that it shows **No thumbnail** and a
-**Retry** button, which runs the thumbnail backfill for the whole deployment (#208). The grid
-reloads when a job on a deployment in view finishes (`hooks/useBusyDeployments.ts`,
-`lib/thumbnailRetry.ts`).
+**Retry** button, which runs the thumbnail backfill for the whole deployment (#208). The grid also
+starts that backfill by itself, once per deployment per browser session, the first time it shows a
+deployment's **No thumbnail** card, so a deployment whose thumbnails cannot be made does not loop
+(`hooks/useAutoRetryThumbnails.ts`, #175). A photo with no rendition and a Google Drive original
+has nothing an `<img>` can load, since `/api/media/{id}/image` needs a Bearer header, so the grid
+and the viewer never request it (`lib/mediaImageUrl.ts`, #300). The viewer shows the same states
+as the card, **Processing…** or **No preview yet** with Retry, and its filmstrip a plain tile. Both
+show the user's own copy of a just-uploaded file until its rendition exists. While a job
+runs on a deployment in view the grid quietly refetches its page every 30 s, keeping the cards on
+screen until the new rows arrive, and it reloads once more when
+the job finishes (`hooks/useRefreshWhileBusy.ts`, `hooks/useBusyDeployments.ts`,
+`lib/thumbnailRetry.ts`). The pipeline makes thumbnails newest first, the grid's order, four at a
+time (#286).
 
 ### Selection actions
 
-Click selects, double-click opens. Once something is selected the **Actions** menu
+A click (or Enter) opens a photo, even while others are selected, and the selection survives the
+viewer. The circle at a card's bottom-left, Ctrl/Cmd-click or Space selects; Shift-click selects
+the range from the last selected card (`lib/cardSelection.ts`, #283). Once something is selected the **Actions** menu
 (`components/data/MediaBulkActions.tsx`) offers: *Label as…* (one human observation on every
 selected image), *Find similar images* (single selection, Wildlife Brain), *Upload to iNaturalist*,
 *Remove images* (soft delete with undo), *Run AI (re-classify)* and *Create species ID model…*.
@@ -52,7 +64,8 @@ the Edge Impulse recipe (`TrainModelModal.tsx`, `POST /api/models/train`, behind
 
 ## The full-screen labeling modal
 
-Selecting a photo opens a **full-screen modal** (`MediaDetail.tsx`):
+Clicking a photo opens a **full-screen modal** (`MediaDetail.tsx`; its photo area and filmstrip are
+`MediaDetailImage.tsx`):
 
 - **Left** — the image at up to 92vh with **bounding-box overlays** and draw/redraw/delete; ‹/›
   arrows and ←/→ keys step between images; Esc cancels a draw or closes; click the backdrop to close.
@@ -63,7 +76,7 @@ Selecting a photo opens a **full-screen modal** (`MediaDetail.tsx`):
 
 | Action | Effect |
 |--------|--------|
-| **✓ Confirm** | Accept the AI label → `review_status='human_reviewed'`, sets `reviewer_id`; auto-advances |
+| **✓ Confirm** | Accept the AI label → `review_status='human_reviewed'`, sets `reviewer_id`; auto-advances. With no observation selected it confirms every unreviewed per-model AI row (`confirmAllTargets`); the consensus row (`source_type='consensus'`) stays `ai_reviewed` (#301) |
 | **✕ Blank** | False trigger → `observation_type='blank'`, clears species; auto-advances |
 | **Correct** | Change species via the taxon-validated `SpeciesPicker` (writes `taxon_id`) |
 | **▭ Box / Redraw / ✕** | Draw, replace, or delete the bounding box (writes the bbox quad) |

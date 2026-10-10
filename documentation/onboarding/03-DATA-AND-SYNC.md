@@ -9,7 +9,7 @@ work is run as background jobs.
    (anon key + the user's JWT → the **`authenticated`** Postgres role) and queries tables directly
    with `supabase.from('…')`. Row-Level Security (RLS) scopes every row to the user's projects.
 2. **Backend API (privileged / heavy work).** EXIF parsing, Drive uploads, model conversion, the AI
-   pipeline, LoRaWAN ingestion, and admin-only RPCs go through FastAPI, which uses the
+   pipeline, and admin-only RPCs go through FastAPI, which uses the
    **service-role** key (bypasses RLS) where appropriate.
 
 ## The RLS + GRANT model (read this before debugging "permission denied")
@@ -47,7 +47,7 @@ permissions, verify against the **live** DB, not just the migrations.
 | `media_assets` | embedded in `media` queries (renditions: provider, dimensions, bytes) | RLS read — a missing GRANT aborts the **whole** embedding query (prod, Jul 2026) |
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
 | `taxa` | SpeciesPicker (local search) | RLS read |
-| `user_roles`, `project_invitations` | members panel, invitation banner | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below) |
+| `user_roles`, `project_invitations` | members panel, invitation banner; the user's own roles in Settings and the move picker | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below); a user reads only their own `user_roles` rows directly |
 | `media_embeddings`, `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
 | `devices`, `lorawan_*`, `firmware`, `ai_models`, `api_jobs` | LoRaWAN, manifests, models, jobs | service-role |
 
@@ -75,6 +75,11 @@ photos as the user sees them; with the raw BMP on, the app doubles it for op5. A
 camera keeps its old values until its next deployment start. Ranges and the cost note live in
 `frontend/src/lib/burstCapture.ts`.
 
+Beside the burst, `detection_threshold_pct` (50 to 99, default 57, the camera's factory setting) is
+how confident the on-device model must be before a photo counts as a detection; the app writes it
+as op16 (ww-backend#246, ww-mobile-app#342). The input clamps to the column's CHECK range, which
+lives in `frontend/src/lib/detectionThreshold.ts`.
+
 The same panel edits the capture flash (ww-backend#168, written as op34, op13, op35 and op36 by
 ww-mobile-app#282): `flash_mode` (default `off`, which also turns off the night IR for motion
 detection), `flash_led`, and for `time_of_day` a window stored as UTC minutes
@@ -83,9 +88,35 @@ shows the window in the browser's timezone beside the UTC the camera runs on; th
 `frontend/src/lib/flashSettings.ts`. A save asks for the row back, because RLS turns a
 non-admin's update into 0 rows with no error.
 
+Settings → ✎ Details edits a project's `name`, `description` and `website` as the signed-in user,
+through `frontend/src/lib/projectDetails.ts` (#288). The `projects` UPDATE policy allows a
+project_admin of the project or a ww_admin, so only they see the action, and the save asks for the
+row back in the same way. The columns have no length, format or uniqueness checks. A rename leaves
+the project's Google Drive folder under the old name: later uploads go to a new folder under the
+new name, once the cached folder id expires (24 h, or at once without Redis).
+
 Observation provenance fields (`source_type`, `review_status`, `reviewer_id`, `annotator_id`,
 `classification_method`) are written through one helper, `frontend/src/lib/observations.ts`, so
 every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md).
+
+Deleting photos soft-deletes their `media` rows only; their observations stay readable, because
+the `observations` read policy checks the deployment, not the photo. Every read that counts or
+lists observations (Insights, My Data, Reporting, Field, the upload summary) goes through
+`frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
+with no photo unless asked not to, and pages past the 1,000-row cap (#198).
+
+**A deployment changes project only through the `move_deployment` RPC** (ww-backend#272); a
+direct UPDATE of `deployments.project_id` is refused with 42501. Insights > Deployments, Move to
+project, calls it from the browser as the signed-in user through
+`frontend/src/lib/moveDeployment.ts`; a service-role call has no `auth.uid()` and is refused. The
+rule is project_admin on both projects (or ww_admin), the same organisation, and a target that is
+neither deleted nor archived. An organisation_manager can see every project but cannot move. The
+picker lists only targets that pass, from the user's own `user_roles` rows, and `toMoveError` maps
+the SQLSTATEs: 42501 not allowed, P0002 deployment or target not found, 22023 another organisation
+or an archived target, 22004 a missing argument. Photos, observations, annotations and alerts
+follow the deployment, since they reach their project through it. Originals already in Google
+Drive stay in the old project's folder and later uploads go to the new one: the photos are found
+by their stored references, so nothing is moved in Drive.
 
 ## Frontend ⇄ backend env mapping
 
@@ -157,7 +188,11 @@ and the Upload button waits for it (the deployment count resolves by card folder
    matches it exactly against the user's deployments. Only when a frame carries no tag does the
    card folder (`MEDIA/<8-hex>/`, a prefix of the same id) decide. The folder can be wrong: it is
    created at boot, before the deployment id is configured, so a frame under `MEDIA/00000000/`
-   can carry the real id in its EXIF (ww-website#140).
+   can carry the real id in its EXIF (ww-website#140). A WW500 frame (EXIF `Make` "Wildlife.ai")
+   with no id, or the all-zero one, is a **test photo** taken before a deployment was set on the
+   camera: it leaves the selection as soon as the EXIF read lands, whatever its folder, and the page
+   says "N test photos skipped" (`withoutTestPhotos`, ww-website#287). A file with no EXIF keeps the
+   folder fallback.
 2. **Triage of unassigned photos** (`UnassignedTriage`). Files that resolve to no deployment are
    grouped into **capture sessions** — same EXIF id, else same card folder, gaps under 6 h
    (`unassignedSessions.ts`) — and shown with sample thumbnails, time-span stats and, when the
@@ -217,7 +252,9 @@ with a fresh Supabase client after an HTTP/2 `ConnectionTerminated` (`routers/ex
 ### On the server
 
 ```
-POST /api/exif/parse  → parse EXIF, bind deployment (EXIF Deployment_ID, else card-folder prefix;
+POST /api/exif/parse  → parse EXIF, drop WW500 test photos (domain/exif.py is_test_photo,
+                        counted as `test_photos_skipped` in the response and the job summary),
+                        bind deployment (EXIF Deployment_ID, else card-folder prefix;
                         `deployment_id_source` says which), buffer bytes to Azure blob store,
                         enqueue upload_drive_images_job
 upload_drive_images_job:
@@ -266,7 +303,9 @@ instant in the **deployment's** timezone at display time.
   schema (display-only; `media.timestamp` stays UTC). It is **app-populated** (no DB trigger):
   `resolve_timezone(lat, lon)` in [`domain/photo_preprocessing.py`](../../backend/app/domain/photo_preprocessing.py)
   derives it from the deployment's GPS via `timezonefinder`. CamtrapDP import sets it automatically;
-  existing/device deployments are filled by `POST /api/deployments/backfill-timezones` (idempotent).
+  existing/device deployments are filled by `POST /api/deployments/backfill-timezones` (idempotent,
+  system admins only). Editing a deployment's location (`PATCH /api/deployments/{id}/location`)
+  recomputes it from the new coordinates, and clears it when they are removed.
 - **Display** — [`frontend/src/lib/time.ts`](../../frontend/src/lib/time.ts) (`formatCaptureTime`,
   `getTimeOfDay`, `hourInTimezone`) renders the UTC instant in the deployment zone (with a label like
   `10:44 am NZST`) and drives the day/night filter. **Store the IANA name, not a fixed offset**, so DST

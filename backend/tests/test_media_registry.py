@@ -1,6 +1,6 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Tests for Media Registry URL resolution (pure)."""
+"""Tests for Media Registry URL resolution, the routes that call it, and rendition generation."""
 
 from io import BytesIO
 from unittest.mock import MagicMock
@@ -23,19 +23,36 @@ def test_thumbnail_prefers_thumbnail_url():
     assert resolve_url(row, "thumbnail") == "cdn/t.jpg"
 
 
-def test_thumbnail_falls_back_to_preview_then_original():
+def test_thumbnail_falls_back_to_preview_then_public_original():
     row = {"id": "m1", "file_path": "gdrive://abc", "media_assets": {"preview_url": "cdn/p.jpg"}}
     assert resolve_url(row, "thumbnail") == "cdn/p.jpg"
 
-    row_none = {"id": "m1", "file_path": "gdrive://abc", "media_assets": {}}
-    # No renditions, private storage → proxy endpoint (thumb).
-    assert resolve_url(row_none, "thumbnail") == "/api/media/m1/image?size=thumb"
+    row_public = {"id": "m1", "file_path": "https://example.com/img.jpg", "media_assets": {}}
+    assert resolve_url(row_public, "thumbnail") == "https://example.com/img.jpg"
+
+
+def test_private_original_without_rendition_resolves_to_none():
+    # #305: the auth-gated /api/media/{id}/image proxy cannot load in a plain <img>,
+    # so a private original with no rendition gets no URL at all, at every size.
+    for assets in ({}, [], None, {"animal_crop_url": "cdn/c.jpg"}):
+        row = {"id": "m1", "file_path": "gdrive://abc", "media_assets": assets}
+        for size in ("thumbnail", "preview", "original"):
+            assert resolve_url(row, size) is None, (assets, size)
+
+
+def test_missing_file_path_resolves_to_none():
+    row = {"id": "m1", "file_path": None, "media_assets": {}}
+    assert resolve_url(row, "thumbnail") is None
+    assert resolve_url(row, "original") is None
 
 
 def test_preview_falls_back_to_original_not_thumbnail():
-    row = {"id": "m1", "file_path": "gdrive://abc", "media_assets": {"thumbnail_url": "cdn/t.jpg"}}
-    # preview missing → original (full proxy), never the tiny thumbnail.
-    assert resolve_url(row, "preview") == "/api/media/m1/image?size=full"
+    row = {"id": "m1", "file_path": "https://example.com/img.jpg", "media_assets": {"thumbnail_url": "cdn/t.jpg"}}
+    # preview missing → public original, never the tiny thumbnail.
+    assert resolve_url(row, "preview") == "https://example.com/img.jpg"
+
+    private = {"id": "m1", "file_path": "gdrive://abc", "media_assets": {"thumbnail_url": "cdn/t.jpg"}}
+    assert resolve_url(private, "preview") is None
 
 
 def test_original_public_url_passthrough():
@@ -43,9 +60,20 @@ def test_original_public_url_passthrough():
     assert resolve_url(row, "original") == "https://example.com/img.jpg"
 
 
-def test_original_private_uses_proxy():
-    row = {"id": "m1", "file_path": "gdrive://abc"}
-    assert resolve_url(row, "original") == "/api/media/m1/image?size=full"
+def test_original_private_is_none_even_with_renditions():
+    row = {"id": "m1", "file_path": "gdrive://abc", "media_assets": {"thumbnail_url": "cdn/t.jpg", "preview_url": "cdn/p.jpg"}}
+    assert resolve_url(row, "original") is None
+
+
+def test_no_size_hands_out_the_image_proxy():
+    rows = [
+        {"id": "m1", "file_path": "gdrive://abc", "media_assets": {}},
+        {"id": "m2", "file_path": "drive/folder/x.jpg"},
+        {"id": "m3", "file_path": "", "media_assets": [{"thumbnail_url": "cdn/t.jpg"}]},
+    ]
+    for row in rows:
+        for size in ("thumbnail", "preview", "original"):
+            assert "/api/media/" not in (resolve_url(row, size) or "")
 
 
 def test_media_assets_as_list_is_normalised():
@@ -63,7 +91,108 @@ def test_with_resolved_urls_adds_all_sizes():
     assert out["id"] == "m1"  # original fields preserved
 
 
-# ── Burst grouping (pure) ─────────────────────────────────────────────
+def test_with_resolved_urls_private_without_rendition_is_all_none():
+    row = {"id": "m1", "file_path": "gdrive://abc", "file_name": "a.jpg", "media_assets": []}
+    out = with_resolved_urls(row)
+    assert out["thumbnail_url"] is None
+    assert out["preview_url"] is None
+    assert out["original_url"] is None
+    assert out["file_name"] == "a.jpg"
+
+
+def test_with_resolved_urls_private_keeps_renditions():
+    row = {"id": "m1", "file_path": "gdrive://abc", "media_assets": {"thumbnail_url": "cdn/t.jpg", "preview_url": "cdn/p.jpg"}}
+    out = with_resolved_urls(row)
+    assert (out["thumbnail_url"], out["preview_url"], out["original_url"]) == ("cdn/t.jpg", "cdn/p.jpg", None)
+
+
+# ── Registry routes (the callers) ────────────────────────────────────
+
+
+def _route_client(monkeypatch, data):
+    """A TestClient with auth bypassed, the flag on and the anon client returning ``data``."""
+    from types import SimpleNamespace
+
+    from fastapi.testclient import TestClient
+
+    from app.authz import require_deployment_access, require_media_access
+    from app.config import settings
+    from app.dependencies import get_current_user
+    from app.main import app
+    from app.routers import media as media_router
+
+    table = MagicMock()
+    for name in ("select", "eq", "is_", "order", "range", "maybe_single"):
+        getattr(table, name).return_value = table
+    table.execute.return_value = SimpleNamespace(data=data)
+    anon = MagicMock()
+    anon.table.return_value = table
+    monkeypatch.setattr(media_router.supabase_client, "create_anon_client", lambda: anon)
+    monkeypatch.setattr(settings, "FF_MEDIA_REGISTRY_ENABLED", True)
+
+    overrides = {
+        get_current_user: lambda: SimpleNamespace(id="u1", email="t@ww.ai"),
+        require_media_access: lambda: None,
+        require_deployment_access: lambda: None,
+    }
+    app.dependency_overrides.update(overrides)
+    return TestClient(app), overrides
+
+
+def _clear(overrides):
+    from app.main import app
+
+    for dep in overrides:
+        app.dependency_overrides.pop(dep, None)
+
+
+def test_registry_route_returns_null_urls_for_private_original_without_rendition(monkeypatch):
+    rows = [
+        {"id": "m1", "file_path": "gdrive://abc", "file_name": "a.jpg", "timestamp": None, "deployment_id": "d1", "media_assets": []},
+        {
+            "id": "m2",
+            "file_path": "gdrive://def",
+            "file_name": "b.jpg",
+            "timestamp": None,
+            "deployment_id": "d1",
+            "media_assets": [{"thumbnail_url": "cdn/t.jpg", "preview_url": "cdn/p.jpg"}],
+        },
+    ]
+    client, overrides = _route_client(monkeypatch, rows)
+    try:
+        body = client.get("/api/media/registry/d1").json()
+    finally:
+        _clear(overrides)
+    m1, m2 = body["data"]["media"]
+    assert (m1["thumbnail_url"], m1["preview_url"], m1["original_url"]) == (None, None, None)
+    assert (m2["thumbnail_url"], m2["preview_url"], m2["original_url"]) == ("cdn/t.jpg", "cdn/p.jpg", None)
+    assert body["data"]["count"] == 2
+
+
+def test_resolve_route_returns_null_url_for_private_original_without_rendition(monkeypatch):
+    client, overrides = _route_client(monkeypatch, {"id": "m1", "file_path": "gdrive://abc", "media_assets": []})
+    try:
+        body = client.get("/api/media/m1/resolve?size=preview").json()
+    finally:
+        _clear(overrides)
+    assert body["error"] is None
+    assert body["data"] == {"media_id": "m1", "size": "preview", "url": None}
+
+
+def test_resolve_route_is_not_found_when_maybe_single_finds_no_row(monkeypatch):
+    # supabase-py's maybe_single().execute() returns None, not a response, when no row matches.
+    from app.routers import media as media_router
+
+    client, overrides = _route_client(monkeypatch, None)
+    media_router.supabase_client.create_anon_client().table().execute.return_value = None
+    try:
+        body = client.get("/api/media/m1/resolve").json()
+    finally:
+        _clear(overrides)
+    assert body["error"]["code"] == "NOT_FOUND"
+
+
+# ── Burst grouping (pure)─────────────────────────────────────────────
 
 
 def _row(mid: str, ts):

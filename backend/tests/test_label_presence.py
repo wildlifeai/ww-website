@@ -132,10 +132,26 @@ def test_apply_stratum_number_keys_are_optional_and_toggle():
     assert lp.apply_stratum(r, "x") == r
     assert lp.strata_summary(r) == "medium, clear, night_ir,low_light"
     assert lp.strata_summary({}) == "no strata"
-    # The labeller's vocabulary is the prompt's, so labels and model answers compare directly.
+    # The labeller's vocabulary is the prompt's, so labels and model answers compare directly;
+    # camouflaged, border and distance are human-only strata (architecture report section 10).
     for column, value in lp.STRATA_KEYS.values():
-        allowed = {"animal_size": gp.SIZE_VALUES, "visibility": gp.VISIBILITY_VALUES, "conditions": gp.VISUAL_CONDITIONS}[column]
+        allowed = {
+            "animal_size": gp.SIZE_VALUES,
+            "visibility": gp.VISIBILITY_VALUES + ("camouflaged", "border"),
+            "conditions": gp.VISUAL_CONDITIONS,
+            "distance": ("close", "mid", "far", "na"),
+        }[column]
         assert value in allowed
+
+
+def test_strata_letter_keys_never_shadow_a_verdict_and_distance_is_single_valued():
+    assert not set(lp.STRATA_KEYS) & (set(lp.LABELS) | {"b", "q"})
+    r = lp.apply_stratum(lp.apply_stratum({"label": "animal"}, "c"), "f")
+    assert r["distance"] == "far"
+    r = lp.apply_stratum(lp.apply_stratum(lp.apply_stratum(r, "k"), "r"), "v")
+    assert (r["visibility"], r["conditions"]) == ("camouflaged", "rain,vegetation")
+    assert lp.apply_stratum(r, "o")["visibility"] == "border"
+    assert lp.strata_summary(r) == "camouflaged, rain,vegetation, far"
 
 
 def test_legacy_csv_is_widened_in_place_and_stays_readable(tmp_path):
@@ -147,7 +163,7 @@ def test_legacy_csv_is_widened_in_place_and_stays_readable(tmp_path):
     assert lp.ensure_columns(str(csv_path)) is False  # already widened
     text = csv_path.read_text(encoding="utf-8")
     assert text.splitlines()[0] == ",".join(lp.CSV_COLUMNS) and "\r" not in text
-    assert text.splitlines()[2] == "/f/b.jpg,f/a,0,empty,victor,t,note,,,"
+    assert text.splitlines()[2] == "/f/b.jpg,f/a,0,empty,victor,t,note,,,,"
     labels = lp.load_labels(str(csv_path))
     assert labels[lp.os.path.normpath("/f/a.jpg")]["has_animal"] == "1" and labels[lp.os.path.normpath("/f/a.jpg")]["animal_size"] == ""
     # A strata row appended afterwards lines up with the widened header, and the last row wins.
@@ -163,6 +179,13 @@ def test_legacy_csv_is_widened_in_place_and_stays_readable(tmp_path):
     assert other.read_text(encoding="utf-8").splitlines()[0] == ",".join(lp.CSV_COLUMNS)
     assert lp.load_labels(str(other))[lp.os.path.normpath("/f/z.jpg")]["label"] == "empty"
     assert lp.csv_columns_of(str(tmp_path / "missing.csv")) is None
+    # A CSV from before the distance column (the three v2 strata only) is widened the same way.
+    three = tmp_path / "three.csv"
+    header = ",".join(lp.LEGACY_CSV_COLUMNS + ("animal_size", "visibility", "conditions"))
+    three.write_text(f"{header}\n/f/y.jpg,f/y,1,animal,v,t,,small,,\n", encoding="utf-8")
+    assert lp.ensure_columns(str(three)) is True
+    assert lp.load_labels(str(three))[lp.os.path.normpath("/f/y.jpg")]["animal_size"] == "small"
+    assert lp.csv_columns_of(str(three)) == lp.CSV_COLUMNS
 
 
 def test_pending_keeps_burst_order_and_skips_labelled():

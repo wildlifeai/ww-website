@@ -52,14 +52,26 @@ _TELEMETRY_KEYS = {
     "snr": ("lorawan_snr", float),
 }
 
-TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8}
+TYPE_SIZES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 8: 2, 9: 4, 10: 8}
+
+# struct codes for the integer types: SHORT, LONG, SSHORT, SLONG.
+_INT_FORMATS = {3: "H", 4: "I", 8: "h", 9: "i"}
+
+# The EXIF Make every WW500 writes, and the id a camera with no deployment set
+# could carry. Together they identify a test photo (see is_test_photo).
+WW500_MAKE = "Wildlife.ai"
+ZERO_DEPLOYMENT_ID = "00000000-0000-0000-0000-000000000000"
 
 
 # ── Low-level EXIF parsing ───────────────────────────────────────────
 
 
-def _format_value(value: bytes, type_id: int):
-    """Convert raw EXIF bytes to a Python-friendly value."""
+def _format_value(value: bytes, type_id: int, endian: str = "<"):
+    """Convert raw EXIF bytes to a Python-friendly value.
+
+    ``endian`` is the file's byte order from the TIFF header, ``"<"`` (II) or
+    ``">"`` (MM). WW500 frames are little-endian; many other cameras write MM.
+    """
     if isinstance(value, bytes):
         if type_id == 2:  # ASCII
             try:
@@ -67,7 +79,7 @@ def _format_value(value: bytes, type_id: int):
             except Exception:
                 return None
         elif type_id in (5, 10):  # RATIONAL or SRATIONAL
-            fmt = "<II" if type_id == 5 else "<ii"
+            fmt = endian + ("II" if type_id == 5 else "ii")
             pairs = []
             for i in range(0, len(value), 8):
                 if i + 8 > len(value):
@@ -75,16 +87,11 @@ def _format_value(value: bytes, type_id: int):
                 num, denom = struct.unpack(fmt, value[i : i + 8])
                 pairs.append(num / denom if denom != 0 else 0.0)
             return pairs[0] if len(pairs) == 1 else pairs
-        elif type_id == 3:  # SHORT
+        elif type_id in _INT_FORMATS:  # SHORT, LONG, SSHORT, SLONG: first value only
+            fmt = endian + _INT_FORMATS[type_id]
+            size = TYPE_SIZES[type_id]
             try:
-                # We assume little endian because the value was sliced already.
-                # Strictly speaking, endianness should be passed in, but as a fallback unpack the first one
-                return struct.unpack("<H", value[:2])[0] if len(value) >= 2 else value.hex()
-            except Exception:
-                return value.hex()
-        elif type_id == 4:  # LONG
-            try:
-                return struct.unpack("<I", value[:4])[0] if len(value) >= 4 else value.hex()
+                return struct.unpack(fmt, value[:size])[0] if len(value) >= size else value.hex()
             except Exception:
                 return value.hex()
         elif type_id in (1, 7):  # BYTE or UNDEFINED
@@ -144,13 +151,15 @@ def _parse_ifd(
             fp.seek(current_pos)
 
         if tag_name:
-            parsed_data[tag_name] = _format_value(value, type_id)
+            parsed_data[tag_name] = _format_value(value, type_id, endian)
 
-        # Auto-follow pointer tags into sub-IFDs
-        if tag == 0x8825:  # GPSInfoIFDPointer
+        # Auto-follow pointer tags into sub-IFDs, then come back for the next
+        # entry. Cameras that sort their tags put ExifIFDPointer before
+        # GPSInfoIFDPointer, so without the seek the GPS IFD was lost.
+        if tag in (0x8769, 0x8825):  # ExifIFDPointer, GPSInfoIFDPointer
+            current_pos = fp.tell()
             _parse_ifd(fp, base_offset, value_offset, endian, parsed_data, check_next_ifd=False)
-        elif tag == 0x8769:  # ExifIFDPointer
-            _parse_ifd(fp, base_offset, value_offset, endian, parsed_data, check_next_ifd=False)
+            fp.seek(current_pos)
 
     # Parse next IFD in the chain (if any)
     if check_next_ifd:
@@ -481,6 +490,25 @@ def match_deployment(
     return None
 
 
+def is_test_photo(parsed: Dict[str, Any]) -> bool:
+    """True for a WW500 test photo, which is never uploaded (ww-website#287).
+
+    The firmware writes the ``Deployment_ID`` tag only once a deployment is set,
+    so a frame whose ``Make`` is ``"Wildlife.ai"`` and whose EXIF carries no
+    deployment id, or the all-zero one, was taken on the bench before that. The
+    card folder plays no part: such frames sit in ``MEDIA/00000000/``, but so
+    can real ones taken right after the id was set. A file with no EXIF (a BMP
+    frame, another camera) is not a test photo. ``parsed`` is the output of
+    :func:`parse_exif_from_bytes`. Mirrors ``isTestPhoto`` in
+    ``frontend/src/lib/exifDeploymentId.ts``.
+    """
+    make = parsed.get("Make")
+    if not isinstance(make, str) or make.strip().lower() != WW500_MAKE.lower():
+        return False
+    dep_id = parsed.get("deployment_id")
+    return not dep_id or str(dep_id).lower() == ZERO_DEPLOYMENT_ID
+
+
 def resolve_deployment_source(exif_deployment_id: Optional[str], folder_prefix: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     """Which deployment id a frame binds to, and where it came from.
 
@@ -489,7 +517,10 @@ def resolve_deployment_source(exif_deployment_id: Optional[str], folder_prefix: 
     of the same id and is created at boot, before the id is configured, so a
     frame can sit under ``MEDIA/00000000/`` while its EXIF names the real
     deployment. The tag therefore wins; the folder fills in only when there is
-    no tag (a BMP frame, or an image from something other than a WW500).
+    no EXIF id at all (a BMP frame, or an image from something other than a
+    WW500). A WW500 frame without the tag is a test photo and never reaches
+    this function: callers drop it first with :func:`is_test_photo`
+    (ww-website#287).
 
     Returns ``(id, source)`` with ``source`` one of ``"exif_tag"``,
     ``"folder_path"`` or ``None`` when neither is present. The id keeps the

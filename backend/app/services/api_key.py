@@ -2,15 +2,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """API key generation, validation, and scope enforcement.
 
-Organisation admins create keys via the web UI. Partner platforms
+Organisation managers create keys in Settings. Partner platforms
 (Wildlife Insights, TRAPPER, etc.) use them to access the Public Data API.
 
 Key format: ww_live_<32 hex chars>
-Storage: bcrypt hash in Supabase `api_keys` table.
+Storage: SHA-256 hex of the raw key in the ww-backend `api_keys` table, read and
+written only with the service role. A fast lookup hash is right for a 128-bit
+random key; a slow password hash such as bcrypt buys nothing here.
 """
 
 import hashlib
 import secrets
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import structlog
@@ -21,6 +24,7 @@ logger = structlog.get_logger()
 
 KEY_PREFIX = "ww_live_"
 KEY_LENGTH = 32  # hex chars after prefix
+_LIST_PAGE = 1000  # PostgREST's row cap
 
 # ── Available scopes ─────────────────────────────────────────────────
 
@@ -38,6 +42,10 @@ class ApiKeyError(Exception):
     """Raised on key validation failures."""
 
     pass
+
+
+class ApiKeyScopeError(ApiKeyError):
+    """The key is valid but lacks the scope the call needs."""
 
 
 # ── Key generation ───────────────────────────────────────────────────
@@ -84,7 +92,9 @@ async def validate_api_key(
     client = create_service_client()
 
     try:
-        response = client.table("api_keys").select("*").eq("key_hash", key_hash).is_("revoked_at", "null").execute()
+        response = (
+            client.table("api_keys").select("id, organisation_id, scopes, expires_at").eq("key_hash", key_hash).is_("revoked_at", "null").execute()
+        )
 
         if not response.data:
             raise ApiKeyError("Invalid or revoked API key")
@@ -93,17 +103,16 @@ async def validate_api_key(
 
         # Check expiry
         if key_record.get("expires_at"):
-            from datetime import datetime, timezone
-
             expires = datetime.fromisoformat(key_record["expires_at"].replace("Z", "+00:00"))
             if datetime.now(timezone.utc) > expires:
                 raise ApiKeyError("API key has expired")
 
         # Check scope
         if required_scope and required_scope not in key_record.get("scopes", []):
-            raise ApiKeyError(f"Key does not have required scope: {required_scope}")
+            raise ApiKeyScopeError(f"Key does not have required scope: {required_scope}")
 
-        # Update last_used_at (fire-and-forget)
+        # Update last_used_at (fire-and-forget). Postgres reads the string "now()" as
+        # the transaction time, like "now", so PostgREST stores a real timestamp.
         try:
             client.table("api_keys").update({"last_used_at": "now()"}).eq("id", key_record["id"]).execute()
         except Exception:
@@ -132,16 +141,16 @@ async def create_api_key_record(
     user_id: str,
     name: str,
     scopes: List[str],
-    expires_at: Optional[str] = None,
+    expires_at: Optional[datetime] = None,
 ) -> tuple[str, Dict[str, Any]]:
     """Create a new API key for an organisation.
 
     Args:
         org_id: Organisation UUID.
-        user_id: Creating user's UUID (must be org admin).
+        user_id: Creating user's UUID. The caller checks they manage the organisation.
         name: Human-readable key name (e.g. "Wildlife Insights sync").
-        scopes: List of permission scopes.
-        expires_at: Optional ISO timestamp for key expiry.
+        scopes: List of permission scopes, at least one.
+        expires_at: Optional expiry, in the future. A naive time is read as UTC.
 
     Returns:
         Tuple of (raw_key, db_record). Raw key is shown once to the user.
@@ -149,10 +158,16 @@ async def create_api_key_record(
     Raises:
         ApiKeyError: If scopes are invalid or DB insert fails.
     """
-    # Validate scopes
+    if not scopes:
+        raise ApiKeyError("A key needs at least one scope")
     invalid = set(scopes) - VALID_SCOPES
     if invalid:
-        raise ApiKeyError(f"Invalid scopes: {invalid}")
+        raise ApiKeyError(f"Invalid scopes: {sorted(invalid)}")
+    if expires_at is not None:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            raise ApiKeyError("expires_at must be in the future")
 
     raw_key, key_hash = generate_api_key()
     key_prefix = raw_key[: len(KEY_PREFIX) + 8]
@@ -166,10 +181,10 @@ async def create_api_key_record(
             "name": name,
             "key_hash": key_hash,
             "key_prefix": key_prefix,
-            "scopes": scopes,
+            "scopes": sorted(set(scopes)),
         }
-        if expires_at:
-            record["expires_at"] = expires_at
+        if expires_at is not None:
+            record["expires_at"] = expires_at.isoformat()
 
         response = client.table("api_keys").insert(record).execute()
 
@@ -225,20 +240,26 @@ async def revoke_api_key(key_id: str, org_id: str) -> bool:
 
 
 async def list_api_keys(org_id: str) -> List[Dict[str, Any]]:
-    """List all active (non-revoked) API keys for an organisation.
+    """List all active (non-revoked) API keys for an organisation, newest first.
 
-    Returns key metadata only — never the hash. The raw key is
-    only shown at creation time.
+    Returns key metadata only, never the hash. The raw key is
+    only shown at creation time. Paged, since PostgREST returns at most
+    1,000 rows a request.
     """
     client = create_service_client()
 
-    response = (
-        client.table("api_keys")
-        .select("id, name, key_prefix, scopes, expires_at, last_used_at, created_at")
-        .eq("organisation_id", org_id)
-        .is_("revoked_at", "null")
-        .order("created_at", desc=True)
-        .execute()
-    )
-
-    return response.data or []
+    rows: List[Dict[str, Any]] = []
+    while True:
+        page = (
+            client.table("api_keys")
+            .select("id, name, key_prefix, scopes, expires_at, last_used_at, created_at")
+            .eq("organisation_id", org_id)
+            .is_("revoked_at", "null")
+            .order("created_at", desc=True)
+            .order("id")
+            .range(len(rows), len(rows) + _LIST_PAGE - 1)
+            .execute()
+        ).data or []
+        rows.extend(page)
+        if len(page) < _LIST_PAGE:
+            return rows

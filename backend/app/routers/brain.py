@@ -259,11 +259,11 @@ async def similar(request: Request, media_id: str, n: int = Query(20, ge=1, le=1
 
     def _run_model():
         me = svc.table("media_embeddings").select("embedding_run_id").eq("media_id", media_id).maybe_single().execute()
-        run_id = (me.data or {}).get("embedding_run_id")
+        run_id = (me.data or {}).get("embedding_run_id") if me else None
         if not run_id:
             return None
         run = svc.table("embedding_runs").select("model_name").eq("id", run_id).maybe_single().execute()
-        return (run.data or {}).get("model_name")
+        return (run.data or {}).get("model_name") if run else None
 
     model_name = await asyncio.to_thread(_run_model)
     store = get_vector_service(model_name)  # per-model vector space (falls back to default)
@@ -289,7 +289,7 @@ async def confirm_cluster(request: Request, cluster_assignment_id: str, body: Co
 
     def _confirm():
         ca = svc.table("cluster_assignments").select("*").eq("id", cluster_assignment_id).maybe_single().execute()
-        if not ca.data:
+        if not ca or not ca.data:
             return None, 0
         assignment = ca.data
         members = (
@@ -483,7 +483,7 @@ async def review_media(request: Request, media_id: str, body: ReviewDecisionRequ
 
     def _write():
         m = svc.table("media").select("deployment_id").eq("id", media_id).maybe_single().execute()
-        if not m.data:
+        if not m or not m.data:
             return False
         svc.table("observations").insert(
             {

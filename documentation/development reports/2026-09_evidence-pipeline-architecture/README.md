@@ -86,7 +86,7 @@ frames from the SD card, one burst per trigger
 | 6 | Image-quality class before presence | L1 | no | Issue 5 |
 | 7 | VLM confidence is not a probability | L4 | `services/gemini_presence.py`* prompt v1 | Item 1 (prompt v2) |
 | 8 | Close the human-review loop | L6 | `domain/active_learning.py::get_review_queue`, `qa_report` | Issue 8 |
-| 9 | Stratified benchmark | L6 | `scripts/eval_presence.py::compute_metrics`* (whole set) | Item 1; issue 4 |
+| 9 | Stratified benchmark | L6 | `scripts/eval_presence.py::metrics_by_stratum` (section 10) | Item 1; issue 4 |
 | 10 | System cost budget | L6 | `services/gemini_pricing.py`*, `PipelineStepResult.cost_usd`* | Section 11; P8 |
 | 11 | Escalation budget per deployment | L4 | no | Issue 9 |
 | 12 | Model disagreement matrix | L6 | `domain/active_learning.py::compute_qa_metrics` (one AI label vs one human label) | Issue 7 |
@@ -149,7 +149,7 @@ All values in [0, 1]. Absent means not computable for the frame: no row, never 0
 | `motion_frac` | Changed-pixel fraction of the 320x240 grayscale mask against the burst's first frame (the first frame against the second), diff threshold 15 | Singleton, or fewer than two frames of the burst resolved |
 | `motion` | `min(1, motion_frac / 0.02)`; `motion_frac > 0.6` (camera shift, light change) gives 0 and a `camera_shift` flag | `motion_frac` absent |
 | `neighbour_animal` | 1 if any other frame in the burst has `speciesnet_presence = 1` or Gemini `has_animal`, else 0 | Singleton |
-| `edge_presence` | 1 if an `ai_origin='edge'` row exists; 0 if EXIF `user_comment_fields` carry NN scores and none cleared | No NN scores in EXIF |
+| `edge_presence` | 1 if an `ai_origin='edge'` animal row exists (`human` and `vehicle` rows from a type class do not count, #135); 0 if EXIF `user_comment_fields` carry NN scores and none cleared | No NN scores in EXIF |
 | `edge_score` | Highest target-label score / 100 | As above |
 
 ### 6.2 Weights, threshold, bands
@@ -231,6 +231,10 @@ ww-backend `supabase/schemas/public/tables/35_observations.sql`:
 | `classification_probability`, `embedding_run_id`, `cluster_id`, `observation_tags`, `deleted_at` | NULL | |
 | `observation_comments` | `evidence_fusion_v1 score=0.91 threshold=0.50 speciesnet=0 gemini=1.0 neighbour=1 motion=0.60 edge=absent near=0.70` | audit line, under 500 characters |
 
+Readers (#170): the Annotations card and the detection notifications follow this row's
+`observation_type` for presence when no human verdict exists, and take the species from the
+per-model rows (`photoVerdict`, `photo_detections`).
+
 Uniqueness is enforced by the writer. If ww-backend wants it in the schema:
 `unique (media_id) where source_type = 'consensus' and deleted_at is null` (partial index, not
 part of the `media_evidence` issue).
@@ -291,6 +295,12 @@ Replaces the v1 prompt and schema in `services/gemini_presence.py`*; the contact
 the same fields per cell. The JSON schema enumerates every string, so a stray label is a parse
 error.
 
+**Not the default (2026-10-09).** Production stays on v1: on the 632 labelled frames both
+answered, v2 matched v1 on wildlife (98.8% vs 98.1% recall) at about $0.35 vs $0.21 per 1,000
+frames (726 vs 473 tokens per frame) and called 68 of 82 person frames an animal, so v2 stays
+selectable for the eval and v3 is the next try
+([September report §6.5](../2026-09_false-negatives-and-vlm-audit/README.md#65-results)).
+
 ```text
 Examine this camera trap image. It may have been automatically flagged as empty. Inspect
 foliage, shadows, ground textures and the frame borders for wildlife evidence: reflective
@@ -329,32 +339,34 @@ Recall per stratum with `n` and a 95% Wilson interval; no stratum reported as a 
 
 | Stratum | Derivation | How |
 |---|---|---|
-| day / night IR | automatic | grayscale test (R = G = B on a pixel sample), or EXIF `flash_fired` (tag 0x9209 bit 0, or MakerNote field 8: visible 1, IR 2), `camera_variant = HM0360` |
-| deployment | automatic | `media.deployment_id`; folder in file-based tools |
+| day / night IR | automatic | EXIF `flash_fired` (tag 0x9209 bit 0, or MakerNote field 8: visible 1, IR 2), else the WW500 exposure, else the greyscale ratio (`scripts/eval_presence.py::light_of`, [#302](https://github.com/wildlifeai/ww-website/issues/302)) |
+| deployment | automatic | `media.deployment_id`; in file-based tools the EXIF deployment id it is matched from, first 8 characters, plus the export folder |
 | burst length | automatic | `burst_len` |
-| small / large | automatic with a box | box area over frame area, SpeciesNet or Gemini box: small under 2%, large over 20%; else `gemini_size`; else human |
-| border | automatic with a box | box within 2% of a frame edge; else `animal_location` in (`edge`, `corner`); else human |
-| motion blur | automatic proxy, human confirms | `laplacian_variance_sharpness` below a per-camera cut set from the labelled frames |
+| size | automatic with a box | box area over frame area, SpeciesNet box else Gemini box, in prompt v2's four sizes (tiny under 2%, small to 10%, medium to 30%, large above) so box, model and human share one vocabulary; else `gemini_size` |
+| border | automatic with a box | box within 2% of a frame edge; else `animal_location` in (`edge`, `corner`) |
+| motion blur | automatic proxy, human confirms | `laplacian_variance_sharpness` below a per-camera cut set from the labelled frames (not built; the human `motion_blur` condition stands in) |
 | close / distant | human | `distance` column |
 | camouflaged, partial | human | `visibility` column |
 | rain, vegetation, fog, obstruction | human | `conditions` column; the quality stage (issue 5) automates these later |
 | genuine blank | label | `has_animal = 0` |
-| human, vehicle | human | `subject` column |
+| human, vehicle | human | `label` column (`person`); vehicle not labelled yet |
 
 Columns appended to `scripts/label_presence.py`'s CSV, all optional, old CSVs still read:
 
 | Column | Values | Status |
 |---|---|---|
-| `animal_size` | `tiny`, `small`, `medium`, `large` | On the vlm branch (September report §6.8.6) |
-| `visibility` | `clear`, `partial`, `obscured`; issue 4 adds `camouflaged`, `border` | On the vlm branch, extended by issue 4 |
-| `conditions` | semicolon list from prompt v2's `visual_conditions` | On the vlm branch |
-| `subject` | `animal`, `human`, `vehicle`, `empty`, `unsure` | Issue 4 |
-| `distance` | `close`, `mid`, `far`, `na` | Issue 4 |
-| `taxon` | free text | Issue 4 |
+| `animal_size` | `tiny`, `small`, `medium`, `large` | Built |
+| `visibility` | `clear`, `partial`, `obscured`, `camouflaged`, `border` | Built |
+| `conditions` | comma list from prompt v2's `visual_conditions` (semicolons also read) | Built, keys for all but `overexposed`, `underexposed` |
+| `subject` | `animal`, `human`, `vehicle`, `empty`, `unsure` | Not added: `label` already holds animal, empty, unsure and person |
+| `distance` | `close`, `mid`, `far`, `na` | Built |
+| `taxon` | free text | Not added: not a presence stratum |
 
-`scripts/eval_presence.py`* prints recall per automatic stratum today; issue 4 adds the human
-strata, `n`, the interval and the 30-frame floor, with a human column overriding the automatic
-one for the same stratum.
+**Status (2026-10-10, [#163](https://github.com/wildlifeai/ww-website/issues/163)).**
+`scripts/eval_presence.py` prints every stratum above but motion blur and vehicle, with `n`, the Wilson
+interval and the 30-frame floor; a human `animal_size`, `border` visibility or `night_ir`
+condition overrides the automatic value. Results on the labelled set:
+[September report §6.5](../2026-09_false-negatives-and-vlm-audit/README.md#65-results).
 
 ## 11. Cost model per 100,000 frames
 
@@ -363,7 +375,7 @@ USD. Unknown stays unknown.
 | Stage | Layer | Per 100,000 frames | Status | Source |
 |---|---|---|---|---|
 | Gemini presence, `single`, online, prompt v1 | L4 | **$21.00** ($0.21 per 1,000) | measured 2026-09-28, 600 frames | September report §6.6 |
-| Gemini presence, prompt v2 | L4 | see source | measured on a v2 draft, 2026-09-29 | September report §6.8.7 |
+| Gemini presence, prompt v2 | L4 | **$35** ($0.35 per 1,000) | measured 2026-10-09, 962 frames; not the default | September report §6.5 |
 | Gemini presence, Batch API | L4 | **$10.50** | estimated, published 50% discount | September report §6.3 |
 | Gemini contact sheet | L4 | unknown (7 sheets scored) | unknown | September report §6.6 |
 | SpeciesNet, BioCLIP, DINOv3 on the Azure T4 | L2, L3, L5 | unknown: 1 to 2 s per image, T4 per-second rate not recorded | unknown | [cloud-infrastructure.md](../../resources/cloud-infrastructure.md) |
@@ -528,7 +540,6 @@ Tracking:
 Open items:
 
 - Unmeasured: the Azure T4 per-second rate, L4 seconds per image, DINOv3 time per frame,
-  contact-sheet cost on real burst lengths, and the placeholders 0.02 (motion saturation) and
-  2% / 20% (size strata).
+  contact-sheet cost on real burst lengths, and the placeholder 0.02 (motion saturation).
 - Cached v1 verdicts: 632 is the cache copy saved beside the September report on 2026-09-28,
   664 is the scratchpad cache after the 2026-09-29 resume; both are prompt v1, superseded by v2.

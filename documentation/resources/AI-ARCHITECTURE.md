@@ -28,7 +28,7 @@ spec, and validation roadmap live in the
 |---|---|
 | Model identity: `firmware_model_id` (OP 14) + `version_number` (OP 15) → `{id}V{ver}.TFL` | `ai_model_families` / `ai_models`, manifest, firmware |
 | Detection threshold: OP 16 is a **logit 0–127**, not a percent — convert per the model's output quantization | firmware `cvapp.h`, manifest compile |
-| Label chain: output tensor index *i* → `labels.txt` line *i* → `ai_models.label_map[label]` → taxon | convert job (LM-1/2 checks in `domain/model.py`), firmware, edge reflection |
+| Label chain: output tensor index *i* → `labels.txt` line *i* → `ai_models.label_map[label]` → taxon or type | convert job (LM-1/2 checks in `domain/model.py`), firmware, edge reflection (LM-10 in `domain/label_map.py`) |
 | Edge results in the image: EXIF UserComment `0x9286` `"label: pct%; "` (+ DeploymentID `0xF200`, MakerNote `0x927C`) | firmware `exif_builder`, website `domain/exif.py` |
 
 ## How the layers combine
@@ -53,4 +53,4 @@ spec, and validation roadmap live in the
 | Cloud pipeline + Wildlife Brain | [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE.md) |
 | Schema (`ai_model_families`, `ai_models`, `observations`, `device_alert_rules`) | ww-backend `documentation/resources/DATABASE_REFERENCE.md` |
 | OP parameters (OP 14/15/16 …) | firmware `_Documentation/Operational_Parameters.md` |
-| LoRaWAN production ingest (canonical) | ww-backend `documentation/resources/LORAWAN_INGEST.md` — the `lorawan-ingest` edge function. The website's [lorawan-webhook-setup](./lorawan-webhook-setup.md) documents a **legacy prototype** parser only |
+| LoRaWAN ingest | ww-backend [LORAWAN_INGEST](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/LORAWAN_INGEST.md), the `lorawan-ingest` edge function |

@@ -7,6 +7,7 @@
 // Tools stay in Toolkit; monitoring stays in Field.
  
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
@@ -21,7 +22,10 @@ import { showUndoToast } from '../components/common/undoToastBus'
 import { ProjectMembersPanel } from '../components/data/ProjectMembersPanel'
 import { NotificationRulesPanel } from '../components/settings/NotificationRulesPanel'
 import { ProjectDefaultsPanel } from '../components/settings/ProjectDefaultsPanel'
+import { ProjectDetailsPanel } from '../components/settings/ProjectDetailsPanel'
 import { InaturalistPanel } from '../components/settings/InaturalistPanel'
+import { ApiKeysPanel } from '../components/settings/ApiKeysPanel'
+import { adminScope, isProjectAdmin, type AdminScope, type OwnRole } from '../lib/moveDeployment'
 
 interface ProjectRow {
   id: string
@@ -31,6 +35,31 @@ interface ProjectRow {
   deployment_count: number
   organisation_id: string
 }
+
+const NO_PROJECTS: ProjectRow[] = []
+
+async function fetchProjectRows(): Promise<ProjectRow[]> {
+  const { data, error } = await supabase
+    .from('projects')
+    .select('id, name, description, organisation_id, created_at, deployments(id)')
+    .is('deleted_at', null)
+    .is('deployments.deleted_at', null)
+    .order('created_at', { ascending: false })
+  if (error) throw new Error(error.message)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return (data || []).map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    description: p.description,
+    organisation_id: p.organisation_id,
+    created_at: p.created_at,
+    deployment_count: Array.isArray(p.deployments) ? p.deployments.length : 0,
+  }))
+}
+
+const PANEL_TITLE = {
+  details: 'Project Details', members: 'Project Members', defaults: 'Project Defaults', notifications: 'Notifications',
+} as const
 
 function formatDate(s: string | null) {
   return s ? new Date(s).toLocaleDateString() : '—'
@@ -51,19 +80,30 @@ function Section({ title, description, children }: {
 export function SettingsPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const { clearAll, toggleProject } = useProjectSelection()
+  const { clearAll, toggleProject, reloadProjects } = useProjectSelection()
   const { guard } = useDemoGuard()
   const [searchParams] = useSearchParams()
 
-  const [projects, setProjects] = useState<ProjectRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [projRefresh, setProjRefresh] = useState(0)
+  const queryClient = useQueryClient()
+  const projectsKey = ['settings', 'projects', user?.id]
+  const projectsQuery = useQuery({
+    queryKey: projectsKey,
+    queryFn: fetchProjectRows,
+    enabled: !!user,
+  })
+  const projects = projectsQuery.data ?? NO_PROJECTS
+  const loading = projectsQuery.isPending
+  const error = projectsQuery.error?.message ?? null
+  // Optimistic edits to the list after a create or delete, before any re-read.
+  const editProjects = (edit: (rows: ProjectRow[]) => ProjectRow[]) =>
+    queryClient.setQueryData<ProjectRow[]>(projectsKey, rows => edit(rows ?? []))
 
-  // Which projects the user may delete (project_admin, or an org-manager/system "super" role).
+  // Which projects the user may delete: the database's rule, project_admin of the project or ww_admin.
   const [adminProjectIds, setAdminProjectIds] = useState<Set<string>>(new Set())
   const [isSuperAdmin, setIsSuperAdmin] = useState(false)
   const canDeleteProject = (id: string) => isSuperAdmin || adminProjectIds.has(id)
+  // Who may edit a project's details: the projects UPDATE policy (project_admin or ww_admin).
+  const [editScope, setEditScope] = useState<AdminScope>({ wwAdmin: false, adminProjectIds: new Set() })
 
   // Delete-confirmation modal (type the project name to confirm).
   const [deleteTarget, setDeleteTarget] = useState<ProjectRow | null>(null)
@@ -72,37 +112,9 @@ export function SettingsPage() {
 
   // Auto-open Create Project when arrived with ?create=true (zero-project empty state)
   const [createOpen, setCreateOpen] = useState(() => searchParams.get('create') === 'true')
-  // Per-project slide-over: members, capture/AI defaults, or notification rules.
-  type PanelKind = 'members' | 'defaults' | 'notifications'
+  // Per-project slide-over: details, members, capture/AI defaults, or notification rules.
+  type PanelKind = 'details' | 'members' | 'defaults' | 'notifications'
   const [panel, setPanel] = useState<{ kind: PanelKind; id: string; name: string; org_id: string } | null>(null)
-
-  useEffect(() => {
-    if (!user) return
-    let cancelled = false
-    setLoading(true)
-    supabase
-      .from('projects')
-      .select('id, name, description, organisation_id, created_at, deployments(id)')
-      .is('deleted_at', null)
-      .is('deployments.deleted_at', null)
-      .order('created_at', { ascending: false })
-      .then(({ data, error: err }) => {
-        if (cancelled) return
-        if (err) { setError(err.message); setLoading(false); return }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows: ProjectRow[] = (data || []).map((p: any) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description,
-          organisation_id: p.organisation_id,
-          created_at: p.created_at,
-          deployment_count: Array.isArray(p.deployments) ? p.deployments.length : 0,
-        }))
-        setProjects(rows)
-        setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [user, projRefresh])
 
   // Load the user's roles to decide which projects show a Delete action.
   useEffect(() => {
@@ -110,7 +122,7 @@ export function SettingsPage() {
     let cancelled = false
     supabase
       .from('user_roles')
-      .select('scope_id, scope_type, role')
+      .select('scope_id, scope_type, role, is_active, expires_at')
       .eq('user_id', user.id)
       .then(({ data }) => {
         if (cancelled || !data) return
@@ -118,14 +130,12 @@ export function SettingsPage() {
         let sup = false
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const r of data as any[]) {
-          if (r.scope_type === 'system') sup = true
-          // Org-managers can only see their own org's projects (RLS), so treating them as
-          // able-to-delete-visible-projects is correct; the backend re-checks per project.
-          if (r.scope_type === 'organisation' && r.role === 'organisation_manager') sup = true
+          if (r.scope_type === 'system' && r.role === 'ww_admin') sup = true
           if (r.scope_type === 'project' && r.role === 'project_admin') admins.add(r.scope_id)
         }
         setAdminProjectIds(admins)
         setIsSuperAdmin(sup)
+        setEditScope(adminScope(data as OwnRole[]))
       })
     return () => { cancelled = true }
   }, [user])
@@ -138,13 +148,15 @@ export function SettingsPage() {
       const res = await apiClient.del(`/api/projects/${target.id}`) as { deleted_at?: string }
       const deletedAt = res?.deleted_at
       setDeleteTarget(null)
-      setProjects(prev => prev.filter(p => p.id !== target.id))
+      editProjects(rows => rows.filter(p => p.id !== target.id))
+      reloadProjects()
       if (deletedAt) {
         showUndoToast({
           message: `Deleted project "${target.name}"`,
           onUndo: async () => {
             await apiClient.post(`/api/projects/${target.id}/restore`, { deleted_at: deletedAt })
-            setProjRefresh(x => x + 1)
+            void queryClient.invalidateQueries({ queryKey: projectsKey })
+            reloadProjects()
           },
         })
       }
@@ -188,6 +200,15 @@ export function SettingsPage() {
           >
             📊 Health
           </button>
+          {isProjectAdmin(editScope, r.id) && (
+            <button
+              style={{ ...NAV_BTN, color: 'var(--text-color)' }}
+              onClick={e => { e.stopPropagation(); setPanel({ kind: 'details', id: r.id, name: r.name, org_id: r.organisation_id }) }}
+              title="Name, description and website (Project Admin)"
+            >
+              ✎ Details
+            </button>
+          )}
           <button
             style={{ ...NAV_BTN, color: 'var(--text-color)' }}
             onClick={e => { e.stopPropagation(); setPanel({ kind: 'members', id: r.id, name: r.name, org_id: r.organisation_id }) }}
@@ -198,7 +219,7 @@ export function SettingsPage() {
           <button
             style={{ ...NAV_BTN, color: 'var(--text-color)' }}
             onClick={e => { e.stopPropagation(); setPanel({ kind: 'defaults', id: r.id, name: r.name, org_id: r.organisation_id }) }}
-            title="Default triggering method, AI model, photos per trigger and capture flash (Project Admin)"
+            title="Default triggering method, AI model, photos per trigger, detection threshold and capture flash (Project Admin)"
           >
             ⚙ Defaults
           </button>
@@ -222,7 +243,7 @@ export function SettingsPage() {
       ),
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [clearAll, toggleProject, navigate, guard, adminProjectIds, isSuperAdmin])
+  ], [clearAll, toggleProject, navigate, guard, adminProjectIds, isSuperAdmin, editScope])
 
   return (
     <div style={{ maxWidth: 960 }}>
@@ -236,7 +257,7 @@ export function SettingsPage() {
 
       <Section
         title="Projects"
-        description="Each project's actions let you open it, view dataset health, manage members, set capture & AI defaults, and configure your notifications."
+        description="Each project's actions let you open it, view dataset health, edit its details, manage members, set capture & AI defaults, and configure your notifications."
       >
         <div style={{ marginBottom: '0.75rem' }}>
           <DemoDisabled tip="Creating projects is disabled in the demo">
@@ -277,16 +298,19 @@ export function SettingsPage() {
 
       <Section title="Integrations" description="External services linked to your account.">
         <InaturalistPanel />
+        <ApiKeysPanel />
       </Section>
 
       <CreateProjectModal
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         onCreated={(p: CreatedProject) => {
-          setProjects(prev => [{
+          editProjects(rows => [{
             id: p.id, name: p.name, description: null, organisation_id: '',
             created_at: new Date().toISOString(), deployment_count: 0,
-          }, ...prev])
+          }, ...rows])
+          // The top-bar and upload pickers read the shared list, not this page's (#299).
+          reloadProjects()
           setCreateOpen(false)
         }}
       />
@@ -301,7 +325,7 @@ export function SettingsPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
               <div>
                 <div style={{ fontWeight: 600, fontSize: '1.0625rem' }}>
-                  {panel.kind === 'members' ? 'Project Members' : panel.kind === 'defaults' ? 'Project Defaults' : 'Notifications'}
+                  {PANEL_TITLE[panel.kind]}
                 </div>
                 <div style={{ fontSize: '0.8rem', opacity: 0.6 }}>{panel.name}</div>
               </div>
@@ -311,13 +335,24 @@ export function SettingsPage() {
                 title="Close"
               >✕</button>
             </div>
+            {panel.kind === 'details' && (
+              <ProjectDetailsPanel
+                projectId={panel.id}
+                onSaved={saved => {
+                  editProjects(rows => rows.map(p => (p.id === saved.id ? { ...p, name: saved.name, description: saved.description } : p)))
+                  setPanel(prev => (prev && prev.id === saved.id ? { ...prev, name: saved.name } : prev))
+                  // The top-bar and upload pickers read the shared list, not this page's (#299).
+                  reloadProjects()
+                }}
+              />
+            )}
             {panel.kind === 'members' && (
               <ProjectMembersPanel projectId={panel.id} projectName={panel.name} />
             )}
             {panel.kind === 'defaults' && (
               <>
                 <p style={{ fontSize: '0.8rem', opacity: 0.65, margin: '0 0 0.875rem 0' }}>
-                  Default triggering method, AI model, photos per trigger and capture flash for this project's deployments. Cameras pick up changes at their next deployment. Requires the Project Admin role.
+                  Default triggering method, AI model, photos per trigger, detection threshold and capture flash for this project's deployments. Cameras pick up changes at their next deployment. Requires the Project Admin role.
                 </p>
                 <ProjectDefaultsPanel projectId={panel.id} />
               </>
