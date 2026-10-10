@@ -130,7 +130,7 @@ export function ToolkitPage() {
           <Section
             icon="📦"
             title="Export dataset for R"
-            description="Download a CamtrapDP package (ZIP) for the selected project. Open it directly in the camtrapdp R package or any tool that supports the Camera Trap Data Package standard."
+            description="Download the selected project as a CamtrapDP package (ZIP), with its original photos. Open it in the camtrapdp R package or any tool that reads Camera Trap Data Packages."
           >
             {!canExport && (
               <p style={{ fontSize: '0.8125rem', opacity: 0.65, margin: 0 }}>
