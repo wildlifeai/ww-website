@@ -10,7 +10,7 @@ drive the real UI against a real database.
 |---|---|
 | `01-smoke` | Site + API up; public pages (`/`, `/guides`, `/faq`, `/resources`) render clean; seeded user can log in and every authed page (`/toolkit`, `/field`, `/annotations`, `/insights`, `/settings`) renders without errors or auth bounces |
 | `02-demo` | "Try the demo" opens a signed-in session via `/api/auth/demo-session`; DemoGuard keeps it read-only (upload gated) |
-| `03-upload-exif` | Real SD-card folder upload through the modal (webkitdirectory); EXIF UserComment deployment UUIDs bind exact-match to seeded deployments; a stamped UUID with **no** deployments row is auto-created (#92) so nothing lands unassigned |
+| `03-upload-exif` | Real SD-card folder upload through `/upload-data` (webkitdirectory), AI off; the deployment UUIDs the WW500 stamps in EXIF bind exact-match to seeded deployments; a stamped UUID with **no** deployments row goes through triage and is created under that id (#92), so nothing lands unassigned and every touched deployment is one of the card's folders |
 | `04-lorawan-realtime` | With the Field page open, a synthetic `lorawan_messages`+`lorawan_parsed_messages` insert appears in the UI **without reload** — verifies both the FieldPage subscription (#94) and that the realtime publication SQL is applied to the dev DB |
 | `05-a11y` | The public pages (`/`, `/login`, `/signup`, `/guides`, `/faq`, `/resources`) have no serious or critical axe-core violations (WCAG 2.0 and 2.1, A and AA). No account needed |
 
