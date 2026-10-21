@@ -1,0 +1,25 @@
+# Builds the ML worker image (Dockerfile target `worker`) for the Cloud Run job ww-ml-worker-dev.
+# Run by .github/workflows/deploy-ml-worker-gcp.yml:
+#
+#   gcloud builds submit backend/ --config backend/cloudbuild.worker.yaml \
+#     --service-account projects/<project>/serviceAccounts/github-deployer@<project>.iam.gserviceaccount.com \
+#     --gcs-source-staging-dir gs://<project>-build-source/source \
+#     --substitutions _IMAGE=<registry path>,_SHA=<commit>,_ENV_TAG=dev-latest
+#
+# `--target worker` is essential: the Dockerfile's last stage is `api`, so a plain
+# `gcloud builds submit --tag` would build the API. Machine and disk follow Cloud Run's GPU
+# best practices build example; the image is 8 to 10 GB.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '--target', 'worker',
+           '-t', '${_IMAGE}:${_SHA}', '-t', '${_IMAGE}:${_ENV_TAG}',
+           '-f', 'Dockerfile', '.']
+images: ['${_IMAGE}:${_SHA}', '${_IMAGE}:${_ENV_TAG}']
+substitutions:
+  _ENV_TAG: dev-latest
+options:
+  machineType: E2_HIGHCPU_32
+  diskSizeGb: 200
+  # A build run as a user-specified service account must choose where its logs go.
+  logging: CLOUD_LOGGING_ONLY
+timeout: 2400s

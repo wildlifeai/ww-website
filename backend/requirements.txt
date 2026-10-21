@@ -21,6 +21,7 @@ timezonefinder>=6.5.0            # GPS coordinates → timezone lookup
 Pillow>=10.0.0                   # Image processing for clustering (dHash, sharpness)
 numpy>=1.24                      # Numerical ops for perceptual hashing
 google-genai>=2.25.0             # Gemini API SDK for the animal-presence step (services/gemini_presence.py); light, no torch
+google-cloud-run==0.16.2         # run_v2 JobsClient: the API starts the ML-worker Cloud Run job (jobs/dispatch.py); the gcp trainer uses it too
 arq>=0.25                        # ARQ queue CLIENT — the API enqueues GPU jobs to Redis; the
 #                                  worker (requirements-ml.txt) executes them. Lightweight (redis dep only).
 # Heavy ML deps (torch, transformers, hdbscan, umap-learn, speciesnet) live in

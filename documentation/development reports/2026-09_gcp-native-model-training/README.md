@@ -154,10 +154,10 @@ Changes to code #151 inherits from dev: `services/vela.py` (arena check), `domai
   compares int8 accuracy and bench behaviour with the Edge Impulse model.
 - **The arena check now refuses models Vela says need more than 512 KiB** on every upload path.
   No model in the dev `ai-models` bucket has been measured against it; do that before merging.
-- **Shared settings with the migration plan**: its §8 adds `GOOGLE_CLOUD_PROJECT` and
-  `CLOUD_RUN_JOB_REGION` with default `""` and `google-cloud-run` in `requirements.txt`; this
-  branch adds the two settings (region default `asia-southeast1`) and `google-cloud-run==0.16.1`
-  in `requirements-ml.txt`. Whichever lands second reconciles.
+- **Shared settings with the migration plan**: reconciled by the Cloud Run worker (#189). Both
+  use this branch's `GOOGLE_CLOUD_PROJECT` and `CLOUD_RUN_JOB_REGION` (region default
+  `asia-southeast1`), and `google-cloud-run` moved to `requirements.txt` so the API can start
+  executions too.
 - **Compose**: the new settings are not forwarded in `docker-compose.yml`.
 - **Modal copy**: it still explains Edge Impulse's alphabetical class order, which does not
   apply to `gcp`.
