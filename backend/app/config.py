@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     PUBLIC_API_RATE_LIMIT_PER_MINUTE: int = Field(60, ge=1, description="Calls a minute one API key may make to the /api/v1 data endpoints")
     FF_CAMTRAPDP_IMPORT_ENABLED: bool = Field(True, description="Enable CamtrapDP package import endpoint")
     FF_CAMTRAPDP_EXPORT_ENABLED: bool = Field(
-        False,
+        True,
         description="POST /api/exports/camtrapdp starts the export job with the original photos (#328). Off: FEATURE_DISABLED",
     )
     CAMTRAPDP_EXPORT_BUCKET: str = Field("exports", description="Private Supabase Storage bucket the export ZIPs go to")

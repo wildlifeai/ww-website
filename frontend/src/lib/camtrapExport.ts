@@ -5,8 +5,8 @@
 //
 // The backend's export job (POST /api/exports/camtrapdp) packages the project's metadata from
 // ww-backend's export-camtrap-dp with the original photos, and the job's result_url is a signed
-// link to the ZIP. While the job is off on a backend (FEATURE_DISABLED, until its storage
-// bucket exists), the download falls back to the Edge Function's metadata-only ZIP, as before.
+// link to the ZIP. Where a backend turns the job off (FEATURE_DISABLED), the download falls
+// back to the Edge Function's metadata-only ZIP.
 //
 // Each function that calls out takes the client, as lib/projectMembers.ts does.
 import type { SupabaseClient } from '@supabase/supabase-js'

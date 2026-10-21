@@ -12,6 +12,7 @@ import { NoProjectSelected } from '../components/common/NoProjectSelected'
 import { CamtrapExportStatus } from '../components/data/CamtrapExportStatus'
 import { useCamtrapExport } from '../hooks/useCamtrapExport'
 import { useClusters } from '../hooks/useBrain'
+import { useFilledTimezones } from '../hooks/useFilledTimezones'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared button style (lifecycle nav + overflow)
@@ -254,7 +255,8 @@ export function MyDataPage() {
     // A new selection keeps the last list (shown as loading) until its own arrives.
     placeholderData: keepPreviousData,
   })
-  const deployments = depQuery.data ?? NO_DEPLOYMENTS
+  // Deployments without a zone get one from their coordinates on first view (#309).
+  const deployments = useFilledTimezones(depQuery.data ?? NO_DEPLOYMENTS)
 
   // The projects tab reads the project list, every other tab the deployments.
   const loading = tab === 'projects'

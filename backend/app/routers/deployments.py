@@ -10,7 +10,7 @@ from pydantic import AfterValidator, BaseModel, Field, field_validator, model_va
 
 from app.authz import assert_access, deployment_id_prefix_bounds, require_system_admin
 from app.dependencies import get_current_user, get_user_client, get_verified_user, require_not_demo
-from app.domain.deployment_location import apply_location_update, location_update
+from app.domain.deployment_location import MAX_TIMEZONE_FILL, apply_location_update, fill_missing_timezones, location_update
 from app.domain.soft_delete import check_deleted_at, now_iso, restore_deployments_as_user, soft_delete_deployments_as_user
 from app.schemas.common import ApiResponse
 from app.services.db_utils import rows_of
@@ -258,6 +258,29 @@ async def update_deployment_location(
     if outcome == "forbidden":
         raise HTTPException(status_code=403, detail=LOCATION_FORBIDDEN)
     return ApiResponse(data=row)
+
+
+class FillTimezonesRequest(BaseModel):
+    deployment_ids: List[uuid.UUID] = Field(..., max_length=MAX_TIMEZONE_FILL)
+
+
+@router.post("/fill-timezones")
+async def fill_timezones(
+    body: FillTimezonesRequest,
+    user_client: Any = Depends(get_user_client),
+) -> ApiResponse:
+    """Give the listed deployments their time zone, where they have coordinates and none (#309).
+
+    The website calls this for the deployments it shows without a zone, so capture times turn
+    local without an admin backfill: the app creates deployments without one. Any signed-in
+    user, the demo account included, for the deployments they can see; ids they can't see, and
+    deployments with no coordinates, are left out. Returns ``{deployment_id: zone}`` for the ones
+    filled.
+    """
+    ids = [str(i) for i in dict.fromkeys(body.deployment_ids)]
+    service_client = create_service_client()
+    filled = await asyncio.to_thread(fill_missing_timezones, user_client, service_client, ids)
+    return ApiResponse(data=filled)
 
 
 @router.post("/validate")
