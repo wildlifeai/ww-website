@@ -62,6 +62,10 @@ UPDATE changes 0 rows and reports success. Only an INSERT fails loudly (`42501`)
 proves nothing. A user sees only their own `users` row and their own `user_roles` rows, which is
 why the members panel listed only the caller and "removed" members it never touched.
 
+So every update asks for the rows back with `.select('id')` and reports none as a refusal
+([frontend.md](frontend.md)); a page that showed "Saved ✓" on a viewer's 0-row update is how the
+audit found it (2026-10_ui-audit 03 #1).
+
 For anything about other users (members, invitations, roles), call the `ww-backend` RPC that
 checks the caller itself; `frontend/src/lib/projectMembers.ts` wraps the membership ones. After a
 write, refetch and show what the database holds rather than updating local state optimistically.
@@ -75,9 +79,10 @@ When a `ww-backend` change touches roles, invitations or RLS, run
 
 Supabase caps every response at 1,000 rows, and a query without `.range()` just gets the first
 1,000 with no error. A deployment can hold more photos than that: the thumbnail backfill read
-1,000 of "Sunset test 2"'s 1,101 and never saw the rest (#208). Any backend loop over a whole
-deployment pages with `.order()` plus `.range()` until a short page, as
-`media_registry.backfill_thumbnails` does. A check for known keys looks up only those keys with
+1,000 of "Sunset test 2"'s 1,101 and never saw the rest (#208), and confirming a cluster of more
+than 1,000 photos labelled only 1,000 (2026-10-21). Any backend read over a whole deployment or
+project goes through `services/db_utils.read_all`, a query ordered on a unique key and paged with
+`.range()` until a short page. A check for known keys looks up only those keys with
 `.in_()` in chunks, as the upload dedup in `jobs.definitions.existing_media_keys` does (#317).
 
 ---

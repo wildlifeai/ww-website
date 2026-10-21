@@ -35,6 +35,14 @@ Rules:
   (`lib/tabReturnRefresh.ts`), without a loading state. A website write that creates, deletes,
   restores or renames a project calls `reloadProjects()`, or the top-bar and upload pickers miss
   it (#299).
+* What the user may do in a project comes from `useProjectRoles()` (`canView`, `canWrite`,
+  `isProjectAdmin`, `isOrgManager`, `managesAnyOrg`, `isSystemAdmin`, `loading`), one shared
+  query of the user's own `user_roles`, with the rules in `lib/projectRoles.ts` mirroring
+  `has_project_role`. Hide what the role cannot do rather than show it and fail; don't read
+  `user_roles` again in a component. `useIsAdmin` is a thin wrapper over it.
+* Every Supabase update asks for the changed rows (`.select('id')`) and treats none as a refusal:
+  RLS refuses an update as "0 rows, no error". Observations go through `updateObservations` and
+  `deleteObservation` (`lib/observationWrites.ts`), which throw on 0 rows.
 * Read observations for a count, chart or species list through `fetchLiveObservations`
   (`lib/liveObservations.ts`), never a bare `from('observations')`: a deleted photo leaves its
   observations behind ([03-DATA-AND-SYNC](../../../documentation/onboarding/03-DATA-AND-SYNC.md), #198).
