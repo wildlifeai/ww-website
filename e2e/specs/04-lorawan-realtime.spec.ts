@@ -36,10 +36,23 @@ test.describe('LoRaWAN realtime telemetry', () => {
       received_at: receivedAt,
     })
 
+    // The page subscribes once its deployments have loaded, over a websocket that
+    // networkidle does not wait for. An insert before Realtime confirms the
+    // subscription is never delivered, so wait for that confirmation first.
+    let subscribed = false
+    page.on('websocket', (ws) => ws.on('framereceived', ({ payload }) => {
+      const text = typeof payload === 'string' ? payload : payload.toString()
+      if (text.includes('realtime:field-lorawan-live') && text.includes('Subscribed to PostgreSQL')) subscribed = true
+    }))
+
     try {
       await login(page)
       await page.goto('/field')
       await page.waitForLoadState('networkidle')
+      await expect.poll(() => subscribed, {
+        message: 'the Field page never got "Subscribed to PostgreSQL" from Realtime for field-lorawan-live',
+        timeout: 30_000,
+      }).toBe(true)
 
       // Insert a synthetic uplink AFTER the page is subscribed.
       const { data: msg, error: e1 } = await sb
