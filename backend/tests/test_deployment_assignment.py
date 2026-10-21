@@ -30,8 +30,8 @@ def _chain(rows):
 
 
 async def test_classify_deployment_access(monkeypatch):
-    """valid = caller holds a role on the deployment's project/org; no_access = exists but no
-    role; not_found = not in the DB."""
+    """valid = caller may add photos (project_member or above on the deployment's project);
+    no_access = exists, but they may not; not_found = not in the DB."""
     from app.authz import classify_deployment_access
 
     roles = [{"role": "project_admin", "scope_type": "project", "scope_id": "proj-1", "expires_at": None}]
@@ -77,15 +77,28 @@ def test_create_deployment_denied_for_non_member(verified_client, monkeypatch):
     async def _deny(*a, **k):
         raise HTTPException(status_code=404, detail="Not found")
 
-    monkeypatch.setattr("app.routers.deployments.assert_access", _deny)
+    monkeypatch.setattr("app.routers.deployments.assert_write", _deny)
 
     resp = verified_client.post("/api/deployments", json={"project_id": "proj-x", "name": "Cam 1"})
     assert resp.status_code == 404
 
 
+def test_create_deployment_refused_for_a_viewer(verified_client, monkeypatch):
+    """A project_viewer reads the project but cannot add to it (assert_write -> 403)."""
+
+    async def _refuse(*a, **k):
+        raise HTTPException(status_code=403, detail="You need the Project Member role to change this project.")
+
+    monkeypatch.setattr("app.routers.deployments.assert_write", _refuse)
+
+    resp = verified_client.post("/api/deployments", json={"project_id": "proj-1", "name": "Cam 1"})
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "You need the Project Member role to change this project."
+
+
 def test_create_deployment_succeeds_for_member(verified_client, monkeypatch):
     """With project access, a deployment (and its placeholder device) is created."""
-    monkeypatch.setattr("app.routers.deployments.assert_access", AsyncMock(return_value=None))
+    monkeypatch.setattr("app.routers.deployments.assert_write", AsyncMock(return_value=None))
 
     def make_table(name):
         t = MagicMock()
@@ -139,7 +152,7 @@ def _tables_with_existing_deployments(existing: list[dict]):
 
 
 def test_create_deployment_uses_the_supplied_id(verified_client, monkeypatch):
-    monkeypatch.setattr("app.routers.deployments.assert_access", AsyncMock(return_value=None))
+    monkeypatch.setattr("app.routers.deployments.assert_write", AsyncMock(return_value=None))
     client, inserted = _tables_with_existing_deployments(existing=[])
     monkeypatch.setattr("app.routers.deployments.create_service_client", lambda: client)
 
@@ -152,7 +165,7 @@ def test_create_deployment_uses_the_supplied_id(verified_client, monkeypatch):
 
 def test_create_deployment_refuses_an_existing_id(verified_client, monkeypatch):
     """A duplicate is a 409, never a silent reuse of a row that may belong to someone else."""
-    monkeypatch.setattr("app.routers.deployments.assert_access", AsyncMock(return_value=None))
+    monkeypatch.setattr("app.routers.deployments.assert_write", AsyncMock(return_value=None))
     client, inserted = _tables_with_existing_deployments(existing=[{"id": STAMPED_ID}])
     monkeypatch.setattr("app.routers.deployments.create_service_client", lambda: client)
 
@@ -162,6 +175,6 @@ def test_create_deployment_refuses_an_existing_id(verified_client, monkeypatch):
 
 
 def test_create_deployment_rejects_a_non_uuid_id(verified_client, monkeypatch):
-    monkeypatch.setattr("app.routers.deployments.assert_access", AsyncMock(return_value=None))
+    monkeypatch.setattr("app.routers.deployments.assert_write", AsyncMock(return_value=None))
     resp = verified_client.post("/api/deployments", json={"project_id": "proj-1", "name": "Bench", "id": "E10F7C43"})
     assert resp.status_code == 400
