@@ -31,7 +31,7 @@ from app.dependencies import get_current_user, get_verified_user, require_not_de
 from app.middleware.rate_limit import limiter
 from app.schemas.brain import ConfirmClusterRequest, EmbedRequest, MultiClusterRequest, ReprocessAllRequest, ReprocessRequest, ReviewDecisionRequest
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
-from app.services.db_utils import row_of, rows_of
+from app.services.db_utils import read_all, row_of, rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -168,16 +168,18 @@ async def multi_clusters(request: Request, body: MultiClusterRequest, user=Depen
         clusters_resp = svc.table("cluster_assignments").select("*").in_("embedding_run_id", run_ids).order("image_count", desc=True).execute()
         clusters = rows_of(clusters_resp)
 
-        # 3. Fetch member media per cluster (with optional confidence filter).
-        members_query = (
-            svc.table("media_embeddings")
-            .select("media_id, cluster_id, deployment_id, cluster_confidence, is_outlier")
-            .in_("deployment_id", body.deployment_ids)
-        )
-        if body.min_confidence > 0:
-            members_query = members_query.gte("cluster_confidence", body.min_confidence)
-        members_resp = members_query.execute()
-        members = rows_of(members_resp)
+        # 3. Fetch member media per cluster (with optional confidence filter), every page.
+        def _members_query():
+            query = (
+                svc.table("media_embeddings")
+                .select("media_id, cluster_id, deployment_id, cluster_confidence, is_outlier")
+                .in_("deployment_id", body.deployment_ids)
+            )
+            if body.min_confidence > 0:
+                query = query.gte("cluster_confidence", body.min_confidence)
+            return query.order("media_id")
+
+        members = read_all(_members_query)
 
         # 4. Group by model variant (cross-variant is not meaningful).
         run_model = {r["id"]: r.get("model_name", "unknown") for r in latest_runs}
@@ -214,13 +216,14 @@ async def umap_coords(request: Request, deployment_id: str, user=Depends(get_cur
     svc = create_service_client()
 
     def _fetch():
-        resp = (
-            svc.table("media_embeddings")
-            .select("media_id, umap_x, umap_y, cluster_id, is_outlier, cluster_purity")
-            .eq("deployment_id", deployment_id)
-            .execute()
+        return read_all(
+            lambda: (
+                svc.table("media_embeddings")
+                .select("media_id, umap_x, umap_y, cluster_id, is_outlier, cluster_purity")
+                .eq("deployment_id", deployment_id)
+                .order("media_id")
+            )
         )
-        return rows_of(resp)
 
     points = await asyncio.to_thread(_fetch)
     return ApiResponse(data={"points": points, "count": len(points)}, meta=ApiMeta(request_id=req_id))
@@ -236,15 +239,16 @@ async def list_outliers(request: Request, deployment_id: str, user=Depends(get_c
     svc = create_service_client()
 
     def _fetch():
-        resp = (
-            svc.table("media_embeddings")
-            .select("media_id, cluster_confidence")
-            .eq("deployment_id", deployment_id)
-            .eq("is_outlier", True)
-            .order("cluster_confidence", desc=False)
-            .execute()
+        return read_all(
+            lambda: (
+                svc.table("media_embeddings")
+                .select("media_id, cluster_confidence")
+                .eq("deployment_id", deployment_id)
+                .eq("is_outlier", True)
+                .order("cluster_confidence", desc=False)
+                .order("media_id")
+            )
         )
-        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch)
     return ApiResponse(data={"outliers": rows, "count": len(rows)}, meta=ApiMeta(request_id=req_id))
@@ -297,13 +301,16 @@ async def confirm_cluster(request: Request, cluster_assignment_id: str, body: Co
         assignment = row_of(svc.table("cluster_assignments").select("*").eq("id", cluster_assignment_id).maybe_single().execute())
         if not assignment:
             return None, 0
-        members = (
-            svc.table("media_embeddings")
-            .select("media_id")
-            .eq("deployment_id", assignment["deployment_id"])
-            .eq("embedding_run_id", assignment["embedding_run_id"])
-            .eq("cluster_id", assignment["cluster_id"])
-            .execute()
+        # Every member: a read without .range() stops at 1,000, which labelled only 1,000.
+        members = read_all(
+            lambda: (
+                svc.table("media_embeddings")
+                .select("media_id")
+                .eq("deployment_id", assignment["deployment_id"])
+                .eq("embedding_run_id", assignment["embedding_run_id"])
+                .eq("cluster_id", assignment["cluster_id"])
+                .order("media_id")
+            )
         )
         obs_rows = [
             {
@@ -321,7 +328,7 @@ async def confirm_cluster(request: Request, cluster_assignment_id: str, body: Co
                 "embedding_run_id": assignment["embedding_run_id"],
                 "cluster_id": assignment["cluster_id"],
             }
-            for m in rows_of(members)
+            for m in members
         ]
         for i in range(0, len(obs_rows), 50):
             svc.table("observations").insert(obs_rows[i : i + 50]).execute()
