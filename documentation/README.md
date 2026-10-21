@@ -47,6 +47,7 @@ status banner. When in doubt, the living docs in `resources/` and `onboarding/` 
 
 | Spec | For | Covers |
 |------|-----|--------|
+| [2026-10_ui-audit](development%20reports/2026-10_ui-audit/README.md) | website | 📋 Proposal. UI audit of every page for role fit, scale (100 deployments, 50,000 photos) and clutter; eight decisions and a nine-agent improvement plan |
 | [species-brain-training-spec](development%20reports/species-brain-training-spec.md) | website | 🔧 Built behind `FF_MODEL_TRAINING_ENABLED`. Annotations → Actions → *Create species ID model…*: the Edge Impulse recipe (dataset, transfer learning, int8 export, Vela) automated from a selection, with a dataset-ZIP fallback when no trainer is configured. Serves the GDMA APAC key result on non-technical users training a model |
 | [2026-09_gcp-native-model-training](development%20reports/2026-09_gcp-native-model-training/README.md) | website + Google Cloud | 📋 Proposal with code. The same action with `MODEL_TRAINER=gcp`: a Cloud Run job trains, the website compiles and registers |
 | [2026-09_false-negatives-and-vlm-audit](development%20reports/2026-09_false-negatives-and-vlm-audit/README.md) | website + pipeline | 🔧 Active. Detector false negatives (SpeciesNet/MegaDetector), Motion ROI burst differencing, Wildlife Brain fallbacks, iNaturalist policy constraints, and (§6) the flag-gated Gemini animal-presence step with its labeller and evaluation script |

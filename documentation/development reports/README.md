@@ -76,6 +76,7 @@ Ordered roughly by how likely you are to need them. Descriptions live in the
 
 | Report | Status |
 |---|---|
+| [2026-10_ui-audit](2026-10_ui-audit/README.md) | 📋 Proposal, decisions taken 2026-10-21: 133 findings across five page groups, nine improvement agents not scheduled yet |
 | [2026-10_e2e-in-ci](2026-10_e2e-in-ci.md) | 🔧 Active, 2026-10-01: the Playwright flows run on every Cloudflare Pages preview deployment; first run pending |
 | [species-brain-training-spec](species-brain-training-spec.md) | 🔧 Active: built behind `FF_MODEL_TRAINING_ENABLED`; first live Edge Impulse run and a load on a camera still to do |
 | [2026-09_evidence-pipeline-architecture](2026-09_evidence-pipeline-architecture/README.md) | 📋 Proposal, 2026-09-29: evidence score, consensus row and `media_evidence` contract; items 1 to 3 built in #155, the rest tracked in its section 17 |
