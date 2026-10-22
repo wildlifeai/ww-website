@@ -22,8 +22,8 @@ const columns: Column<AdminDevice>[] = [
     key: 'latest_deployment', label: 'Latest deployment',
     render: d => d.latest_deployment ? (
       <div>
-        <div>{d.latest_deployment.name}{d.latest_deployment.deployment_end && <span style={{ opacity: 0.6 }}> (ended)</span>}</div>
-        <div style={{ fontSize: '0.72rem', opacity: 0.6 }}>{d.latest_deployment.project.name}</div>
+        <div>{d.latest_deployment.name}{d.latest_deployment.deployment_end && <span style={{ color: 'var(--text-muted)' }}> (ended)</span>}</div>
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{d.latest_deployment.project.name}</div>
       </div>
     ) : '—',
     getValue: d => d.latest_deployment ? `${d.latest_deployment.name} ${d.latest_deployment.project.name}` : '',
@@ -46,14 +46,16 @@ export function AdminDevicesPage() {
   }, [devices])
   const rows = orgId ? devices.filter(d => d.organisation?.id === orgId) : devices
 
+  // Nothing until the role check answers, so a non-admin never sees the page; then redirect.
+  if (isAdmin === null) return null
   if (isAdmin === false) return <Navigate to="/" replace />
 
   return (
     <div style={{ maxWidth: 1160 }}>
-      <h2 style={{ margin: '0 0 1rem 0' }}>📡 Devices</h2>
-      {error && <p style={{ color: 'var(--error)', marginBottom: '1rem' }}>⚠ {error.message}</p>}
-      {isAdmin === null || isLoading ? (
-        <p style={{ opacity: 0.5 }}>Loading devices…</p>
+      <h2 style={{ margin: '0 0 1rem 0' }}>Devices</h2>
+      {error && <p role="alert" style={{ color: 'var(--error)', marginBottom: '1rem' }}>{error.message}</p>}
+      {isLoading ? (
+        <p style={{ color: 'var(--text-muted)' }}>Loading devices…</p>
       ) : (
         <DataTable<AdminDevice>
           columns={columns} rows={rows} rowKey={d => d.id}

@@ -22,7 +22,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 
 **Conventions**: no Tailwind — components use inline `style={{}}` objects with CSS variables
 (`--primary`, `--surface`, `--border`, `--radius`). Shared primitives live in
-`src/components/ui/` (`Modal`, `Ribbon`, `DataTable`, `ControlBar`/`FilterSelect`, `StatusBadge`,
+`src/components/ui/` (`Modal`, `Ribbon`, `DataTable`, `FilterSelect`, `StatusBadge`,
 `VegaChart`).
 
 ## Backend
