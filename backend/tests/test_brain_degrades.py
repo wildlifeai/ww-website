@@ -136,7 +136,7 @@ def brain_client(monkeypatch):
     """TestClient with auth bypassed and a service client whose every read is empty."""
     from fastapi.testclient import TestClient
 
-    from app.authz import require_deployment_access, require_media_access
+    from app.authz import require_deployment_access, require_deployment_write, require_media_access, require_media_write
     from app.dependencies import get_current_user, get_verified_user
     from app.main import app
     from app.routers import brain
@@ -156,7 +156,9 @@ def brain_client(monkeypatch):
         get_current_user: lambda: user,
         get_verified_user: lambda: user,
         require_deployment_access: lambda: None,
+        require_deployment_write: lambda: None,
         require_media_access: lambda: None,
+        require_media_write: lambda: None,
     }
     app.dependency_overrides.update(overrides)
     yield TestClient(app)

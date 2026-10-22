@@ -25,6 +25,7 @@ import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
+from app.authz import WRITE_REFUSED, writable_media_ids
 from app.config import settings
 from app.dependencies import get_current_user, require_not_demo
 from app.domain.inaturalist import (
@@ -283,13 +284,20 @@ async def publish_to_inat(
     observation per encounter), drops by-catch (human/vehicle/blank), uploads
     each photo through the backend proxy (bypassing browser CORS), and records
     the mapping in inat_observations / inat_observation_media for status tracking.
+
+    Only photos in projects the caller can change (project_member or above) are published: the
+    others are left out, and ``403`` when that is all of them.
     """
     _check_feature()
+
+    media_ids = await writable_media_ids(user.id, body.media_ids)
+    if not media_ids:
+        raise HTTPException(403, detail=WRITE_REFUSED)
 
     try:
         result = await publish_media_to_inat(
             user_id=user.id,
-            media_ids=body.media_ids,
+            media_ids=media_ids,
             gap_seconds=body.gap_seconds,
             geoprivacy=body.geoprivacy,
         )

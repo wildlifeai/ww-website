@@ -9,10 +9,10 @@ from typing import Annotated, Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import AfterValidator, BaseModel
 
+from app.authz import project_creator_org_id
 from app.dependencies import get_user_client, get_verified_user, require_not_demo
 from app.domain.open_deployments import OpenDeploymentConflict
 from app.domain.soft_delete import check_deleted_at, now_iso, restore_project_as_user, soft_delete_project_as_user
-from app.services.db_utils import rows_of
 from app.services.supabase_client import create_service_client
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -31,20 +31,20 @@ async def create_project(
     """Create a project in the caller's organisation.
 
     The caller becomes ``project_admin`` automatically via the ``handle_new_project`` DB trigger
-    (which reads ``created_by``), mirroring the CamtrapDP import. Requires the user to belong to
-    an organisation. ``get_verified_user`` blocks the demo/unverified accounts.
+    (which reads ``created_by``), mirroring the CamtrapDP import. Requires an active
+    ``organisation_member`` or ``organisation_manager`` role, as ww-backend's projects INSERT
+    policy does. ``get_verified_user`` blocks the demo/unverified accounts.
     """
     name = (body.name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="Project name is required.")
 
+    org_id = await project_creator_org_id(user.id)
+    if not org_id:
+        raise HTTPException(status_code=403, detail="You must belong to an organisation to create a project.")
+
     def _create() -> Dict[str, Any]:
         svc = create_service_client()
-        # Resolve the user's primary organisation (user_roles uses scope_id + scope_type).
-        org_res = svc.table("user_roles").select("scope_id").eq("user_id", user.id).eq("scope_type", "organisation").limit(1).execute()
-        if not org_res.data:
-            raise HTTPException(status_code=403, detail="You must belong to an organisation to create a project.")
-        org_id = rows_of(org_res)[0]["scope_id"]
 
         project_id = str(uuid.uuid4())
         svc.table("projects").insert(

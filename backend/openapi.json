@@ -3031,7 +3031,7 @@
     },
     "/api/deployments": {
       "post": {
-        "description": "Create a deployment in a project the caller can access (manual upload assignment).\n\nGuarded by project access \u2014 a caller with no role on the project gets 404 (so other tenants'\nproject IDs can't be probed). Auto-creates a placeholder device because deployments require a\nnon-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the\n``(deployment_start, device_id)`` unique index.",
+        "description": "Create a deployment in a project the caller can change (manual upload assignment).\n\nThe rule of ww-backend's deployments INSERT policy, project_member or above (``assert_write``):\na caller with no role on the project gets 404 (so other tenants' project IDs can't be\nprobed), a project_viewer 403. Auto-creates a placeholder device because deployments require a\nnon-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the\n``(deployment_start, device_id)`` unique index.",
         "operationId": "create_deployment_api_deployments_post",
         "parameters": [
           {
@@ -3784,7 +3784,7 @@
     },
     "/api/inat/publish": {
       "post": {
-        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (human/vehicle/blank), uploads\neach photo through the backend proxy (bypassing browser CORS), and records\nthe mapping in inat_observations / inat_observation_media for status tracking.",
+        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (human/vehicle/blank), uploads\neach photo through the backend proxy (bypassing browser CORS), and records\nthe mapping in inat_observations / inat_observation_media for status tracking.\n\nOnly photos in projects the caller can change (project_member or above) are published: the\nothers are left out, and ``403`` when that is all of them.",
         "operationId": "publish_to_inat_api_inat_publish_post",
         "parameters": [
           {
@@ -4477,7 +4477,7 @@
     },
     "/api/media/run-selected": {
       "post": {
-        "description": "Queue a pipeline run for specific media IDs (not the full deployment).\n\nLooks up the deployment_id from the first media record, then runs the\npipeline with a media_ids filter. The lookup runs as the requesting user\nso RLS limits it to media in their own projects.",
+        "description": "Queue a pipeline run for specific media IDs (not the full deployment).\n\nLooks up the deployment_id from the first media record, then runs the\npipeline with a media_ids filter. The lookup runs as the requesting user\nso RLS limits it to media in their own projects; the caller must be able to change that\ndeployment's project (project_member or above, ``403`` otherwise).",
         "operationId": "run_pipeline_selected_api_media_run_selected_post",
         "parameters": [
           {
@@ -5094,7 +5094,7 @@
     },
     "/api/projects": {
       "post": {
-        "description": "Create a project in the caller's organisation.\n\nThe caller becomes ``project_admin`` automatically via the ``handle_new_project`` DB trigger\n(which reads ``created_by``), mirroring the CamtrapDP import. Requires the user to belong to\nan organisation. ``get_verified_user`` blocks the demo/unverified accounts.",
+        "description": "Create a project in the caller's organisation.\n\nThe caller becomes ``project_admin`` automatically via the ``handle_new_project`` DB trigger\n(which reads ``created_by``), mirroring the CamtrapDP import. Requires an active\n``organisation_member`` or ``organisation_manager`` role, as ww-backend's projects INSERT\npolicy does. ``get_verified_user`` blocks the demo/unverified accounts.",
         "operationId": "create_project_api_projects_post",
         "parameters": [
           {

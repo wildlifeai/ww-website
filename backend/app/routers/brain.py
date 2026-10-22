@@ -18,10 +18,12 @@ from app.authz import (
     accessible_deployment_ids,
     assert_access,
     media_org_deployment_ids,
-    require_cluster_access,
+    require_cluster_write,
     require_deployment_access,
+    require_deployment_write,
     require_media_access,
-    require_project_access,
+    require_media_write,
+    require_project_write,
     require_system_admin,
 )
 from app.config import settings
@@ -29,7 +31,7 @@ from app.dependencies import get_current_user, get_verified_user, require_not_de
 from app.middleware.rate_limit import limiter
 from app.schemas.brain import ConfirmClusterRequest, EmbedRequest, MultiClusterRequest, ReprocessAllRequest, ReprocessRequest, ReviewDecisionRequest
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
-from app.services.db_utils import row_of, rows_of
+from app.services.db_utils import read_all, row_of, rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
@@ -51,7 +53,7 @@ def _al_disabled(req_id):
     )
 
 
-@router.post("/embed/{deployment_id}", dependencies=[Depends(require_deployment_access)])
+@router.post("/embed/{deployment_id}", dependencies=[Depends(require_deployment_write)])
 @limiter.limit("10/minute")
 async def embed_deployment(request: Request, deployment_id: str, body: EmbedRequest | None = None, user=Depends(get_verified_user)):
     """Embed + cluster a deployment. Server mode enqueues a GPU job."""
@@ -166,16 +168,18 @@ async def multi_clusters(request: Request, body: MultiClusterRequest, user=Depen
         clusters_resp = svc.table("cluster_assignments").select("*").in_("embedding_run_id", run_ids).order("image_count", desc=True).execute()
         clusters = rows_of(clusters_resp)
 
-        # 3. Fetch member media per cluster (with optional confidence filter).
-        members_query = (
-            svc.table("media_embeddings")
-            .select("media_id, cluster_id, deployment_id, cluster_confidence, is_outlier")
-            .in_("deployment_id", body.deployment_ids)
-        )
-        if body.min_confidence > 0:
-            members_query = members_query.gte("cluster_confidence", body.min_confidence)
-        members_resp = members_query.execute()
-        members = rows_of(members_resp)
+        # 3. Fetch member media per cluster (with optional confidence filter), every page.
+        def _members_query():
+            query = (
+                svc.table("media_embeddings")
+                .select("media_id, cluster_id, deployment_id, cluster_confidence, is_outlier")
+                .in_("deployment_id", body.deployment_ids)
+            )
+            if body.min_confidence > 0:
+                query = query.gte("cluster_confidence", body.min_confidence)
+            return query.order("media_id")
+
+        members = read_all(_members_query)
 
         # 4. Group by model variant (cross-variant is not meaningful).
         run_model = {r["id"]: r.get("model_name", "unknown") for r in latest_runs}
@@ -212,13 +216,14 @@ async def umap_coords(request: Request, deployment_id: str, user=Depends(get_cur
     svc = create_service_client()
 
     def _fetch():
-        resp = (
-            svc.table("media_embeddings")
-            .select("media_id, umap_x, umap_y, cluster_id, is_outlier, cluster_purity")
-            .eq("deployment_id", deployment_id)
-            .execute()
+        return read_all(
+            lambda: (
+                svc.table("media_embeddings")
+                .select("media_id, umap_x, umap_y, cluster_id, is_outlier, cluster_purity")
+                .eq("deployment_id", deployment_id)
+                .order("media_id")
+            )
         )
-        return rows_of(resp)
 
     points = await asyncio.to_thread(_fetch)
     return ApiResponse(data={"points": points, "count": len(points)}, meta=ApiMeta(request_id=req_id))
@@ -234,15 +239,16 @@ async def list_outliers(request: Request, deployment_id: str, user=Depends(get_c
     svc = create_service_client()
 
     def _fetch():
-        resp = (
-            svc.table("media_embeddings")
-            .select("media_id, cluster_confidence")
-            .eq("deployment_id", deployment_id)
-            .eq("is_outlier", True)
-            .order("cluster_confidence", desc=False)
-            .execute()
+        return read_all(
+            lambda: (
+                svc.table("media_embeddings")
+                .select("media_id, cluster_confidence")
+                .eq("deployment_id", deployment_id)
+                .eq("is_outlier", True)
+                .order("cluster_confidence", desc=False)
+                .order("media_id")
+            )
         )
-        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch)
     return ApiResponse(data={"outliers": rows, "count": len(rows)}, meta=ApiMeta(request_id=req_id))
@@ -281,7 +287,7 @@ async def similar(request: Request, media_id: str, n: int = Query(20, ge=1, le=1
     return ApiResponse(data={"media_id": media_id, "results": hits}, meta=ApiMeta(request_id=req_id))
 
 
-@router.post("/clusters/{cluster_assignment_id}/confirm", dependencies=[Depends(require_cluster_access), Depends(require_not_demo)])
+@router.post("/clusters/{cluster_assignment_id}/confirm", dependencies=[Depends(require_cluster_write), Depends(require_not_demo)])
 async def confirm_cluster(request: Request, cluster_assignment_id: str, body: ConfirmClusterRequest, user=Depends(get_current_user)):
     """Confirm a cluster as a taxon — bulk-creates human observations for members."""
     req_id = getattr(request.state, "request_id", None)
@@ -295,13 +301,16 @@ async def confirm_cluster(request: Request, cluster_assignment_id: str, body: Co
         assignment = row_of(svc.table("cluster_assignments").select("*").eq("id", cluster_assignment_id).maybe_single().execute())
         if not assignment:
             return None, 0
-        members = (
-            svc.table("media_embeddings")
-            .select("media_id")
-            .eq("deployment_id", assignment["deployment_id"])
-            .eq("embedding_run_id", assignment["embedding_run_id"])
-            .eq("cluster_id", assignment["cluster_id"])
-            .execute()
+        # Every member: a read without .range() stops at 1,000, which labelled only 1,000.
+        members = read_all(
+            lambda: (
+                svc.table("media_embeddings")
+                .select("media_id")
+                .eq("deployment_id", assignment["deployment_id"])
+                .eq("embedding_run_id", assignment["embedding_run_id"])
+                .eq("cluster_id", assignment["cluster_id"])
+                .order("media_id")
+            )
         )
         obs_rows = [
             {
@@ -319,7 +328,7 @@ async def confirm_cluster(request: Request, cluster_assignment_id: str, body: Co
                 "embedding_run_id": assignment["embedding_run_id"],
                 "cluster_id": assignment["cluster_id"],
             }
-            for m in rows_of(members)
+            for m in members
         ]
         for i in range(0, len(obs_rows), 50):
             svc.table("observations").insert(obs_rows[i : i + 50]).execute()
@@ -360,7 +369,7 @@ async def embedding_runs(request: Request, deployment_id: str, user=Depends(get_
     return ApiResponse(data={"runs": runs}, meta=ApiMeta(request_id=req_id))
 
 
-@router.post("/reprocess/deployment/{deployment_id}", dependencies=[Depends(require_deployment_access)])
+@router.post("/reprocess/deployment/{deployment_id}", dependencies=[Depends(require_deployment_write)])
 async def reprocess_deployment_endpoint(request: Request, deployment_id: str, body: ReprocessRequest | None = None, user=Depends(get_verified_user)):
     """Supersede current runs and re-embed a deployment (new embedding_run)."""
     req_id = getattr(request.state, "request_id", None)
@@ -376,7 +385,7 @@ async def reprocess_deployment_endpoint(request: Request, deployment_id: str, bo
     return ApiResponse(data={"job_id": job_id, "status": "queued", "deployment_id": deployment_id}, meta=ApiMeta(request_id=req_id))
 
 
-@router.post("/reprocess/project/{project_id}", dependencies=[Depends(require_project_access)])
+@router.post("/reprocess/project/{project_id}", dependencies=[Depends(require_project_write)])
 async def reprocess_project_endpoint(request: Request, project_id: str, body: ReprocessRequest | None = None, user=Depends(get_verified_user)):
     """Reprocess all deployments in a project."""
     req_id = getattr(request.state, "request_id", None)
@@ -444,7 +453,7 @@ async def compare_runs_endpoint(request: Request, run_a: str = Query(...), run_b
 # ── Active learning + review queue (Phase 8) ─────────────────────────
 
 
-@router.post("/recalculate-al-scores/{deployment_id}", dependencies=[Depends(require_deployment_access), Depends(require_not_demo)])
+@router.post("/recalculate-al-scores/{deployment_id}", dependencies=[Depends(require_deployment_write), Depends(require_not_demo)])
 async def recalculate_al_scores(request: Request, deployment_id: str, user=Depends(get_current_user)):
     """Enqueue an active-learning score recompute for a deployment."""
     req_id = getattr(request.state, "request_id", None)
@@ -474,7 +483,7 @@ async def review_queue(request: Request, deployment_id: str, limit: int = Query(
     return ApiResponse(data={"queue": rows, "count": len(rows)}, meta=ApiMeta(request_id=req_id))
 
 
-@router.post("/review/{media_id}", dependencies=[Depends(require_media_access), Depends(require_not_demo)])
+@router.post("/review/{media_id}", dependencies=[Depends(require_media_write), Depends(require_not_demo)])
 async def review_media(request: Request, media_id: str, body: ReviewDecisionRequest, user=Depends(get_current_user)):
     """Record a reviewer decision on one media item (creates a human observation)."""
     req_id = getattr(request.state, "request_id", None)

@@ -77,3 +77,5 @@ The demo project has one deployment and no photos, so dev shows layouts, not sca
 ## Not verified
 
 Widths, row heights and above-the-fold counts are read from the JSX, not measured. Viewer behaviour at the API (03 #3, 05 open question 1) is read from `authz.py`, not run. Each slice lists its own open questions; the data-shape ones (projects per user, deployments per project, observations per project on staging) size several of the scale fixes and are a read-only query away.
+
+**21 October 2026, agent 1.** The write check now covers the routes in decision 1 ([API reference, Access](../../resources/api-reference.md#access)). Two things the slices did not say: `POST /api/inat/publish` read any photo by id with the service role, with no project check at all (now write-checked); and the batch deletes, the location edit and project delete run as the caller, so RLS already refused a viewer there. `DemoGuard.tsx` was left to the page agents.
