@@ -53,7 +53,7 @@ export function useProjectRoles(): ProjectRoles {
   })
   const summary = useMemo(() => summariseRoles(roles.data ?? []), [roles.data])
 
-  const managedOrgIds = useMemo(() => [...summary.managedOrgIds].sort(), [summary])
+  const managedOrgIds = useMemo(() => [...summary.managedOrgIds].toSorted(), [summary])
   const managedProjects = useQuery({
     queryKey: [PROJECT_ROLES_KEY, userId, 'managedProjects', managedOrgIds],
     queryFn: () => fetchManagedProjectIds(supabase, managedOrgIds),
