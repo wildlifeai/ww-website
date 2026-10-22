@@ -2,16 +2,17 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // StatusBadge — annotation lifecycle state for a media item
 //
-// States
-//   pending     grey  ⧗   No observations yet (unprocessed / pipeline running)
-//   issue       red   ✕   Explicit pipeline error (reserved for BE-2)
-//   ai          teal  AI  Identified by the ML model only
-//   reviewed    green ✓   A human has reviewed / annotated this image
+// States (icons from lucide-react)
+//   pending     grey   Hourglass  No observations yet (unprocessed / pipeline running)
+//   issue       red    X          Explicit pipeline error (reserved for BE-2)
+//   ai          teal   Cpu        Identified by the ML model only
+//   reviewed    green  Check      A human has reviewed / annotated this image
 //
-// Images with no observations show the colourless 'pending' badge so the grid
-// reads as "still being processed" rather than alarming red errors. When BE-2
-// lands (explicit per-media status field) genuine failures surface as 'issue'.
+// The review grid shows no badge for 'pending' (an unlabelled card says "No label"), so the
+// thumbnails carry the three DESIGN.md states only. When BE-2 lands (explicit per-media status
+// field) genuine failures surface as 'issue'.
 // ─────────────────────────────────────────────────────────────────────────────
+import { Check, Cpu, Hourglass, X, type LucideIcon } from 'lucide-react'
 
 export type AnnotationStatus = 'pending' | 'issue' | 'ai' | 'reviewed'
 
@@ -27,7 +28,7 @@ interface BadgeStyle {
   bg: string
   border: string
   color: string
-  icon: string
+  icon: LucideIcon
   defaultLabel: string
 }
 
@@ -36,28 +37,28 @@ const STYLES: Record<AnnotationStatus, BadgeStyle> = {
     bg:           'rgba(107,114,128,0.55)',
     border:       'rgba(107,114,128,0.35)',
     color:        '#ffffff',
-    icon:         '⧗',
+    icon:         Hourglass,
     defaultLabel: 'Processing',
   },
   issue: {
     bg:           'rgba(239,68,68,0.88)',
     border:       'rgba(239,68,68,0.4)',
     color:        '#ffffff',
-    icon:         '✕',
+    icon:         X,
     defaultLabel: 'Error',
   },
   ai: {
     bg:           'rgba(20,184,166,0.88)',
     border:       'rgba(20,184,166,0.4)',
     color:        '#ffffff',
-    icon:         '⚙',
+    icon:         Cpu,
     defaultLabel: 'AI',
   },
   reviewed: {
     bg:           'rgba(16,185,129,0.88)',
     border:       'rgba(16,185,129,0.4)',
     color:        '#ffffff',
-    icon:         '✓',
+    icon:         Check,
     defaultLabel: 'Reviewed',
   },
 }
@@ -65,6 +66,7 @@ const STYLES: Record<AnnotationStatus, BadgeStyle> = {
 export function StatusBadge({ status, size = 'sm', label }: StatusBadgeProps) {
   const s = STYLES[status]
   const isSm = size === 'sm'
+  const Icon = s.icon
 
   return (
     <span
@@ -86,7 +88,7 @@ export function StatusBadge({ status, size = 'sm', label }: StatusBadgeProps) {
         userSelect: 'none',
       }}
     >
-      <span style={{ fontSize: isSm ? '0.6rem' : '0.7rem' }}>{s.icon}</span>
+      <Icon size={isSm ? 10 : 12} strokeWidth={3} aria-hidden />
       {(!isSm || label) && (
         <span>{label ?? s.defaultLabel}</span>
       )}
@@ -107,7 +109,7 @@ export function StatusBadge({ status, size = 'sm', label }: StatusBadgeProps) {
  *   - `hasAi`       — any observation carrying an AI-produced label
  *   - `hasError`    — an explicit pipeline error flag (reserved for BE-2)
  *
- * Precedence: error (✕) ▸ reviewed (✓) ▸ ai (teal) ▸ pending (⧗).
+ * Precedence: error ▸ reviewed ▸ ai ▸ pending.
  * Fallback (no observations at all) → 'pending': the image is still working
  * its way through the pipeline, so show a neutral colourless badge instead of
  * a red error.
