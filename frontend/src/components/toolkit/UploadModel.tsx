@@ -4,6 +4,7 @@ import { apiClient } from '../../lib/apiClient'
 import { JobProgress } from '../common'
 import { useJob } from '../../hooks/useJob'
 import { ModelLabelMapper } from './ModelLabelMapper'
+import { Check, CircleX, FileArchive, Lock, Upload } from 'lucide-react'
 
 interface PretrainedModel {
   architecture: string
@@ -199,7 +200,7 @@ export function UploadModel() {
   // Permission gate: show access denied if user has no managed orgs
   if (isLoadingOrgs) {
     return (
-      <div style={{ textAlign: 'center', padding: '3rem', opacity: 0.6 }}>
+      <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
         <p>Checking permissions…</p>
       </div>
     )
@@ -208,9 +209,9 @@ export function UploadModel() {
   if (!managedOrgs || managedOrgs.length === 0) {
     return (
       <div style={{ textAlign: 'center', padding: '3rem' }}>
-        <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>🔒</div>
+        <Lock size={36} color="var(--text-muted)" aria-hidden="true" style={{ marginBottom: '1rem' }} />
         <h3 style={{ marginBottom: '0.5rem' }}>Access Restricted</h3>
-        <p style={{ opacity: 0.7, maxWidth: '400px', margin: '0 auto' }}>
+        <p style={{ color: 'var(--text-muted)', maxWidth: '400px', margin: '0 auto' }}>
           You need the <strong>Organisation Manager</strong> role to upload AI models.
           Contact your organisation administrator to request access.
         </p>
@@ -221,7 +222,7 @@ export function UploadModel() {
   return (
     <div>
       <h3 style={{ marginBottom: '0.5rem' }}>Upload AI Model</h3>
-      <p style={{ opacity: 0.7, marginBottom: '1.5rem' }}>
+      <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
         Import an Edge Impulse model, upload raw model files, or select a pre-trained model from the SenseCap Zoo. It will be compiled, packaged, and versioned securely under your organisation.
       </p>
 
@@ -272,7 +273,7 @@ export function UploadModel() {
         <div style={{ marginBottom: '1.5rem', padding: '1rem', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
           <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>SenseCap Zoo Model</label>
           {isLoadingSscma ? (
-            <div style={{ padding: '0.5rem', opacity: 0.6 }}>Loading models…</div>
+            <div style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>Loading models…</div>
           ) : (
             <select
               value={sscmaModelId}
@@ -286,7 +287,7 @@ export function UploadModel() {
             </select>
           )}
           {computedResolution && (
-            <p style={{ fontSize: '0.75rem', opacity: 0.8, marginTop: '0.5rem' }}>Resolution: {computedResolution}</p>
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Resolution: {computedResolution}</p>
           )}
         </div>
       )}
@@ -329,7 +330,7 @@ export function UploadModel() {
             className="input"
             style={{ width: '100%', padding: '0.75rem', borderRadius: '4px', border: '1px solid var(--border)' }}
           />
-          <p style={{ fontSize: '0.8rem', opacity: 0.6, marginTop: '0.25rem' }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
             This groups versions together. If a model with this name exists, this upload becomes the next version.
           </p>
         </div>
@@ -377,17 +378,17 @@ export function UploadModel() {
           />
           {file ? (
             <div>
-              <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>📦</div>
-              <strong>{file.name}</strong>
-              <div style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: '0.25rem' }}>
+              <FileArchive size={24} color="var(--primary)" aria-hidden="true" style={{ marginBottom: '0.25rem' }} />
+              <div><strong>{file.name}</strong></div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
                 {(file.size / 1024 / 1024).toFixed(2)} MB
               </div>
             </div>
           ) : (
             <div>
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📤</div>
+              <Upload size={28} color="var(--text-muted)" aria-hidden="true" style={{ marginBottom: '0.5rem' }} />
               <p>Drag & drop your model file here, or click to browse</p>
-              <p style={{ fontSize: '0.75rem', opacity: 0.5 }}>Max 50 MB · .zip, .tflite, .cc</p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Max 50 MB · .zip, .tflite, .cc</p>
             </div>
           )}
         </div>
@@ -402,7 +403,7 @@ export function UploadModel() {
             style={{ padding: '0.75rem 2rem' }}
           >
             {uploadMutation.isPending
-              ? (modelSource === 'Pre-trained Model' ? '⏳ Registering model…' : modelSource === 'SenseCap Models' ? '⏳ Importing from SenseCap…' : '⏳ Uploading & converting…')
+              ? (modelSource === 'Pre-trained Model' ? 'Registering model…' : modelSource === 'SenseCap Models' ? 'Importing from SenseCap…' : 'Uploading & converting…')
               : (modelSource === 'Custom Upload' ? 'Upload & Process Model' : 'Import & Process Model')}
           </button>
         </div>
@@ -421,16 +422,16 @@ export function UploadModel() {
           lineHeight: '1.8',
         }}>
           {/* Steps shown during/after mutation */}
-          <div style={{ opacity: 0.9 }}>✅ Authenticated as current user</div>
-          <div style={{ opacity: 0.9 }}>
-            ✅ Source: <strong>{modelSource}</strong>
-            {modelSource === 'Pre-trained Model' && <> — {ptArchitecture} ({ptResolution})</>}
-            {modelSource === 'SenseCap Models' && sscmaModelId && <> — {modelName}</>}
+          <div><Check size={13} aria-hidden="true" /> Authenticated as current user</div>
+          <div>
+            <Check size={13} aria-hidden="true" /> Source: <strong>{modelSource}</strong>
+            {modelSource === 'Pre-trained Model' && <>, {ptArchitecture} ({ptResolution})</>}
+            {modelSource === 'SenseCap Models' && sscmaModelId && <>, {modelName}</>}
           </div>
 
           {uploadMutation.isPending && (
-            <div style={{ opacity: 0.7 }}>
-              ⏳ {modelSource === 'Pre-trained Model'
+            <div style={{ color: 'var(--text-muted)' }}>
+              {modelSource === 'Pre-trained Model'
                 ? 'Registering model in your organisation…'
                 : modelSource === 'SenseCap Models'
                   ? 'Downloading and packaging model from SenseCap Zoo…'
@@ -440,21 +441,21 @@ export function UploadModel() {
 
           {uploadMutation.isSuccess && (
             <div style={{ color: 'var(--primary)' }}>
-              ✅ Model registered successfully!
+              <Check size={13} aria-hidden="true" /> Model registered successfully
             </div>
           )}
 
           {uploadMutation.isError && (() => {
             const err = uploadMutation.error as { message: string; code?: string }
             // Distinguish the failure modes so the hint isn't misleading: a transport
-            // failure (server unreachable / upload dropped) is not a permission problem —
+            // failure (server unreachable / upload dropped) is not a permission problem,
             // and the role check already passed to render this form.
             const isNetwork = err.code === 'NETWORK_ERROR' || /failed to fetch|network/i.test(err.message)
             const isPermission = err.code === 'FORBIDDEN' || /403|permission|manager|not authoris|not authoriz/i.test(err.message)
             return (
               <div style={{ color: 'var(--error)' }}>
-                ❌ <strong>Failed:</strong> {err.message}
-                <div style={{ marginTop: '0.5rem', opacity: 0.7, fontSize: '0.75rem' }}>
+                <CircleX size={13} aria-hidden="true" /> <strong>Failed:</strong> {err.message}
+                <div style={{ marginTop: '0.5rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
                   {isNetwork
                     ? 'The server couldn\'t be reached for this request. Check the backend is running and reachable; for large model files, the connection may have been dropped or the file may exceed the size limit.'
                     : isPermission

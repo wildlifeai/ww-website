@@ -3,10 +3,12 @@ import { supabase } from '../config/supabase'
 import { useAuth } from './useAuth'
 import {
   EMPTY_SELECTION,
+  PROJECT_LIST_COLUMNS,
   clearProjects,
   projectQuery,
   selectAllProjects,
   selectionAfterLoad,
+  toSelectableProject,
   toggleProjectSelection,
   type SelectionState,
 } from '../lib/projectSelection'
@@ -15,6 +17,8 @@ import { shouldRefreshOnReturn, subscribeToTabReturn } from '../lib/tabReturnRef
 export interface Project {
   id: string
   name: string
+  /** The organisation's name, null when the user cannot read it. */
+  organisation?: string | null
 }
 
 interface ProjectSelectionContextType {
@@ -59,13 +63,18 @@ export const ProjectSelectionProvider = ({ children }: { children: ReactNode }) 
       lastLoadAt.current = Date.now()
       const { data, error } = await supabase
         .from('projects')
-        .select('id, name')
+        .select(PROJECT_LIST_COLUMNS)
         .is('deleted_at', null)
+        // Each project's newest live deployment only, for the default selection.
+        .is('deployments.deleted_at', null)
         .order('name')
-      
+        .order('deployment_start', { referencedTable: 'deployments', ascending: false, nullsFirst: false })
+        .limit(1, { referencedTable: 'deployments' })
+
       if (isMounted) {
-        // Select every project on load, so an empty selection only ever means none.
-        setSelection(prev => selectionAfterLoad(prev, user.id, error ? null : data))
+        // A first load selects the project with the newest deployment; empty only ever means none.
+        const projects = error ? null : (data ?? []).map(toSelectableProject)
+        setSelection(prev => selectionAfterLoad(prev, user.id, projects))
         setIsLoading(false)
       }
     }

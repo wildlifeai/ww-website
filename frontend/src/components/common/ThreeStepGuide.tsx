@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import type { LucideIcon } from 'lucide-react'
+import { ArrowRight, type LucideIcon } from 'lucide-react'
 
 export interface GuideStep {
   icon: LucideIcon
@@ -70,7 +70,7 @@ export function ThreeStepGuide({ steps, heading }: ThreeStepGuideProps) {
             <p style={{
               margin: 0,
               fontSize: '0.875rem',
-              opacity: 0.7,
+              color: 'var(--text-muted)',
               lineHeight: 1.55,
               flex: 1,
             }}>
@@ -81,16 +81,20 @@ export function ThreeStepGuide({ steps, heading }: ThreeStepGuideProps) {
             <Link
               to={step.linkTo}
               style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.3rem',
                 fontSize: '0.875rem',
                 color: 'var(--primary)',
                 fontWeight: 600,
                 textDecoration: 'none',
                 marginTop: 'auto',
               }}
-              onMouseEnter={e => ((e.target as HTMLElement).style.textDecoration = 'underline')}
-              onMouseLeave={e => ((e.target as HTMLElement).style.textDecoration = 'none')}
+              onMouseEnter={e => (e.currentTarget.style.textDecoration = 'underline')}
+              onMouseLeave={e => (e.currentTarget.style.textDecoration = 'none')}
             >
               {step.linkLabel}
+              <ArrowRight size={14} aria-hidden="true" />
             </Link>
           </div>
         ))}
