@@ -113,12 +113,15 @@ confirm fails with `permission denied for table observations`, that's the missin
 
 | Surface | Route | Purpose |
 |---------|-------|---------|
-| Cluster review | `/clusters/:id` | Bulk-confirm an HDBSCAN cluster to one species |
-| Review queue | `/review/:id` | Active-learning order — highest-value images first |
+| Cluster review | `/clusters/:id` | Bulk-confirm an HDBSCAN cluster to one species; reassign, flag for an expert or publish to iNaturalist the photos selected in a cluster |
 | Dataset health | `/intelligence/:id` | Review funnel + AI-vs-human agreement |
 
-> Event review (`EventReviewPage`) is currently **unrouted** — `/events/:id` was removed from
-> `App.tsx`; the page file remains pending re-route-or-delete.
+Cluster review's *Publish to iNaturalist* calls `POST /api/inat/publish`, so it needs the account
+connected in Toolkit and a deployment with a location, and names each encounter by its photos'
+current labels ([inaturalist-integration](../development%20reports/inaturalist-integration.md#4-publish-phase-2)).
+
+The Review Queue (`/review/:id`) and Event Review were retired in October 2026 (UI audit decisions 3
+and 6): `/review/:id` now opens the deployment's photos in the grid.
 
 For the model side of these, see [04-AI-PIPELINE](./04-AI-PIPELINE.md). The full design rationale is
 in [`development reports/_archive/annotation-pipeline-review.md`](../development%20reports/_archive/annotation-pipeline-review.md)

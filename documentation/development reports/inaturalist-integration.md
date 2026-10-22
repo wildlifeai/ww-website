@@ -66,12 +66,14 @@ Already implemented before this work; surfaced in Phase 3.
 `domain/inaturalist_publish.py → publish_media_to_inat(user_id, media_ids, gap_seconds, geoprivacy)`
 exposed at **`POST /api/inat/publish`**.
 
-1. **By-catch filter** — keep only media with an `animal` observation; drop `human`/`vehicle`/`blank`
-   and unprocessed media.
+1. **By-catch filter**: a photo speaks through its newest human review, else its AI rows
+   (`_photo_labels`); keep it only when that label is an `animal`, so a reviewer's `blank` or `human`
+   outvotes the AI. Unprocessed media are dropped too.
 2. **Idempotency** — skip media already in `inat_observation_media`.
 3. **Burst consolidation** — cluster per deployment by temporal gap (`Δt < gap_seconds`, default 60 s);
    each burst → **one iNat observation with all its photos**. Untimed images each stand alone.
-4. **species_guess** — most-common animal scientific name in the burst (human-reviewed preferred).
+4. **species_guess**: the most common scientific name across the burst's photos, each photo by its
+   label from step 1, so a cluster confirmed as one species and then reassigned goes up as the new one.
 5. **Transactional upload** — `create_observation` (deployment lat/lon, earliest timestamp,
    `geoprivacy='obscured'` default) → insert `inat_observations` (`sync_status='uploaded'`) → for each
    photo, resolve bytes via `media_resolver` and **proxy-upload** through `upload_observation_photo`
