@@ -131,6 +131,12 @@ describe('fetchActiveDeployments', () => {
     expect(queries[0]).toContainEqual(['order', 'id'])
     expect(queries[1]).toContainEqual(['range', PAGE_SIZE, 2 * PAGE_SIZE - 1])
   })
+
+  it('sends no request for no projects', async () => {
+    const { db, queries } = fakeDb(() => ({ data: [], error: null }))
+    expect(await fetchActiveDeployments(db, [])).toEqual([])
+    expect(queries).toHaveLength(0)
+  })
 })
 
 describe('summariseDetections', () => {

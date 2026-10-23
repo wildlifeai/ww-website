@@ -63,6 +63,8 @@ type DeploymentRow = Omit<ActiveDeployment, 'project_name' | 'device_name'> & {
 export async function fetchActiveDeployments(
   db: SupabaseClient, projectIds: string[], now = new Date(),
 ): Promise<ActiveDeployment[]> {
+  // No projects, no request, as the chunked reads below do.
+  if (projectIds.length === 0) return []
   const nowIso = now.toISOString()
   const rows = await readAllPages((from, to) => db
     .from('deployments')
