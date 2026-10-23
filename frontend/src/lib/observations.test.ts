@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { confirmAllTargets, groupByBox, photoVerdict } from './observations'
+import { confirmAllTargets, groupByBox, isHumanRow, observationLabel, opinionSource, photoVerdict } from './observations'
 
 const box = (id: string, x: number | null, y = 0.2, w = 0.3, h = 0.4) => ({ id, bbox_x: x, bbox_y: y, bbox_w: w, bbox_h: h })
 
@@ -62,6 +62,13 @@ describe('photoVerdict', () => {
     const reviewedRat = { ...rat, review_status: 'human_reviewed' }
     expect(photoVerdict([confirmed, reviewedRat])).toEqual({ labelObs: reviewedRat, isEmpty: false })
   })
+
+  it("prefers a person's own row over an AI row a reviewer confirmed, in any order (decision 2)", () => {
+    const stamped = { ...rat, review_status: 'human_reviewed' }
+    const mine = { id: 'human', source_type: 'human', review_status: 'human_reviewed', observation_type: 'animal', scientific_name: 'Mus musculus' }
+    expect(photoVerdict([stamped, mine]).labelObs).toBe(mine)
+    expect(photoVerdict([mine, stamped]).labelObs).toBe(mine)
+  })
 })
 
 describe('confirmAllTargets', () => {
@@ -83,5 +90,34 @@ describe('confirmAllTargets', () => {
   it('still confirms older machine rows with no source_type', () => {
     const legacy = { id: 'legacy', source_type: null, review_status: 'ai_reviewed', classification_method: 'machine' }
     expect(confirmAllTargets([legacy, consensus]).map(o => o.id)).toEqual(['legacy'])
+  })
+})
+
+describe('isHumanRow', () => {
+  it('is a row a person wrote, not an AI row a person confirmed', () => {
+    expect(isHumanRow({ source_type: 'human' })).toBe(true)
+    expect(isHumanRow({ source_type: null, classification_method: 'human' })).toBe(true)
+    expect(isHumanRow({ source_type: 'ai', classification_method: 'human', review_status: 'human_reviewed' })).toBe(false)
+    expect(isHumanRow({ source_type: 'consensus', review_status: 'consensus_approved' })).toBe(false)
+  })
+})
+
+describe('observationLabel', () => {
+  it('names a row by its common name, its species, else its type in words', () => {
+    expect(observationLabel({ vernacular_name: 'Black rat', scientific_name: 'Rattus rattus', observation_type: 'animal' })).toBe('Black rat')
+    expect(observationLabel({ scientific_name: 'Rattus rattus', observation_type: 'animal' })).toBe('Rattus rattus')
+    expect(observationLabel({ scientific_name: null, observation_type: 'human' })).toBe('Person')
+    expect(observationLabel({ scientific_name: null, observation_type: 'animal' })).toBe('Animal')
+    expect(observationLabel({ scientific_name: null, observation_type: null })).toBe('Unlabelled')
+  })
+})
+
+describe('opinionSource', () => {
+  it('names the model version, the camera, the consensus or the person', () => {
+    expect(opinionSource({ source_type: 'ai', ai_origin: 'cloud', source_model_version: 'speciesnet-4.0.1a' })).toBe('speciesnet-4.0.1a')
+    expect(opinionSource({ source_type: 'ai', ai_origin: 'edge', source_model_version: null })).toBe('Camera AI')
+    expect(opinionSource({ source_type: 'consensus', source_model_version: 'evidence_fusion_v1' })).toBe('Consensus, evidence_fusion_v1')
+    expect(opinionSource({ source_type: 'human', classified_by: 'me@example.org' })).toBe('me@example.org')
+    expect(opinionSource({ source_type: 'ai', classification_method: 'machine' })).toBe('Cloud AI')
   })
 })
