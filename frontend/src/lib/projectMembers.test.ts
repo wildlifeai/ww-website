@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  cancelInvitation, inviteMember, normaliseEmail, removeMember, toMembersError,
+  cancelInvitation, changeMemberRole, inviteMember, normaliseEmail, removeMember, toMembersError,
   type ProjectMember,
 } from './projectMembers'
 
@@ -29,6 +29,7 @@ describe('toMembersError', () => {
     [{ code: '23505', message: 'Already a member of this project' }, 'already_member'],
     [{ code: '23514', message: 'Cannot remove the last project admin' }, 'last_admin'],
     [{ code: '22023', message: 'User is not a member of this project' }, 'not_a_member'],
+    [{ code: '22023', message: 'Cannot demote yourself as the last project admin' }, 'last_admin'],
     [{ code: '22023', message: 'Invalid email address' }, 'invalid_email'],
     [{ code: '22023', message: 'Invalid role: must be project_admin, project_member or project_viewer' }, 'unknown'],
     [{ code: 'P0002', message: 'Invitation not found or expired' }, 'invitation_gone'],
@@ -94,5 +95,20 @@ describe('removeMember', () => {
     const { db, rpc } = fakeDb({ data: { success: true } })
     await removeMember(db, 'p1', 'u2', 'me')
     expect(rpc).toHaveBeenCalledWith('remove_project_member', { p_project_id: 'p1', p_user_id: 'u2', p_removed_by: 'me' })
+  })
+})
+
+describe('changeMemberRole', () => {
+  it('passes the new role and the caller as p_updated_by', async () => {
+    const { db, rpc } = fakeDb({ data: { success: true } })
+    await changeMemberRole(db, 'p1', 'u2', 'project_viewer', 'me')
+    expect(rpc).toHaveBeenCalledWith('update_project_member_role', {
+      p_project_id: 'p1', p_user_id: 'u2', p_new_role: 'project_viewer', p_updated_by: 'me',
+    })
+  })
+
+  it('reports a refusal the user can act on', async () => {
+    const { db } = fakeDb({ data: null, error: { code: '42501', message: 'Unauthorized: Only project admins can change roles' } })
+    await expect(changeMemberRole(db, 'p1', 'u2', 'project_admin', 'me')).rejects.toMatchObject({ kind: 'not_allowed' })
   })
 })
