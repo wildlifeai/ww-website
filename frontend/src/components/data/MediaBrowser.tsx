@@ -1,102 +1,57 @@
  
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useEffectEvent, useMemo, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
+import {
+  ChartColumn, Check, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Hourglass, ImageOff, RefreshCw,
+  Search, SlidersHorizontal, Upload, X,
+} from 'lucide-react'
 import { survivingPending } from '../../lib/pendingCards'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { useINat } from '../../hooks/useINat'
+import { useProjectRoles } from '../../hooks/useProjectRoles'
 import { INatBadge, type INatState } from './INatBadge'
 import { MediaDetail } from './MediaDetail'
 import { FilterSelect } from '../ui/ControlBar'
 import { MultiSelect } from '../ui/MultiSelect'
 import { Ribbon } from '../ui/Ribbon'
+import { Banner, BannerProgress, type BannerTone } from '../ui/Banner'
 import { StatusBadge, deriveAnnotationStatus } from '../ui/StatusBadge'
-import type { AnnotationStatus } from '../ui/StatusBadge'
 import { Modal } from '../ui/Modal'
-import { isHumanReviewed, isAiLabel, humanCreateFields, photoVerdict } from '../../lib/observations'
+import { isHumanReviewed, isAiLabel, photoVerdict, observationLabel } from '../../lib/observations'
 import { apiClient } from '../../lib/apiClient'
 import { mediaDeleteOutcome, type MediaDeleteResponse } from '../../lib/mediaDelete'
-import { showUndoToast } from '../common/undoToastBus'
+import { showErrorToast, showUndoToast } from '../common/undoToastBus'
 import { BulkLabelModal } from './BulkLabelModal'
 import { type SpeciesSelection } from './SpeciesPicker'
-import { getTimeOfDay, formatCaptureTime } from '../../lib/time'
+import { formatCaptureTime } from '../../lib/time'
 import { useQueryClient } from '@tanstack/react-query'
 import { MediaGroup } from './MediaGroup'
-import { useMultiClusters, useConfirmCluster, useSimilarImages } from '../../hooks/useBrain'
+import { ClusterLabelAll } from './ClusterLabelAll'
+import { useClusters, useMultiClusters, useReviewQueue, useSimilarImages } from '../../hooks/useBrain'
+import { useFeatureEnabled } from '../../hooks/useFeatureEnabled'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { useJobsList } from '../../hooks/useJobs'
 import { useBusyDeployments } from '../../hooks/useBusyDeployments'
 import { useDeploymentFilterOptions } from '../../hooks/useDeploymentFilterOptions'
+import { useGridFilterOptions, modelOptionLabel } from '../../hooks/useGridFilterOptions'
 import { useAutoRetryThumbnails } from '../../hooks/useAutoRetryThumbnails'
 import { useRefreshWhileBusy } from '../../hooks/useRefreshWhileBusy'
 import { isThumbnailStuck } from '../../lib/thumbnailRetry'
 import { displayImageUrl } from '../../lib/mediaImageUrl'
-import { applySelectIntent, cardClickIntent, cardKeyIntent, circleClickIntent, type CardIntent } from '../../lib/cardSelection'
+import { applySelectIntent, arrowTarget, cardClickIntent, cardKeyIntent, circleClickIntent, type CardIntent } from '../../lib/cardSelection'
+import { writeVerdicts, type VerdictLabel } from '../../lib/humanVerdict'
+import { labelledSpecies } from '../../lib/speciesSuggestions'
+import {
+  applyFilterOps, gridFilterPlan, gridQueryKey, hasAdvancedFilters, hasAnyFilter, NO_FILTERS, type GridFilters,
+} from '../../lib/gridFilters'
+import {
+  DEPLOYMENT_GROUP_LIMIT, GROUP_LABELS, availableGroupings, groupInOrder, observationGroupKey, type GroupBy,
+} from '../../lib/gridGrouping'
+import { PAGE_SIZE, pageWindow } from '../../lib/gridPage'
 import { MediaBulkActions, type BulkAction } from './MediaBulkActions'
 import { DeleteConfirmModal, AiModelPickerModal, PipelineLogModal } from './BulkActionModals'
 import { TrainModelModal } from './TrainModelModal'
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ClusterLabelAll — per-cluster header action shown when grouping by cluster.
-// Labels every image in the cluster as one species in a single call (the bulk
-// "confirm cluster" workflow, brought in from the old standalone Explore page).
-// ─────────────────────────────────────────────────────────────────────────────
-
-function ClusterLabelAll({ clusterId, deploymentId, onDone }: { clusterId: string; deploymentId?: string; onDone: (created: number, name: string) => void }) {
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const confirm = useConfirmCluster(deploymentId)
-
-  const apply = () => {
-    const sci = name.trim()
-    if (!sci) return
-    confirm.mutate(
-      { id: clusterId, taxon: { scientific_name: sci } },
-      { onSuccess: (r) => { setOpen(false); setName(''); onDone(r?.observations_created ?? 0, sci) } },
-    )
-  }
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        title="Label every image in this cluster as one species"
-        style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--primary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
-      >
-        ✓ Label all…
-      </button>
-    )
-  }
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
-      <input
-        autoFocus
-        value={name}
-        onChange={e => setName(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter') apply(); else if (e.key === 'Escape') { setOpen(false); setName('') } }}
-        placeholder="scientific name"
-        style={{ fontSize: '0.72rem', padding: '0.2rem 0.4rem', width: 160, border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--surface)', color: 'var(--text-color)' }}
-      />
-      <button
-        type="button"
-        onClick={apply}
-        disabled={!name.trim() || confirm.isPending}
-        style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem', border: 'none', borderRadius: 'var(--radius)', background: 'var(--primary)', color: '#fff', cursor: 'pointer', opacity: !name.trim() || confirm.isPending ? 0.5 : 1 }}
-      >
-        {confirm.isPending ? '…' : 'Apply'}
-      </button>
-      <button
-        type="button"
-        onClick={() => { setOpen(false); setName('') }}
-        style={{ fontSize: '0.72rem', padding: '0.2rem 0.4rem', border: 'none', background: 'transparent', color: 'var(--text-color)', opacity: 0.6, cursor: 'pointer' }}
-      >
-        ✕
-      </button>
-      {confirm.isError && <span style={{ fontSize: '0.7rem', color: 'var(--error)' }}>failed</span>}
-    </span>
-  )
-}
 
 // Columns fetched for a media record (+ its assets and observations). Shared by
 // the paginated grid loader and the "find similar" fetch so they stay in sync.
@@ -105,7 +60,7 @@ const MEDIA_SELECT =
   'media_assets(thumbnail_url, preview_url, animal_crop_url), ' +
   'observations(id, deployment_id, media_id, observation_type, scientific_name, vernacular_name, taxon_id, ' +
   'count, life_stage, sex, behavior, ' +
-  'classification_method, classified_by, classification_probability, observation_comments, crop_url, ' +
+  'classification_method, classified_by, classification_timestamp, classification_probability, observation_comments, crop_url, ' +
   'review_status, source_type, ai_origin, source_model_version, reviewer_id, annotator_id, bbox_x, bbox_y, bbox_w, bbox_h)'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -151,6 +106,7 @@ export interface ObservationRecord {
   behavior: string | null
   classification_method: string | null
   classified_by: string | null
+  classification_timestamp?: string | null
   classification_probability: number | null
   observation_comments: string | null
   crop_url?: string | null   // per-observation bbox crop (crop view)
@@ -174,21 +130,67 @@ interface Props {
   initialDeploymentId?: string
   /** Pre-apply a species filter (e.g. deep-linked from an Insights chart). */
   initialSpecies?: string
-}
-
-type TimeOfDay = 'all' | 'day' | 'night'
-type GroupBy = 'none' | 'cluster' | 'species' | 'sex' | 'life_stage' | 'annotation_type' | 'deployment' | 'model' | 'annotator'
-
-const GROUP_LABELS: Record<GroupBy, string> = {
-  none: 'None', cluster: 'Cluster', species: 'Species', sex: 'Sex', life_stage: 'Life stage',
-  annotation_type: 'Annotation type', deployment: 'Deployment', model: 'AI model', annotator: 'Annotator',
+  /** Open this photo in the viewer (e.g. linked from the UMAP explorer). */
+  initialMediaId?: string
 }
 
 // A thin divider that separates the purpose-groups in the ribbon's first row
-// (stats │ display controls │ selection).
+// (pager │ display controls │ selection).
 const RIBBON_SECTION: React.CSSProperties = {
   display: 'flex', alignItems: 'center', gap: '0.5rem',
   borderLeft: '1px solid var(--border)', paddingLeft: '0.7rem', marginLeft: '0.7rem',
+}
+
+const SMALL_BTN: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', padding: '0.2rem 0.5rem',
+  border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'transparent',
+  color: 'var(--primary)', cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'none',
+}
+
+const ELLIPSIS: React.CSSProperties = { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }
+const TWO_LINES: React.CSSProperties = { display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }
+
+// The fixed values the observations table allows (ww-backend CHECK constraints).
+const SEX_VALUES = ['female', 'male', 'unknown']
+const LIFE_STAGE_VALUES = ['adult', 'subadult', 'juvenile', 'hatchling', 'unknown']
+const capitalised = (s: string) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })
+
+/** Labels view: at most this many cards per photo; the viewer shows the rest. */
+const MAX_LABEL_CARDS = 4
+
+const EMPTY_IDS: ReadonlySet<string> = new Set()
+
+/** The advanced filters cleared, keeping the species choice. */
+const clearedAdvanced = (f: GridFilters): GridFilters => ({ ...NO_FILTERS, species: f.species })
+
+const pagerButton = (disabled: boolean): React.CSSProperties => ({
+  display: 'inline-flex', alignItems: 'center', padding: '0.15rem', border: '1px solid var(--border)',
+  borderRadius: 'var(--radius)', background: 'transparent', cursor: disabled ? 'not-allowed' : 'pointer',
+  color: disabled ? 'var(--text-muted)' : 'var(--primary)',
+})
+
+const cardStyle = (sel: boolean, isOpen: boolean): React.CSSProperties => ({
+  border: sel || isOpen ? '2px solid var(--primary)' : '1px solid var(--border)',
+  borderRadius: 'var(--radius)', overflow: 'hidden', cursor: 'pointer',
+  backgroundColor: 'var(--surface)', transition: 'border-color 0.15s, transform 0.15s',
+  transform: isOpen ? 'scale(1.02)' : undefined, userSelect: 'none',
+})
+
+// Every card keeps a 4:3 image area whatever the column width (02 #20).
+const IMAGE_AREA: React.CSSProperties = {
+  aspectRatio: '4 / 3', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  overflow: 'hidden', position: 'relative',
+}
+
+/** Arrow keys move focus between the grid's cards, a row at a time up and down. */
+function moveFocus(e: React.KeyboardEvent<HTMLElement>): boolean {
+  const cards = Array.from(document.querySelectorAll<HTMLElement>('.media-card'))
+  const grid = e.currentTarget.parentElement
+  const columns = grid ? getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length : 1
+  const next = arrowTarget(e.key, cards.indexOf(e.currentTarget), cards.length, columns)
+  if (next === null) return false
+  cards[next].focus()
+  return true
 }
 
 // Which observations get a card in the "Labels" view: AI detections that have a
@@ -196,6 +198,20 @@ const RIBBON_SECTION: React.CSSProperties = {
 // so they're shown on the full frame). AI detections with no crop are omitted.
 function isLabelCard(o: ObservationRecord): boolean {
   return !!o.crop_url || o.source_type === 'human' || isHumanReviewed(o)
+}
+
+const labelCards = (m: MediaRecord) => m.observations.filter(isLabelCard).slice(0, MAX_LABEL_CARDS)
+
+/** Media records for `ids`, in that order (deleted photos dropped), 100 ids per request. */
+async function fetchMediaInOrder(ids: readonly string[]): Promise<MediaRecord[]> {
+  const rank = new Map(ids.map((id, i) => [id, i]))
+  const chunks = Array.from({ length: Math.ceil(ids.length / 100) }, (_, i) => ids.slice(i * 100, (i + 1) * 100))
+  const pages = await Promise.all(chunks.map(async chunk => {
+    const { data, error } = await supabase.from('media').select(MEDIA_SELECT).in('id', chunk).is('deleted_at', null)
+    if (error) throw new Error(error.message)
+    return (data || []) as unknown as MediaRecord[]
+  }))
+  return pages.flat().sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
 }
 
 // ── Processing banner ─────────────────────────────────────────────────────────
@@ -219,55 +235,50 @@ function ProcessingBanner({ deployments }: { deployments: Props['deployments'] }
   const isOne = depIds.length === 1
   // Progress from the active AI job(s) (now reported per-deployment); the analysing job carries it.
   const pct = Math.round(Math.max(0, ...active.map(j => j.progress ?? 0)) * 100)
-  const insightsLink = `/insights?tab=reports${isOne ? `&deployment=${depIds[0]}` : ''}`
+  // Insights takes the deployment parameter once per deployment.
+  const insightsLink = `/insights?tab=reports${depIds.map(id => `&deployment=${encodeURIComponent(id)}`).join('')}`
 
   return (
-    <div
-      role="status"
-      style={{
-        display: 'flex', flexDirection: 'column', gap: '0.4rem',
-        padding: '0.6rem 0.9rem', marginBottom: '0.75rem',
-        border: '1px solid rgba(59,130,246,0.4)', borderRadius: 'var(--radius)',
-        backgroundColor: 'rgba(59,130,246,0.08)', fontSize: '0.8125rem',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-        <span style={{ fontSize: '1rem', animation: 'spin 1.4s linear infinite' }}>⟳</span>
-        <span style={{ flex: 1 }}>
-          <strong>Analysing {pct}%</strong> — AI is processing {isOne ? 'deployment ' : 'deployments '}
-          <strong>{shown}</strong>. Thumbnails and labels appear as they complete.
-        </span>
-        <Link
-          to={insightsLink}
-          style={{ whiteSpace: 'nowrap', color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}
-          title="See species/detection stats for these images as they're analysed"
-        >
-          📊 See stats so far →
+    <Banner
+      tone="info"
+      icon={RefreshCw}
+      action={
+        <Link to={insightsLink} style={{ ...SMALL_BTN, border: 'none', fontWeight: 600, fontSize: '0.8125rem' }}
+          title="See species and detection numbers for these photos as they are analysed">
+          <ChartColumn size={14} aria-hidden /> See stats so far
         </Link>
-      </div>
-      <div style={{ height: 4, borderRadius: 2, background: 'rgba(59,130,246,0.2)', overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${pct}%`, background: 'var(--primary, #3b82f6)', borderRadius: 2, transition: 'width 0.4s ease' }} />
-      </div>
-      <style>{`@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }`}</style>
-    </div>
+      }
+      footer={<BannerProgress pct={pct} />}
+    >
+      <strong>Analysing {pct}%</strong>: the AI is processing {isOne ? 'deployment ' : 'deployments '}
+      <strong>{shown}</strong>. Thumbnails and labels appear as they complete.
+    </Banner>
   )
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies }: Props) {
+export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies, initialMediaId }: Props) {
   const { user } = useAuth()
+  const roles = useProjectRoles()
   // deployment_id → IANA timezone, so capture times render in the photo's local zone.
   const tzByDeployment = useMemo(
     () => new Map(deployments.map(d => [d.id, d.timezone ?? null])),
     [deployments],
   )
+  const projectByDeployment = useMemo(() => new Map(deployments.map(d => [d.id, d.project_id])), [deployments])
   const deploymentOptions = useDeploymentFilterOptions(deployments)
   const qc = useQueryClient()
   const { isActive: uploadActive, pendingUploads, pendingSince } = useUploadStore()
   const [reloadKey, setReloadKey] = useState(0)
   // Set by the background refresh during a job: that fetch keeps the cards on screen (#286).
   const silentReload = useRef(false)
+  // Set when rows may have joined or left the filtered set, so the next fetch counts again.
+  const recount = useRef(false)
+  const reload = useCallback((countAgain: boolean) => {
+    if (countAgain) recount.current = true
+    setReloadKey(k => k + 1)
+  }, [])
   // Media whose thumbnail failed to load — shown as "processing" (the rendition
   // is likely still generating). Reset on every (re)load so they re-attempt.
   const [failedThumbs, setFailedThumbs] = useState<Set<string>>(new Set())
@@ -280,30 +291,33 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   // "Find similar" mode: anchor media id + the resolved, similarity-ranked records.
   const [similarToId, setSimilarToId]     = useState<string | null>(null)
   const [similarRecords, setSimilarRecords] = useState<MediaRecord[]>([])
+  // "Needs review first" mode: the review-queue photos, in queue order.
+  const [reviewRecords, setReviewRecords] = useState<MediaRecord[]>([])
   const [similarLoading, setSimilarLoading] = useState(false)
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
-  const [notice, setNotice]       = useState<string | null>(null)
+  // One notice at a time (a result, a failure, the iNaturalist upload), shown as a Banner.
+  const [notice, setNotice]       = useState<{ tone: BannerTone; text: string } | null>(null)
+  const flash = useCallback((tone: BannerTone, text: string, autoHide = tone === 'success') => {
+    setNotice({ tone, text })
+    if (autoHide) window.setTimeout(() => setNotice(n => (n?.text === text ? null : n)), 4000)
+  }, [])
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null)
   // The observation a crop card was opened from, pre-selected in the detail.
   const [focusObsId, setFocusObsId] = useState<string | null>(null)
 
-  // ── Primary filters (in ControlBar) ──────────────────────────────────────
+  // ── Filters (all run in the media query, lib/gridFilters) ────────────────
   const [filterDeployments, setFilterDeployments] = useState<string[]>([])
-  const [filterSpecies, setFilterSpecies]       = useState<string[]>(initialSpecies ? [initialSpecies] : [])
-  const [filterStatus, setFilterStatus]         = useState<string>('')
-  const [filterAnnotator, setFilterAnnotator]   = useState<string>('')
-  const [filterModel, setFilterModel]           = useState<string>('')
-  const [filterAnnotationType, setFilterAnnotationType] = useState<string>('')
-  const [filterSex, setFilterSex]               = useState<string>('')
-  const [filterLifeStage, setFilterLifeStage]   = useState<string>('')
+  const [filters, setFilters] = useState<GridFilters>(() => ({ ...NO_FILTERS, species: initialSpecies ? [initialSpecies] : [] }))
+  // The Advanced filters dialog edits a draft, applied in one query on Apply.
+  const [draft, setDraft] = useState<GridFilters | null>(null)
+  const [wantSpeciesOptions, setWantSpeciesOptions] = useState(false)
   const [thumbScale, setThumbScale]             = useState(() => {
     const saved = localStorage.getItem('ww:thumbScale')
     return saved ? Number(saved) : 140
   })
-  const [groupBy, setGroupBy]                   = useState<GroupBy>(() => {
-    return (localStorage.getItem('ww:groupBy') as GroupBy) || 'none'
-  })
+  // Grouping is not remembered: a returning reviewer starts on the plain grid (02 #12).
+  const [groupChoice, setGroupChoice]           = useState<GroupBy>('none')
   // Photo (full frame) vs crop (the detected animal cut-out). Crops make it fast
   // to scan a species for misclassifications; photos reveal animals missing a box.
   const [imageView, setImageView]               = useState<'photo' | 'crop'>(() => {
@@ -311,21 +325,56 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   })
   const [clusterThreshold, setClusterThreshold] = useState(0.0)
 
-  // Persist thumbScale, groupBy and imageView to localStorage
+  // Persist thumbScale and imageView to localStorage
   useEffect(() => { localStorage.setItem('ww:thumbScale', String(thumbScale)) }, [thumbScale])
-  useEffect(() => { localStorage.setItem('ww:groupBy', groupBy) }, [groupBy])
   useEffect(() => { localStorage.setItem('ww:imageView', imageView) }, [imageView])
 
-  // ── Advanced filter state ─────────────────────────────────────────────────
-  const [advancedOpen, setAdvancedOpen]   = useState(false)
-  const [filterDateFrom, setFilterDateFrom] = useState('')
-  const [filterDateTo, setFilterDateTo]     = useState('')
-  const [filterTime, setFilterTime]         = useState<TimeOfDay>('all')
+  // The deployments the query reads, keyed by value so a new array with the same ids (the
+  // timezone fill, a parent re-render) does not refetch or reset the page.
+  const deploymentKey = (filterDeployments.length ? filterDeployments : deployments.map(d => d.id)).join(',')
+  const activeDeploymentIds = useMemo(() => (deploymentKey ? deploymentKey.split(',') : []), [deploymentKey])
+  const queryKey = gridQueryKey(activeDeploymentIds, filters)
+  const plan = useMemo(() => gridFilterPlan(filters), [filters])
+  const singleDeployment = activeDeploymentIds.length === 1 ? activeDeploymentIds[0] : null
+  // Clusters, UMAP and the active-learning order exist only where their backend flag is on
+  // (decision 6); the flags are global, so any deployment in view can be asked.
+  const brainOn = useFeatureEnabled('brain', activeDeploymentIds[0] ?? null)
+  const reviewOrderOn = useFeatureEnabled('activeLearning', activeDeploymentIds[0] ?? null)
+  const groupOptions = availableGroupings(activeDeploymentIds.length).filter(g => g !== 'cluster' || brainOn)
+  const groupBy: GroupBy = groupOptions.includes(groupChoice) ? groupChoice : 'none'
+  const filterOptions = useGridFilterOptions(activeDeploymentIds, { species: wantSpeciesOptions, advanced: draft !== null })
+  // "Needs review first": the retired Review Queue's order, for one deployment (decision 6).
+  const [orderBy, setOrderBy] = useState<'' | 'review'>('')
+  const reviewMode = orderBy === 'review' && !!singleDeployment && reviewOrderOn && !similarToId
 
-  // WS5-T2: pagination state
-  const PAGE_SIZE = 100
-  const [page, setPage]           = useState(0)
+  // Page and selection belong to one query: a new filter goes back to page 1, and a new page
+  // (or the similar or review-first list) starts with nothing selected ("All on page" means
+  // what is on screen).
+  const [pageAt, setPageAt] = useState({ key: '', page: 0 })
+  const page = pageAt.key === queryKey ? pageAt.page : 0
   const [totalCount, setTotalCount] = useState<number | null>(null)
+  const pageKey = `${queryKey}|${page}|${similarToId ?? (reviewMode ? 'review' : '')}`
+  const [selection, setSelection] = useState<{ key: string; ids: ReadonlySet<string> }>({ key: '', ids: EMPTY_IDS })
+  const selectedIds = selection.key === pageKey ? selection.ids : EMPTY_IDS
+  const setSelectedIds = (ids: ReadonlySet<string>) => setSelection({ key: pageKey, ids })
+  const clearSelection = useCallback(() => setSelection({ key: '', ids: EMPTY_IDS }), [])
+  // The last card selected, where a Shift-click range starts.
+  const selectAnchor = useRef<string | null>(null)
+  const goToPage = (p: number) => {
+    setPageAt({ key: queryKey, page: Math.max(0, p) })
+    window.scrollTo({ top: 0 })
+  }
+
+  // Groups the reviewer collapsed, for the current grouping.
+  const [collapsedAt, setCollapsedAt] = useState<{ groupBy: GroupBy; labels: ReadonlySet<string> }>({ groupBy: 'none', labels: EMPTY_IDS })
+  const collapsed = collapsedAt.groupBy === groupBy ? collapsedAt.labels : EMPTY_IDS
+
+  // ── Roles (decision 1): only people who can write to a photo's project select it ──
+  const canWriteDeployment = (deploymentId: string) => {
+    const project = projectByDeployment.get(deploymentId)
+    return !roles.loading && !!project && roles.canWrite(project)
+  }
+  const isSelectable = (m: MediaRecord) => !m._pending && canWriteDeployment(m.deployment_id)
 
   // ── Phase 3: iNaturalist publish + tracking ───────────────────────────────
   const inat = useINat()
@@ -333,39 +382,13 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   const [inatSelected, setInatSelected] = useState<Set<string>>(new Set())
   const [inatStates, setInatStates]     = useState<Map<string, { state: INatState; uri: string | null }>>(new Map())
   const [inatBusy, setInatBusy]         = useState(false)
-  const [inatMsg, setInatMsg]           = useState<string | null>(null)
 
-  // ── Phase 4: Unified selection (click = open, circle / Ctrl / Shift = select, #283) ──
-  // Selection is implicit: it's "on" whenever at least one image is selected.
-  const [selectedIds, setSelectedIds]     = useState<Set<string>>(new Set())
-  // The last card selected, where a Shift-click range starts.
-  const selectAnchor = useRef<string | null>(null)
   const [showDeleteModal, setShowDeleteModal]   = useState(false)
   const [showAiPicker, setShowAiPicker]         = useState(false)
   const [showLabelModal, setShowLabelModal]     = useState(false)
   const [showTrainModal, setShowTrainModal]     = useState(false)
   const [labelBusy, setLabelBusy]               = useState(false)
   const [pipelineLogs, setPipelineLogs]         = useState<string[] | null>(null)
-  // Quick in-context connect: paste a personal API token (Pathway 2). The full
-  // guided panel lives on the Other page; this is the convenience entry point.
-  const connectInat = useCallback(async () => {
-    const t = window.prompt(
-      'Paste your iNaturalist API token\n(open https://www.inaturalist.org/users/api_token, log in, and copy the api_token value):',
-    )
-    if (!t || !t.trim()) return
-    try {
-      await inat.setToken(t)
-    } catch {
-      setInatMsg('iNaturalist token was rejected — copy the full api_token and try again.')
-    }
-  }, [inat])
-
-  // const toggleInat = (id: string) => setInatSelected(prev => {
-  //   const next = new Set(prev)
-  //   if (next.has(id)) next.delete(id)
-  //   else next.add(id)
-  //   return next
-  // })
 
   // Load iNat upload/sync state for a set of media (graceful if table absent).
   const loadInatStates = useCallback(async (ids: string[]) => {
@@ -388,7 +411,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     if (action === 'similar') {
       // Anchor on the single selected image and enter similarity-ranked mode.
       const anchor = [...selectedIds][0]
-      if (anchor) { setSimilarToId(anchor); setSelectedIds(new Set()) }
+      if (anchor) { setSimilarToId(anchor); clearSelection() }
     } else if (action === 'delete') {
       setShowDeleteModal(true)
     } else if (action === 'ai') {
@@ -398,21 +421,18 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     } else if (action === 'train') {
       setShowTrainModal(true)
     } else if (action === 'inat') {
-      if (!inat.connected) {
-        connectInat()
-        return
-      }
+      // Not connected, the menu links to the Toolkit page instead of offering this.
       // Upload the unified selection. Pass the ids directly: setInatSelected is
       // async, so uploadToInat() reading inatSelected here would see the stale
       // (empty) set and silently no-op.
-      setInatSelected(selectedIds)
+      setInatSelected(new Set(selectedIds))
       setInatMode(true)
-      uploadToInat(selectedIds)
+      uploadToInat(new Set(selectedIds))
     }
     // syncFromInat/uploadToInat are plain (unmemoised) functions declared below;
     // including them would just defeat the memo without changing behaviour.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inat.connected, connectInat, selectedIds])
+  }, [selectedIds, clearSelection])
 
   const handleBatchDelete = useCallback(async (ids: string[]) => {
     const res = await apiClient.del('/api/media/batch', { media_ids: ids }) as { data?: MediaDeleteResponse }
@@ -423,7 +443,10 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     // Capture the rows so Undo can re-insert them without a full refetch.
     const removed = media.filter(m => gone.has(m.id))
     setMedia(prev => prev.filter(m => !gone.has(m.id)))
-    setSelectedIds(new Set())
+    setSimilarRecords(prev => prev.filter(m => !gone.has(m.id)))
+    setReviewRecords(prev => prev.filter(m => !gone.has(m.id)))
+    setTotalCount(t => (t === null ? t : Math.max(0, t - deletedIds.length)))
+    clearSelection()
     if (deletedAt) {
       showUndoToast({
         message,
@@ -433,10 +456,11 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
             const have = new Set(prev.map(m => m.id))
             return [...removed.filter(m => !have.has(m.id)), ...prev]
           })
+          setTotalCount(t => (t === null ? t : t + deletedIds.length))
         },
       })
     }
-  }, [media])
+  }, [media, clearSelection])
 
   const handleRunAi = useCallback(async (models: string[]) => {
     const ids = Array.from(selectedIds)
@@ -457,29 +481,23 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
 
   // Honour ?deployment=<id>[,<id>...] from the upload redirect and the dock link. One id focuses
   // that deployment; several (an upload that spanned deployments) select them all, and the
-  // deployment pill reads "N deployments".
+  // deployment pill reads "N deployments". A new deployment choice starts on page 1 by itself.
   useEffect(() => {
     if (!initialDeploymentId) return
     const ids = initialDeploymentId.split(',').map(s => s.trim()).filter(Boolean)
-    if (ids.length) { setFilterDeployments(ids); setPage(0) }
+    if (ids.length) setFilterDeployments(ids)
   }, [initialDeploymentId])
 
-
-
-  // Reset page when deployment filter changes
-  useEffect(() => { setPage(0) }, [filterDeployments, deployments])
-
   // ── Fetch media (with pagination) ─────────────────────────────────────────
+  // Every filter is part of this query, so the page and the total agree. The total is counted
+  // once per filter set (and again after a write), not on every page turn or refresh (02 #7).
+  const countedFor = useRef<string | null>(null)
   useEffect(() => {
     const silent = silentReload.current
     silentReload.current = false
     if (!user) return
 
-    const deploymentIds = filterDeployments.length
-      ? filterDeployments
-      : deployments.map(d => d.id)
-
-    if (deploymentIds.length === 0) {
+    if (activeDeploymentIds.length === 0) {
       setMedia([])
       setTotalCount(0)
       return
@@ -491,41 +509,47 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
 
     const from = page * PAGE_SIZE
     const to   = from + PAGE_SIZE - 1
+    const wantCount = countedFor.current !== queryKey || recount.current
 
-    supabase
+    const query = supabase
       .from('media')
-      .select(MEDIA_SELECT, { count: 'exact' })
-      .in('deployment_id', deploymentIds)
+      .select([MEDIA_SELECT, ...plan.embeds].join(', '), wantCount ? { count: 'exact' } : undefined)
+      .in('deployment_id', activeDeploymentIds)
       .is('deleted_at', null)
+    applyFilterOps(query, plan.ops)
       .order('timestamp', { ascending: false, nullsFirst: false })
       .range(from, to)
       .then(({ data, error: err, count }) => {
         if (cancelled) return
         if (err) { setError(err.message); setLoading(false); return }
         setMedia((data || []) as unknown as MediaRecord[])
-        setTotalCount(count ?? null)
+        if (wantCount) {
+          countedFor.current = queryKey
+          recount.current = false
+          setTotalCount(count ?? null)
+        }
         setFailedThumbs(new Set())  // re-attempt thumbnails (renditions may now exist)
         setLoadedAt(Date.now())
         setLoading(false)
       })
 
     return () => { cancelled = true }
-  }, [user, deployments, filterDeployments, page, reloadKey])
+  }, [user, activeDeploymentIds, queryKey, plan, page, reloadKey])
 
   // While an upload is running, poll so newly-registered media appear in the grid
   // without a manual refresh, and do one final refresh when it finishes (cleanup
-  // runs on the isActive → false transition, catching the last batch).
+  // runs on the isActive → false transition, catching the last batch), counted again.
   useEffect(() => {
     if (!uploadActive) return
     const t = setInterval(() => setReloadKey(k => k + 1), 4000)
-    return () => { clearInterval(t); setReloadKey(k => k + 1) }
-  }, [uploadActive])
+    return () => { clearInterval(t); reload(true) }
+  }, [uploadActive, reload])
 
   // Deployments with a queued or running job. When one finishes, reload so the
   // thumbnails and labels it produced appear without a manual refresh.
   const busy = useBusyDeployments(() => {
     setRetryRequested(new Set())
-    setReloadKey(k => k + 1)
+    reload(true)
   })
 
   const retryThumbnails = useCallback(async (deploymentId: string) => {
@@ -535,18 +559,17 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
       await qc.invalidateQueries({ queryKey: ['jobs'] })
     } catch (e) {
       setRetryRequested(s => { const n = new Set(s); n.delete(deploymentId); return n })
-      setNotice(`Couldn't start the thumbnails: ${e instanceof Error ? e.message : String(e)}`)
-      window.setTimeout(() => setNotice(null), 4000)
+      flash('error', `Couldn't start the thumbnails: ${e instanceof Error ? e.message : String(e)}`)
     }
-  }, [qc])
+  }, [qc, flash])
 
+  // Cards with no image to show: still processing, or stuck past the grace period (#208).
+  const missingThumbs = media.filter(m => !retryRequested.has(m.deployment_id) && (!displayImageUrl(m, 'thumb') || failedThumbs.has(m.id)))
   // Start the backfill once by itself for a deployment whose cards say "No thumbnail" (#175).
-  useAutoRetryThumbnails(
-    media.filter(m => !retryRequested.has(m.deployment_id) && (!displayImageUrl(m, 'thumb') || failedThumbs.has(m.id))),
-    loadedAt,
-    busy,
-    retryThumbnails,
-  )
+  useAutoRetryThumbnails(missingThumbs, loadedAt, busy, retryThumbnails)
+  // One notice with one Retry for the stuck deployments on the page, not a button per card (02 #22).
+  const stuckThumbs = missingThumbs.filter(m => isThumbnailStuck(m, loadedAt, busy))
+  const stuckDeploymentIds = [...new Set(stuckThumbs.map(m => m.deployment_id))]
 
   // Refresh iNaturalist badges whenever the loaded media set changes.
   useEffect(() => { loadInatStates(media.map(m => m.id)) }, [media, loadInatStates])
@@ -558,197 +581,115 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     const toPublish = ids ?? inatSelected
     if (toPublish.size === 0 || inatBusy) return
     setInatBusy(true)
-    setInatMsg('⬆ Uploading to iNaturalist…')
+    flash('info', 'Uploading to iNaturalist…', false)
     try {
       const r = await inat.publish([...toPublish])
-      setInatMsg(
-        `✓ ${r.observations_created} observation(s), ${r.photos_uploaded} photo(s)` +
+      flash('success',
+        `${r.observations_created} observation(s), ${r.photos_uploaded} photo(s) on iNaturalist` +
         (r.skipped_bycatch ? ` · ${r.skipped_bycatch} by-catch skipped` : '') +
         (r.skipped_already_published ? ` · ${r.skipped_already_published} already on iNat` : '') +
         (r.errors ? ` · ${r.errors} error(s)` : ''),
+        false,
       )
       setInatSelected(new Set())
       await loadInatStates(media.map(m => m.id))
     } catch (e) {
-      setInatMsg(`⚠ ${(e as Error)?.message ?? 'Upload failed'}`)
+      flash('error', (e as Error)?.message ?? 'Upload failed')
     } finally {
       setInatBusy(false)
     }
   }
 
-  // Pull community identifications from iNaturalist and refresh the badges.
-  // Bulk-label: write one human observation per selected image (animal species,
-  // or a blank when selection is null). iNat community-ID sync now lives in
-  // Settings (and auto-runs on login), not here.
-  const bulkLabel = async (selection: SpeciesSelection | null) => {
+  // Bulk "Label as": one human verdict per selected photo, updated when the photo has one, and
+  // AI rows untouched (lib/humanVerdict, decision 2), with Undo; a refusal shows in the same toast.
+  // iNat community-ID sync lives in Settings.
+  const bulkLabel = async (choice: SpeciesSelection | null) => {
     if (labelBusy) return
-    const ids = [...selectedIds]
-    if (ids.length === 0) { setShowLabelModal(false); return }
+    const photos = visible.filter(m => selectedIds.has(m.id) && isSelectable(m))
+    if (photos.length === 0) { setShowLabelModal(false); return }
     setLabelBusy(true)
-    const depByMedia = new Map(media.map(m => [m.id, m.deployment_id]))
-    const rows = ids
-      .filter(mid => depByMedia.get(mid))
-      .map(mid => ({
-        deployment_id: depByMedia.get(mid)!,
-        media_id: mid,
-        observation_level: 'media',
-        observation_type: selection ? 'animal' : 'blank',
-        taxon_id: selection?.taxon_id ?? null,
-        scientific_name: selection?.scientific_name ?? null,
-        vernacular_name: selection?.vernacular_name ?? null,
-        ...humanCreateFields({ userId: user?.id, userEmail: user?.email }),
-      }))
-    if (rows.length === 0) { setLabelBusy(false); setShowLabelModal(false); return }
-    const { error } = await supabase.from('observations').insert(rows)
-    setLabelBusy(false)
-    if (error) {
-      setNotice(`Error: ${error.message}`)
-    } else {
+    const label: VerdictLabel = choice
+      ? { observation_type: 'animal', taxon_id: choice.taxon_id, scientific_name: choice.scientific_name, vernacular_name: choice.vernacular_name }
+      : { observation_type: 'blank' }
+    try {
+      const result = await writeVerdicts(supabase, photos, label, { userId: user?.id, userEmail: user?.email })
+      // The cards show the new verdicts at once; the reload then counts again, since a status
+      // filter may no longer match them.
+      const written = (m: MediaRecord) => {
+        const rows = result.observations.get(m.id)
+        return rows ? { ...m, observations: rows } : m
+      }
+      setMedia(prev => prev.map(written))
+      setSimilarRecords(prev => prev.map(written))
+      setReviewRecords(prev => prev.map(written))
+      clearSelection()
+      reload(true)
+      const name = choice ? (choice.vernacular_name || choice.scientific_name) : 'empty'
+      showUndoToast({
+        message: `Labelled ${result.saved} photo${result.saved !== 1 ? 's' : ''} as ${name}`,
+        onUndo: async () => {
+          await result.undo()
+          reload(true)
+        },
+      })
+    } catch (e) {
+      showErrorToast(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLabelBusy(false)
       setShowLabelModal(false)
-      setSelectedIds(new Set())
-      setReloadKey(k => k + 1)
-      setNotice(`Labelled ${rows.length} image${rows.length !== 1 ? 's' : ''} as ${selection ? selection.scientific_name : 'blank'}`)
     }
-    window.setTimeout(() => setNotice(null), 4000)
   }
 
-  // ── Derived filter options ────────────────────────────────────────────────
-  const speciesList = useMemo(() => {
-    const names = new Set<string>()
-    media.forEach(m => m.observations.forEach(o => { if (o.scientific_name) names.add(o.scientific_name) }))
-    return Array.from(names).sort()
-  }, [media])
-
-  const humanAnnotatorList = useMemo(() => {
-    const names = new Set<string>()
-    media.forEach(m => m.observations.forEach(o => {
-      if (o.classification_method === 'human' && o.classified_by) names.add(o.classified_by)
-    }))
-    return Array.from(names).sort()
-  }, [media])
-
-  const modelList = useMemo(() => {
-    const models = new Set<string>()
-    media.forEach(m => m.observations.forEach(o => {
-      const v = o.source_model_version || (o.classification_method === 'machine' ? o.classified_by : null)
-      if (v) models.add(v)
-    }))
-    return Array.from(models).sort().map(v => ({
-      value: v,
-      label: v.startsWith('speciesnet') ? `SpeciesNet (${v.split('-').pop()})` :
-             v.startsWith('bioclip')    ? `BioCLIP (${v.split('-').pop()})` : v,
-    }))
-  }, [media])
-
-  const sexList = useMemo(() => {
-    const vals = new Set<string>()
-    media.forEach(m => m.observations.forEach(o => { if (o.sex) vals.add(o.sex) }))
-    return Array.from(vals).sort()
-  }, [media])
-
-  const lifeStageList = useMemo(() => {
-    const vals = new Set<string>()
-    media.forEach(m => m.observations.forEach(o => { if (o.life_stage) vals.add(o.life_stage) }))
-    return Array.from(vals).sort()
-  }, [media])
-
-  // ── Client-side filter chain ──────────────────────────────────────────────
+  // ── Page contents ───────────────────────────────────────────────────────────
   // Optimistic cards for files still uploading (no DB row yet), shown instantly via the local
   // preview so the grid isn't empty right after an upload redirect. Scoped to the deployment(s)
-  // in view and retired one for one as real rows land (see lib/pendingCards for why a name match
-  // is not enough).
+  // in view, on the first unfiltered page, and retired one for one as real rows land (see
+  // lib/pendingCards for why a name match is not enough).
+  const showPending = page === 0 && !hasAnyFilter(filters)
   const pendingCards = useMemo<MediaRecord[]>(() => {
-    if (pendingUploads.length === 0) return []
-    const viewIds = new Set(filterDeployments.length ? filterDeployments : deployments.map(d => d.id))
+    if (pendingUploads.length === 0 || !showPending) return []
+    const viewIds = new Set(activeDeploymentIds)
     return survivingPending(pendingUploads, media, pendingSince, viewIds).map(p => ({
       id: `pending:${p.fileName.toLowerCase()}`, deployment_id: p.deploymentId, file_path: '', file_name: p.fileName,
       file_mediatype: 'image/jpeg', timestamp: null, file_public: false, media_comments: null,
       exif_metadata: null, media_assets: null, observations: [], _pending: true,
     }))
-  }, [pendingUploads, pendingSince, media, filterDeployments, deployments])
+  }, [pendingUploads, pendingSince, media, activeDeploymentIds, showPending])
 
-  const filtered = useMemo(() => {
-    // Real (viewable) media first; still-uploading placeholders appended last so the user
-    // interacts with available photos rather than "Uploading" cards.
-    let result: MediaRecord[] = pendingCards.length ? [...media, ...pendingCards] : media
-
-    if (filterSpecies.length) {
-      result = result.filter(m => m.observations.some(o => !!o.scientific_name && filterSpecies.includes(o.scientific_name)))
-    }
-    if (filterAnnotator) {
-      result = result.filter(m => m.observations.some(o =>
-        o.classification_method === 'human' && o.classified_by === filterAnnotator
-      ))
-    }
-    if (filterModel) {
-      result = result.filter(m => m.observations.some(o =>
-        (o.source_model_version === filterModel) ||
-        (o.classification_method === 'machine' && o.classified_by === filterModel)
-      ))
-    }
-    if (filterAnnotationType) {
-      result = result.filter(m => {
-        const hasBbox = m.observations.some(o => o.bbox_x != null)
-        return filterAnnotationType === 'bbox' ? hasBbox : !hasBbox
-      })
-    }
-    if (filterSex) {
-      result = result.filter(m => m.observations.some(o => o.sex === filterSex))
-    }
-    if (filterLifeStage) {
-      result = result.filter(m => m.observations.some(o => o.life_stage === filterLifeStage))
-    }
-    if (filterStatus) {
-      result = result.filter(m => {
-        const status = deriveAnnotationStatus({
-          hasReviewed: m.observations.some(isHumanReviewed),
-          hasAi:       m.observations.some(isAiLabel),
-        })
-        return status === (filterStatus as AnnotationStatus)
-      })
-    }
-    if (filterDateFrom) {
-      result = result.filter(m => !m.timestamp || m.timestamp >= filterDateFrom)
-    }
-    if (filterDateTo) {
-      result = result.filter(m => !m.timestamp || m.timestamp <= filterDateTo + 'T23:59:59')
-    }
-    if (filterTime !== 'all') {
-      result = result.filter(m => getTimeOfDay(m.timestamp, tzByDeployment.get(m.deployment_id)) === filterTime)
-    }
-
-    return result
-  }, [media, pendingCards, filterSpecies, filterAnnotator, filterModel, filterAnnotationType, filterSex, filterLifeStage, filterStatus, filterDateFrom, filterDateTo, filterTime, tzByDeployment])
+  // Real (viewable) media first; still-uploading placeholders appended last so the user
+  // interacts with available photos rather than "Uploading" cards.
+  const filtered = useMemo(() => (pendingCards.length ? [...media, ...pendingCards] : media), [media, pendingCards])
+  // The cards on screen: the page, or the similarity results.
+  const visible = similarToId ? similarRecords : reviewMode ? reviewRecords : filtered
+  const visibleSelectable = visible.filter(isSelectable)
+  const selectAllOnPage = () => setSelectedIds(new Set(visibleSelectable.map(m => m.id)))
 
   // ── Keyboard shortcuts ──────────────────────────────────────────────────────
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Ctrl/Cmd+A: select all visible media (once a selection has started)
-      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && selectedIds.size > 0) {
-        e.preventDefault()
-        setSelectedIds(new Set(filtered.map(m => m.id)))
-      }
-      // Escape: clear the selection. While the viewer is open its own Escape closes it, and the
-      // selection survives.
-      if (e.key === 'Escape' && !selectedMediaId && selectedIds.size > 0) {
-        setSelectedIds(new Set())
-      }
+  const onWindowKey = useEffectEvent((e: KeyboardEvent) => {
+    // Ctrl/Cmd+A: select every selectable photo on the page (once a selection has started)
+    if ((e.ctrlKey || e.metaKey) && e.key === 'a' && selectedIds.size > 0) {
+      e.preventDefault()
+      selectAllOnPage()
     }
+    // Escape: clear the selection. While the viewer is open its own Escape closes it, and the
+    // selection survives.
+    if (e.key === 'Escape' && !selectedMediaId && selectedIds.size > 0) clearSelection()
+  })
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => onWindowKey(e)
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [selectedIds.size, filtered, selectedMediaId])
+  }, [])
 
-  // ── Cluster data (only fetched when groupBy === 'cluster') ─────────────────
-  const activeDeploymentIds = useMemo(() => {
-    if (filterDeployments.length) return filterDeployments
-    return deployments.map(d => d.id)
-  }, [deployments, filterDeployments])
+  // ── Cluster data (only fetched when grouped by cluster, one deployment) ─────
   // While a job runs on a deployment in view, refetch the page so its thumbnails appear (#286).
   useRefreshWhileBusy(activeDeploymentIds, busy, () => { silentReload.current = true; setReloadKey(k => k + 1) })
   const clustersQ = useMultiClusters(
     groupBy === 'cluster' ? activeDeploymentIds : [],
     clusterThreshold,
   )
+  // Review clusters and UMAP need an embedding run on the deployment.
+  const clusterRun = useClusters(groupBy === 'cluster' && singleDeployment ? singleDeployment : undefined)
 
   // Map a cluster group's display label → its confirm-able row id, so the group
   // header can offer "label all" (only for unconfirmed clusters). Mirrors the
@@ -767,10 +708,9 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   // the group) and reload media so the new observations show on the thumbnails.
   const onClusterConfirmed = useCallback((created: number, name: string) => {
     qc.invalidateQueries({ queryKey: ['brain', 'clusters-multi'] })
-    setReloadKey(k => k + 1)
-    setNotice(`Labelled cluster as ${name}${created ? ` · ${created} observation${created !== 1 ? 's' : ''}` : ''}`)
-    window.setTimeout(() => setNotice(null), 4000)
-  }, [qc])
+    reload(true)
+    flash('success', `Labelled cluster as ${name}${created ? ` · ${created} observation${created !== 1 ? 's' : ''}` : ''}`)
+  }, [qc, reload, flash])
 
   // ── Find-similar data ──────────────────────────────────────────────────────
   // Embedding nearest-neighbours for the anchor image; results are fetched as
@@ -783,28 +723,42 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     if (!hits) return
     let cancelled = false
     setSimilarLoading(true)
-    const ids = [similarToId, ...hits.map(h => h.media_id)]
-    const rank = new Map(ids.map((id, i) => [id, i]))
-    supabase
-      .from('media')
-      .select(MEDIA_SELECT)
-      .in('id', ids)
-      .is('deleted_at', null)
-      .then(({ data }) => {
-        if (cancelled) return
-        const recs = ((data || []) as unknown as MediaRecord[])
-          .sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0))
-        setSimilarRecords(recs)
-        setSimilarLoading(false)
-      })
+    fetchMediaInOrder([similarToId, ...hits.map(h => h.media_id)])
+      .then(recs => { if (!cancelled) setSimilarRecords(recs) })
+      .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
+      .finally(() => { if (!cancelled) setSimilarLoading(false) })
     return () => { cancelled = true }
   }, [similarToId, similarQ.data])
+
+  // ── Needs review first ─────────────────────────────────────────────────────
+  // The active-learning queue (up to 200 photos of one deployment, highest score first) as
+  // grid cards; photos a person has reviewed drop out, also after a label here.
+  const reviewQ = useReviewQueue(reviewMode && singleDeployment ? singleDeployment : undefined, 200)
+  useEffect(() => {
+    const queue = reviewMode ? reviewQ.data?.queue : undefined
+    if (!queue) { setReviewRecords([]); return }
+    let cancelled = false
+    fetchMediaInOrder(queue.map(q => q.media_id))
+      .then(recs => { if (!cancelled) setReviewRecords(recs.filter(m => !m.observations.some(isHumanReviewed))) })
+      .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
+    return () => { cancelled = true }
+  }, [reviewMode, reviewQ.data, reloadKey])
+
+  // ── A linked photo (?media=, from the UMAP explorer) opens in the viewer ──
+  const userId = user?.id
+  const [linkedMedia, setLinkedMedia] = useState<MediaRecord | null>(null)
+  useEffect(() => {
+    if (!initialMediaId || !userId) return
+    let cancelled = false
+    fetchMediaInOrder([initialMediaId])
+      .then(([rec]) => { if (!cancelled && rec) { setLinkedMedia(rec); setSelectedMediaId(rec.id) } })
+      .catch(() => { /* a photo that cannot be read just does not open */ })
+    return () => { cancelled = true }
+  }, [initialMediaId, userId])
 
   // ── Grouped media computation ─────────────────────────────────────────────
   const groupedMedia = useMemo(() => {
     if (groupBy === 'none') return null
-
-    const groups = new Map<string, MediaRecord[]>()
     const deploymentNames = new Map(deployments.map(d => [d.id, d.location_name || d.id.slice(0, 8)]))
 
     // Cluster lookups (from the multi-cluster API): media → cluster_id, the set
@@ -817,134 +771,94 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
       if (c.scientific_name && !clusterNames.has(c.cluster_id)) clusterNames.set(c.cluster_id, c.scientific_name)
     }
 
-    for (const m of filtered) {
-      let key: string
-      switch (groupBy) {
-        case 'cluster': {
-          if (!clusterData) { key = '(Loading clusters…)'; break }
-          if (outlierSet.has(m.id)) { key = '🟡 Outliers'; break }
-          const cid = mediaCluster[m.id]
-          // Not in any cluster yet (e.g. blank frame with no animal crop, or
-          // embeddings not run for this deployment).
-          if (cid == null) { key = '⧗ Not yet clustered'; break }
-          key = clusterNames.get(cid) ?? `Cluster ${cid}`
-          break
-        }
-        case 'species':
-          key = m.observations[0]?.scientific_name || '(No species)'
-          break
-        case 'sex':
-          key = m.observations[0]?.sex || '(Unknown)'
-          break
-        case 'life_stage':
-          key = m.observations[0]?.life_stage || '(Unknown)'
-          break
-        case 'annotation_type':
-          key = m.observations.some(o => o.bbox_x != null) ? 'Bounding box' : 'Whole image'
-          break
-        case 'deployment':
-          key = deploymentNames.get(m.deployment_id) || m.deployment_id.slice(0, 8)
-          break
-        case 'model': {
-          const aiObs = m.observations.find(o => o.classification_method === 'machine')
-          key = aiObs?.source_model_version || aiObs?.classified_by || '(No AI model)'
-          break
-        }
-        case 'annotator': {
-          const humanObs = m.observations.find(o => o.classification_method === 'human')
-          key = humanObs?.classified_by || '(No annotator)'
-          break
-        }
-        default:
-          key = '(Ungrouped)'
+    return groupInOrder(filtered, m => {
+      if (groupBy === 'cluster') {
+        if (!clusterData) return '(Loading clusters…)'
+        if (outlierSet.has(m.id)) return 'Outliers'
+        const cid = mediaCluster[m.id]
+        // Not in any cluster yet (e.g. blank frame with no animal crop, or
+        // embeddings not run for this deployment).
+        if (cid == null) return 'Not yet clustered'
+        return clusterNames.get(cid) ?? `Cluster ${cid}`
       }
-      const list = groups.get(key) || []
-      list.push(m)
-      groups.set(key, list)
-    }
-
-    // Sort groups by size descending
-    return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length)
+      if (groupBy === 'deployment') return deploymentNames.get(m.deployment_id) || m.deployment_id.slice(0, 8)
+      return observationGroupKey(groupBy, m.observations)
+    })
   }, [filtered, groupBy, deployments, clustersQ.data])
 
-  // ── KPI stats ─────────────────────────────────────────────────────────────
+  // ── Page stats ────────────────────────────────────────────────────────────
   // Over real rows only: an optimistic card has no file_path by construction, and counting it
   // as "no image" (and as media) made the header read "10 no image" during every upload.
   const stats = useMemo(() => {
     const real = filtered.filter(m => !m._pending)
     return {
-      total:          real.length,
-      uploading:      filtered.length - real.length,
-      withDetections: real.filter(m => m.observations.some(isAiLabel)).length,
-      annotated:      real.filter(m => m.observations.some(isHumanReviewed)).length,
-      noImage:        real.filter(m => !m.file_path).length,
+      total:     real.length,
+      uploading: filtered.length - real.length,
+      noImage:   real.filter(m => !m.file_path).length,
     }
   }, [filtered])
+  const win = pageWindow(page, stats.total, totalCount)
 
   // Number of cards the Labels view renders this page (AI crops + human labels).
   const cropCardCount = useMemo(() => {
     if (imageView !== 'crop') return 0
     let n = 0
-    for (const m of filtered) n += m.observations.filter(isLabelCard).length
+    for (const m of filtered) n += labelCards(m).length
     return n
   }, [filtered, imageView])
 
-  const hasAdvancedFilters = !!(
-    filterStatus || filterAnnotator || filterModel || filterAnnotationType || filterSex || filterLifeStage ||
-    filterDateFrom || filterDateTo || filterTime !== 'all'
-  )
+  const advancedActive = hasAdvancedFilters(filters)
+  const advancedCount = [filters.status, filters.annotator, filters.model, filters.annotationType, filters.sex, filters.lifeStage, filters.dateFrom || filters.dateTo]
+    .filter(Boolean).length
+  const clearAdvanced = () => setFilters(clearedAdvanced)
+  const editDraft = (patch: Partial<GridFilters>) => setDraft(d => (d ? { ...d, ...patch } : d))
 
-  const clearAdvanced = () => {
-    setFilterStatus(''); setFilterAnnotator(''); setFilterModel(''); setFilterAnnotationType(''); setFilterSex(''); setFilterLifeStage('')
-    setFilterDateFrom('')
-    setFilterDateTo('')
-    setFilterTime('all')
-  }
-
-  const selectedMedia = filtered.find(m => m.id === selectedMediaId) || null
+  // The viewer steps through the cards on screen; a linked photo opens even when it is not one.
+  const selectedMedia = visible.find(m => m.id === selectedMediaId)
+    ?? (linkedMedia?.id === selectedMediaId ? linkedMedia : null)
 
   const handleMediaUpdated = (updated: MediaRecord) => {
-    setMedia(prev => prev.map(m => m.id === updated.id ? updated : m))
+    const swap = (list: MediaRecord[]) => list.map(m => m.id === updated.id ? updated : m)
+    setMedia(swap)
+    setSimilarRecords(swap)
+    setReviewRecords(swap)
+    setLinkedMedia(m => (m?.id === updated.id ? updated : m))
   }
 
   // AN-4: after a one-click Confirm/Blank, jump to the next image in the grid.
   const advanceToNext = () => {
     if (!selectedMediaId) return
-    const idx = filtered.findIndex(m => m.id === selectedMediaId)
-    const next = idx >= 0 && idx < filtered.length - 1 ? filtered[idx + 1] : null
+    const idx = visible.findIndex(m => m.id === selectedMediaId)
+    const next = idx >= 0 && idx < visible.length - 1 ? visible[idx + 1] : null
     setSelectedMediaId(next ? next.id : null)
   }
 
   // Step back to the previous image in the grid (modal ‹ arrow).
   const advanceToPrev = () => {
     if (!selectedMediaId) return
-    const idx = filtered.findIndex(m => m.id === selectedMediaId)
-    if (idx > 0) setSelectedMediaId(filtered[idx - 1].id)
+    const idx = visible.findIndex(m => m.id === selectedMediaId)
+    if (idx > 0) setSelectedMediaId(visible[idx - 1].id)
   }
 
   if (deployments.length === 0) {
-    return <p style={{ opacity: 0.6, padding: '2rem 0' }}>Select a project or add deployments to browse media.</p>
+    return <p style={{ color: 'var(--text-muted)', padding: '2rem 0' }}>Select a project or add deployments to browse media.</p>
   }
 
-  // Pagination button style helper
-  const PAGE_BTN = (disabled: boolean): React.CSSProperties => ({
-    padding: '0.3rem 0.6rem', fontSize: '0.8125rem',
-    border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-    backgroundColor: 'transparent', cursor: disabled ? 'not-allowed' : 'pointer',
-    color: disabled ? 'var(--text-color)' : 'var(--primary)',
-    opacity: disabled ? 0.35 : 1,
-  })
-
-  const minWidth = thumbScale
-  const height = Math.round(thumbScale * 0.78)
+  const compact = thumbScale < 120
+  const roomy = thumbScale >= 200
+  const gridStyle: React.CSSProperties = {
+    display: 'grid',
+    gridTemplateColumns: `repeat(auto-fill, minmax(${thumbScale}px, 1fr))`,
+    gap: compact ? '0.5rem' : '0.75rem',
+  }
 
   // ── Card gestures (#283, rules in lib/cardSelection.ts) ───────────────────
   // The grid's selectable media in rendered order, for a Shift-click range.
   const gridOrder = () => {
-    if (similarToId) return similarRecords.map(m => m.id)
+    if (similarToId || reviewMode) return visible.flatMap(m => (isSelectable(m) ? [m.id] : []))
     const ids: string[] = []
     for (const m of groupedMedia ? groupedMedia.flatMap(([, items]) => items) : filtered) {
-      if (!m._pending && (imageView !== 'crop' || m.observations.some(isLabelCard))) ids.push(m.id)
+      if (isSelectable(m) && (imageView !== 'crop' || m.observations.some(isLabelCard))) ids.push(m.id)
     }
     return ids
   }
@@ -954,18 +868,24 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
     selectAnchor.current = next.anchor
     setSelectedIds(next.selected)
   }
-  const cardProps = (id: string, focusObs: string | null) => ({
-    className: 'media-card',
-    tabIndex: 0,
-    title: 'Click to open · Ctrl/Cmd-click or the circle to select · Shift-click to select a range',
-    onClick: (e: React.MouseEvent) => onCardIntent(id, cardClickIntent(e), focusObs),
-    onKeyDown: (e: React.KeyboardEvent) => {
-      // The clicked card keeps focus under the viewer, whose keys are its own.
-      const intent = selectedMediaId ? null : cardKeyIntent(e)
-      if (intent) { e.preventDefault(); onCardIntent(id, intent, focusObs) }
-    },
-  })
-  const renderSelectCircle = (m: MediaRecord, sel: boolean) => (
+  const cardProps = (m: MediaRecord, focusObs: string | null) => {
+    const selectable = isSelectable(m)
+    return {
+      className: 'media-card',
+      tabIndex: 0,
+      title: selectable ? 'Click to open · Ctrl/Cmd-click or the circle to select · Shift-click to select a range' : 'Click to open',
+      // Someone who cannot label these photos opens them with any click.
+      onClick: (e: React.MouseEvent) => onCardIntent(m.id, selectable ? cardClickIntent(e) : 'open', focusObs),
+      onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => {
+        // The clicked card keeps focus under the viewer, whose keys are its own.
+        if (selectedMediaId) return
+        const intent = cardKeyIntent(e)
+        if (intent && (selectable || intent === 'open')) { e.preventDefault(); onCardIntent(m.id, intent, focusObs) }
+        else if (e.target === e.currentTarget && moveFocus(e)) e.preventDefault()
+      },
+    }
+  }
+  const renderSelectCircle = (m: MediaRecord, sel: boolean) => isSelectable(m) && (
     <button
       type="button"
       className="media-card-select"
@@ -975,37 +895,64 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
       style={{
         position: 'absolute', bottom: 4, left: 4, width: 18, height: 18, padding: 0, border: 'none',
         borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+        cursor: 'pointer',
         backgroundColor: sel ? 'var(--primary)' : 'rgba(0,0,0,0.45)',
         color: '#fff', boxShadow: '0 0 0 1.5px rgba(255,255,255,0.85)',
         // Every circle shows while a selection is active; otherwise on hover (index.css).
         opacity: selectedIds.size > 0 ? 1 : undefined,
       }}
     >
-      {sel ? '✓' : ''}
+      {sel && <Check size={12} strokeWidth={3} aria-hidden />}
     </button>
   )
+
+  // The card's label line: one name (common name first, as the viewer shows it) and one
+  // confidence, the verdict's (02 #17, #18). Hidden on small thumbnails; two lines on large.
+  const renderLabelBar = (name: string | null, isEmpty: boolean, conf: number | null, hint: string, timestamp: string | null, deploymentId: string) => {
+    if (compact) return null
+    return (
+      <div style={{ padding: '0.375rem 0.5rem', fontSize: '0.6875rem' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem' }}>
+          <span title={hint} style={{ flex: 1, minWidth: 0, fontWeight: 600, ...(roomy ? TWO_LINES : ELLIPSIS) }}>
+            {name ?? (isEmpty
+              ? <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Empty</span>
+              : <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>No label</span>)}
+          </span>
+          {conf !== null && <span style={{ color: 'var(--text-muted)', flexShrink: 0 }}>{(conf * 100).toFixed(0)}%</span>}
+        </div>
+        {timestamp && (
+          <div style={{ color: 'var(--text-muted)', fontSize: '0.625rem', ...ELLIPSIS }}>
+            {formatCaptureTime(timestamp, tzByDeployment.get(deploymentId))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
 
   // ── Thumbnail card renderer (shared by flat + grouped grids) ──────────────
   const renderThumbCard = (m: MediaRecord) => {
     const imgUrl = displayImageUrl(m, 'thumb')
+    const fileName = m.file_name || m.file_path.split('/').pop() || ''
 
     // Optimistic (still-uploading) card — display-only, no selection/detail/actions.
     if (m._pending) {
       return (
-        <div key={m.id} title="Uploading…" style={{
+        <div key={m.id} title={`Uploading ${fileName}`} style={{
           border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden',
-          backgroundColor: 'var(--surface)', opacity: 0.9,
+          backgroundColor: 'var(--surface)',
         }}>
-          <div style={{ position: 'relative', aspectRatio: '4 / 3', backgroundColor: 'var(--surface)' }}>
+          <div style={{ ...IMAGE_AREA, backgroundColor: 'var(--surface)' }}>
             {imgUrl ? (
-              <img src={imgUrl} alt={m.file_name ?? ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={imgUrl} alt={fileName} decoding="async" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '0.7rem', opacity: 0.5 }}>Uploading…</div>
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Uploading…</span>
             )}
-            <span style={{ position: 'absolute', top: 6, left: 6, background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '0.62rem', padding: '2px 6px', borderRadius: 4 }}>⬆ Uploading</span>
+            <span style={{ position: 'absolute', top: 6, left: 6, display: 'inline-flex', alignItems: 'center', gap: 3, background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: '0.62rem', padding: '2px 6px', borderRadius: 4 }}>
+              <Upload size={10} aria-hidden /> Uploading
+            </span>
           </div>
-          <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.68rem', opacity: 0.65, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.file_name}</div>
+          {!compact && <div style={{ padding: '0.4rem 0.5rem', fontSize: '0.68rem', color: 'var(--text-muted)', ...ELLIPSIS }}>{fileName}</div>}
         </div>
       )
     }
@@ -1018,82 +965,43 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
 
     // Top label: a human verdict, then the consensus row, then the first row (#170)
     const { labelObs: topObs, isEmpty } = photoVerdict(m.observations)
-    const label  = topObs?.scientific_name || (isEmpty ? 'Empty' : null)
-    const conf   = topObs?.classification_probability ?? null
-    const aiConfs = m.observations
-      .filter(o => isAiLabel(o) && o.classification_probability != null)
-      .map(o => o.classification_probability as number)
-    const lowestConf = aiConfs.length ? Math.min(...aiConfs) : null
-    const isSelected = selectedMediaId === m.id
+    const name = topObs && !isEmpty && (topObs.scientific_name || topObs.vernacular_name || topObs.observation_type)
+      ? observationLabel(topObs) : null
+    const conf = topObs?.classification_probability ?? null
+    const hint = [topObs?.scientific_name, fileName].filter(Boolean).join(' · ')
+    const isOpen = selectedMediaId === m.id
     const inatSt  = inatStates.get(m.id)
     const sel = selectedIds.has(m.id)
+    const stuck = !retryRequested.has(m.deployment_id) && isThumbnailStuck(m, loadedAt, busy)
 
     return (
-      <div
-        key={m.id}
-        {...cardProps(m.id, null)}
-        style={{
-          border: sel ? '2px solid var(--primary)' : isSelected ? '2px solid var(--primary)' : '1px solid var(--border)',
-          borderRadius: 'var(--radius)',
-          overflow: 'hidden',
-          cursor: 'pointer',
-          backgroundColor: 'var(--surface)',
-          transition: 'border-color 0.15s, transform 0.15s',
-          transform: isSelected ? 'scale(1.02)' : undefined,
-          userSelect: 'none',
-        }}
-      >
+      <div key={m.id} {...cardProps(m, null)} style={cardStyle(sel, isOpen)}>
         {/* Thumbnail area */}
-        <div style={{
-          height,
-          backgroundColor: imgUrl ? undefined : 'rgba(0,0,0,0.04)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-          position: 'relative',
-        }}>
+        <div style={{ ...IMAGE_AREA, backgroundColor: imgUrl ? undefined : 'rgba(0,0,0,0.04)' }}>
           {imgUrl && !failedThumbs.has(m.id) ? (
             <img
               src={imgUrl}
-              alt={m.file_name || 'media'}
+              alt={fileName || 'photo'}
+              loading="lazy"
+              decoding="async"
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               onError={() => setFailedThumbs(s => new Set(s).add(m.id))}
             />
-          ) : !retryRequested.has(m.deployment_id) && isThumbnailStuck(m, loadedAt, busy) ? (
-            // Old enough that the thumbnail should exist, and nothing is making it.
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem' }}>
-              <span style={{ opacity: 0.5 }}>No thumbnail</span>
-              <button
-                type="button"
-                className="btn btn-outline"
-                style={{ fontSize: '0.72rem', padding: '0.15rem 0.6rem' }}
-                title="Make the missing thumbnails for this deployment"
-                onClick={e => { e.stopPropagation(); retryThumbnails(m.deployment_id) }}
-              >
-                Retry
-              </button>
-            </div>
           ) : (
-            // Thumbnail not ready yet (rendition still generating / resolving).
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', opacity: 0.5, fontSize: '0.72rem' }}>
-              <span style={{ fontSize: '1.4rem' }}>⏳</span>
-              <span>Processing…</span>
-            </div>
+            // Stuck: the thumbnail should exist and nothing is making it (one Retry above the
+            // grid). Otherwise still generating.
+            <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              {stuck ? <ImageOff size={18} aria-hidden /> : <Hourglass size={18} aria-hidden />}
+              {!compact && <span>{stuck ? 'No thumbnail' : 'Processing…'}</span>}
+            </span>
           )}
 
-          {/* WS5-T4: Status badge — top-left overlay */}
-          <span style={{ position: 'absolute', top: 4, left: 4 }}>
-            <StatusBadge
-              status={annotStatus}
-              size="sm"
-              label={
-                annotStatus === 'ai' && lowestConf !== null
-                  ? `${(lowestConf * 100).toFixed(0)}%`
-                  : undefined
-              }
-            />
-          </span>
+          {/* Status badge, top-left. No badge until a label exists. */}
+          {annotStatus !== 'pending' && (
+            <span style={{ position: 'absolute', top: 4, left: 4 }}>
+              <StatusBadge status={annotStatus} size="sm" />
+            </span>
+          )}
 
           {/* Phase 3: iNaturalist dove badge — top-right overlay */}
           {inatSt && (
@@ -1106,25 +1014,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
           {renderSelectCircle(m, sel)}
         </div>
 
-        {/* Label bar */}
-        <div style={{ padding: '0.375rem 0.5rem', fontSize: '0.6875rem' }}>
-          <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {topObs?.scientific_name
-              ? label
-              : isEmpty
-                ? <span style={{ opacity: 0.6, fontStyle: 'italic' }}>Empty</span>
-                : <span style={{ opacity: 0.4 }}>No label</span>}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', opacity: 0.6, fontSize: '0.625rem' }}>
-            <span>{m.file_name || m.file_path.split('/').pop()}</span>
-            {conf !== null && <span>{(conf * 100).toFixed(0)}%</span>}
-          </div>
-          {m.timestamp && (
-            <div style={{ opacity: 0.5, fontSize: '0.625rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {formatCaptureTime(m.timestamp, tzByDeployment.get(m.deployment_id))}
-            </div>
-          )}
-        </div>
+        {renderLabelBar(name, isEmpty, conf, hint, m.timestamp, m.deployment_id)}
       </div>
     )
   }
@@ -1133,92 +1023,107 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
   // Renders an individual detection's crop (observations.crop_url). Selection and
   // open are keyed by media id (actions are media-level), so the existing grid
   // machinery is reused. Falls back to the full frame when a crop is missing.
-  const renderCropCard = (m: MediaRecord, obs: ObservationRecord | null, key: string) => {
-    const cropUrl = obs?.crop_url || null
+  const renderCropCard = (m: MediaRecord, obs: ObservationRecord, key: string) => {
+    const cropUrl = obs.crop_url || null
     const imgUrl = cropUrl || displayImageUrl(m, 'thumb')
     const noCrop = !cropUrl
     const sel = selectedIds.has(m.id)
-    const isSelected = selectedMediaId === m.id
-    const status = deriveAnnotationStatus({
-      hasReviewed: !!obs && isHumanReviewed(obs),
-      hasAi: !!obs && isAiLabel(obs),
-    })
-    const conf = obs?.classification_probability ?? null
-    const isEmpty = !!obs && !obs.scientific_name && obs.observation_type === 'blank'
-    const label = obs?.scientific_name || null
+    const isOpen = selectedMediaId === m.id
+    // Once a person gave the photo its verdict, each crop shows that verdict, not the AI's.
+    const verdict = photoVerdict(m.observations)
+    const ruled = !!verdict.labelObs && isHumanReviewed(verdict.labelObs) ? verdict : null
+    const shown = ruled ? ruled.labelObs : obs
+    const status = ruled ? 'reviewed' : deriveAnnotationStatus({ hasReviewed: isHumanReviewed(obs), hasAi: isAiLabel(obs) })
+    const isEmpty = ruled ? ruled.isEmpty : !obs.scientific_name && obs.observation_type === 'blank'
+    const name = shown && !isEmpty && (shown.scientific_name || shown.vernacular_name || shown.observation_type)
+      ? observationLabel(shown) : null
+    const conf = ruled ? null : obs.classification_probability ?? null
+    const aiSaid = ruled && isAiLabel(obs) && obs.scientific_name ? `AI: ${obs.scientific_name}` : null
+    const hint = [shown?.scientific_name, aiSaid, m.file_name].filter(Boolean).join(' · ')
 
     return (
-      <div
-        key={key}
-        {...cardProps(m.id, obs?.id ?? null)}
-        style={{
-          border: sel || isSelected ? '2px solid var(--primary)' : '1px solid var(--border)',
-          borderRadius: 'var(--radius)', overflow: 'hidden', cursor: 'pointer',
-          backgroundColor: 'var(--surface)', transition: 'border-color 0.15s, transform 0.15s',
-          transform: isSelected ? 'scale(1.02)' : undefined, userSelect: 'none',
-        }}
-      >
-        <div style={{ height, backgroundColor: imgUrl ? undefined : 'rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
+      <div key={key} {...cardProps(m, obs.id)} style={cardStyle(sel, isOpen)}>
+        <div style={{ ...IMAGE_AREA, backgroundColor: imgUrl ? undefined : 'rgba(0,0,0,0.04)' }}>
           {imgUrl ? (
             <img
               src={imgUrl}
-              alt={label || 'crop'}
+              alt={name || 'crop'}
+              loading="lazy"
+              decoding="async"
               // Crops are tight cut-outs — 'contain' shows the whole animal;
               // a full-frame fallback fills the card with 'cover'.
               style={{ width: '100%', height: '100%', objectFit: noCrop ? 'cover' : 'contain' }}
               onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
             />
           ) : (
-            <span style={{ fontSize: '2rem', opacity: 0.3 }}>📷</span>
+            <ImageOff size={24} aria-hidden style={{ color: 'var(--text-muted)' }} />
           )}
-          <span style={{ position: 'absolute', top: 4, left: 4 }}>
-            <StatusBadge status={status} size="sm" label={status === 'ai' && conf !== null ? `${(conf * 100).toFixed(0)}%` : undefined} />
-          </span>
-          {noCrop && imgUrl && (
+          {status !== 'pending' && (
+            <span style={{ position: 'absolute', top: 4, left: 4 }}>
+              <StatusBadge status={status} size="sm" />
+            </span>
+          )}
+          {noCrop && imgUrl && !compact && (
             <span style={{ position: 'absolute', bottom: 4, right: 4, fontSize: '0.6rem', padding: '0.05rem 0.3rem', borderRadius: '3px', background: 'rgba(0,0,0,0.55)', color: '#fff' }}>
               full frame
             </span>
           )}
           {renderSelectCircle(m, sel)}
         </div>
-        <div style={{ padding: '0.375rem 0.5rem', fontSize: '0.6875rem' }}>
-          <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {label || (isEmpty ? <span style={{ opacity: 0.6, fontStyle: 'italic' }}>Empty</span> : <span style={{ opacity: 0.4 }}>No label</span>)}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', opacity: 0.6, fontSize: '0.625rem' }}>
-            <span>{m.file_name || m.file_path.split('/').pop()}</span>
-            {conf !== null && <span>{(conf * 100).toFixed(0)}%</span>}
-          </div>
-        </div>
+        {renderLabelBar(name, isEmpty, conf, hint, null, m.deployment_id)}
       </div>
     )
   }
 
   // Expand a media into one card per label: AI crops + human labels (full-frame
-  // when they have no crop). Un-labelled / cropless AI frames are omitted.
-  const cropCardsFor = (m: MediaRecord) =>
-    m.observations.filter(isLabelCard).map(o => renderCropCard(m, o, o.id))
+  // when they have no crop), at most MAX_LABEL_CARDS. Un-labelled / cropless AI frames are omitted.
+  const cropCardsFor = (m: MediaRecord) => labelCards(m).map(o => renderCropCard(m, o, o.id))
+  const renderCards = (items: MediaRecord[]) =>
+    imageView === 'crop' ? items.flatMap(m => cropCardsFor(m)) : items.map(m => renderThumbCard(m))
 
+  const toggleGroupSelection = (items: MediaRecord[], allSelected: boolean) => {
+    const next = new Set(selectedIds)
+    for (const m of items) {
+      if (allSelected) next.delete(m.id)
+      else next.add(m.id)
+    }
+    setSelectedIds(next)
+  }
+
+  const pagerText = win.total === null
+    ? null
+    : win.hasPrev || win.hasNext
+      ? `${win.from.toLocaleString()}–${win.to.toLocaleString()} of ${win.total.toLocaleString()}`
+      : `${win.total.toLocaleString()} photo${win.total !== 1 ? 's' : ''}`
+  const writableOnPage = visibleSelectable.length > 0
   return (
     <div>
       {/* ── "Being processed" banner for in-view deployments ───────── */}
       <ProcessingBanner deployments={deployments} />
 
-      {/* ── Ribbon command bar (sticky so filters/actions stay reachable
+      {/* ── Ribbon command bar (sticky so filters, the pager and actions stay reachable
           while scrolling the photo grid) ──────────────────────────── */}
       <Ribbon
         sticky
         status={
           <div style={{ display: 'flex', alignItems: 'center' }}>
-            {/* ── Stats (read-only; first to drop when the row is tight) ── */}
-            <span className="ribbon-stats" style={{ opacity: 0.6, whiteSpace: 'nowrap' }} title="Results in the current view">
-              <strong>{totalCount ?? stats.total}</strong> media{totalCount !== null && totalCount > PAGE_SIZE && <span style={{ opacity: 0.8 }}> ({stats.total} shown)</span>}
-              {' · '}<strong>{stats.withDetections}</strong> detections
-              {' · '}<strong>{stats.annotated}</strong> annotated
-              {imageView === 'crop' && <> · <strong>{cropCardCount}</strong> labels</>}
-              {stats.noImage > 0 && <span style={{ color: 'var(--warning, #f59e0b)' }}> · {stats.noImage} no image</span>}
-              {stats.uploading > 0 && <span style={{ color: 'var(--primary)' }}> · {stats.uploading} uploading</span>}
-            </span>
+            {/* ── Pager: one count, the filtered total (02 #5, #24) ── */}
+            {!similarToId && !reviewMode && (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', whiteSpace: 'nowrap' }}>
+                {(win.hasPrev || win.hasNext) && (
+                  <button type="button" onClick={() => goToPage(page - 1)} disabled={!win.hasPrev} aria-label="Previous page" style={pagerButton(!win.hasPrev)}>
+                    <ChevronLeft size={16} aria-hidden />
+                  </button>
+                )}
+                {pagerText && <span style={{ color: 'var(--text-muted)' }}>{pagerText}</span>}
+                {(win.hasPrev || win.hasNext) && (
+                  <button type="button" onClick={() => goToPage(page + 1)} disabled={!win.hasNext} aria-label="Next page" style={pagerButton(!win.hasNext)}>
+                    <ChevronRight size={16} aria-hidden />
+                  </button>
+                )}
+                {stats.uploading > 0 && <span style={{ color: 'var(--primary)' }}>· {stats.uploading} uploading</span>}
+              </span>
+            )}
 
             {/* ── Display controls (what to show) ── */}
             <span style={RIBBON_SECTION}>
@@ -1227,117 +1132,133 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
                   <button key={v} onClick={() => setImageView(v)}
                     style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', border: 'none', cursor: 'pointer',
                       background: imageView === v ? 'var(--primary)' : 'transparent', color: imageView === v ? '#fff' : 'var(--text-color)', fontWeight: imageView === v ? 600 : 400 }}>
-                    {v === 'photo' ? '🖼 Photo' : '🏷️ Labels'}
+                    {v === 'photo' ? 'Photo' : 'Labels'}
                   </button>
                 ))}
               </span>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', opacity: 0.7, flexShrink: 0 }} title="Thumbnail size">
-                <span>🔍</span>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.72rem', color: 'var(--text-muted)', flexShrink: 0 }} title="Thumbnail size">
+                <Search size={13} aria-hidden />
                 <input type="range" min={80} max={280} step={10} value={thumbScale} onChange={e => setThumbScale(+e.target.value)}
-                  style={{ width: 90, accentColor: 'var(--primary)', cursor: 'pointer' }} />
+                  aria-label="Thumbnail size" style={{ width: 90, accentColor: 'var(--primary)', cursor: 'pointer' }} />
               </label>
             </span>
 
-            {/* ── Selection / actions ── */}
-            <span style={RIBBON_SECTION}>
-              <MediaBulkActions
-                selectedCount={selectedIds.size}
-                onSelectAll={() => setSelectedIds(new Set(filtered.map(m => m.id)))}
-                onClearSelection={() => setSelectedIds(new Set())}
-                onAction={handleBulkAction}
-                inatConnected={!!inat.connected}
-              />
-            </span>
-          </div>
-        }
-        subBar={(groupBy !== 'none' || hasAdvancedFilters) ? (
-          <>
-            {/* Active grouping is persisted — surface it so it's never a surprise, and one-click clearable. */}
-            {groupBy !== 'none' && (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', padding: '0.2rem 0.55rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg-color)' }}>
-                ▦ Grouped by <strong>{GROUP_LABELS[groupBy]}</strong>
-                <button onClick={() => setGroupBy('none')} title="Clear grouping" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.85rem', lineHeight: 1, padding: 0 }}>✕</button>
+            {/* ── Selection: only for photos the user can label (decision 1) ── */}
+            {writableOnPage && (
+              <span style={RIBBON_SECTION}>
+                <button type="button" onClick={selectAllOnPage} title="Select every photo on this page"
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.78rem', color: 'var(--primary)', padding: '0.2rem 0.4rem', whiteSpace: 'nowrap' }}>
+                  All on page
+                </button>
               </span>
             )}
-            {hasAdvancedFilters && (
+          </div>
+        }
+        subBar={(selectedIds.size > 0 || advancedActive) ? (
+          <>
+            {selectedIds.size > 0 && (
+              <MediaBulkActions
+                selectedCount={selectedIds.size}
+                onClearSelection={clearSelection}
+                onAction={handleBulkAction}
+                inatConnected={!!inat.connected}
+                inatEnabled={inat.enabled}
+                canTrain={roles.managesAnyOrg}
+              />
+            )}
+            {advancedActive && (
               <button onClick={clearAdvanced}
-                style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--primary)', padding: '0.2rem 0.5rem' }}>
-                ✕ Clear advanced filters
+                style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--primary)', padding: '0.2rem 0.5rem' }}>
+                <X size={13} aria-hidden /> Clear advanced filters
               </button>
             )}
           </>
         ) : undefined}
         tabs={[
           {
-            id: 'filter', label: 'Filter', icon: '⛃',
+            id: 'filter', label: 'Filter',
             groups: [
               { id: 'deployment', title: 'Deployment', content: (
                 <MultiSelect values={filterDeployments} onChange={setFilterDeployments} allLabel="All deployments" noun="deployment"
                   searchable options={deploymentOptions} />
               ) },
               { id: 'species', title: 'Species', content: (
-                <MultiSelect values={filterSpecies} onChange={setFilterSpecies} allLabel="All species" noun="species"
-                  options={speciesList.map(s => ({ value: s, label: s }))} />
+                <MultiSelect values={filters.species} onChange={species => setFilters(f => ({ ...f, species }))} allLabel="All species" noun="species" nounPlural="species"
+                  searchable onOpen={() => setWantSpeciesOptions(true)}
+                  loading={filterOptions.species.isFetching}
+                  note={filterOptions.species.data?.incomplete ? 'Showing the first species found' : undefined}
+                  // A chosen species stays listed while the options load, or after a deep link.
+                  options={[...new Set([...filters.species, ...(filterOptions.species.data?.values ?? [])])].map(s => ({ value: s, label: s }))} />
               ) },
               {
                 id: 'refine', title: 'More filters',
-                launcher: () => setAdvancedOpen(true),
-                launcherTitle: 'Advanced filters (status, annotator, model, sex, life stage, date, day/night)',
-                launcherActive: hasAdvancedFilters,
                 content: (
                   <button
-                    onClick={() => setAdvancedOpen(true)}
+                    onClick={() => setDraft(filters)}
                     style={{
+                      display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
                       padding: '0.35rem 0.7rem', fontSize: '0.75rem', cursor: 'pointer',
                       borderRadius: 'var(--radius)', whiteSpace: 'nowrap',
-                      border: `1px solid ${hasAdvancedFilters ? 'var(--primary)' : 'var(--border)'}`,
-                      backgroundColor: hasAdvancedFilters ? 'rgba(76,175,80,0.1)' : 'transparent',
-                      color: hasAdvancedFilters ? 'var(--primary)' : 'var(--text-color)',
+                      border: `1px solid ${advancedActive ? 'var(--primary)' : 'var(--border)'}`,
+                      backgroundColor: advancedActive ? 'rgba(76,175,80,0.1)' : 'transparent',
+                      color: advancedActive ? 'var(--primary)' : 'var(--text-color)',
                     }}
                   >
-                    ⚙ Advanced filters{hasAdvancedFilters ? ' ●' : ''}
+                    <SlidersHorizontal size={13} aria-hidden /> Advanced filters{advancedCount ? ` (${advancedCount})` : ''}
                   </button>
                 ),
               },
+              ...(singleDeployment && reviewOrderOn ? [{ id: 'order', title: 'Order', content: (
+                <FilterSelect value={orderBy} onChange={v => setOrderBy(v === 'review' ? 'review' : '')} placeholder="Newest first"
+                  options={[{ value: 'review', label: 'Needs review first' }]} />
+              ) }] : []),
             ],
           },
           {
-            id: 'group', label: 'Group', icon: '▦',
+            id: 'group', label: 'Group',
             groups: [
               { id: 'group-mode', title: 'Group by', content: (
-                <FilterSelect value={groupBy} onChange={v => setGroupBy(v as GroupBy)} placeholder="None"
-                  options={[
-                    { value: 'none',            label: '— None' },
-                    { value: 'cluster',         label: '🧠 Cluster (embeddings)' },
-                    { value: 'species',         label: '🐾 Species' },
-                    { value: 'sex',             label: '♀♂ Sex' },
-                    { value: 'life_stage',      label: '🌱 Life stage' },
-                    { value: 'annotation_type', label: '▣ Annotation type' },
-                    { value: 'deployment',      label: '📍 Deployment' },
-                    { value: 'model',           label: '🤖 AI model' },
-                    { value: 'annotator',       label: '👤 Annotator' },
-                  ]} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <FilterSelect value={groupBy === 'none' ? '' : groupBy} onChange={v => setGroupChoice((v || 'none') as GroupBy)} placeholder="None"
+                    options={groupOptions.map(g => ({ value: g, label: GROUP_LABELS[g] }))} />
+                  {groupedMedia && groupedMedia.length > 1 && (
+                    collapsed.size < groupedMedia.length ? (
+                      <button type="button" style={SMALL_BTN} onClick={() => setCollapsedAt({ groupBy, labels: new Set(groupedMedia.map(([label]) => label)) })}>
+                        <ChevronsDownUp size={13} aria-hidden /> Collapse all
+                      </button>
+                    ) : (
+                      <button type="button" style={SMALL_BTN} onClick={() => setCollapsedAt({ groupBy, labels: EMPTY_IDS })}>
+                        <ChevronsUpDown size={13} aria-hidden /> Expand all
+                      </button>
+                    )
+                  )}
+                  {!singleDeployment && brainOn && (
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                      {activeDeploymentIds.length > DEPLOYMENT_GROUP_LIMIT
+                        ? `Pick one deployment to group by cluster, ${DEPLOYMENT_GROUP_LIMIT} or fewer to group by deployment`
+                        : 'Pick one deployment to group by cluster'}
+                    </span>
+                  )}
+                </div>
               ) },
               ...(groupBy === 'cluster' ? [{ id: 'cluster-threshold', title: 'Similarity', content: (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>Loose</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Loose</span>
                   <input type="range" min={0} max={1} step={0.05} value={clusterThreshold}
-                    onChange={e => setClusterThreshold(+e.target.value)}
+                    onChange={e => setClusterThreshold(+e.target.value)} aria-label="Cluster similarity"
                     style={{ width: 80, accentColor: 'var(--primary)', cursor: 'pointer' }} />
-                  <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>Tight</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Tight</span>
                   <span style={{ fontSize: '0.7rem', fontWeight: 600, minWidth: '2rem' }}>{(clusterThreshold * 100).toFixed(0)}%</span>
-                  {clustersQ.isLoading && <span style={{ fontSize: '0.7rem', opacity: 0.5 }}>⏳</span>}
+                  {clustersQ.isLoading && <Hourglass size={13} aria-label="Loading clusters" style={{ color: 'var(--text-muted)' }} />}
                 </div>
               ) }] : []),
               // Deeper clustering tools (embed/reassign/tiered review + the UMAP
               // map) live on their own per-deployment pages — linked here so they
               // stay reachable now that the standalone Explore page is retired.
-              ...(groupBy === 'cluster' && activeDeploymentIds.length === 1 ? [{ id: 'cluster-advanced', title: 'Advanced', content: (
+              ...(groupBy === 'cluster' && singleDeployment && clusterRun.data?.embedding_run_id ? [{ id: 'cluster-advanced', title: 'Advanced', content: (
                 <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  <Link to={`/clusters/${activeDeploymentIds[0]}`} title="Embed, reassign and tiered cluster review"
-                    style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--primary)', textDecoration: 'none', whiteSpace: 'nowrap' }}>◧ Review clusters</Link>
-                  <Link to={`/umap/${activeDeploymentIds[0]}`} title="2-D embedding map of this deployment"
-                    style={{ fontSize: '0.72rem', padding: '0.2rem 0.5rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--primary)', textDecoration: 'none', whiteSpace: 'nowrap' }}>✦ UMAP</Link>
+                  <Link to={`/clusters/${singleDeployment}`} title="Embed, reassign and tiered cluster review" style={SMALL_BTN}>Review clusters</Link>
+                  <Link to={`/umap/${singleDeployment}`} title="2-D embedding map of this deployment" style={SMALL_BTN}>UMAP</Link>
                 </div>
               ) }] : []),
             ],
@@ -1345,46 +1266,39 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
         ]}
       />
 
-      {/* iNaturalist publish result banner */}
-      {inatMsg && (
-        <div style={{
-          margin: '0 0 1rem', padding: '0.5rem 0.75rem', fontSize: '0.8125rem',
-          border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-          backgroundColor: inatMsg.startsWith('⚠') ? 'rgba(239,68,68,0.08)' : 'rgba(116,172,0,0.1)',
-          display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center',
-        }}>
-          <span>{inatMsg}</span>
-          <button onClick={() => setInatMsg(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6 }}>✕</button>
-        </div>
-      )}
-
-      {loading && <p style={{ opacity: 0.6 }}>Loading media…</p>}
-      {error && <p style={{ color: 'var(--error)' }}>⚠ {error}</p>}
       {notice && (
-        <p style={{
-          margin: '0 0 0.5rem', padding: '0.4rem 0.75rem', fontSize: '0.8rem',
-          color: 'var(--text-color)', background: 'rgba(76,175,80,0.12)',
-          border: '1px solid rgba(76,175,80,0.35)', borderRadius: 'var(--radius)',
-        }}>✓ {notice}</p>
+        <Banner tone={notice.tone} onClose={() => setNotice(null)}>{notice.text}</Banner>
       )}
+      {loading && <p style={{ color: 'var(--text-muted)' }}>Loading media…</p>}
+      {error && <Banner tone="error">{error}</Banner>}
 
       {/* ── Not-hosted notice ──────────────────────────────────────── */}
       {/* Keyed on the loaded rows, not the loading flag: the 4 s refetch during an upload sets
           loading on every poll, which blinked the old banner on and off. Optimistic cards are
           not counted (see stats), so an upload in progress no longer triggers it either. */}
       {stats.noImage > 0 && (
-        <p style={{
-          margin: '0 0 1rem',
-          padding: '0.6rem 0.875rem',
-          border: '1px solid var(--warning, #f59e0b)',
-          borderRadius: 'var(--radius)',
-          backgroundColor: 'rgba(245,158,11,0.06)',
-          fontSize: '0.8125rem',
-        }}>
-          📷 {stats.noImage === stats.total ? 'These images are' : `${stats.noImage} of these images are`} not
+        <Banner tone="warning" icon={ImageOff}>
+          {stats.noImage === stats.total ? 'These photos are' : `${stats.noImage} of these photos are`} not
           hosted online, so only their records can be shown. Upload the originals from the Upload page to
           attach them, or set a hosted URL in the media detail panel.
-        </p>
+        </Banner>
+      )}
+
+      {/* ── Stuck thumbnails: one notice, one Retry for their deployments (02 #22) ── */}
+      {stuckThumbs.length > 0 && !similarToId && !reviewMode && (
+        <Banner
+          tone="warning"
+          icon={ImageOff}
+          action={
+            <button type="button" className="btn btn-outline" style={{ fontSize: '0.75rem', padding: '0.2rem 0.6rem' }}
+              title="Make the missing thumbnails for these deployments"
+              onClick={() => stuckDeploymentIds.forEach(id => retryThumbnails(id))}>
+              Retry
+            </button>
+          }
+        >
+          {stuckThumbs.length} photo{stuckThumbs.length !== 1 ? 's' : ''} on this page {stuckThumbs.length !== 1 ? 'have' : 'has'} no thumbnail.
+        </Banner>
       )}
 
       {/* ── Thumbnail grid (full width) — selecting a photo opens the modal ── */}
@@ -1393,77 +1307,98 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
           {similarToId ? (
             <>
               {/* Find-similar mode: ranked neighbours of the anchor image */}
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap',
-                margin: '0 0 0.625rem', padding: '0.4rem 0.75rem', fontSize: '0.8rem',
-                background: 'rgba(33,150,243,0.10)', border: '1px solid rgba(33,150,243,0.35)',
-                borderRadius: 'var(--radius)',
-              }}>
-                <span>🔎 <strong>{Math.max(0, similarRecords.length - 1)}</strong> images similar to the selected one · ranked by visual similarity (anchor shown first)</span>
-                <button
-                  type="button"
-                  onClick={() => setSimilarToId(null)}
-                  style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem' }}
-                >
-                  ✕ Clear
-                </button>
-              </div>
+              <Banner
+                tone="info"
+                icon={Search}
+                action={
+                  <button type="button" onClick={() => setSimilarToId(null)}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem' }}>
+                    <X size={13} aria-hidden /> Clear
+                  </button>
+                }
+              >
+                <strong>{Math.max(0, similarRecords.length - 1)}</strong> photos similar to the selected one, most similar first (the selected one leads)
+              </Banner>
               {similarLoading && similarRecords.length === 0 && (
-                <p style={{ opacity: 0.6, padding: '1rem 0' }}>Searching for similar images…</p>
+                <p style={{ color: 'var(--text-muted)', padding: '1rem 0' }}>Searching for similar photos…</p>
               )}
               {similarQ.isError && (
-                <p style={{ color: 'var(--error)', padding: '0.5rem 0' }}>
-                  No embedding for this image yet — run clustering/embedding for this deployment first.
-                </p>
+                <Banner tone="error">No embedding for this photo yet. Run clustering for this deployment first.</Banner>
               )}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: `repeat(auto-fill, minmax(${minWidth}px, 1fr))`,
-                gap: thumbScale < 120 ? '0.5rem' : '0.75rem',
-              }}>
+              <div style={gridStyle}>
                 {similarRecords.map(m => renderThumbCard(m))}
+              </div>
+            </>
+          ) : reviewMode ? (
+            <>
+              {/* Needs review first: the active-learning order, one deployment */}
+              <Banner
+                tone="info"
+                action={
+                  <button type="button" onClick={() => setOrderBy('')}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem' }}>
+                    <X size={13} aria-hidden /> Newest first
+                  </button>
+                }
+              >
+                <strong>{reviewRecords.length}</strong> unreviewed photos the AI is least sure about, most uncertain first. Filters do not apply here.
+              </Banner>
+              {reviewQ.isLoading && <p style={{ color: 'var(--text-muted)', padding: '1rem 0' }}>Loading the review order…</p>}
+              {reviewQ.isError && <Banner tone="error">The review order is not available for this deployment yet.</Banner>}
+              <div style={gridStyle}>
+                {renderCards(reviewRecords)}
               </div>
             </>
           ) : (
           <>
           {!loading && filtered.length === 0 && (
-            <p style={{ opacity: 0.6, padding: '1rem 0' }}>No media records found for the selected filters.</p>
+            <p style={{ color: 'var(--text-muted)', padding: '1rem 0' }}>No photos match these filters.</p>
           )}
           {!loading && filtered.length > 0 && imageView === 'crop' && cropCardCount === 0 && (
-            <p style={{ opacity: 0.6, padding: '1rem 0' }}>
-              No labels to show here — neither AI detections nor human labels exist for this view.
-              Switch to <strong>🖼 Photo</strong> to see and annotate the full frames.
+            <p style={{ color: 'var(--text-muted)', padding: '1rem 0' }}>
+              No labels on this page yet. Switch to <strong>Photo</strong> to see and label the full frames.
             </p>
           )}
           {/* Grouped view — collapsible sections */}
           {groupedMedia ? groupedMedia.map(([groupLabel, groupItems]) => {
             const clusterInfo = clusterByLabel.get(groupLabel)
+            const groupSelectable = groupItems.filter(isSelectable)
+            const allSelected = groupSelectable.length > 0 && groupSelectable.every(m => selectedIds.has(m.id))
+            const labelAll = !!(clusterInfo && !clusterInfo.confirmed && singleDeployment && canWriteDeployment(singleDeployment))
             return (
             <MediaGroup
               key={groupLabel}
               label={groupLabel}
               count={groupItems.length}
-              action={clusterInfo && !clusterInfo.confirmed && activeDeploymentIds.length === 1
-                ? <ClusterLabelAll clusterId={clusterInfo.id} deploymentId={filterDeployments.length === 1 ? filterDeployments[0] : undefined} onDone={onClusterConfirmed} />
-                : undefined}
+              open={!collapsed.has(groupLabel)}
+              onToggle={() => {
+                const next = new Set(collapsed)
+                if (!next.delete(groupLabel)) next.add(groupLabel)
+                setCollapsedAt({ groupBy, labels: next })
+              }}
+              action={(groupSelectable.length > 0 || labelAll) ? (
+                <>
+                  {groupSelectable.length > 0 && (
+                    <button type="button" style={SMALL_BTN} onClick={() => toggleGroupSelection(groupSelectable, allSelected)}
+                      title={allSelected ? 'Deselect the photos in this group' : 'Select the photos in this group'}>
+                      {allSelected ? 'Deselect' : 'Select'}
+                    </button>
+                  )}
+                  {labelAll && clusterInfo && singleDeployment && (
+                    <ClusterLabelAll clusterId={clusterInfo.id} deploymentId={singleDeployment} onDone={onClusterConfirmed} />
+                  )}
+                </>
+              ) : undefined}
             >
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: `repeat(auto-fill, minmax(${minWidth}px, 1fr))`,
-                gap: thumbScale < 120 ? '0.5rem' : '0.75rem',
-              }}>
-                {imageView === 'crop' ? groupItems.flatMap(m => cropCardsFor(m)) : groupItems.map(m => renderThumbCard(m))}
+              <div style={gridStyle}>
+                {renderCards(groupItems)}
               </div>
             </MediaGroup>
             )
           }) : (
           /* Flat (ungrouped) grid */
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(auto-fill, minmax(${minWidth}px, 1fr))`,
-            gap: thumbScale < 120 ? '0.5rem' : '0.75rem',
-          }}>
-            {imageView === 'crop' ? filtered.flatMap(m => cropCardsFor(m)) : filtered.map(m => renderThumbCard(m))}
+          <div style={gridStyle}>
+            {renderCards(filtered)}
           </div>
           )}
           </>
@@ -1476,7 +1411,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
           <MediaDetail
             media={selectedMedia}
             timezone={tzByDeployment.get(selectedMedia.deployment_id)}
-            mediaList={filtered}
+            mediaList={visible}
             onSelect={setSelectedMediaId}
             onClose={() => setSelectedMediaId(null)}
             onUpdated={handleMediaUpdated}
@@ -1489,56 +1424,16 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
         )}
       </div>
 
-      {/* ── Pagination (WS5-T2) ──────────────────────────────────── */}
-      {totalCount !== null && totalCount > PAGE_SIZE && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: '0.5rem', marginTop: '1.25rem', fontSize: '0.8125rem',
-        }}>
-          <button
-            onClick={() => setPage(0)}
-            disabled={page === 0}
-            style={PAGE_BTN(page === 0)}
-          >
-            ««
-          </button>
-          <button
-            onClick={() => setPage(p => Math.max(0, p - 1))}
-            disabled={page === 0}
-            style={PAGE_BTN(page === 0)}
-          >
-            ‹ Prev
-          </button>
-          <span style={{ opacity: 0.7, minWidth: '7rem', textAlign: 'center' }}>
-            {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, totalCount)} of {totalCount}
-          </span>
-          <button
-            onClick={() => setPage(p => p + 1)}
-            disabled={(page + 1) * PAGE_SIZE >= totalCount}
-            style={PAGE_BTN((page + 1) * PAGE_SIZE >= totalCount)}
-          >
-            Next ›
-          </button>
-          <button
-            onClick={() => setPage(Math.ceil(totalCount / PAGE_SIZE) - 1)}
-            disabled={(page + 1) * PAGE_SIZE >= totalCount}
-            style={PAGE_BTN((page + 1) * PAGE_SIZE >= totalCount)}
-          >
-            »»
-          </button>
-        </div>
-      )}
-
-      {/* ── Advanced settings modal (WS5-T3) ─────────────────────── */}
+      {/* ── Advanced filters (WS5-T3): a draft, applied in one query ── */}
       <Modal
-        open={advancedOpen}
-        onClose={() => setAdvancedOpen(false)}
+        open={draft !== null}
+        onClose={() => setDraft(null)}
         title="Advanced filters"
         size="sm"
         footer={
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
             <button
-              onClick={clearAdvanced}
+              onClick={() => setDraft(d => (d ? clearedAdvanced(d) : d))}
               style={{
                 padding: '0.5rem 1rem', fontSize: '0.875rem',
                 border: '1px solid var(--border)', borderRadius: 'var(--radius)',
@@ -1548,7 +1443,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
               Clear all
             </button>
             <button
-              onClick={() => setAdvancedOpen(false)}
+              onClick={() => { if (draft) setFilters(draft); setDraft(null) }}
               style={{
                 padding: '0.5rem 1.25rem', fontSize: '0.875rem',
                 border: 'none', borderRadius: 'var(--radius)',
@@ -1560,28 +1455,30 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
           </div>
         }
       >
+        {draft && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
           {/* Observation attribute filters (moved out of the main ribbon) */}
           <section>
             <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>Annotation</div>
             <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-              <FilterSelect value={filterStatus} onChange={setFilterStatus} placeholder="Any status"
+              <FilterSelect value={draft.status} onChange={v => editDraft({ status: v as GridFilters['status'] })} placeholder="Any status"
                 options={[
                   { value: 'ai',       label: 'AI identified' },
-                  { value: 'reviewed', label: '✓ Reviewed'    },
-                  { value: 'pending',  label: '⧗ Processing'  },
-                  { value: 'issue',    label: '✕ Issue'       },
+                  { value: 'reviewed', label: 'Reviewed'      },
+                  { value: 'pending',  label: 'Not labelled'  },
                 ]} />
-              <FilterSelect value={filterAnnotationType} onChange={setFilterAnnotationType} placeholder="Any type"
+              <FilterSelect value={draft.annotationType} onChange={v => editDraft({ annotationType: v as GridFilters['annotationType'] })} placeholder="Any type"
                 options={[
-                  { value: 'bbox',  label: '▣ Bounding box' },
-                  { value: 'whole', label: '▢ Whole image'  },
+                  { value: 'bbox',  label: 'Bounding box' },
+                  { value: 'whole', label: 'Whole image'  },
                 ]} />
-              <FilterSelect value={filterAnnotator} onChange={setFilterAnnotator} placeholder="Any annotator"
-                options={humanAnnotatorList.map(a => ({ value: a, label: a }))} />
-              <FilterSelect value={filterModel} onChange={setFilterModel} placeholder="Any AI model"
-                options={modelList} />
+              <FilterSelect value={draft.annotator} onChange={v => editDraft({ annotator: v })}
+                placeholder={filterOptions.annotators.isFetching ? 'Loading annotators…' : 'Any annotator'}
+                options={[...new Set([draft.annotator, ...(filterOptions.annotators.data?.values ?? [])].filter(Boolean))].map(a => ({ value: a, label: a }))} />
+              <FilterSelect value={draft.model} onChange={v => editDraft({ model: v })}
+                placeholder={filterOptions.models.isFetching ? 'Loading AI models…' : 'Any AI model'}
+                options={[...new Set([draft.model, ...(filterOptions.models.data?.values ?? [])].filter(Boolean))].map(v => ({ value: v, label: modelOptionLabel(v) }))} />
             </div>
           </section>
 
@@ -1589,10 +1486,10 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
           <section>
             <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>Animal</div>
             <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-              <FilterSelect value={filterSex} onChange={setFilterSex} placeholder="Any sex"
-                options={sexList.map(s => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))} />
-              <FilterSelect value={filterLifeStage} onChange={setFilterLifeStage} placeholder="Any life stage"
-                options={lifeStageList.map(s => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))} />
+              <FilterSelect value={draft.sex} onChange={v => editDraft({ sex: v })} placeholder="Any sex"
+                options={SEX_VALUES.map(capitalised)} />
+              <FilterSelect value={draft.lifeStage} onChange={v => editDraft({ lifeStage: v })} placeholder="Any life stage"
+                options={LIFE_STAGE_VALUES.map(capitalised)} />
             </div>
           </section>
 
@@ -1601,11 +1498,11 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
             <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>Date range</div>
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <label style={{ fontSize: '0.8125rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <span style={{ opacity: 0.7 }}>From</span>
+                <span style={{ color: 'var(--text-muted)' }}>From</span>
                 <input
                   type="date"
-                  value={filterDateFrom}
-                  onChange={e => setFilterDateFrom(e.target.value)}
+                  value={draft.dateFrom}
+                  onChange={e => editDraft({ dateFrom: e.target.value })}
                   style={{
                     padding: '0.375rem 0.5rem', borderRadius: 'var(--radius)',
                     border: '1px solid var(--border)', backgroundColor: 'var(--surface)',
@@ -1614,11 +1511,11 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
                 />
               </label>
               <label style={{ fontSize: '0.8125rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                <span style={{ opacity: 0.7 }}>To</span>
+                <span style={{ color: 'var(--text-muted)' }}>To</span>
                 <input
                   type="date"
-                  value={filterDateTo}
-                  onChange={e => setFilterDateTo(e.target.value)}
+                  value={draft.dateTo}
+                  onChange={e => editDraft({ dateTo: e.target.value })}
                   style={{
                     padding: '0.375rem 0.5rem', borderRadius: 'var(--radius)',
                     border: '1px solid var(--border)', backgroundColor: 'var(--surface)',
@@ -1629,37 +1526,15 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
             </div>
           </section>
 
-          {/* Time of day */}
-          <section>
-            <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>Time of day</div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              {([['all', 'All'], ['day', '☀ Day (06–18)'], ['night', '🌙 Night (18–06)']] as [TimeOfDay, string][]).map(([val, lbl]) => (
-                <button
-                  key={val}
-                  onClick={() => setFilterTime(val)}
-                  style={{
-                    padding: '0.375rem 0.875rem', fontSize: '0.8125rem',
-                    border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-                    cursor: 'pointer',
-                    backgroundColor: filterTime === val ? 'var(--primary)' : 'transparent',
-                    color: filterTime === val ? '#fff' : 'var(--text-color)',
-                    transition: 'background-color 0.15s',
-                  }}
-                >
-                  {lbl}
-                </button>
-              ))}
-            </div>
-          </section>
-
         </div>
+        )}
       </Modal>
 
       {/* ── Bulk action modals ──────────────────────────────────── */}
       {showDeleteModal && (
         <DeleteConfirmModal
           mediaIds={Array.from(selectedIds)}
-          fileNames={filtered.filter(m => selectedIds.has(m.id)).map(m => m.file_name || m.file_path.split('/').pop() || m.id)}
+          fileNames={visible.flatMap(m => (selectedIds.has(m.id) ? [m.file_name || m.file_path.split('/').pop() || m.id] : []))}
           onConfirm={handleBatchDelete}
           onClose={() => setShowDeleteModal(false)}
         />
@@ -1677,11 +1552,12 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies 
           busy={labelBusy}
           onApply={bulkLabel}
           onClose={() => setShowLabelModal(false)}
+          seeds={labelledSpecies(media.flatMap(m => m.observations))}
         />
       )}
       {showTrainModal && (() => {
         // The selection as the trainer will see it (optimistic upload placeholders are not rows yet).
-        const rows = filtered.filter(m => selectedIds.has(m.id) && !m._pending)
+        const rows = visible.filter(m => selectedIds.has(m.id) && !m._pending)
         const depIds = new Set(rows.map(m => m.deployment_id))
         const projectIds = [...new Set(deployments.filter(d => depIds.has(d.id)).map(d => d.project_id))]
         return (
