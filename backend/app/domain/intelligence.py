@@ -21,7 +21,7 @@ from typing import Optional
 
 import structlog
 
-from app.services.db_utils import rows_of
+from app.services.db_utils import read_all, rows_of
 
 logger = structlog.get_logger()
 
@@ -197,14 +197,17 @@ async def dataset_health(project_id: str) -> dict:
         return {"project_id": project_id, "deployments": 0, "species": [], "review_funnel": {}, "outlier_rate": None}
 
     def _fetch():
-        obs = rows_of(
-            svc.table("observations")
-            .select("scientific_name, review_status, observation_type")
-            .in_("deployment_id", deployment_ids)
-            .is_("deleted_at", "null")
-            .execute()
+        # Every page of both: a read without .range() stops at 1,000 rows without an error.
+        obs = read_all(
+            lambda: (
+                svc.table("observations")
+                .select("scientific_name, review_status, observation_type")
+                .in_("deployment_id", deployment_ids)
+                .is_("deleted_at", "null")
+                .order("id")
+            )
         )
-        emb = rows_of(svc.table("media_embeddings").select("is_outlier").in_("deployment_id", deployment_ids).execute())
+        emb = read_all(lambda: svc.table("media_embeddings").select("is_outlier").in_("deployment_id", deployment_ids).order("media_id"))
         return obs, emb
 
     observations, embeddings = await asyncio.to_thread(_fetch)

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from postgrest.exceptions import APIError
 from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
-from app.authz import assert_access, deployment_id_prefix_bounds, require_system_admin
+from app.authz import assert_write, deployment_id_prefix_bounds, require_system_admin
 from app.dependencies import get_current_user, get_user_client, get_verified_user, require_not_demo
 from app.domain.deployment_location import MAX_TIMEZONE_FILL, apply_location_update, fill_missing_timezones, location_update
 from app.domain.soft_delete import check_deleted_at, now_iso, restore_deployments_as_user, soft_delete_deployments_as_user
@@ -46,15 +46,16 @@ async def create_deployment(
     body: CreateDeploymentRequest,
     user: Any = Depends(get_verified_user),
 ) -> Dict[str, Any]:
-    """Create a deployment in a project the caller can access (manual upload assignment).
+    """Create a deployment in a project the caller can change (manual upload assignment).
 
-    Guarded by project access — a caller with no role on the project gets 404 (so other tenants'
-    project IDs can't be probed). Auto-creates a placeholder device because deployments require a
+    The rule of ww-backend's deployments INSERT policy, project_member or above (``assert_write``):
+    a caller with no role on the project gets 404 (so other tenants' project IDs can't be
+    probed), a project_viewer 403. Auto-creates a placeholder device because deployments require a
     non-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the
     ``(deployment_start, device_id)`` unique index.
     """
-    # Access guard — raises 404 unless the caller holds a role on this project's org/project.
-    await assert_access(user.id, project_id=body.project_id)
+    # Access guard: 404 unless the caller can read the project, 403 unless they can change it.
+    await assert_write(user.id, project_id=body.project_id)
 
     # A supplied id must be a UUID (the column is uuid; a bad value would be a 500 from
     # Postgres) and must not already exist (a duplicate is a 409, never a silent reuse of

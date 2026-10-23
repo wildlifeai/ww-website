@@ -36,3 +36,19 @@ export async function canEditObservations(
   if (roleErr) throw new Error(roleErr.message)
   return allowed === true
 }
+
+export const NOT_SAVED = 'Not saved: only project members can label photos.'
+
+/**
+ * Updates observations as the caller and returns the ids the database changed. Throws when it
+ * changed none: RLS turns a refused update into "0 rows" with no error, the same trap as #183.
+ */
+export async function updateObservations(
+  db: SupabaseClient, ids: string[], patch: Record<string, unknown>,
+): Promise<string[]> {
+  if (ids.length === 0) return []
+  const { data, error } = await db.from('observations').update(patch).in('id', ids).select('id')
+  if (error) throw new Error(error.message)
+  if (!data || data.length === 0) throw new Error(NOT_SAVED)
+  return data.map(row => row.id as string)
+}
