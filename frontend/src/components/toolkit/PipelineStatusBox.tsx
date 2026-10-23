@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect } from 'react'
+import { Info, TriangleAlert } from 'lucide-react'
 import type { ProgressPhase, ProgressSummary } from '../../types/job'
 import { aiAnalysisStatus } from './pipelineProgress'
 
@@ -65,10 +66,10 @@ interface StepsResult {
 }
 
 const STEP_COLOR: Record<StepStatus, string> = {
-  pending: 'var(--text-secondary, #999)',
+  pending: 'var(--text-muted)',
   active: 'var(--primary, #3b82f6)',
   done: 'var(--success, #4CAF50)',
-  warn: 'var(--warning, #FF9800)',
+  warn: 'var(--warning)',
   error: 'var(--error, #f44336)',
 }
 const STEP_ICON: Record<StepStatus, string> = { pending: '', active: '', done: '✓', warn: '!', error: '✕' }
@@ -192,8 +193,8 @@ function StepRow({ step, last }: { step: StepView; last: boolean }) {
         <span style={{
           width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: '0.72rem', fontWeight: 700, color: isPending ? 'var(--text-secondary, #999)' : '#fff',
-          background: isPending ? 'var(--surface-sunken)' : color,
+          fontSize: '0.72rem', fontWeight: 700, color: isPending ? 'var(--text-muted)' : '#fff',
+          background: isPending ? 'var(--border)' : color,
           border: isPending ? '1px solid var(--border)' : 'none',
         }}>
           {isActive
@@ -202,16 +203,16 @@ function StepRow({ step, last }: { step: StepView; last: boolean }) {
         </span>
         {!last && <span style={{ flex: 1, width: 2, minHeight: 12, background: 'var(--border)', margin: '2px 0' }} />}
       </div>
-      <div style={{ paddingBottom: last ? 0 : '0.7rem', flex: 1, minWidth: 0, opacity: isPending ? 0.55 : 1 }}>
+      <div style={{ paddingBottom: last ? 0 : '0.7rem', flex: 1, minWidth: 0, color: isPending ? 'var(--text-muted)' : undefined }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
           <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>{step.label}</span>
           {isActive && step.progress != null && (
             <span style={{ fontSize: '0.75rem', color, fontWeight: 600 }}>{Math.round(step.progress * 100)}%</span>
           )}
         </div>
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary, #888)', marginTop: 1 }}>{step.detail}</div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 1 }}>{step.detail}</div>
         {isActive && step.progress != null && (
-          <div style={{ height: 3, background: 'var(--surface-sunken)', borderRadius: 2, overflow: 'hidden', marginTop: 5 }}>
+          <div style={{ height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', marginTop: 5 }}>
             <div style={{ width: `${Math.round(step.progress * 100)}%`, height: '100%', background: color, transition: 'width 0.3s ease-out' }} />
           </div>
         )}
@@ -221,12 +222,12 @@ function StepRow({ step, last }: { step: StepView; last: boolean }) {
 }
 
 /**
- * Derive the section title deterministically from the pipeline phase —
+ * Derive the section title deterministically from the pipeline phase,
  * never by parsing message strings.
  */
 function deriveSectionTitle(state: PipelineState, phase: string): string {
   if (phase === 'uploading') {
-    return `📤 Uploading & analysing images… (${state.uploadedFiles}/${state.totalFiles})`
+    return `Uploading & analysing images… (${state.uploadedFiles}/${state.totalFiles})`
   }
   if (phase === 'completed') {
     const hasErrors = state.jobs.some(j => j.status === 'completed_with_errors')
@@ -242,21 +243,21 @@ function deriveSectionTitle(state: PipelineState, phase: string): string {
       { uploaded: 0, skipped: 0, failed: 0 },
     )
     if (hasErrors) {
-      return `⚠️ Done with issues — ${totals.uploaded} uploaded, ${totals.skipped} skipped, ${totals.failed} failed`
+      return `Done with issues: ${totals.uploaded} uploaded, ${totals.skipped} skipped, ${totals.failed} failed`
     }
     if (totals.uploaded + totals.skipped > 0) {
-      return `✅ Done — ${totals.uploaded} uploaded${totals.skipped > 0 ? `, ${totals.skipped} skipped` : ''}`
+      return `Done: ${totals.uploaded} uploaded${totals.skipped > 0 ? `, ${totals.skipped} skipped` : ''}`
     }
-    return '✅ Pipeline Complete'
+    return 'Pipeline Complete'
   }
-  if (phase === 'failed') return '❌ Pipeline Failed'
-  if (phase === 'stalled') return '⏳ Still working… (taking longer than usual)'
+  if (phase === 'failed') return 'Pipeline Failed'
+  if (phase === 'stalled') return 'Still working… (taking longer than usual)'
 
   // Processing — phase 2: if the offloaded AI-analysis job is running, surface ITS
   // progress (it long outlives the upload, so this is what the user is waiting on).
   const ai = aiAnalysisStatus(state)
   if (ai?.active) {
-    return `🤖 Analysing images… ${Math.round(ai.progress * 100)}%`
+    return `Analysing images… ${Math.round(ai.progress * 100)}%`
   }
 
   // Processing — use the current phase from the most advanced active job
@@ -264,11 +265,11 @@ function deriveSectionTitle(state: PipelineState, phase: string): string {
   const jobPhase = activeJob?.currentPhase
 
   switch (jobPhase) {
-    case 'download':     return `📥 Downloading ${state.totalFiles} images from Azure…`
-    case 'drive_upload': return `☁️ Uploading ${state.totalFiles} images to Google Drive…`
-    case 'cleanup':      return `🧹 Cleaning up temporary files…`
-    case 'ai_pipeline':  return `🤖 Running AI analysis…`
-    default:             return `🔄 Processing ${state.totalFiles} images…`
+    case 'download':     return `Downloading ${state.totalFiles} images from Azure…`
+    case 'drive_upload': return `Uploading ${state.totalFiles} images to Google Drive…`
+    case 'cleanup':      return `Cleaning up temporary files…`
+    case 'ai_pipeline':  return `Running AI analysis…`
+    default:             return `Processing ${state.totalFiles} images…`
   }
 }
 
@@ -397,7 +398,7 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  backgroundColor: phase === 'stalled' ? 'var(--warning, #FF9800)' : 'var(--primary, #3b82f6)',
+                  backgroundColor: phase === 'stalled' ? 'var(--warning)' : 'var(--primary, #3b82f6)',
                   animation: 'pipeline-pulse 1.5s ease-in-out infinite',
                   flexShrink: 0,
                 }}
@@ -407,8 +408,8 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.8125rem' }}>
           {isActive && (
-            <span style={{ opacity: 0.6, fontSize: '0.75rem', fontWeight: 400 }}>
-              ⏱ {formatElapsed(elapsed)}
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 400 }}>
+              {formatElapsed(elapsed)}
               {eta && <span style={{ marginLeft: '0.5rem' }}>• {eta} remaining</span>}
             </span>
           )}
@@ -416,7 +417,7 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
         </span>
       </div>
 
-      <div style={{ height: 6, background: 'var(--surface-sunken)', borderRadius: 3, overflow: 'hidden' }}>
+      <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
         <div
           style={{
             width: `${percent}%`,
@@ -442,7 +443,9 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
           background: issue.level === 'error' ? 'rgba(244,67,54,0.08)' : 'rgba(255,152,0,0.10)',
           color: issue.level === 'error' ? 'var(--error, #f44336)' : '#e65100',
         }}>
-          <span aria-hidden>{issue.level === 'error' ? '⚠️' : 'ℹ️'}</span>
+          {issue.level === 'error'
+            ? <TriangleAlert size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
+            : <Info size={14} aria-hidden="true" style={{ flexShrink: 0 }} />}
           <span>{issue.text}</span>
         </div>
       )}
@@ -450,7 +453,7 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
       {/* Technical log — collapsed by default so it doesn't drown the summary */}
       <button
         onClick={() => setShowLog(v => !v)}
-        style={{ marginTop: '0.6rem', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-secondary, #888)', fontSize: '0.75rem' }}
+        style={{ marginTop: '0.6rem', background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--text-muted)', fontSize: '0.75rem' }}
       >
         {showLog ? '▾ Hide technical details' : '▸ Show technical details'}
       </button>
@@ -459,24 +462,24 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
           ref={logContainerRef}
           style={{
             marginTop: '0.4rem', fontSize: '0.72rem', maxHeight: '150px', overflowY: 'auto',
-            fontFamily: 'monospace', background: 'var(--surface-sunken)', padding: '0.5rem', borderRadius: 4,
+            fontFamily: 'monospace', background: 'var(--border)', padding: '0.5rem', borderRadius: 4,
           }}
         >
           {state.logs.map((l, i) => {
             let color = 'inherit'
             if (l.level === 'error') color = 'var(--error)'
             if (l.level === 'success') color = 'var(--success, #4CAF50)'
-            if (l.level === 'warning') color = 'var(--warning, #FF9800)'
+            if (l.level === 'warning') color = 'var(--warning)'
             return (
               <div key={`${l.ts}-${i}`} style={{ opacity: 0.9, color, marginBottom: '0.2rem' }}>
-                <span style={{ opacity: 0.5, marginRight: '0.5rem' }}>
+                <span style={{ color: 'var(--text-muted)', marginRight: '0.5rem' }}>
                   {new Date(l.ts).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                 </span>
                 {l.message}
               </div>
             )
           })}
-          {state.logs.length === 0 && <div style={{ opacity: 0.5 }}>Waiting for pipeline to start…</div>}
+          {state.logs.length === 0 && <div style={{ color: 'var(--text-muted)' }}>Waiting for pipeline to start…</div>}
         </div>
       )}
 

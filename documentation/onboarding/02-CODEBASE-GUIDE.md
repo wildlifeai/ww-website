@@ -42,13 +42,17 @@ src/
 ### Signed-in navigation
 
 Defined as `USER_TABS` in `App.tsx`. The active tab is highlighted, so pages no longer repeat
-their own title. Lifecycle order: **prepare → collect → analyse**. The 📡 **Realtime** tab appears only
-when the user has an active deployment.
+their own title, and a deep route lights its parent tab (`lib/navTabs.ts`). Lifecycle order:
+**prepare → collect → analyse**. The 📡 **Realtime** tab appears only when one of the user's
+projects has a device that sends or has sent LoRaWAN data, at least one `lorawan_messages` row the
+user can read (`hooks/useHasRealtimeData.ts`, UI audit decision 7). Below 900 px the tabs show
+their icon only. Write controls (the header Upload button, Home's upload step, Toolkit's Prepare
+SD card) hide for a user who can write to no project (`hooks/useWritableProjects.ts`).
 
 | Tab | Route | Page |
 |-----|-------|------|
-| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (upload, SD-card prep, manifest, model upload) |
-| 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with an active deployment) |
+| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (SD-card prep, model upload, iNaturalist, CamtrapDP export; each card by role) |
+| 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with LoRaWAN data) |
 | 🏷️ Annotations | `/annotations` | `AnnotationsPage` → `MediaBrowser` (+ full-screen modal) |
 | 📈 Insights | `/insights` | `InsightsPage` (projects, deployments, charts, maps) |
 
@@ -71,7 +75,7 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 
 | Route | Page | Purpose |
 |-------|------|---------|
-| `/toolkit` | `ToolkitPage` | Upload, SD-card prep, manifest, privileged model upload |
+| `/toolkit` | `ToolkitPage` | SD-card prep, privileged model upload, iNaturalist, CamtrapDP export |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
 | `/field` | `FieldPage` | Active-deployment view (LoRaWAN heartbeats) |

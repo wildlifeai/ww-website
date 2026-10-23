@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 /**
- * DemoGuard — make the read-only demo obvious in the UI.
+ * DemoGuard: make the read-only demo obvious in the UI.
  *
  * The demo account is read-only at the DB (project_viewer role) and the API
  * (require_not_demo). This adds the UX layer so demo users never hit a raw
@@ -14,9 +14,10 @@
  */
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { Lock } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 
-const DEFAULT_MSG = 'This is disabled in the demo — exit the demo to work with your own data.'
+const DEFAULT_MSG = 'This is disabled in the demo. Exit the demo to work with your own data.'
 
 const DemoToastContext = createContext<(message?: string) => void>(() => {})
 
@@ -43,7 +44,7 @@ export function DemoGuardProvider({ children }: { children: ReactNode }) {
             fontSize: '0.875rem', maxWidth: 440, textAlign: 'center', display: 'flex', gap: '0.5rem', alignItems: 'center',
           }}
         >
-          <span>🔒</span><span>{message}</span>
+          <Lock size={15} aria-hidden="true" style={{ flexShrink: 0 }} /><span>{message}</span>
         </div>
       )}
     </DemoToastContext.Provider>
@@ -77,21 +78,21 @@ export function RequireNotDemo({ children, feature = 'This feature' }: { childre
   const { isDemo } = useDemoGuard()
   if (!isDemo) return <>{children}</>
   return (
-    <div className="glass-card" style={{ maxWidth: 560, margin: '3rem auto', padding: '2rem', textAlign: 'center' }}>
-      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔒</div>
+    <div className="card" style={{ maxWidth: 560, margin: '3rem auto', padding: '2rem', textAlign: 'center' }}>
+      <Lock size={32} color="var(--text-muted)" aria-hidden="true" style={{ marginBottom: '0.5rem' }} />
       <h2 style={{ margin: '0 0 0.5rem' }}>Read-only demo</h2>
-      <p style={{ opacity: 0.7, marginBottom: '1.5rem' }}>
+      <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
         {feature} is disabled while you're exploring the demo with sample data.
         Create a free account to upload and analyse your own data.
       </p>
-      <Link to="/login" className="btn" style={{ textDecoration: 'none' }}>Create an account →</Link>
+      <Link to="/login" className="btn" style={{ textDecoration: 'none' }}>Create an account</Link>
     </div>
   )
 }
 
 /**
  * Wrap a write control. For demo users it dims the control, adds a "not-allowed"
- * tooltip, and intercepts the click (showing the toast) — without the control
+ * tooltip, and intercepts the click (showing the toast), without the control
  * needing to know anything about the demo. For real users it renders untouched.
  */
 export function DemoDisabled({ children, tip }: { children: ReactNode; tip?: string }) {
@@ -100,7 +101,7 @@ export function DemoDisabled({ children, tip }: { children: ReactNode; tip?: str
   return (
     <span
       title={tip ?? 'Disabled in the demo'}
-      onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); showDemoToast(tip ? `${tip} — exit the demo to do this.` : undefined) }}
+      onClickCapture={(e) => { e.preventDefault(); e.stopPropagation(); showDemoToast(tip ? `${tip}. Exit the demo to do this.` : undefined) }}
       style={{ display: 'inline-flex', opacity: 0.5, cursor: 'not-allowed' }}
     >
       {children}
