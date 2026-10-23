@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Supabase query helpers: typed row access and pagination.
 
-fetch_all_rows() is a direct port of db_utils.py fetch_all_rows() for backend use.
+fetch_all_rows() is a direct port of db_utils.py fetch_all_rows() for backend use; read_all()
+pages a filtered query.
 """
 
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Optional, cast
 
 import structlog
 from postgrest import APIResponse
@@ -33,6 +34,20 @@ def row_of(response: Optional[APIResponse]) -> Optional[Row]:
     if response is None:
         return None
     return cast(Optional[Row], response.data) or None
+
+
+def read_all(build_query: Callable[[], Any], page_size: int = 1000) -> List[Row]:
+    """Every row of a filtered read, paged past PostgREST's 1,000-row cap.
+
+    ``build_query`` returns the query afresh, ordered on a unique key, so the pages neither skip
+    nor repeat rows. A read without ``.range()`` stops at 1,000 rows without an error.
+    """
+    rows: List[Row] = []
+    while True:
+        page = rows_of(build_query().range(len(rows), len(rows) + page_size - 1).execute())
+        rows.extend(page)
+        if len(page) < page_size:
+            return rows
 
 
 def fetch_all_rows(client, table: str, select: str = "*", page_size: int = 1000) -> List[Dict[str, Any]]:

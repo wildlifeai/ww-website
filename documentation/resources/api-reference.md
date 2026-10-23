@@ -13,6 +13,18 @@ Complete endpoint reference for the Wildlife Watcher V2 API.
 
 **Authentication:** JWT Bearer token from Supabase Auth (required for protected endpoints).
 
+<a id="access"></a>**Access.** A route that names a deployment, project, photo or cluster checks the
+caller's live `user_roles` rows (`backend/app/authz.py`) at one of two levels:
+
+- **Read**, the default: any role on the project, its organisation, or the system. `404` otherwise,
+  so ids in other organisations cannot be probed.
+- **Write**, for a route that changes project data with the service role or starts work on it:
+  ww-backend's `has_project_role(..., 'project_member')`, so `project_member` or `project_admin` on
+  the project, or `ww_admin`. A `project_viewer`, the demo account included, and every organisation
+  role get `403` "You need the Project Member role to change this project." (UI audit decision 1).
+
+A route that runs as the caller (`get_user_client`) leaves the decision to RLS; its row says so.
+
 > LoRaWAN uplinks do not come through this API. Network servers post to ww-backend's
 > `lorawan-ingest` edge function, see [LORAWAN_INGEST](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/LORAWAN_INGEST.md).
 
@@ -117,7 +129,7 @@ the soft delete and its Undo.
 
 | Method · Path | Auth | Description |
 |---|---|---|
-| `POST /api/projects` | JWT | Create a project in the caller's organisation — body `{ name, description? }` |
+| `POST /api/projects` | JWT · active `organisation_member` or `organisation_manager` | Create a project in the caller's organisation: body `{ name, description? }`. `403` without such a role |
 | `DELETE /api/projects/{project_id}` | JWT · `project_admin` or `ww_admin` | Soft-delete, cascading to deployments → media → observations under one `deleted_at`. The database decides and cascades in one transaction: `soft_delete_project` runs as the caller and allows a `project_admin` of the project or `ww_admin`. Anyone else who can see the project, an organisation manager included, gets `403`; a project the caller cannot see is `404`. Returns the shared `deleted_at` so the client can offer Undo |
 | `POST /api/projects/{project_id}/restore` | JWT · `project_admin` or `ww_admin` | Undo that delete, body `{ deleted_at }` (with a time zone offset, `422` otherwise). `restore_project` runs as the caller under the same rule and clears exactly that `deleted_at` on the project and the rows deleted with it. Returns `{ id, restored }`, `restored` false when nothing was deleted at that time; `403` for anyone else, `404` for an unknown project, `409` with nothing restored when a camera in it has since got another open deployment (one per camera, ww-backend #320), naming the camera |
 
@@ -182,7 +194,7 @@ image-upload pipeline — see [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/exif/parse` | Form `files[]` (+ optional `paths[]`, `upload_to_drive`, `assigned_deployment_id`, `run_ai`) → per-file parsed EXIF; buffers bytes to Azure + enqueues the Drive upload job. `assigned_deployment_id` binds photos that carry no valid deployment ID; `run_ai` (default `true`) gates the post-upload AI pipeline + Wildlife Brain. Response `drive_upload` tells you whether anything was actually stored, clients **must** treat `{enabled: false}` (`reason: server_disabled` = `GOOGLE_DRIVE_ENABLED` unset, or `not_requested`) and `{status: "skipped", reason: "no_deployment_id"}` as *nothing saved* (media rows are only created by the Drive job); `{status: "error"}` = not authenticated; otherwise it carries the enqueued `job_id`. WW500 test photos (EXIF `Make` "Wildlife.ai" with no `Deployment_ID`, or the all-zero id) are never stored, even under `assigned_deployment_id`; their image entries carry `exif.test_photo: true`, and `test_photos_skipped` counts them in the response and the job summary (ww-website#287) |
+| `POST /api/exif/parse` | Form `files[]` (+ optional `paths[]`, `upload_to_drive`, `assigned_deployment_id`, `run_ai`) → per-file parsed EXIF; buffers bytes to Azure + enqueues the Drive upload job. Photos are stored only in deployments the caller can **write** to (see [Access](#access)): the others are listed in `drive_upload.blocked_deployments`, with `reason: "no_access"` when nothing was stored, and an `assigned_deployment_id` the caller cannot write to is ignored. `auto_create_deployment` needs write on `project_id`. `assigned_deployment_id` binds photos that carry no valid deployment ID; `run_ai` (default `true`) gates the post-upload AI pipeline + Wildlife Brain. Response `drive_upload` tells you whether anything was actually stored, clients **must** treat `{enabled: false}` (`reason: server_disabled` = `GOOGLE_DRIVE_ENABLED` unset, or `not_requested`) and `{status: "skipped", reason: "no_deployment_id"}` as *nothing saved* (media rows are only created by the Drive job); `{status: "error"}` = not authenticated; otherwise it carries the enqueued `job_id`. WW500 test photos (EXIF `Make` "Wildlife.ai" with no `Deployment_ID`, or the all-zero id) are never stored, even under `assigned_deployment_id`; their image entries carry `exif.test_photo: true`, and `test_photos_skipped` counts them in the response and the job summary (ww-website#287) |
 
 **Key extracted fields:** `deployment_id` (firmware tag `0xF200` → `UserComment` → `Custom_Data`),
 `latitude`/`longitude` (GPS DMS→decimal), `date` (Original → Create → DateTime), `Make`/`Model`,
@@ -207,7 +219,7 @@ see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 | `POST /api/inat/observations` | JWT | Create an observation — body `{ species_guess, latitude, longitude, observed_on, geoprivacy?, … }` |
 | `GET /api/inat/observations/{observation_id}/status` | None | Identification status for one observation |
 | `POST /api/inat/observations/poll` | JWT | Batch status for ≤200 observation ids (`{ observation_ids: [...] }`) |
-| `POST /api/inat/publish` | JWT | **Publish WW media to iNat** — consolidates bursts by temporal gap, drops human/vehicle/blank by-catch, proxy-uploads photos. Body `{ media_ids, gap_seconds?, geoprivacy? }` (default `obscured`) → `observations_created`, `photos_uploaded`, `skipped_*`, `errors` |
+| `POST /api/inat/publish` | JWT · write | Only photos in projects the caller can **write** to are published, `403` when that is none of them. **Publish WW media to iNat**: consolidates bursts by temporal gap, drops human/vehicle/blank by-catch, proxy-uploads photos. Body `{ media_ids, gap_seconds?, geoprivacy? }` (default `obscured`) → `observations_created`, `photos_uploaded`, `skipped_*`, `errors` |
 | `POST /api/inat/sync` | JWT | **Pull community IDs back** — batch-polls `quality_grade` + `community_taxon`, updates `sync_status`, writes `source_type='consensus'` observations into WW. Idempotent → `checked`, `updated`, `research`, `disagreement`, `observations_written` |
 | `GET /api/inat/taxa/search` | JWT | iNat taxa autocomplete — backs the `SpeciesPicker` alongside the local `taxa` table |
 | `POST /api/inat/taxa` | JWT | Register an iNat taxon + its lineage locally, returning a real `taxon_id` |
@@ -240,9 +252,9 @@ Run inference + ecological event/effort computation on a deployment. Gated by `F
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/pipeline/run` | Run the pipeline, body `{ deployment_id, steps?, confidence_threshold?, config?, only_unannotated? }`. Steps: `media_prep`, `speciesnet`, `animal_crop`, `bioclip`. Returns per-step + aggregate counts and records an `annotation_run`. Error `PIPELINE_BUSY` (retryable) when another run holds the deployment; the request does not wait |
-| `POST /api/pipeline/events/cluster` | Group observations into ecological events by temporal gap — body `{ deployment_id, gap_minutes?, min_images? }` |
-| `POST /api/pipeline/effort/{deployment_id}` | Compute + store effort (trap-nights, uptime, false-trigger rate) |
+| `POST /api/pipeline/run` | **Write** (see [Access](#access)). Run the pipeline, body `{ deployment_id, steps?, confidence_threshold?, config?, only_unannotated? }`. Steps: `media_prep`, `speciesnet`, `animal_crop`, `bioclip`. Returns per-step + aggregate counts and records an `annotation_run`. Error `PIPELINE_BUSY` (retryable) when another run holds the deployment; the request does not wait |
+| `POST /api/pipeline/events/cluster` | **Write** (see [Access](#access)). Group observations into ecological events by temporal gap: body `{ deployment_id, gap_minutes?, min_images? }` |
+| `POST /api/pipeline/effort/{deployment_id}` | **Write** (see [Access](#access)). Compute + store effort (trap-nights, uptime, false-trigger rate) |
 | `GET /api/pipeline/effort/{deployment_id}` | Retrieve cached effort stats |
 
 > The pipeline also runs **automatically after upload** (`auto_annotate_deployments`) — the endpoints
@@ -262,7 +274,7 @@ endpoints are gated by `FF_MEDIA_REGISTRY_ENABLED`. All return the standard `Api
 | `GET /api/media/registry/{deployment_id}` | A deployment's media with `thumbnail_url`, `preview_url` and `original_url` resolved as for `/resolve`, each `null` when only a private original exists. Cluster Review and the Review Queue read it |
 | `POST /api/media/thumbnails/{deployment_id}` | Make the missing thumbnails/previews for a deployment (async job, in the caller's job list, progress per 25 photos). The grid's Retry on a "No thumbnail" card calls it |
 | `DELETE /api/media/batch` | Soft-delete media by id list, body `{ "media_ids": [...] }`. Runs as the caller, so RLS changes only photos they uploaded (while at least `project_member`) or any photo in a project they administer; other ids, and ids already deleted, are skipped without an error. Returns `{ deleted, requested, deleted_at, deleted_ids, skipped_ids }`; `deleted_at` is shared by the batch, for Undo. `POST /api/media/batch/restore` (body `{ media_ids, deleted_at }`) undoes it under the same rule and returns `{ restored, restored_ids, skipped_ids }` |
-| `POST /api/media/run-selected` | Run the AI pipeline on a media subset — body `{ "media_ids": [...], "steps": [...] }` |
+| `POST /api/media/run-selected` | **Write** on the first photo's deployment (see [Access](#access)). Run the AI pipeline on a media subset: body `{ "media_ids": [...], "steps": [...] }`; answers `NOT_IMPLEMENTED` until the per-media job exists |
 
 ---
 
@@ -272,7 +284,7 @@ Deployment helpers used by the upload flow and Insights. JWT required. Prefix `/
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/deployments` | Create a deployment (+ placeholder device) in a project you can access — body `{ project_id, name?, id?, location_name?, latitude?, longitude?, deployment_start?, deployment_end? }`. Backs the "assign/create a deployment at upload" flow: pass the new id as `assigned_deployment_id` to `/api/exif/parse` to bind photos that carry no valid deployment ID. `id` (a UUID) creates the row under the id the camera stamped into the photos' EXIF, so the phone that configured the camera converges on it when it syncs; `400` if not a UUID, `409` if it already exists |
+| `POST /api/deployments` | **Write** on the project (see [Access](#access)), the deployments INSERT policy's rule. Create a deployment (+ placeholder device) in it: body `{ project_id, name?, id?, location_name?, latitude?, longitude?, deployment_start?, deployment_end? }`. Backs the "assign/create a deployment at upload" flow: pass the new id as `assigned_deployment_id` to `/api/exif/parse` to bind photos that carry no valid deployment ID. `id` (a UUID) creates the row under the id the camera stamped into the photos' EXIF, so the phone that configured the camera converges on it when it syncs; `400` if not a UUID, `409` if it already exists |
 | `PATCH /api/deployments/{deployment_id}/location` | Correct a deployment's location as the signed-in user (Insights > Deployments, Edit location). Body `{ location_name, location_description, latitude, longitude, altitude, accuracy }`, every field written, so `null` clears it; `timezone` is recomputed from the coordinates. Runs on the caller's client, so RLS decides: the creator while still a project member, or a project admin. `403` when RLS refuses (0 rows), `404` when the caller cannot see the deployment, `422` for an invalid body. Returns the stored location columns |
 | `POST /api/deployments/validate` | Resolve deployment ids to `valid` / `no_access` / `not_found` — the upload pre-check that drives the warning banners. Accepts full UUIDs (from EXIF `0xF200`) and 8-hex card-folder prefixes. Body `{ "deployment_ids": ["e10f7c43-…", "7785FABB", …] }` |
 | `DELETE /api/deployments/batch` | Soft-delete deployments and their media and observations, body `{ "deployment_ids": [...] }`. The database decides and cascades: each id goes through `soft_delete_deployment` as the caller, which allows the deployment's creator while a `project_member`, a `project_admin` of the project, or `ww_admin`. Returns `{ deleted_at, deployment_ids, refused_ids }`; ids the caller cannot see are skipped, and `403` when every visible id was refused. `deleted_at` is shared by the whole batch, for Undo |
@@ -288,7 +300,7 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/camtrapdp/import` | Import a CamtrapDP `.zip` — multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device of the importing organisation, reused by a re-import and never shared with another organisation. A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
+| `POST /api/camtrapdp/import` | Needs an active `organisation_member` or `organisation_manager` role, the rule for creating a project; the new project goes in that organisation. Not the demo. Import a CamtrapDP `.zip`: multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device of the importing organisation, reused by a re-import and never shared with another organisation. A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
 
 > An API key starts the same export with `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
 
@@ -325,16 +337,16 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/brain/embed/{deployment_id}` | Embed + cluster a deployment (server mode enqueues a GPU job). A worker that can't embed (no ML stack, `HF_TOKEN` or GPU) fails the job with the reason and writes no run |
+| `POST /api/brain/embed/{deployment_id}` | **Write** (see [Access](#access)). Embed + cluster a deployment (server mode enqueues a GPU job). A worker that can't embed (no ML stack, `HF_TOKEN` or GPU) fails the job with the reason and writes no run |
 | `GET /api/brain/clusters/{deployment_id}` | Clusters from the deployment's latest embedding run |
 | `POST /api/brain/clusters/multi` | Aggregate clusters across deployments — body `{ "deployment_ids": [...], "min_confidence": 0 }`; returns `clusters`, `media_clusters` (media→cluster map), `outlier_media_ids` |
 | `GET /api/brain/umap/{deployment_id}` | Persisted 2-D UMAP scatter coordinates |
 | `GET /api/brain/outliers/{deployment_id}` | HDBSCAN-rejected images (expert-review candidates) |
 | `GET /api/brain/similar/{media_id}` | Nearest neighbours (`?n=20`, 1 to 100) among the photos of the anchor's organisation, in deployments the caller can read. `NOT_FOUND` envelope when the photo has no embedding |
-| `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | Confirm a cluster as a taxon → bulk-creates human observations for its members |
+| `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | **Write** (see [Access](#access)). Confirm a cluster as a taxon → bulk-creates human observations for its members |
 | `GET /api/brain/embedding-runs/{deployment_id}` | List embedding runs (model version, status, image count) |
-| `POST /api/brain/reprocess/deployment/{deployment_id}` | Supersede current runs and re-embed a deployment. The worker checks it can embed first, so a failed check leaves the current clusters in place |
-| `POST /api/brain/reprocess/project/{project_id}` | Reprocess every deployment in a project |
+| `POST /api/brain/reprocess/deployment/{deployment_id}` | **Write** (see [Access](#access)). Supersede current runs and re-embed a deployment. The worker checks it can embed first, so a failed check leaves the current clusters in place |
+| `POST /api/brain/reprocess/project/{project_id}` | **Write** (see [Access](#access)). Reprocess every deployment in a project |
 | `POST /api/brain/reprocess/all` | Platform-wide re-embed — default dry-run returns a cost estimate; `confirm=true` executes |
 | `GET /api/brain/compare-runs` | Compare cluster assignments between two runs (`?run_a=&run_b=`) |
 | `POST /api/brain/backup` | **No-op** (compat shim) — pgvector inherits Supabase PITR, so there's no separate snapshot; the job completes with nothing to do |
@@ -345,9 +357,9 @@ Same prefix; the queue/score endpoints are additionally gated by **`FF_ACTIVE_LE
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/brain/recalculate-al-scores/{deployment_id}` | Recompute active-learning scores for a deployment |
+| `POST /api/brain/recalculate-al-scores/{deployment_id}` | **Write** (see [Access](#access)). Recompute active-learning scores for a deployment |
 | `GET /api/brain/review-queue/{deployment_id}` | Media ranked by `active_learning_score` DESC with AI label + score reasons (`?limit=50`) |
-| `POST /api/brain/review/{media_id}` | Record a reviewer decision (`approve` / `reassign` / `expert`) → human observation |
+| `POST /api/brain/review/{media_id}` | **Write** (see [Access](#access)). Record a reviewer decision (`approve` / `reassign` / `expert`) → human observation |
 
 ---
 
@@ -358,7 +370,7 @@ Prefix `/api/intelligence`.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/intelligence/shift-detection/{deployment_id}` | Detect distribution shift between two time windows |
+| `POST /api/intelligence/shift-detection/{deployment_id}` | **Write** (see [Access](#access)). Detect distribution shift between two time windows |
 | `GET /api/intelligence/health/{project_id}` | Dataset health: species coverage, review funnel, outlier rate |
 | `GET /api/intelligence/alerts/{project_id}` | Active (unacknowledged) conservation alerts |
 | `GET /api/intelligence/unknown-species/{org_id}` | Provisional taxa awaiting expert confirmation |
@@ -369,11 +381,11 @@ Prefix `/api/intelligence`.
 
 ## QA
 
-Prefix `/api/qa`. JWT required.
+Prefix `/api/qa`. JWT required; gated by **`FF_ACTIVE_LEARNING_ENABLED`** (the router is not mounted when off).
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/qa/report/{deployment_id}` | AI-vs-human agreement (a precision proxy over images carrying both an AI and a human label) |
+| `GET /api/qa/report/{deployment_id}` | **Read** (see [Access](#access)), `404` otherwise. AI-vs-human agreement (a precision proxy over images carrying both an AI and a human label) |
 
 ---
 

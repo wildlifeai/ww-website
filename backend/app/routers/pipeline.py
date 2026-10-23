@@ -15,7 +15,7 @@ import asyncio
 import structlog
 from fastapi import APIRouter, Depends, Request
 
-from app.authz import assert_access, require_deployment_access
+from app.authz import assert_write, require_deployment_access, require_deployment_write
 from app.dependencies import get_current_user, get_privileged_client, get_verified_user, require_not_demo
 from app.domain.events import cluster_deployment_events, compute_deployment_effort
 from app.domain.pipeline import PipelineBusyError, run_pipeline
@@ -47,9 +47,9 @@ async def run_inference_pipeline(
     Requires authentication.
     """
     req_id = getattr(request.state, "request_id", None)
-    # Object-level authz: the pipeline runs with the service role (RLS-bypassing),
-    # so verify the caller actually has access to this deployment.
-    await assert_access(user.id, deployment_id=body.deployment_id)
+    # Object-level authz: the pipeline writes with the service role (RLS-bypassing), so the
+    # caller must be able to change this deployment's project (project_member or above).
+    await assert_write(user.id, deployment_id=body.deployment_id)
 
     try:
         result = await run_pipeline(
@@ -106,8 +106,8 @@ async def cluster_events(
     Requires authentication.
     """
     req_id = getattr(request.state, "request_id", None)
-    # Object-level authz: clustering replaces this deployment's events — verify access.
-    await assert_access(user.id, deployment_id=body.deployment_id)
+    # Object-level authz: clustering replaces this deployment's events, a write.
+    await assert_write(user.id, deployment_id=body.deployment_id)
 
     try:
         result = await cluster_deployment_events(
@@ -135,7 +135,7 @@ async def cluster_events(
 # ── Effort Computation ───────────────────────────────────────────────
 
 
-@router.post("/effort/{deployment_id}", dependencies=[Depends(require_deployment_access), Depends(require_not_demo)])
+@router.post("/effort/{deployment_id}", dependencies=[Depends(require_deployment_write), Depends(require_not_demo)])
 async def compute_effort(
     request: Request,
     deployment_id: str,

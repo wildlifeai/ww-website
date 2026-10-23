@@ -17,7 +17,7 @@ The demo can never mutate data, even though it's a normal signed-in session:
 | Layer | Mechanism | Where |
 |-------|-----------|-------|
 | **Database** | The `project_viewer` role grants `SELECT` on project data; **no write policy accepts it** | `ww-backend` RLS (migration `add_project_viewer_readonly_role`) |
-| **API** | `require_not_demo` dependency returns **403** on every mutating endpoint (CamtrapDP import, pipeline run, effort, annotations, iNat, …) — service-role endpoints bypass RLS, so this closes that gap | `backend/app/dependencies.py` |
+| **API** | The write check refuses a `project_viewer`, so the demo, with **403** on every route that changes project data with the service role ([Access](api-reference.md#access)); `require_not_demo` also returns **403** on the mutating endpoints (CamtrapDP import, pipeline run, effort, annotations, iNat, …) | `backend/app/authz.py`, `backend/app/dependencies.py` |
 | **UI** | `DemoGuard` disables write controls with a tooltip, guards write routes, and shows a friendly toast instead of a raw error | `frontend/src/components/common/DemoGuard.tsx` |
 
 A demo visitor therefore sees disabled buttons and "read-only demo" notices — never a
