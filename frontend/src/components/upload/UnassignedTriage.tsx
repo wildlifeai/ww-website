@@ -1,22 +1,27 @@
 /**
- * UnassignedTriage — resolve photos that arrive without a deployment.
+ * UnassignedTriage, resolve photos that arrive without a deployment.
  *
  * Why this exists: media rows are only created for files that reach Google
  * Drive, and `candidates` in the drive-upload job requires a deployment_id
  * (backend/app/jobs/definitions.py). A photo with no deployment is therefore
- * never stored and never appears anywhere — while the dock still reports the
+ * never stored and never appears anywhere, while the dock still reports the
  * run as complete. Silently dropping a card's photos is the failure this
  * screen prevents.
  *
  * Photos are grouped into capture sessions (same card folder, gaps under
  * SESSION_GAP_MS) so the operator decides per shoot rather than per photo,
  * and each session can be bound to an existing deployment or turned into a
- * new one pre-filled from the photos themselves.
+ * new one pre-filled from the photos themselves. With many sessions, one
+ * action assigns every session left, or creates a deployment for each
+ * (UI audit 05 #6). Decided sessions collapse to a line.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { PageHelp } from '../common/PageHelp'
 import { apiClient } from '../../lib/apiClient'
-import { buildSessions, deploymentLabel, fmt, span } from './unassignedSessions'
-import type { TriageDeployment, TriageSession } from './unassignedSessions'
+import { deploymentPickerGroups, pickerLabels, type UploadTarget } from '../../lib/uploadTargets'
+import { DeploymentPicker } from './DeploymentPicker'
+import { buildSessions, defaultDeploymentName, fmt, planBulkCreate, span } from './unassignedSessions'
+import type { TriageSession } from './unassignedSessions'
 
 interface Props {
   files: File[]
@@ -31,12 +36,47 @@ interface Props {
    * is accounted for and the footer's "ready to upload" count is honest.
    */
   matched?: { label: string; count: number }[]
-  deployments: TriageDeployment[]
+  /** Photos whose deployment is in a project the user cannot upload to; they are left out. */
+  blockedCount?: number
+  /** Deployments the user can upload to. */
+  deployments: UploadTarget[]
+  /** Projects the user can upload to, offered when a session becomes a new deployment. */
   projects: { id: string; name: string }[]
   onCancel: () => void
+  /** A deployment was created here, so the page's list is out of date. */
+  onDeploymentCreated?: () => void
   /** Sessions the user resolved; skipped ones are excluded. */
   onDone: (assignments: { deploymentId: string; indices: number[] }[], skipped: number) => void
 }
+
+/** What POST /api/deployments returns. */
+interface CreatedDeployment {
+  id: string
+  project_id: string
+  name: string
+  location_name: string | null
+  deployment_start: string | null
+}
+
+async function createDeployment(projectId: string, name: string, exifDeploymentId: string | null): Promise<UploadTarget> {
+  // When the camera stamped a deployment id, create the row under that id: the
+  // phone that configured the device holds the same id locally, so its later
+  // sync converges on this row instead of producing a second deployment.
+  const dep = (await apiClient.post('/api/deployments', {
+    project_id: projectId,
+    name,
+    ...(exifDeploymentId ? { id: exifDeploymentId } : {}),
+  })) as CreatedDeployment
+  return {
+    id: dep.id,
+    project_id: dep.project_id ?? projectId,
+    name: dep.name ?? name,
+    location_name: dep.location_name ?? null,
+    deployment_start: dep.deployment_start ?? null,
+  }
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 
 /** A few representative frames from the session (first, last, and between). */
 function useSamplePicks(indices: number[]): number[] {
@@ -71,37 +111,46 @@ function Thumb({ file, alt }: { file: File; alt: string }) {
   return <img ref={ref} alt={alt} loading="lazy" />
 }
 
+/** The project select for a new deployment; hidden when there is only one project to pick. */
+function ProjectSelect({ projects, value, onChange, label }: {
+  projects: { id: string; name: string }[]
+  value: string
+  onChange: (id: string) => void
+  label: string
+}) {
+  if (projects.length < 2) return null
+  return (
+    <select className="triage-select" aria-label={label} value={value} onChange={(e) => onChange(e.target.value)}>
+      {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+    </select>
+  )
+}
+
 function SessionCard({
-  session, files, filePaths, deployments, projects, onAssign, onSkip,
+  session, files, filePaths, groups, projects, onAssign, onCreated, onSkip,
 }: {
   session: TriageSession
   files: File[]
   filePaths: string[]
-  deployments: TriageDeployment[]
+  groups: ReturnType<typeof deploymentPickerGroups>
   projects: { id: string; name: string }[]
   onAssign: (deploymentId: string) => void
+  onCreated: (deployment: UploadTarget) => void
   onSkip: () => void
 }) {
   const picks = useSamplePicks(session.indices)
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [name, setName] = useState(
-    session.exifDeploymentId
-      ? `Camera deployment ${session.exifDeploymentId.slice(0, 8)}`
-      : session.cardFolder
-        ? `Card ${session.cardFolder}`
-        : `Photos from ${fmt(session.firstMs)}`,
-  )
+  const [name, setName] = useState(() => defaultDeploymentName(session))
   // Projects can still be loading when this card first renders, so the initial
-  // value would stick at '' while the <select> visually shows the first option
-  // - "Create & assign" then failed with "pick a project" on an apparently
+  // value would stick at '' while the <select> visually shows the first option,
+  // and "Create & assign" then failed with "pick a project" on an apparently
   // picked project. Derive the effective value instead of syncing state in an
   // effect (which this repo's lint rejects).
   const [pickedProjectId, setPickedProjectId] = useState('')
   const projectId = pickedProjectId || projects[0]?.id || ''
 
-  const resolved = session.deploymentId !== null
   const samplePath = filePaths[session.indices[0]] ?? files[session.indices[0]]?.name ?? ''
 
   const create = async () => {
@@ -112,15 +161,7 @@ function SessionCard({
     setBusy(true)
     setError(null)
     try {
-      // When the camera stamped a deployment id, create the row under that id: the
-      // phone that configured the device holds the same id locally, so its later
-      // sync converges on this row instead of producing a second deployment.
-      const dep = await apiClient.post('/api/deployments', {
-        project_id: projectId,
-        name: name.trim(),
-        ...(session.exifDeploymentId ? { id: session.exifDeploymentId } : {}),
-      })
-      onAssign(dep.id)
+      onCreated(await createDeployment(projectId, name.trim(), session.exifDeploymentId))
       setCreating(false)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not create the deployment.')
@@ -130,7 +171,7 @@ function SessionCard({
   }
 
   return (
-    <div className={`triage-card${resolved ? ' is-resolved' : ''}${session.skipped ? ' is-skipped' : ''}`}>
+    <div className="triage-card">
       <div className="triage-shots">
         {picks.map((i, n) => (
           <Thumb key={i} file={files[i]} alt={`Frame ${n + 1} of this session`} />
@@ -162,84 +203,196 @@ function SessionCard({
         )}
       </dl>
 
-      {resolved ? (
-        <p className="triage-state ok">
-          Assigned to {(() => {
-            const d = deployments.find((x) => x.id === session.deploymentId)
-            return d ? deploymentLabel(d) : 'a new deployment'
-          })()}
-        </p>
-      ) : session.skipped ? (
-        <p className="triage-state warn">
-          Left unassigned — these {session.indices.length} photos will not be uploaded.
-        </p>
-      ) : (
-        <>
-          <div className="triage-actions">
-            <select
-              className="triage-select"
-              defaultValue=""
-              aria-label="Assign these photos to a deployment"
-              onChange={(e) => e.target.value && onAssign(e.target.value)}
-            >
-              <option value="">Assign to an existing deployment…</option>
-              {deployments.map((d) => (
-                <option key={d.id} value={d.id}>{deploymentLabel(d)}</option>
-              ))}
-            </select>
-            <button type="button" className="triage-btn" onClick={() => setCreating((v) => !v)}>
-              Create deployment from these photos
-            </button>
-            <button type="button" className="triage-btn ghost" onClick={onSkip}>
-              Skip
-            </button>
-          </div>
+      <div className="triage-actions">
+        <DeploymentPicker
+          groups={groups}
+          value=""
+          onChange={(id) => { if (id) onAssign(id) }}
+          placeholder="Assign to an existing deployment…"
+          label="Assign these photos to a deployment"
+        />
+        <button type="button" className="triage-btn" onClick={() => setCreating((v) => !v)}>
+          Create deployment from these photos
+        </button>
+        <button type="button" className="triage-btn ghost" onClick={onSkip}>
+          Skip
+        </button>
+      </div>
 
-          {creating && (
-            <div className="triage-create">
-              <label>
-                <span>Name</span>
-                <input value={name} onChange={(e) => setName(e.target.value)} />
-              </label>
-              <label>
-                <span>Project</span>
-                <select value={projectId} onChange={(e) => setPickedProjectId(e.target.value)}>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </label>
-              <p className="triage-hint">
-                Covers {fmt(session.firstMs)} → {fmt(session.lastMs)}, taken from the photos.
-              </p>
-              {error && <p className="triage-state warn">{error}</p>}
-              <button type="button" className="triage-btn primary" disabled={busy} onClick={create}>
-                {busy ? 'Creating…' : 'Create & assign'}
-              </button>
-            </div>
+      {creating && (
+        <div className="triage-create">
+          <label>
+            <span>Name</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} />
+          </label>
+          {projects.length > 1 && (
+            <label>
+              <span>Project</span>
+              <ProjectSelect projects={projects} value={projectId} onChange={setPickedProjectId} label="Project" />
+            </label>
           )}
-        </>
+          {error && <p className="triage-state warn">{error}</p>}
+          <button type="button" className="triage-btn primary" disabled={busy} onClick={create}>
+            {busy ? 'Creating…' : 'Create & assign'}
+          </button>
+        </div>
       )}
     </div>
   )
 }
 
+/** A decided session, collapsed to one line with a way back. */
+function DecidedRow({ session, assignedTo, onChange }: {
+  session: TriageSession
+  assignedTo: string | null
+  onChange: () => void
+}) {
+  return (
+    <li className={session.skipped ? 'is-skipped' : 'is-resolved'}>
+      <span className="triage-decided-count">{session.indices.length}</span>
+      <span className="triage-decided-when">{fmt(session.firstMs)} → {fmt(session.lastMs)}</span>
+      <span className="triage-decided-what">
+        {session.skipped ? 'Left out, not uploaded' : `Assigned to ${assignedTo ?? 'a new deployment'}`}
+      </span>
+      <button type="button" className="triage-btn ghost" onClick={onChange}>Change</button>
+    </li>
+  )
+}
+
+/** "Assign all" and "create one deployment per session", for the sessions still undecided. */
+function BulkActions({ pendingCount, groups, projects, busy, progress, error, onAssignAll, onCreateAll }: {
+  pendingCount: number
+  groups: ReturnType<typeof deploymentPickerGroups>
+  projects: { id: string; name: string }[]
+  busy: boolean
+  progress: string | null
+  error: string | null
+  onAssignAll: (deploymentId: string) => void
+  onCreateAll: (projectId: string) => void
+}) {
+  const [target, setTarget] = useState('')
+  const [pickedProjectId, setPickedProjectId] = useState('')
+  const projectId = pickedProjectId || projects[0]?.id || ''
+
+  return (
+    <div className="triage-bulk">
+      <div className="triage-bulk-row">
+        <span>All {plural(pendingCount, 'session')} left:</span>
+        <DeploymentPicker
+          groups={groups}
+          value={target}
+          onChange={setTarget}
+          placeholder="Pick a deployment…"
+          label="Deployment for every session left"
+        />
+        <button
+          type="button"
+          className="triage-btn"
+          disabled={!target || busy}
+          onClick={() => { onAssignAll(target); setTarget('') }}
+        >
+          Assign all
+        </button>
+      </div>
+      <div className="triage-bulk-row">
+        <button
+          type="button"
+          className="triage-btn"
+          disabled={!projectId || busy}
+          onClick={() => onCreateAll(projectId)}
+        >
+          Create one deployment per session
+        </button>
+        {projects.length > 1 && <span>in</span>}
+        <ProjectSelect projects={projects} value={projectId} onChange={setPickedProjectId} label="Project for the new deployments" />
+        {progress && <span className="triage-hint" role="status">{progress}</span>}
+      </div>
+      {error && <p className="triage-state warn">{error}</p>}
+    </div>
+  )
+}
+
+/** How many matched deployments the tally names before "and N more". */
+const MATCHED_NAMED = 5
+
 export function UnassignedTriage({
-  files, filePaths, exifIds, unresolved, matched = [], deployments, projects, onCancel, onDone,
+  files, filePaths, exifIds, unresolved, matched = [], blockedCount = 0, deployments, projects,
+  onCancel, onDeploymentCreated, onDone,
 }: Props) {
   const [sessions, setSessions] = useState<TriageSession[]>(
     () => buildSessions(files, filePaths, unresolved, exifIds),
   )
+  // Deployments made on this screen, offered to every other session too.
+  const [created, setCreated] = useState<UploadTarget[]>([])
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<string | null>(null)
+  const [bulkError, setBulkError] = useState<string | null>(null)
 
+  // The page's list refreshes after a create, so a new deployment can be in both.
+  const groups = useMemo(() => {
+    const listed = new Set(deployments.map((d) => d.id))
+    return deploymentPickerGroups([...deployments, ...created.filter((d) => !listed.has(d.id))], projects)
+  }, [deployments, created, projects])
+  const labels = useMemo(() => pickerLabels(groups), [groups])
+
+  const assign = (keys: string[], deploymentId: string) => {
+    const take = new Set(keys)
+    setSessions((prev) => prev.map((s) =>
+      take.has(s.key) && !s.deploymentId && !s.skipped ? { ...s, deploymentId, skipped: false } : s))
+  }
   const update = (key: string, patch: Partial<TriageSession>) =>
     setSessions((prev) => prev.map((s) => (s.key === key ? { ...s, ...patch } : s)))
+
+  // A new deployment under the camera's id takes every undecided session carrying that id: the
+  // id can be created once, and the camera says they belong together.
+  const takeCreated = (dep: UploadTarget, key: string, exifDeploymentId: string | null) => {
+    setCreated((prev) => [...prev, dep])
+    onDeploymentCreated?.()
+    const keys: string[] = []
+    for (const s of sessions) {
+      if (s.key === key || (exifDeploymentId && s.exifDeploymentId === exifDeploymentId)) keys.push(s.key)
+    }
+    assign(keys, dep.id)
+  }
+
+  const createAll = async (projectId: string) => {
+    const plans = planBulkCreate(sessions)
+    setBulkBusy(true)
+    setBulkError(null)
+    let done = 0
+    setBulkProgress(`Creating ${plans.length} deployment${plans.length === 1 ? '' : 's'}…`)
+    let failures: unknown[] = []
+    try {
+      // Each one assigns its sessions as it lands; a failure leaves its sessions to decide by hand.
+      const results = await Promise.allSettled(plans.map(async (plan) => {
+        const dep = await createDeployment(projectId, plan.name, plan.exifDeploymentId)
+        setCreated((prev) => [...prev, dep])
+        assign(plan.sessionKeys, dep.id)
+        done += 1
+        setBulkProgress(`Created ${done} of ${plans.length}…`)
+      }))
+      failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []))
+      if (failures.length < plans.length) onDeploymentCreated?.()
+    } finally {
+      setBulkProgress(null)
+      setBulkBusy(false)
+    }
+    if (failures.length) {
+      const why = failures[0] instanceof Error ? failures[0].message : 'Could not create the deployment.'
+      setBulkError(`${plural(failures.length, 'deployment')} could not be created (${why}). Decide those sessions one by one.`)
+    }
+  }
 
   const matchedCount = matched.reduce((n, m) => n + m.count, 0)
   const assignedCount = sessions.filter((s) => s.deploymentId).reduce((n, s) => n + s.indices.length, 0)
   const skippedCount = sessions.filter((s) => s.skipped).reduce((n, s) => n + s.indices.length, 0)
   const pending = sessions.filter((s) => !s.deploymentId && !s.skipped)
+  const decided = sessions.filter((s) => s.deploymentId || s.skipped)
   // What will actually be sent: the photos that matched on their own plus the
   // ones resolved here. Counting only the latter read "0 photos ready" while
   // ten matched photos were about to upload.
   const readyCount = matchedCount + assignedCount
+  const leftOut = skippedCount + blockedCount
 
   const finish = () => {
     const assignments = sessions
@@ -248,16 +401,21 @@ export function UnassignedTriage({
     onDone(assignments, skippedCount)
   }
 
+  const matchedNames = matched.slice(0, MATCHED_NAMED).map((m) => `${m.label} (${m.count})`).join(', ')
+  const matchedMore = matched.length > MATCHED_NAMED ? ` and ${matched.length - MATCHED_NAMED} more` : ''
+
   return (
     <div className="triage">
       <header className="triage-head">
         <div>
-          <h3>Some photos aren&apos;t linked to a deployment</h3>
-          <p>
-            We grouped them into capture sessions by the deployment id the camera wrote into
-            each photo, else by card folder, and by gaps between photos. Photos left unassigned
-            are <strong>not uploaded</strong> — they would not appear in Annotations afterwards.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+            <h3>Some photos aren&apos;t linked to a deployment</h3>
+            <PageHelp label="About capture sessions" guide="/guides/uploading-photos" guideLabel="Read the upload guide">
+              Photos that match no deployment are grouped into capture sessions: the same camera or card
+              folder, with no gap over six hours. Pick or create a deployment for each session, or skip
+              it; skipped photos are not uploaded.
+            </PageHelp>
+          </div>
         </div>
         <div className="triage-tally">
           <strong>{sessions.length - pending.length} of {sessions.length}</strong>
@@ -267,44 +425,77 @@ export function UnassignedTriage({
 
       {matched.length > 0 && (
         <p className="triage-matched">
-          <strong>{matchedCount} photo{matchedCount === 1 ? '' : 's'} already matched</strong> a deployment
-          and will upload as they are: {matched.map((m) => `${m.label} (${m.count})`).join(', ')}.
-          Only the sessions below still need a decision.
+          <strong>{plural(matchedCount, 'photo')} already matched</strong> and will upload as they
+          are: {matchedNames}{matchedMore}.
+        </p>
+      )}
+      {blockedCount > 0 && (
+        <p className="triage-state warn">
+          {plural(blockedCount, 'photo')} {blockedCount === 1 ? 'is' : 'are'} in a project you can&apos;t upload to, so {blockedCount === 1 ? 'it is' : 'they are'} left out.
         </p>
       )}
 
-      <div className="triage-list">
-        {sessions.map((s) => (
-          <SessionCard
-            key={s.key}
-            session={s}
-            files={files}
-            filePaths={filePaths}
-            deployments={deployments}
-            projects={projects}
-            onAssign={(deploymentId) => update(s.key, { deploymentId, skipped: false })}
-            onSkip={() => update(s.key, { skipped: true, deploymentId: null })}
-          />
-        ))}
-      </div>
+      {pending.length > 1 && (
+        <BulkActions
+          pendingCount={pending.length}
+          groups={groups}
+          projects={projects}
+          busy={bulkBusy}
+          progress={bulkProgress}
+          error={bulkError}
+          onAssignAll={(id) => assign(pending.map((s) => s.key), id)}
+          onCreateAll={createAll}
+        />
+      )}
+
+      {pending.length > 0 && (
+        <div className="triage-list">
+          {pending.map((s) => (
+            <SessionCard
+              key={s.key}
+              session={s}
+              files={files}
+              filePaths={filePaths}
+              groups={groups}
+              projects={projects}
+              onAssign={(deploymentId) => assign([s.key], deploymentId)}
+              onCreated={(dep) => takeCreated(dep, s.key, s.exifDeploymentId)}
+              onSkip={() => update(s.key, { skipped: true, deploymentId: null })}
+            />
+          ))}
+        </div>
+      )}
+
+      {decided.length > 0 && (
+        <ul className="triage-decided" aria-label="Decided sessions">
+          {decided.map((s) => (
+            <DecidedRow
+              key={s.key}
+              session={s}
+              assignedTo={s.deploymentId ? labels.get(s.deploymentId) ?? null : null}
+              onChange={() => update(s.key, { skipped: false, deploymentId: null })}
+            />
+          ))}
+        </ul>
+      )}
 
       <footer className="triage-foot">
         <span className="triage-hint">
-          {skippedCount > 0
-            ? `${readyCount} photo${readyCount === 1 ? '' : 's'} will upload · ${skippedCount} will be left out`
-            : `${readyCount} photo${readyCount === 1 ? '' : 's'} ready to upload`}
+          {leftOut > 0
+            ? `${plural(readyCount, 'photo')} will upload · ${leftOut} will be left out`
+            : `${plural(readyCount, 'photo')} ready to upload`}
         </span>
         <div className="triage-actions">
           <button type="button" className="triage-btn ghost" onClick={onCancel}>Back</button>
           <button
             type="button"
             className="triage-btn primary"
-            disabled={pending.length > 0}
+            disabled={pending.length > 0 || readyCount === 0 || bulkBusy}
             onClick={finish}
           >
             {pending.length > 0
-              ? `${pending.length} session${pending.length === 1 ? '' : 's'} still to decide`
-              : 'Continue upload'}
+              ? `${plural(pending.length, 'session')} still to decide`
+              : readyCount === 0 ? 'Nothing to upload' : 'Continue upload'}
           </button>
         </div>
       </footer>
