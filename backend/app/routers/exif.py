@@ -26,7 +26,7 @@ import structlog
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from app.authz import assert_access, classify_deployment_access, deployment_id_prefix_bounds
+from app.authz import assert_write, classify_deployment_access, deployment_id_prefix_bounds
 from app.config import settings
 from app.dependencies import get_optional_user, is_email_confirmed
 from app.domain.exif import is_test_photo, parse_exif_from_bytes, resolve_deployment_source
@@ -77,13 +77,13 @@ async def _auto_create_deployments(deployment_ids: List[str], project_id: str, u
     This backs the frontend "create the SD-card deployment" action: the device
     stamps a Deployment_ID that has no matching row, so binding silently drops the
     frames. Reusing the same UUID means every future upload from that device binds
-    automatically. Access-guarded (raises 404 if the caller has no role on the
-    project — mirrors POST /api/deployments). A placeholder device is created
+    automatically. Guarded like POST /api/deployments: 404 if the caller has no role on
+    the project, 403 below project_member. A placeholder device is created
     because deployments need a non-null device_id + a unique (start, device_id).
     """
     from app.domain.photo_preprocessing import resolve_timezone  # noqa: F401 (parity w/ create_deployment)
 
-    await assert_access(user_id, project_id=project_id)  # 404 unless caller has access
+    await assert_write(user_id, project_id=project_id)  # 404 unreadable, 403 below member
 
     def _work() -> List[str]:
         svc = create_service_client()

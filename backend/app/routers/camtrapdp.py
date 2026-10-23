@@ -11,6 +11,7 @@ import asyncio
 import structlog
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 
+from app.authz import project_creator_org_id
 from app.dependencies import get_current_user, get_privileged_client, get_user_client, require_not_demo
 from app.domain import camtrapdp as domain
 from app.schemas.camtrapdp import CamtrapImportResult
@@ -62,18 +63,14 @@ async def import_camtrapdp(
         )
 
     # ── Resolve user's primary organisation ───────────────────────────
-    # Remember: user_roles uses scope_id (not organisation_id) + scope_type
-    org_response = await asyncio.to_thread(
-        lambda: svc.table("user_roles").select("scope_id, role").eq("user_id", user.id).eq("scope_type", "organisation").limit(1).execute()
-    )
-
-    if not org_response.data:
+    # The import creates a project, so the rule is project creation's: an active
+    # organisation_member or organisation_manager role (ww-backend's projects INSERT policy).
+    org_id = await project_creator_org_id(user.id)
+    if not org_id:
         raise HTTPException(
             status_code=403,
             detail="You must belong to an organisation to import data.",
         )
-
-    org_id = org_response.data[0]["scope_id"]
 
     # ── Parse ZIP ──────────────────────────────────────────────────────
     try:

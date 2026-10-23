@@ -122,6 +122,22 @@ Never:
 
 Frontend code must only use anonymous or authenticated user tokens.
 
+## Access checks on service-role routes
+
+A route that reads or writes with the service client bypasses RLS, so it checks the caller
+itself with `app/authz.py` (levels and status codes:
+[API reference, Access](../../../documentation/resources/api-reference.md#access)):
+
+* A read takes `require_*_access` or `assert_access`.
+* A route that changes project data, or starts work on it (a pipeline run, an embed, a cluster
+  confirm, a review, an upload), takes `require_*_write` or `assert_write`, and a body list of
+  photos goes through `writable_media_ids`. The rule is `_can_write`, ww-backend's
+  `has_project_role(..., 'project_member')`; a `project_viewer` is read-only everywhere (UI audit
+  decision 1, 21 Oct 2026). `require_not_demo` stays on as well.
+* A route that runs as the caller (`get_user_client`) needs neither: RLS decides, and the route
+  turns a refused row into `403`.
+* Creating a project needs an active organisation role (`project_creator_org_id`).
+
 
 # 6. Feature Flag Rules
 

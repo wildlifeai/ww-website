@@ -11,7 +11,7 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter, Depends, Request
 
-from app.authz import require_deployment_access, require_org_access, require_project_access
+from app.authz import require_deployment_access, require_deployment_write, require_org_access, require_project_access
 from app.config import settings
 from app.dependencies import get_current_user, require_not_demo
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
@@ -29,7 +29,7 @@ def _disabled(req_id):
     )
 
 
-@router.post("/shift-detection/{deployment_id}", dependencies=[Depends(require_deployment_access), Depends(require_not_demo)])
+@router.post("/shift-detection/{deployment_id}", dependencies=[Depends(require_deployment_write), Depends(require_not_demo)])
 async def shift_detection(request: Request, deployment_id: str, body: ShiftDetectionRequest, user=Depends(get_current_user)):
     """Detect ecological distribution shift between two time windows."""
     req_id = getattr(request.state, "request_id", None)

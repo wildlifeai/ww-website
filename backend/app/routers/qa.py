@@ -12,6 +12,7 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter, Depends, Request
 
+from app.authz import require_deployment_access
 from app.config import settings
 from app.dependencies import get_current_user
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
@@ -21,7 +22,7 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/api/qa", tags=["qa"])
 
 
-@router.get("/report/{deployment_id}")
+@router.get("/report/{deployment_id}", dependencies=[Depends(require_deployment_access)])
 async def qa_report_endpoint(request: Request, deployment_id: str, user=Depends(get_current_user)):
     """AI-vs-human agreement (precision proxy) for a deployment."""
     req_id = getattr(request.state, "request_id", None)
