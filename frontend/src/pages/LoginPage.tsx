@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Auth } from '@supabase/auth-ui-react'
 import { ThemeSupa } from '@supabase/auth-ui-shared'
 import { supabase } from '../config/supabase'
@@ -8,6 +8,7 @@ import { DemoLoginButton } from '../components/common/DemoLoginButton'
 import { MIN_PASSWORD_LENGTH, signUpMetadata, signUpProblem, type SignUpFields } from '../lib/signUp'
 import { loadGoogleIdentity, newNonce } from '../lib/googleIdentity'
 import { usePageMeta } from '../lib/pageMeta'
+import { returnPath } from '../lib/returnPath'
 
 /**
  * Log in (/login) and create an account (/signup), by email or with Google (#116, #187).
@@ -18,16 +19,19 @@ import { usePageMeta } from '../lib/pageMeta'
  * own origin, which is on each Supabase project's redirect allow-list; anything else falls back
  * to the project's Site URL, which on staging is the app's wildlifewatcher:// link that a
  * desktop browser cannot open. supabase-js completes the session from the returning URL. A new account becomes a
- * `users` row in the General organisation (ww-backend `handle_new_user`).
+ * `users` row in the General organisation (ww-backend `handle_new_user`). Signing in returns to
+ * the page that sent the visitor here (`location.state.from`), or home.
  */
 export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }) {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [forgotten, setForgotten] = useState(false)
+  const returnTo = returnPath(location.state)
 
   useEffect(() => {
-    if (user) navigate('/')
-  }, [user, navigate])
+    if (user) navigate(returnTo, { replace: true })
+  }, [user, navigate, returnTo])
 
   const siteUrl = window.location.origin
   const signingUp = mode === 'sign_up'
@@ -50,7 +54,6 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
           <Auth
             supabaseClient={supabase}
             appearance={AUTH_APPEARANCE}
-            theme="light"
             providers={[]}
             redirectTo={siteUrl + '/reset-password'}
             view="forgotten_password"
@@ -71,7 +74,6 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
               <Auth
                 supabaseClient={supabase}
                 appearance={AUTH_APPEARANCE}
-                theme="light"
                 providers={[]}
                 redirectTo={siteUrl + '/'}
                 view="sign_in"
@@ -84,8 +86,8 @@ export function LoginPage({ mode = 'sign_in' }: { mode?: 'sign_in' | 'sign_up' }
           )}
           <div style={{ textAlign: 'center', marginTop: '1rem', fontSize: '0.875rem' }}>
             {signingUp
-              ? <>Already have an account? <Link to="/login" style={{ color: 'var(--primary)' }}>Log in</Link></>
-              : <>No account yet? <Link to="/signup" style={{ color: 'var(--primary)' }}>Create one</Link></>}
+              ? <>Already have an account? <Link to="/login" state={location.state} style={{ color: 'var(--primary)' }}>Log in</Link></>
+              : <>No account yet? <Link to="/signup" state={location.state} style={{ color: 'var(--primary)' }}>Create one</Link></>}
           </div>
         </>
       )}
@@ -250,11 +252,11 @@ function Divider() {
 }
 
 /**
- * ThemeSupa's defaults fail WCAG AA on this page: white on its #3fcf8e brand
- * button is 2:1 and its #7e7e7e labels 3.9:1 on --surface (#212). The brand
- * takes the site's light-mode primary (6.5:1 with white text) and the labels
- * the muted text colour. Hex values, not var(): the Auth UI renders
- * theme="light" whatever the OS scheme, so the dark-mode tokens would not fit.
+ * The Auth UI follows the OS colour scheme through the site's own tokens (UI audit 05 #17):
+ * its colours are CSS values, so var() resolves against index.css in light and dark alike.
+ * ThemeSupa's defaults fail WCAG AA here: white on its #3fcf8e brand button is 2:1 and its
+ * #7e7e7e labels 3.9:1 on --surface (#212). The brand stays the light-mode primary in both
+ * schemes, since white on the dark-mode primary is under 3:1; 6.5:1 with white text.
  */
 const AUTH_APPEARANCE = {
   theme: ThemeSupa,
@@ -263,7 +265,12 @@ const AUTH_APPEARANCE = {
       colors: {
         brand: '#006e1c',
         brandAccent: '#005a17',
-        inputLabelText: '#5f6368',
+        inputText: 'var(--text-color)',
+        inputLabelText: 'var(--text-muted)',
+        inputBorder: 'var(--border)',
+        inputBackground: 'var(--bg-color)',
+        dividerBackground: 'var(--border)',
+        anchorTextColor: 'var(--text-muted)',
       },
     },
   },

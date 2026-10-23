@@ -24,7 +24,7 @@ src/
 ├── main.tsx                # React entry
 ├── pages/                  # route-level components
 ├── components/
-│   ├── ui/                 # design-system primitives (Modal, Ribbon, DataTable, ControlBar,
+│   ├── ui/                 # design-system primitives (Modal, Ribbon, DataTable,
 │   │                       #   FilterSelect, StatusBadge, VegaChart) — see resources/ui-components.md
 │   ├── data/               # feature components (MediaBrowser, MediaDetail, SpeciesPicker,
 │   │                       #   DeploymentMap, ObservationReports, ChartBuilder, …)
@@ -74,15 +74,14 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 | `/toolkit` | `ToolkitPage` | Upload, SD-card prep, manifest, privileged model upload |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
-| `/field` | `FieldPage` | Active-deployment view (LoRaWAN heartbeats) |
-| `/upload-data`, `/upload/logs` | `UploadDataPage` (→ `UploadFlow`), `UploadLogsPage` | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) + log view |
+| `/field` | `FieldPage` | Realtime: active deployments with their newest LoRaWAN check-in, read-only (`lib/realtimeReads.ts`) |
+| `/upload-data` | `UploadDataPage` (→ `UploadFlow`) | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
 | `/upload-model` | `UploadModelPage` | Edge Impulse → Vela model upload (org managers) |
 | `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters |
 | `/review/:id` | `ReviewQueuePage` | Active-learning review queue |
 | `/umap/:id` | `UmapExplorerPage` | Embedding-space exploration |
 | `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project) |
-| `/reporting/:id` | `ReportingPage` | Diel activity, CamtrapDP / Darwin Core exports |
 | `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history |
 | `/notifications` | `NotificationsPage` | Notification inbox — read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router); the unread count drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
 | `/settings` | `SettingsPage` | Projects, account, integrations, organisation API keys |
@@ -92,8 +91,12 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 **Redirects / legacy**: `/results` → `/insights`, `/other` → `/toolkit`, `/my-data` → `/insights`,
 `/analyse-images` → `/upload-data` (query strings preserved), `/explore/:id` →
 `/annotations?deployment=:id` (the Annotations grid now does clustering, bulk cluster-confirm and
-similar-image search), `/analysis/:id` → `/reporting/:id`. The old `MyDataPage` is retained only at
-`/my-data-legacy`. `LabelingPage` was **removed** — its rich editor now lives in the Annotations
+similar-image search), `/analysis/:id` → `/reporting/:id` → `/insights?tab=reports&deployment=:id`
+(one deployment's results are the Insights Reports tab filtered to it; the CamtrapDP export is on
+Toolkit), `/my-data-legacy` → `/insights`, `/upload/logs` → `/processing` (job logs live in
+Processing history). `ReportingPage`, `MyDataPage` and `UploadLogsPage` are only these redirects
+until their routes leave `App.tsx` ([UI audit](../development%20reports/2026-10_ui-audit/README.md),
+decisions 3 and 5). `LabelingPage` was **removed**: its rich editor now lives in the Annotations
 full-screen modal (see [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md)). `EventReviewPage` is
 currently **unrouted** (`/events/:id` was removed from `App.tsx`; the file remains pending
 re-route-or-delete).

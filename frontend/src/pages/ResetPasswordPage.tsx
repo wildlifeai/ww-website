@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Check, Lock } from 'lucide-react'
 import { supabase } from '../config/supabase'
 import { usePageMeta } from '../lib/pageMeta'
+import { MIN_PASSWORD_LENGTH } from '../lib/signUp'
 
 export function ResetPasswordPage() {
   usePageMeta({ title: 'Reset your password' })
@@ -53,8 +55,8 @@ export function ResetPasswordPage() {
     e.preventDefault()
     setErrorMessage('')
 
-    if (password.length < 6) {
-      setErrorMessage('Password must be at least 6 characters long.')
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setErrorMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters long.`)
       return
     }
 
@@ -99,9 +101,9 @@ export function ResetPasswordPage() {
             marginBottom: '1rem',
             transition: 'background 0.3s ease'
           }}>
-            <span style={{ fontSize: '1.5rem', color: 'white' }}>
-              {status === 'success' ? '✓' : '🔒'}
-            </span>
+            {status === 'success'
+              ? <Check size={24} color="white" aria-hidden="true" />
+              : <Lock size={22} color="white" aria-hidden="true" />}
           </div>
         </div>
 
@@ -109,7 +111,7 @@ export function ResetPasswordPage() {
         {status === 'waiting' && (
           <div style={{ textAlign: 'center' }}>
             <h2 style={{ margin: '0 0 1rem', fontSize: '1.5rem' }}>Verifying Reset Link…</h2>
-            <p style={{ opacity: 0.7, margin: 0, lineHeight: 1.6 }}>
+            <p style={{ color: 'var(--text-muted)', margin: 0, lineHeight: 1.6 }}>
               Please wait while we verify your password reset token.
             </p>
             <div style={{
@@ -135,8 +137,8 @@ export function ResetPasswordPage() {
             <h2 style={{ textAlign: 'center', margin: '0 0 0.5rem', fontSize: '1.5rem' }}>
               Set New Password
             </h2>
-            <p style={{ textAlign: 'center', opacity: 0.7, margin: '0 0 2rem', lineHeight: 1.6 }}>
-              Enter your new password below. It must be at least 6 characters long.
+            <p style={{ textAlign: 'center', color: 'var(--text-muted)', margin: '0 0 2rem', lineHeight: 1.6 }}>
+              Enter your new password below. It must be at least {MIN_PASSWORD_LENGTH} characters long.
             </p>
 
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -155,7 +157,7 @@ export function ResetPasswordPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={MIN_PASSWORD_LENGTH}
                   autoFocus
                   autoComplete="new-password"
                   className="reset-input"
@@ -177,7 +179,7 @@ export function ResetPasswordPage() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={MIN_PASSWORD_LENGTH}
                   autoComplete="new-password"
                   className="reset-input"
                 />
@@ -221,7 +223,7 @@ export function ResetPasswordPage() {
             <h2 style={{ margin: '0 0 0.5rem', fontSize: '1.5rem', color: 'var(--success)' }}>
               Password Updated!
             </h2>
-            <p style={{ opacity: 0.7, margin: '0 0 2rem', lineHeight: 1.6 }}>
+            <p style={{ color: 'var(--text-muted)', margin: '0 0 2rem', lineHeight: 1.6 }}>
               Your password has been successfully updated. You can now log in with your new password.
             </p>
             <button
@@ -239,7 +241,7 @@ export function ResetPasswordPage() {
           <div style={{ textAlign: 'center' }}>
             <h2 style={{ margin: '0 0 0.5rem', fontSize: '1.5rem' }}>Link Expired or Invalid</h2>
             {errorMessage && (
-              <p style={{ opacity: 0.7, margin: '0 0 2rem', lineHeight: 1.6 }}>
+              <p style={{ color: 'var(--text-muted)', margin: '0 0 2rem', lineHeight: 1.6 }}>
                 {errorMessage}
               </p>
             )}

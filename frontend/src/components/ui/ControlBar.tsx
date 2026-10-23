@@ -1,89 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 
-export interface ControlBarProps {
-  /** Left slot — filters, selects, search inputs */
-  filters?: React.ReactNode
-  /** Right slot — action buttons (export, create, etc.) */
-  actions?: React.ReactNode
-  /**
-   * When provided an "Advanced" button appears in the actions slot.
-   * The callback receives the current open state so the caller can
-   * open whatever modal it owns.
-   */
-  onAdvanced?: () => void
-  advancedLabel?: string
-  /** Stack filters + actions vertically on narrow containers */
-  wrap?: boolean
-}
-
-export function ControlBar({
-  filters,
-  actions,
-  onAdvanced,
-  advancedLabel = 'Advanced',
-  wrap = true,
-}: ControlBarProps) {
-  return (
-    <div style={{
-      display: 'flex',
-      flexWrap: wrap ? 'wrap' : 'nowrap',
-      gap: '0.625rem',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '0.625rem 0',
-      marginBottom: '1rem',
-    }}>
-      {/* Filters — left-aligned, can wrap */}
-      {filters && (
-        <div style={{
-          display: 'flex',
-          gap: '0.5rem',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          flex: 1,
-          minWidth: 0,
-        }}>
-          {filters}
-        </div>
-      )}
-
-      {/* Actions — right-aligned, no wrap */}
-      <div style={{
-        display: 'flex',
-        gap: '0.5rem',
-        alignItems: 'center',
-        flexShrink: 0,
-      }}>
-        {actions}
-        {onAdvanced && (
-          <button
-            onClick={onAdvanced}
-            style={{
-              padding: '0.375rem 0.75rem',
-              fontSize: '0.8125rem',
-              border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)',
-              backgroundColor: 'transparent',
-              color: 'var(--text-color)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.375rem',
-              whiteSpace: 'nowrap',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--primary)')}
-            onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-          >
-            ⚙ {advancedLabel}
-          </button>
-        )}
-      </div>
-    </div>
-  )
-}
+// The filter controls of the data pages: FilterSelect (Annotations, Insights, admin Devices),
+// SearchInput and ColumnToggle (DataTable). The flat ControlBar toolbar this file was named
+// after had no users and was removed (UI audit 01 F1); the file keeps its name for the imports.
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FilterSelect — a styled <select> sized for use inside a ControlBar
+// FilterSelect: a styled <select> sized for a toolbar or ribbon group
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface FilterSelectOption {
@@ -130,7 +52,7 @@ export function FilterSelect({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SearchInput — a styled text input sized for use inside a ControlBar
+// SearchInput: a styled text input sized for a toolbar
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SearchInputProps {
