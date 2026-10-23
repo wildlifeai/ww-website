@@ -1,12 +1,9 @@
 import { useEffect, useMemo } from 'react'
-import { MapContainer, TileLayer, CircleMarker, Marker, Tooltip, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Tooltip, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
-
-// Fix Leaflet default icon paths broken by bundlers
 import L from 'leaflet'
-import iconUrl from 'leaflet/dist/images/marker-icon.png'
-import iconShadow from 'leaflet/dist/images/marker-shadow.png'
-L.Marker.prototype.options.icon = L.icon({ iconUrl, shadowUrl: iconShadow, iconSize: [25, 41], iconAnchor: [12, 41] })
+import { startDateLabel } from '../../lib/deploymentFilterOptions'
+import { boundsOf, spreadOffsets, type Bounds } from '../../lib/mapMarkers'
 
 interface Deployment {
   id: string
@@ -15,6 +12,8 @@ interface Deployment {
   longitude: number | null
   deployment_start: string | null
   deployment_end: string | null
+  /** IANA zone the dates are shown in; the browser's when absent. */
+  timezone?: string | null
   project_name?: string
   observation_count?: number
   // Optional analytics, supplied by the Insights Map tab. When omitted (e.g. the
@@ -32,14 +31,16 @@ interface DeploymentMapProps {
   selectedDeploymentId?: string | null
   metric?: 'total' | 'perDay'
   speciesLabel?: string | null   // when set, the map is in present/absent mode
-  defaultFocusId?: string | null // centre here on load (e.g. last finished deployment)
   showSpeciesPie?: boolean        // opt-in: render species pie markers (Insights). Other pages keep plain circles.
 }
 
+// Plain mode (no species): one colour per project, with a legend while the colours do not repeat.
 const PROJECT_COLOURS = [
   '#4caf50', '#2196f3', '#ff9800', '#e91e63',
   '#9c27b0', '#00bcd4', '#ff5722', '#607d8b',
 ]
+// Species mode colours by presence only (UI audit 04 #13).
+const PRESENT_COLOUR = '#4caf50'
 
 // A distinct palette for species pie wedges; species beyond it fall back to grey ("Other").
 const SPECIES_COLOURS = [
@@ -48,7 +49,21 @@ const SPECIES_COLOURS = [
 ]
 const OTHER_COLOUR = '#9e9e9e'
 
-// ── Pie-marker SVG helpers ───────────────────────────────────────────────────
+const MUTED: React.CSSProperties = { color: 'var(--text-muted)' }
+const LEGEND_ITEM: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '0.375rem' }
+
+/** A legend dot; `hollow` draws the absent-site ring. */
+function swatch(colour: string, hollow = false) {
+  return (
+    <span style={{
+      width: 10, height: 10, borderRadius: '50%', display: 'inline-block',
+      backgroundColor: hollow ? 'rgba(158,158,158,0.12)' : colour,
+      border: hollow ? `1.5px solid ${colour}` : undefined,
+    }} />
+  )
+}
+
+// ── Marker SVG helpers ───────────────────────────────────────────────────────
 function polar(cx: number, cy: number, r: number, frac: number): [number, number] {
   const a = 2 * Math.PI * frac - Math.PI / 2 // start at 12 o'clock
   return [cx + r * Math.cos(a), cy + r * Math.sin(a)]
@@ -58,6 +73,9 @@ function wedge(cx: number, cy: number, r: number, start: number, end: number): s
   const [x1, y1] = polar(cx, cy, r, end)
   const large = end - start > 0.5 ? 1 : 0
   return `M${cx},${cy} L${x0.toFixed(2)},${y0.toFixed(2)} A${r},${r} 0 ${large} 1 ${x1.toFixed(2)},${y1.toFixed(2)} Z`
+}
+function svg(size: number, inner: string): string {
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`
 }
 function pieMarkerHtml(
   counts: Record<string, number>,
@@ -72,7 +90,7 @@ function pieMarkerHtml(
   const total = entries.reduce((s, [, c]) => s + c, 0)
   let inner: string
   if (total === 0) {
-    // No detections (yet) — small hollow grey ring.
+    // No detections (yet): small hollow grey ring.
     inner = `<circle cx="${r}" cy="${r}" r="${r - 2}" fill="${OTHER_COLOUR}" fill-opacity="0.12" stroke="${OTHER_COLOUR}" stroke-width="1.5"/>`
   } else if (entries.length === 1) {
     inner = `<circle cx="${r}" cy="${r}" r="${r - sw}" fill="${colourOf(entries[0][0])}" fill-opacity="0.9" stroke="${stroke}" stroke-width="${sw}"/>`
@@ -83,35 +101,62 @@ function pieMarkerHtml(
       return `<path d="${wedge(r, r, r - sw, start, end)}" fill="${colourOf(sp)}" fill-opacity="0.9" stroke="${stroke}" stroke-width="${sw}"/>`
     }).join('')
   }
-  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">${inner}</svg>`
+  return svg(size, inner)
+}
+function circleMarkerHtml(radius: number, colour: string, fillOpacity: number, stroke: string, weight: number): string {
+  const c = radius + weight
+  return svg(2 * c, `<circle cx="${c}" cy="${c}" r="${radius}" fill="${colour}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="${weight}"/>`)
 }
 
-// Pans/zooms the map to the default deployment once it's known (and again if the project
-// selection changes the default). Doesn't fight the user afterwards — only re-fires when the
-// target coordinates actually change.
-function FocusController({ focus }: { focus: [number, number] | null }) {
+// One L.DivIcon per distinct look and offset, so a re-render or a selection change hands
+// react-leaflet the same object for every marker that did not change, and it skips setIcon.
+const iconCache = new Map<string, L.DivIcon>()
+function cachedIcon(html: string, size: number, [dx, dy]: [number, number]): L.DivIcon {
+  const key = `${size}|${dx}|${dy}|${html}`
+  let icon = iconCache.get(key)
+  if (!icon) {
+    if (iconCache.size > 2000) iconCache.clear()
+    // The anchor moves the icon by the fan-out offset; the tooltip follows it.
+    icon = L.divIcon({
+      html, className: 'ww-map-marker', iconSize: [size, size],
+      iconAnchor: [size / 2 - dx, size / 2 - dy], tooltipAnchor: [dx, dy],
+    })
+    iconCache.set(key, icon)
+  }
+  return icon
+}
+
+// Frames every marker on load, and again when the set of sites changes; it leaves the user's
+// pan and zoom alone otherwise.
+function FitBounds({ south, west, north, east }: Bounds) {
   const map = useMap()
   useEffect(() => {
-    if (focus) map.setView(focus, Math.max(map.getZoom(), 9), { animate: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus?.[0], focus?.[1]])
+    map.fitBounds([[south, west], [north, east]], { padding: [32, 32], maxZoom: 13 })
+  }, [map, south, west, north, east])
   return null
 }
 
-export function DeploymentMap({ deployments, onSelectDeployment, selectedDeploymentId, metric = 'total', speciesLabel = null, defaultFocusId = null, showSpeciesPie = false }: DeploymentMapProps) {
-  const mapped = deployments.filter(d => d.latitude != null && d.longitude != null)
+const NO_OFFSET: [number, number] = [0, 0]
+
+function dateRange(d: Deployment): string | null {
+  const start = startDateLabel(d.deployment_start, d.timezone)
+  const end = startDateLabel(d.deployment_end, d.timezone)
+  if (!start && !end) return null
+  return end ? `${start ?? '?'} to ${end}` : `from ${start}`
+}
+
+export function DeploymentMap({ deployments, onSelectDeployment, selectedDeploymentId, metric = 'total', speciesLabel = null, showSpeciesPie = false }: DeploymentMapProps) {
+  const mapped = useMemo(
+    () => deployments.filter(d => d.latitude != null && d.longitude != null) as (Deployment & { latitude: number; longitude: number })[],
+    [deployments],
+  )
   // Pie markers only when explicitly enabled (Insights) AND not in single-species present/absent mode.
   const pieMode = showSpeciesPie && speciesLabel == null
+  const speciesMode = speciesLabel != null
+  const metricLabel = metric === 'perDay' ? 'detections per day' : 'detections'
 
-  // A site counts as "absent" only when we're filtering by a species and it has
-  // no detections there. Without a species filter every site is just "shown".
-  const sizeValue = (d: Deployment) => d.metricValue ?? d.observation_count ?? 0
-  const isAbsent = (d: Deployment) => speciesLabel != null && d.present === false
-  const metricLabel = metric === 'perDay' ? 'detections / active day' : 'detection count'
-
-  // Build a colour index by project name (used in species-filter / present-absent mode)
-  const projectNames = [...new Set(deployments.map(d => d.project_name ?? ''))]
-  const colourOfProject = (name: string) => PROJECT_COLOURS[projectNames.indexOf(name) % PROJECT_COLOURS.length]
+  // Plain mode colours by project; the legend lists them only while no colour repeats.
+  const projectNames = useMemo(() => [...new Set(deployments.map(d => d.project_name ?? ''))], [deployments])
 
   // Species → colour, ranked by total detections across all sites (stable legend + wedge order).
   const { speciesColour, rankedSpecies, overflowSpecies } = useMemo(() => {
@@ -127,30 +172,39 @@ export function DeploymentMap({ deployments, onSelectDeployment, selectedDeploym
     }
   }, [mapped])
 
-  // Compute centre of all markers
-  const centre: [number, number] = mapped.length > 0
-    ? [
-        mapped.reduce((s, d) => s + d.latitude!, 0) / mapped.length,
-        mapped.reduce((s, d) => s + d.longitude!, 0) / mapped.length,
-      ]
-    : [20, 0] // world default
+  const bounds = useMemo(() => boundsOf(mapped), [mapped])
+  const offsets = useMemo(() => spreadOffsets(mapped), [mapped])
 
-  // Default focus coordinates (last finished deployment), if it has GPS.
-  const focusCoords = useMemo<[number, number] | null>(() => {
-    const d = mapped.find(m => m.id === defaultFocusId)
-    return d ? [d.latitude!, d.longitude!] : null
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultFocusId, deployments])
+  // One icon per marker, rebuilt only when the data, the mode or the selection changes.
+  const icons = useMemo(() => {
+    const sizeValue = (d: Deployment) => d.metricValue ?? d.observation_count ?? 0
+    // A site counts as "absent" only when a species is chosen and it has no detections there.
+    // The size scale is driven by the present sites only, so a swarm of absent (zero) sites
+    // can't flatten the contrast between the present ones.
+    const isAbsent = (d: Deployment) => speciesMode && d.present === false
+    const maxVal = Math.max(...mapped.filter(d => !isAbsent(d)).map(sizeValue), 1)
+    const colourOfProject = (name: string) => PROJECT_COLOURS[projectNames.indexOf(name) % PROJECT_COLOURS.length]
+    return new Map(mapped.map(d => {
+      const selected = d.id === selectedDeploymentId
+      const offset = offsets.get(d.id) ?? NO_OFFSET
+      if (pieMode) {
+        const size = 22 + Math.round((sizeValue(d) / maxVal) * 22) // 22–44px
+        return [d.id, cachedIcon(pieMarkerHtml(d.speciesCounts ?? {}, speciesColour, size, selected), size, offset)]
+      }
+      const absent = isAbsent(d)
+      const colour = absent ? OTHER_COLOUR : speciesMode ? PRESENT_COLOUR : colourOfProject(d.project_name ?? '')
+      const radius = absent ? 5 : 8 + Math.round((sizeValue(d) / maxVal) * 12)
+      const weight = selected ? 3 : 1.5
+      const stroke = selected ? '#fff' : colour
+      const html = circleMarkerHtml(radius, colour, absent ? 0.12 : 0.8, stroke, weight)
+      return [d.id, cachedIcon(html, 2 * (radius + weight), offset)]
+    }))
+  }, [mapped, offsets, pieMode, speciesMode, speciesColour, projectNames, selectedDeploymentId])
 
-  // Size scale is driven by the present sites only, so a swarm of absent
-  // (zero) sites can't flatten the contrast between the present ones.
-  const maxVal = Math.max(...mapped.filter(d => !isAbsent(d)).map(sizeValue), 1)
   const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2))
+  const gpsNote = `${mapped.length} of ${deployments.length} deployment${deployments.length !== 1 ? 's' : ''} have GPS`
 
-  // Suppress SSR hydration issue with dynamic import
-  useEffect(() => { /* trigger re-render once CSS is loaded */ }, [])
-
-  if (mapped.length === 0) {
+  if (!bounds) {
     return (
       <div style={{
         height: '420px',
@@ -160,8 +214,8 @@ export function DeploymentMap({ deployments, onSelectDeployment, selectedDeploym
         backgroundColor: 'var(--surface)',
         borderRadius: 'var(--radius)',
         border: '1px solid var(--border)',
-        opacity: 0.6,
         fontSize: '0.875rem',
+        ...MUTED,
       }}>
         No deployments with GPS coordinates to display.
       </div>
@@ -171,100 +225,65 @@ export function DeploymentMap({ deployments, onSelectDeployment, selectedDeploym
   return (
     <div style={{ borderRadius: 'var(--radius)', overflow: 'hidden', border: '1px solid var(--border)' }}>
       {/* Strip the default white box/border Leaflet puts on divIcon markers */}
-      <style>{`.ww-pie-marker { background: none; border: none; }`}</style>
+      <style>{`.ww-map-marker { background: none; border: none; }`}</style>
       <MapContainer
-        center={focusCoords ?? centre}
-        zoom={focusCoords ? 9 : mapped.length === 1 ? 10 : 5}
+        bounds={[[bounds.south, bounds.west], [bounds.north, bounds.east]]}
+        boundsOptions={{ padding: [32, 32], maxZoom: 13 }}
         style={{ height: '420px', width: '100%' }}
         scrollWheelZoom={true}
       >
-        <FocusController focus={focusCoords} />
+        <FitBounds {...bounds} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
         {mapped.map(d => {
-          const isSelected = d.id === selectedDeploymentId
-
-          // ── Default: species pie-chart marker ──────────────────────────────
-          if (pieMode) {
-            const counts = d.speciesCounts ?? {}
-            const size = 22 + Math.round((sizeValue(d) / maxVal) * 22) // 22–44px
-            const icon = L.divIcon({
-              html: pieMarkerHtml(counts, speciesColour, size, isSelected),
-              className: 'ww-pie-marker',
-              iconSize: [size, size],
-              iconAnchor: [size / 2, size / 2],
-            })
-            const topSpecies = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5)
-            const obsCount = d.observation_count ?? 0
-            return (
-              <Marker
-                key={d.id}
-                position={[d.latitude!, d.longitude!]}
-                icon={icon}
-                eventHandlers={{ click: () => onSelectDeployment?.(d.id) }}
-              >
-                <Tooltip>
-                  <strong>{d.location_name ?? 'Unnamed'}</strong><br />
-                  {d.project_name && <span style={{ opacity: 0.8 }}>{d.project_name}<br /></span>}
-                  {obsCount === 0 ? (
-                    <em>No detections yet</em>
-                  ) : (
-                    <>
-                      <span>{obsCount} detection{obsCount !== 1 ? 's' : ''}
-                        {metric === 'perDay' && d.perDay != null && <> · {fmt(d.perDay)} / day</>}</span>
-                      {topSpecies.length > 0 && (
-                        <span>
-                          {topSpecies.map(([sp, c]) => (
-                            <span key={sp} style={{ display: 'block', marginTop: 1 }}>
-                              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: speciesColour(sp), marginRight: 4 }} />
-                              {sp}: {c}
-                            </span>
-                          ))}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </Tooltip>
-              </Marker>
-            )
-          }
-
-          // ── Species filter: present/absent circle marker ───────────────────
           const obsCount = d.observation_count ?? 0
-          const absent = isAbsent(d)
-          const colour = colourOfProject(d.project_name ?? '')
-          const radius = absent ? 5 : 8 + Math.round((sizeValue(d) / maxVal) * 12)
+          const range = dateRange(d)
+          const absent = speciesMode && d.present === false
+          const topSpecies = pieMode ? Object.entries(d.speciesCounts ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 5) : []
           return (
-            <CircleMarker
+            <Marker
               key={d.id}
-              center={[d.latitude!, d.longitude!]}
-              radius={radius}
-              pathOptions={{
-                color: isSelected ? '#fff' : absent ? '#9e9e9e' : colour,
-                fillColor: absent ? '#9e9e9e' : colour,
-                fillOpacity: absent ? 0.12 : 0.8,
-                weight: isSelected ? 3 : 1.5,
-              }}
+              position={[d.latitude, d.longitude]}
+              icon={icons.get(d.id)}
+              zIndexOffset={d.id === selectedDeploymentId ? 1000 : 0}
               eventHandlers={{ click: () => onSelectDeployment?.(d.id) }}
             >
               <Tooltip>
                 <strong>{d.location_name ?? 'Unnamed'}</strong><br />
-                {d.project_name && <span style={{ opacity: 0.8 }}>{d.project_name}<br /></span>}
-                {d.deployment_start && <span>{new Date(d.deployment_start).toLocaleDateString()}</span>}
-                {d.deployment_end && <span> → {new Date(d.deployment_end).toLocaleDateString()}</span>}<br />
-                {absent ? (
-                  <span><em>{speciesLabel}</em>: not detected</span>
+                {d.project_name && <span>{d.project_name}<br /></span>}
+                {pieMode ? (
+                  obsCount === 0 ? (
+                    <em>No detections yet</em>
+                  ) : (
+                    <>
+                      <span>{obsCount} detection{obsCount !== 1 ? 's' : ''}
+                        {metric === 'perDay' && d.perDay != null && <>, {fmt(d.perDay)} per day</>}</span>
+                      {topSpecies.map(([sp, c]) => (
+                        <span key={sp} style={{ display: 'block', marginTop: 1 }}>
+                          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: speciesColour(sp), marginRight: 4 }} />
+                          {sp}: {c}
+                        </span>
+                      ))}
+                    </>
+                  )
                 ) : (
-                  <span>
-                    <em>{speciesLabel}</em>: {obsCount} detection{obsCount !== 1 ? 's' : ''}
-                    {d.activeDays != null && <span> over {d.activeDays} day{d.activeDays !== 1 ? 's' : ''}</span>}
-                    {d.perDay != null && <><br />{fmt(d.perDay)} / day</>}
-                  </span>
+                  <>
+                    {range && <>{range}<br /></>}
+                    {speciesMode && (absent ? (
+                      <span><em>{speciesLabel}</em>: not detected</span>
+                    ) : (
+                      <span>
+                        <em>{speciesLabel}</em>: {obsCount} detection{obsCount !== 1 ? 's' : ''}
+                        {d.activeDays != null && <span> over {d.activeDays} day{d.activeDays !== 1 ? 's' : ''}</span>}
+                        {d.perDay != null && <><br />{fmt(d.perDay)} per day</>}
+                      </span>
+                    ))}
+                  </>
                 )}
               </Tooltip>
-            </CircleMarker>
+            </Marker>
           )
         })}
       </MapContainer>
@@ -279,50 +298,27 @@ export function DeploymentMap({ deployments, onSelectDeployment, selectedDeploym
         borderTop: '1px solid var(--border)',
         fontSize: '0.75rem',
       }}>
-        {pieMode ? (
+        {pieMode && (
           <>
-            {rankedSpecies.length === 0 && <span style={{ opacity: 0.6 }}>No species detected yet</span>}
+            {rankedSpecies.length === 0 && <span style={MUTED}>No species detected yet</span>}
             {rankedSpecies.map(sp => (
-              <span key={sp} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: speciesColour(sp), display: 'inline-block' }} />
-                <em>{sp}</em>
-              </span>
+              <span key={sp} style={LEGEND_ITEM}>{swatch(speciesColour(sp))}<em>{sp}</em></span>
             ))}
-            {overflowSpecies && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                <span style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: OTHER_COLOUR, display: 'inline-block' }} />
-                Other
-              </span>
-            )}
-            <span style={{ marginLeft: 'auto', opacity: 0.6 }}>
-              Pie = species mix · size ∝ {metricLabel} · {mapped.length} of {deployments.length} deployment{deployments.length !== 1 ? 's' : ''} have GPS
-            </span>
-          </>
-        ) : (
-          <>
-            {projectNames.map((name, i) => (
-              <span key={name} style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-                <span style={{
-                  width: 10, height: 10, borderRadius: '50%',
-                  backgroundColor: PROJECT_COLOURS[i % PROJECT_COLOURS.length],
-                  display: 'inline-block',
-                }} />
-                {name || 'Unknown project'}
-              </span>
-            ))}
-            <span style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-              <span style={{
-                width: 10, height: 10, borderRadius: '50%',
-                border: '1.5px solid #9e9e9e', backgroundColor: 'rgba(158,158,158,0.12)',
-                display: 'inline-block',
-              }} />
-              absent ({speciesLabel})
-            </span>
-            <span style={{ marginLeft: 'auto', opacity: 0.6 }}>
-              Circle size ∝ {metricLabel} · {mapped.length} of {deployments.length} deployment{deployments.length !== 1 ? 's' : ''} have GPS
-            </span>
+            {overflowSpecies && <span style={LEGEND_ITEM}>{swatch(OTHER_COLOUR)}Other</span>}
           </>
         )}
+        {speciesMode && (
+          <>
+            <span style={LEGEND_ITEM}>{swatch(PRESENT_COLOUR)}Detected</span>
+            <span style={LEGEND_ITEM}>{swatch(OTHER_COLOUR, true)}Not detected</span>
+          </>
+        )}
+        {!pieMode && !speciesMode && projectNames.length <= PROJECT_COLOURS.length && projectNames.map((name, i) => (
+          <span key={name} style={LEGEND_ITEM}>{swatch(PROJECT_COLOURS[i])}{name || 'Unknown project'}</span>
+        ))}
+        <span style={{ marginLeft: 'auto', ...MUTED }}>
+          {pieMode || speciesMode ? `Size: ${metricLabel}. ` : ''}{gpsNote}
+        </span>
       </div>
     </div>
   )

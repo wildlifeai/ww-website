@@ -313,6 +313,8 @@ instant in the **deployment's** timezone at display time.
   `getTimeOfDay`, `hourInTimezone`) renders the UTC instant in the deployment zone (with a label like
   `10:44 am NZST`) and drives the day/night filter. **Store the IANA name, not a fixed offset**, so DST
   is handled automatically (NZ is +12 in winter, +13 in summer).
+- **Per-day counts**: Insights > Reports counts detections per day by `media.timestamp` in this zone,
+  never by `observations.created_at` (the label time); those without one are counted under the chart.
 - **Graceful fallback** — when `timezone` is `NULL` (or the column isn't deployed yet) the UI falls
   back to the **viewer's browser** zone, i.e. the previous behaviour. Deployment queries fetch the
   column defensively (retry without it) so the app keeps working during the schema rollout.
