@@ -488,7 +488,7 @@ async def test_pipeline_route_reports_a_busy_deployment(monkeypatch):
         return None
 
     monkeypatch.setattr(route, "run_pipeline", busy)
-    monkeypatch.setattr(route, "assert_access", allowed)
+    monkeypatch.setattr(route, "assert_write", allowed)
     # The undecorated handler: the router is flag-gated out of the test app and the limiter needs a real request.
     handler = route.run_inference_pipeline.__wrapped__
     response = await handler(SimpleNamespace(state=SimpleNamespace(request_id="r")), PipelineRunRequest(deployment_id=DEP), SimpleNamespace(id="u"))
