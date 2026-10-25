@@ -150,9 +150,8 @@ loaded it and the site rendered in the system fallback.
 The product's native shape is a **catalog with review workflows**, organised
 project → deployment → media → observations:
 
-- **Explore/triage surfaces**: Image Explorer, Media Browser, Review Queue,
-  Cluster Review, Event Review — thumbnail grids with status badges plus
-  filters.
+- **Explore/triage surfaces**: Image Explorer, Media Browser, Cluster Review:
+  thumbnail grids with status badges plus filters.
 - **Analysis surfaces**: Insights, Analysis, Reporting, Dataset Health, UMAP
   Explorer — charts and tables over the same data.
 - **Field/ops surfaces**: Upload Data, Field, Manifest, Toolkit — task-driven

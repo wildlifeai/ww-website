@@ -72,14 +72,22 @@ def _cluster_bursts(media: List[dict], gap_seconds: int) -> List[List[dict]]:
     return bursts
 
 
+def _photo_labels(obs: List[dict]) -> List[dict]:
+    """The observations that speak for one photo: its newest human review, else all its rows.
+
+    A reassign or a later label adds a row instead of replacing the earlier one, so counting every
+    human row lets a superseded label win (a cluster confirmed as A and then reassigned to B went
+    up as A), and an AI "animal" row outlived a reviewer's "blank" or "human".
+    """
+    reviewed = [o for o in obs if o.get("source_type") == "human" or o.get("review_status") in _HUMAN_REVIEWED]
+    if not reviewed:
+        return obs
+    return [max(reviewed, key=lambda o: o.get("updated_at") or o.get("created_at") or "")]
+
+
 def _best_species(burst: List[dict]) -> Optional[str]:
-    """Most-common animal scientific name in a burst (human-reviewed preferred)."""
-    names: List[str] = []
-    for m in burst:
-        human = [o for o in m["_animal_obs"] if o.get("source_type") == "human" or o.get("review_status") in _HUMAN_REVIEWED]
-        for o in human or m["_animal_obs"]:
-            if o.get("scientific_name"):
-                names.append(o["scientific_name"])
+    """Most-common scientific name in a burst, each photo by its own label (see _photo_labels)."""
+    names = [o["scientific_name"] for m in burst for o in m["_animal_obs"] if o.get("scientific_name")]
     if not names:
         return None
     return Counter(names).most_common(1)[0][0]
@@ -114,7 +122,7 @@ async def publish_media_to_inat(
         )
         obs = rows_of(
             svc.table("observations")
-            .select("media_id, observation_type, scientific_name, vernacular_name, review_status, source_type")
+            .select("media_id, observation_type, scientific_name, vernacular_name, review_status, source_type, created_at, updated_at")
             .in_("media_id", media_ids)
             .is_("deleted_at", "null")
             .execute()
@@ -142,13 +150,13 @@ async def publish_media_to_inat(
         "observations": [],
     }
 
-    # By-catch filter: keep only media with at least one animal observation.
+    # By-catch filter: keep only media whose label (see _photo_labels) is an animal.
     keep: List[dict] = []
     for m in media:
         if m["id"] in already:
             result["skipped_already_published"] += 1
             continue
-        animal = [o for o in obs_by_media.get(m["id"], []) if o.get("observation_type") == "animal"]
+        animal = [o for o in _photo_labels(obs_by_media.get(m["id"], [])) if o.get("observation_type") == "animal"]
         if not animal:
             result["skipped_bycatch"] += 1
             continue

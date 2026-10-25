@@ -82,10 +82,10 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 | `/upload-data`, `/upload/logs` | `UploadDataPage` (→ `UploadFlow`), `UploadLogsPage` | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) + log view |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
 | `/upload-model` | `UploadModelPage` | Edge Impulse → Vela model upload (org managers) |
-| `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters |
-| `/review/:id` | `ReviewQueuePage` | Active-learning review queue |
-| `/umap/:id` | `UmapExplorerPage` | Embedding-space exploration |
-| `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project) |
+| `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters, unconfirmed and biggest first, ten per page |
+| `/review/:id` | `ReviewQueuePage` | Retired Review Queue: redirects to `/annotations?deployment=:id` |
+| `/umap/:id` | `UmapExplorerPage` | Embedding-space map of a deployment; a click opens that photo in the grid |
+| `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project), behind `FF_INTELLIGENCE_ENABLED`. Links to a flagged page show only when `useFeatureEnabled` says the feature answers |
 | `/reporting/:id` | `ReportingPage` | Diel activity, CamtrapDP / Darwin Core exports |
 | `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history, 50 at a time up to the API's 200; `?job=<id>` opens that job's row |
 | `/notifications` | `NotificationsPage` | Notification inbox, read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router), filtered in the query and paged with "Load more"; the unread count (a server-side count) drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
@@ -98,9 +98,7 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 `/annotations?deployment=:id` (the Annotations grid now does clustering, bulk cluster-confirm and
 similar-image search), `/analysis/:id` → `/reporting/:id`. The old `MyDataPage` is retained only at
 `/my-data-legacy`. `LabelingPage` was **removed** — its rich editor now lives in the Annotations
-full-screen modal (see [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md)). `EventReviewPage` is
-currently **unrouted** (`/events/:id` was removed from `App.tsx`; the file remains pending
-re-route-or-delete).
+full-screen modal (see [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md)).
 
 **Fallback**: any unmatched path renders `FourZeroFourPage` (404) — the wildcard `*` route at the
 end of `App.tsx`. Client-side only: the Cloudflare Pages SPA fallback still serves HTTP 200.
