@@ -10,6 +10,8 @@ import {
   buildDetailsPatch, fetchProjectDetails, formFromDetails, saveProjectDetails, validateDetails,
   type DetailsForm, type ProjectDetails,
 } from '../../lib/projectDetails'
+import type { SaveState } from '../../hooks/useSaveStatus'
+import { SaveStatus } from './SaveStatus'
 
 const INPUT: React.CSSProperties = {
   width: '100%', padding: '0.4rem 0.55rem', borderRadius: 'var(--radius)', border: '1px solid var(--border)',
@@ -30,9 +32,9 @@ export function ProjectDetailsPanel({ projectId, onSaved }: {
     gcTime: 0,
   })
 
-  if (query.isPending) return <p style={{ opacity: 0.5 }}>Loading…</p>
+  if (query.isPending) return <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
   if (query.isError) return <p style={ERROR}>{query.error.message}</p>
-  if (!query.data) return <p style={{ opacity: 0.7 }}>This project is not available to you.</p>
+  if (!query.data) return <p style={{ color: 'var(--text-muted)' }}>This project is not available to you.</p>
   return <DetailsFields stored={query.data} onSaved={onSaved} />
 }
 
@@ -40,7 +42,7 @@ function DetailsFields({ stored, onSaved }: { stored: ProjectDetails; onSaved: (
   const [current, setCurrent] = useState(stored)
   const [form, setForm] = useState<DetailsForm>(() => formFromDetails(stored))
   const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [msg, setMsg] = useState<SaveState | null>(null)
 
   const initial = formFromDetails(current)
   const dirty = (Object.keys(form) as (keyof DetailsForm)[]).some(k => form[k] !== initial[k])
@@ -60,7 +62,7 @@ function DetailsFields({ stored, onSaved }: { stored: ProjectDetails; onSaved: (
       const saved = await saveProjectDetails(supabase, current.id, buildDetailsPatch(form))
       setCurrent(saved)
       setForm(formFromDetails(saved))
-      setMsg({ ok: true, text: 'Saved ✓' })
+      setMsg({ ok: true, text: 'Saved' })
       onSaved(saved)
     } catch (err) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : 'Not saved.' })
@@ -84,7 +86,7 @@ function DetailsFields({ stored, onSaved }: { stored: ProjectDetails; onSaved: (
         Website
         <input type="text" inputMode="url" value={form.website} onChange={set('website')} style={INPUT} />
       </label>
-      {msg && <div style={msg.ok ? { fontSize: '0.8125rem', color: 'var(--success, #10b981)' } : ERROR}>{msg.text}</div>}
+      <SaveStatus status={msg} />
       <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
         <button type="submit" className="btn" disabled={!!invalid || !dirty || saving} style={{ fontSize: '0.8125rem', padding: '0.4rem 0.9rem', opacity: invalid || !dirty || saving ? 0.6 : 1 }}>
           {saving ? 'Saving…' : 'Save'}

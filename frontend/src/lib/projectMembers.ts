@@ -93,6 +93,7 @@ export function toMembersError(err: PgError): MembersError {
     case 'P0002': return new MembersError('invitation_gone')
     case '22023':
       if (/not a member/i.test(message)) return new MembersError('not_a_member')
+      if (/last project admin/i.test(message)) return new MembersError('last_admin')
       // Other membership RPCs raise 22023 for an invalid role, so match the email case.
       if (/email/i.test(message)) return new MembersError('invalid_email')
       break
@@ -171,6 +172,23 @@ export async function removeMember(
     p_project_id: projectId,
     p_user_id:    userId,
     p_removed_by: removedBy,
+  })
+}
+
+/** Project admins only. `updatedBy` must be the signed-in user; the RPC refuses
+ *  anything else, and an admin demoting themselves as the last admin (`last_admin`). */
+export async function changeMemberRole(
+  db: SupabaseClient,
+  projectId: string,
+  userId: string,
+  role: ProjectRole,
+  updatedBy: string,
+): Promise<void> {
+  await call(db, 'update_project_member_role', {
+    p_project_id: projectId,
+    p_user_id:    userId,
+    p_new_role:   role,
+    p_updated_by: updatedBy,
   })
 }
 

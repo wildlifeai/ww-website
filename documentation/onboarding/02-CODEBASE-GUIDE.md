@@ -28,7 +28,7 @@ src/
 │   │                       #   FilterSelect, StatusBadge, VegaChart) — see resources/ui-components.md
 │   ├── data/               # feature components (MediaBrowser, MediaDetail, SpeciesPicker,
 │   │                       #   DeploymentMap, ObservationReports, ChartBuilder, …)
-│   ├── upload/             # UploadFlow (+ UnassignedTriage, upload.css), ProgressDock
+│   ├── upload/             # UploadFlow (+ UnassignedTriage, DeploymentPicker, upload.css), ProgressDock
 │   ├── toolkit/            # GenerateManifest, UploadModel, PipelineStatusBox
 │   └── common/             # nav/shared bits
 ├── contexts/UploadContext.tsx  # global upload store (survives navigation)
@@ -82,8 +82,8 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 | `/review/:id` | `ReviewQueuePage` | Active-learning review queue |
 | `/umap/:id` | `UmapExplorerPage` | Embedding-space exploration |
 | `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project) |
-| `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history |
-| `/notifications` | `NotificationsPage` | Notification inbox — read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router); the unread count drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
+| `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history, 50 at a time up to the API's 200; `?job=<id>` opens that job's row |
+| `/notifications` | `NotificationsPage` | Notification inbox, read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router), filtered in the query and paged with "Load more"; the unread count (a server-side count) drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
 | `/settings` | `SettingsPage` | Projects, account, integrations, organisation API keys |
 | `/admin/usage` | `AdminUsagePage` | Per-user usage limits (platform admin) |
 | `/admin/devices` | `AdminDevicesPage` | Every device with its organisation and latest deployment, read-only (platform admin) |

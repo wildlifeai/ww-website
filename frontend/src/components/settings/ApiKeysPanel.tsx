@@ -1,20 +1,18 @@
 /**
  * ApiKeysPanel: an organisation's public API keys (Settings), for its managers (#307).
  *
- * Create (the raw key is shown once), list and revoke. Hidden for anyone who manages no
- * organisation, and while the public API is switched off. What the keys do and the scopes
- * are in documentation/resources/api-reference.md.
+ * Create (the raw key is shown once), list and revoke. IntegrationsSection hides it for anyone
+ * who manages no organisation, and while the public API is switched off. What the keys do and
+ * the scopes are in documentation/resources/api-reference.md.
  */
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useAuth } from '../../hooks/useAuth'
-import { apiClient } from '../../lib/apiClient'
+import { useQueryClient } from '@tanstack/react-query'
+import { useApiKeys, type ManagedOrg } from '../../hooks/useManagedOrgs'
 import {
-  API_KEY_SCOPES, createApiKey, expiryFromDate, isPublicApiDisabled, listApiKeys, revokeApiKey,
-  type CreatedApiKey,
+  API_KEY_SCOPES, createApiKey, expiryFromDate, isPublicApiDisabled, revokeApiKey,
+  type ApiKeyInfo, type CreatedApiKey,
 } from '../../lib/apiKeys'
-
-interface ManagedOrg { id: string; name: string }
+import { ConfirmDialog } from '../common/ConfirmDialog'
 
 const fmt = (s: string | null) => (s ? new Date(s).toLocaleDateString() : '—')
 const errText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback)
@@ -25,30 +23,13 @@ const INPUT: React.CSSProperties = {
 }
 const CELL: React.CSSProperties = { padding: '0.45rem 0.5rem', borderBottom: '1px solid var(--border)', textAlign: 'left' }
 
-export function ApiKeysPanel() {
-  const { user } = useAuth()
+export function ApiKeysPanel({ orgs }: { orgs: ManagedOrg[] }) {
   const queryClient = useQueryClient()
 
-  // Same query as the top bar's, so the two share one request.
-  const { data: orgs = [] } = useQuery<ManagedOrg[]>({
-    queryKey: ['managedOrgs', user?.id],
-    queryFn: async () => {
-      try {
-        const res = await apiClient.get('/api/models/managed-orgs') as { data?: ManagedOrg[] }
-        return res?.data || []
-      } catch { return [] }
-    },
-    enabled: !!user,
-  })
   const [pickedOrg, setPickedOrg] = useState('')
   const orgId = pickedOrg || orgs[0]?.id || ''
 
-  const keys = useQuery({
-    queryKey: ['apiKeys', orgId],
-    queryFn: () => listApiKeys(orgId),
-    enabled: !!orgId,
-    retry: false,
-  })
+  const keys = useApiKeys(orgId)
 
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState<string[]>([])
@@ -56,6 +37,9 @@ export function ApiKeysPanel() {
   const [created, setCreated] = useState<CreatedApiKey | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [revoking, setRevoking] = useState<ApiKeyInfo | null>(null)
+  const [revokeError, setRevokeError] = useState<string | null>(null)
+  const [revokeBusy, setRevokeBusy] = useState(false)
 
   if (orgs.length === 0 || isPublicApiDisabled(keys.error)) return null
 
@@ -71,21 +55,26 @@ export function ApiKeysPanel() {
       setExpiry('')
       refresh()
     } catch (e) {
-      setMsg(`⚠ ${errText(e, 'Could not create the key')}`)
+      setMsg(errText(e, 'Could not create the key.'))
     } finally {
       setBusy(false)
     }
   }
 
-  const revoke = async (id: string, keyName: string) => {
-    if (!confirm(`Revoke "${keyName}"? Anything using it stops working.`)) return
-    setMsg(null)
+  const revoke = async () => {
+    if (!revoking) return
+    const id = revoking.id
+    setRevokeBusy(true)
+    setRevokeError(null)
     try {
       await revokeApiKey(orgId, id)
       if (created?.id === id) setCreated(null)
+      setRevoking(null)
       refresh()
     } catch (e) {
-      setMsg(`⚠ ${errText(e, 'Could not revoke the key')}`)
+      setRevokeError(errText(e, 'Could not revoke the key.'))
+    } finally {
+      setRevokeBusy(false)
     }
   }
 
@@ -93,9 +82,9 @@ export function ApiKeysPanel() {
     setScopes(prev => (prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s]))
 
   return (
-    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '1rem 1.25rem', backgroundColor: 'var(--surface)', marginTop: '1rem' }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '1rem 1.25rem', backgroundColor: 'var(--surface)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1rem' }}>🔑 API keys</h3>
+        <h4 style={{ margin: 0, fontSize: '0.95rem' }}>API keys</h4>
         {orgs.length > 1 ? (
           <select
             value={orgId}
@@ -106,7 +95,7 @@ export function ApiKeysPanel() {
             {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
           </select>
         ) : (
-          <span style={{ fontSize: '0.8rem', opacity: 0.7 }}>{orgs[0].name}</span>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{orgs[0].name}</span>
         )}
       </div>
 
@@ -140,14 +129,14 @@ export function ApiKeysPanel() {
         ))}
       </div>
 
-      {msg && <p style={{ fontSize: '0.8rem', margin: '0 0 0.75rem 0' }}>{msg}</p>}
+      {msg && <p role="alert" style={{ fontSize: '0.8rem', margin: '0 0 0.75rem 0', color: 'var(--error, #f44336)' }}>{msg}</p>}
 
       {keys.isLoading ? (
-        <p style={{ opacity: 0.5, fontSize: '0.82rem', margin: 0 }}>Loading keys…</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', margin: 0 }}>Loading keys…</p>
       ) : keys.error ? (
-        <p style={{ fontSize: '0.82rem', margin: 0 }}>⚠ {errText(keys.error, 'Could not load the keys')}</p>
+        <p style={{ fontSize: '0.82rem', margin: 0, color: 'var(--error, #f44336)' }}>{errText(keys.error, 'Could not load the keys.')}</p>
       ) : !keys.data?.length ? (
-        <p style={{ opacity: 0.6, fontSize: '0.82rem', margin: 0 }}>No keys.</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.82rem', margin: 0 }}>No keys.</p>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
@@ -169,7 +158,7 @@ export function ApiKeysPanel() {
                   <td style={CELL}>{fmt(k.expires_at)}</td>
                   <td style={CELL}>
                     <button
-                      onClick={() => revoke(k.id, k.name)}
+                      onClick={() => { setRevokeError(null); setRevoking(k) }}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--error, #f44336)', fontSize: '0.8rem' }}
                     >
                       Revoke
@@ -181,6 +170,19 @@ export function ApiKeysPanel() {
           </table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!revoking}
+        title="Revoke API key"
+        confirmLabel="Revoke"
+        busyLabel="Revoking…"
+        busy={revokeBusy}
+        error={revokeError}
+        onConfirm={revoke}
+        onCancel={() => setRevoking(null)}
+      >
+        <p style={{ margin: 0 }}>Revoke <strong>{revoking?.name}</strong>? Anything using it stops working.</p>
+      </ConfirmDialog>
     </div>
   )
 }
