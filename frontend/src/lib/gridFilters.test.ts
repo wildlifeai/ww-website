@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  applyFilterOps, gridFilterPlan, gridQueryKey, hasAdvancedFilters, hasAnyFilter, NO_FILTERS, type FilterableQuery,
+  applyFilterOps, applyOrder, gridFilterPlan, gridQueryKey, gridSortPlan, hasAdvancedFilters, hasAnyFilter, NO_FILTERS,
+  type FilterableQuery,
 } from './gridFilters'
 
 const f = (over: Partial<typeof NO_FILTERS>) => ({ ...NO_FILTERS, ...over })
@@ -92,6 +93,36 @@ describe('applyFilterOps', () => {
     expect(calls).toEqual([
       ['in', 'a.x', ['1']], ['eq', 'a.y', '2'], ['not', 'a.z', 'is', null], ['is', 'a', null],
       ['or', 'p.eq.1', { referencedTable: 'a' }], ['or', 'p.eq.2'],
+    ])
+  })
+})
+
+describe('gridSortPlan', () => {
+  it('lists newest first, then by id so tied photos keep their place across pages', () => {
+    expect(gridSortPlan('newest')).toEqual({
+      embeds: [],
+      orders: [{ column: 'timestamp', ascending: false, nullsFirst: false }, { column: 'id', ascending: true }],
+    })
+  })
+
+  it('orders by the embedded active-learning score, unscored photos last, then as newest first', () => {
+    const { embeds, orders } = gridSortPlan('review')
+    expect(embeds).toEqual(['media_embeddings(active_learning_score)'])
+    expect(orders).toEqual([
+      { column: 'media_embeddings(active_learning_score)', ascending: false, nullsFirst: false },
+      ...gridSortPlan('newest').orders,
+    ])
+  })
+
+  it('applies each order in turn', () => {
+    const calls: unknown[][] = []
+    type Recorder = { order: (column: string, options: object) => Recorder }
+    const q: Recorder = { order: (...a) => { calls.push(a); return q } }
+    applyOrder(q, gridSortPlan('review').orders)
+    expect(calls).toEqual([
+      ['media_embeddings(active_learning_score)', { ascending: false, nullsFirst: false }],
+      ['timestamp', { ascending: false, nullsFirst: false }],
+      ['id', { ascending: true }],
     ])
   })
 })

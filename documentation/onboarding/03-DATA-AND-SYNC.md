@@ -48,7 +48,8 @@ permissions, verify against the **live** DB, not just the migrations.
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
 | `taxa` | SpeciesPicker (local search) | RLS read |
 | `user_roles`, `project_invitations` | members panel, invitation banner; the user's own roles in Settings and the move picker | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below); a user reads only their own `user_roles` rows directly |
-| `media_embeddings`, `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
+| `media_embeddings` | the grid's *Needs review first* order (embedded in the `media` query, ww-backend #337); Wildlife Brain | RLS read for project viewers; writes service-role |
+| `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
 | `devices`, `lorawan_*`, `firmware`, `ai_models`, `api_jobs` | LoRaWAN, manifests, models, jobs | service-role |
 
 **Project membership goes through RPCs, never direct queries.** RLS lets a user read only their

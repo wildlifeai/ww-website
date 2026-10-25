@@ -1,9 +1,9 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The review grid's filters as one PostgREST media query (UI audit 02 #4, #5), so the page and
-// the pager's total both reflect every filter, across the whole selection rather than the 100
-// loaded photos. An observation filter is an empty embed of `observations` under its own alias:
+// The review grid's filters and order as one PostgREST media query (UI audit 02 #4, #5), so the
+// page and the pager's total both reflect every filter, across the whole selection rather than
+// the 100 loaded photos. An observation filter is an empty embed of `observations` under its own alias:
 // `!inner` keeps photos with a matching row, a plain embed plus `alias=is.null` keeps photos with
 // none (an anti-join). One alias per filter, so two filters may be met by two different rows,
 // as when they ran in the browser.
@@ -135,6 +135,49 @@ export function applyFilterOps<Q extends FilterableQuery<Q>>(query: Q, ops: read
     else if (o.op === 'isNull') q = q.is(o.column, null)
     else q = o.referencedTable ? q.or(o.filters, { referencedTable: o.referencedTable }) : q.or(o.filters)
   }
+  return q
+}
+
+/** Newest first, or "Needs review first": the active-learning score, highest first. */
+export type GridSort = 'newest' | 'review'
+
+/** One `.order()` call on the media query. */
+export interface OrderSpec {
+  column: string
+  ascending: boolean
+  nullsFirst?: boolean
+}
+
+export interface SortPlan {
+  /** Extra select entries the order reads. */
+  embeds: string[]
+  orders: OrderSpec[]
+}
+
+const NEWEST: OrderSpec = { column: 'timestamp', ascending: false, nullsFirst: false }
+/** Last, so photos that tie keep one order and no page repeats or skips one. */
+const BY_ID: OrderSpec = { column: 'id', ascending: true }
+
+/**
+ * The media query's order. The score sits on the photo's `media_embeddings` row, one-to-one
+ * since ww-backend #337, so PostgREST orders photos by it; a photo with no row (not embedded
+ * yet) has no score and comes after every scored one, newest first.
+ */
+export function gridSortPlan(sort: GridSort): SortPlan {
+  if (sort === 'review') {
+    return {
+      embeds: ['media_embeddings(active_learning_score)'],
+      orders: [{ column: 'media_embeddings(active_learning_score)', ascending: false, nullsFirst: false }, NEWEST, BY_ID],
+    }
+  }
+  return { embeds: [], orders: [NEWEST, BY_ID] }
+}
+
+export function applyOrder<Q extends { order(column: string, options: Omit<OrderSpec, 'column'>): Q }>(
+  query: Q, orders: readonly OrderSpec[],
+): Q {
+  let q = query
+  for (const { column, ...options } of orders) q = q.order(column, options)
   return q
 }
 

@@ -127,30 +127,6 @@ export function useEmbedDeployment() {
   })
 }
 
-// ── Active learning / review queue (Phase 8) ───────────────────────────────
-
-export interface ReviewQueueItem {
-  media_id: string
-  active_learning_score: number | null
-  cluster_id: number
-  is_outlier: boolean
-  cluster_confidence: number | null
-  ai_label: string | null
-  ai_confidence: number | null
-  human_label: string | null
-}
-
-export function useReviewQueue(deploymentId?: string, limit = 50) {
-  return useQuery({
-    queryKey: ['brain', 'review-queue', deploymentId, limit],
-    queryFn: async () => {
-      const r = (await apiClient.get(`/api/brain/review-queue/${deploymentId}?limit=${limit}`)) as any
-      return r.data as { queue: ReviewQueueItem[]; count: number }
-    },
-    enabled: !!deploymentId,
-  })
-}
-
 /** Review calls in flight at once while reassign still posts one call per photo (03 #18). */
 const REVIEW_CONCURRENCY = 4
 
@@ -174,7 +150,6 @@ export function useBulkReview(deploymentId?: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['brain', 'clusters', deploymentId] })
-      qc.invalidateQueries({ queryKey: ['brain', 'review-queue', deploymentId] })
     },
   })
 }
