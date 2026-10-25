@@ -101,7 +101,7 @@ every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./
 
 Deleting photos soft-deletes their `media` rows only; their observations stay readable, because
 the `observations` read policy checks the deployment, not the photo. Every read that counts or
-lists observations (Insights, My Data, Reporting, Field, the upload summary) goes through
+lists observations (Insights, Realtime, the upload summary) goes through
 `frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
 with no photo unless asked not to, and pages past the 1,000-row cap (#198).
 

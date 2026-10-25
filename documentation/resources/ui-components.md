@@ -7,7 +7,7 @@ and inline styles — no Tailwind, no component-library dependency.
 Import from the barrel:
 
 ```tsx
-import { Modal, Ribbon, DataTable, ControlBar, FilterSelect, SearchInput, ColumnToggle,
+import { Modal, Ribbon, DataTable, FilterSelect, SearchInput, ColumnToggle,
          StatusBadge, deriveAnnotationStatus, VegaChart } from '../components/ui'
 import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS } from '../components/common'
 ```
@@ -19,7 +19,7 @@ import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS } from '../components/common'
 | `<Ribbon>` | `Ribbon.tsx` | **Annotations + Insights command bars** (Word-style menu bar + grouped ribbon) |
 | `<Modal>` | `Modal.tsx` | Advanced settings, create-project (the upload flow is a page now, `/upload-data`) |
 | `<DataTable>` | `DataTable.tsx` | Insights → Deployments / Projects tables |
-| `<ControlBar>`, `<FilterSelect>`, `<SearchInput>`, `<ColumnToggle>` | `ControlBar.tsx` | `FilterSelect` inside ribbon groups; `ControlBar` is the older flat toolbar |
+| `<FilterSelect>`, `<SearchInput>`, `<ColumnToggle>` | `ControlBar.tsx` | `FilterSelect` inside ribbon groups and the admin Devices toolbar; the other two inside `DataTable` |
 | `<StatusBadge>`, `deriveAnnotationStatus` | `StatusBadge.tsx`, `../../lib/annotationStatus.ts` | Annotation thumbnail grid + modal |
 | `<VegaChart>`, `VEGA_CONFIG` | `VegaChart.tsx` | All charts (Vega-Lite) |
 | `<ThreeStepGuide>` | `../common/ThreeStepGuide.tsx` | Marketing + signed-in landing |
@@ -95,11 +95,11 @@ client paging. With a selection, CSV exports the selected rows only.
 
 ---
 
-## `<ControlBar>` / `<FilterSelect>` / `<SearchInput>` / `<ColumnToggle>`
+## `<FilterSelect>` / `<SearchInput>` / `<ColumnToggle>`
 
-`ControlBar` is the original flat filters+actions toolbar; the Annotations and Insights pages have
-since moved to `<Ribbon>`. `FilterSelect` (a sized `<select>`) is still used **inside ribbon
-groups**; `SearchInput` and `ColumnToggle` are used by `DataTable`.
+`FilterSelect` (a sized `<select>`) is used **inside ribbon groups** and as a `DataTable`
+`toolbar`; `SearchInput` and `ColumnToggle` are used by `DataTable`. They live in `ControlBar.tsx`,
+named after a flat toolbar that had no users and was removed in October 2026.
 
 ```tsx
 <FilterSelect value={dep} onChange={setDep}
@@ -137,8 +137,7 @@ Props: `status: AnnotationStatus`, `size: 'sm' | 'md'` (default `sm`), `label?` 
 
 Thin wrapper around `vega-embed` with the shared `VEGA_CONFIG` theme. Pass a Vega-Lite spec; the
 chart sizes to its container. Used by `ReportsDashboard` (Insights > Reports, specs from
-`components/data/chartSpec.ts` over tables counted by `lib/observationSummary.ts`), `ObservationReports`,
-`ReportingPage`.
+`components/data/chartSpec.ts` over tables counted by `lib/observationSummary.ts`).
 
 ---
 
