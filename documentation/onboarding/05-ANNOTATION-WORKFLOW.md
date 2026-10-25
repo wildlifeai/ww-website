@@ -111,10 +111,14 @@ reading as saved (#183). A viewer sees none of these actions.
 
 ### SpeciesPicker (taxon validation)
 
-`components/data/SpeciesPicker.tsx` debounces a search over the local `taxa` table **and** the
-iNaturalist autocomplete (`/api/inat/taxa/search`). Selecting an iNat result registers its lineage
-(`POST /api/inat/taxa`) and returns a real `taxon_id`; it falls back to local-only when iNat is
-feature-flagged off. Every selection writes a real `taxon_id`, never a free-text string.
+`components/data/SpeciesPicker.tsx` offers, before any typing, the species you picked recently and
+the species already used in the projects in view, most used first (the view `project_species`,
+ww-backend #338; the species on the photos in view stand in until it is read). Typing debounces a
+search over the local `taxa` table, and asks the iNaturalist autocomplete (`/api/inat/taxa/search`)
+only when fewer than three local suggestions match (`lib/speciesSuggestions.ts`). Selecting an iNat
+result registers its lineage (`POST /api/inat/taxa`) and returns a real `taxon_id`; it falls back to
+local-only when iNat is feature-flagged off. Every selection writes a real `taxon_id`, never a
+free-text string.
 
 ## Review provenance (the important invariant)
 

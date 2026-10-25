@@ -1349,7 +1349,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
                     </button>
                   )}
                   {labelAll && clusterInfo && singleDeployment && (
-                    <ClusterLabelAll clusterId={clusterInfo.id} deploymentId={singleDeployment} onDone={onClusterConfirmed} />
+                    <ClusterLabelAll clusterId={clusterInfo.id} deploymentId={singleDeployment} projectId={projectByDeployment.get(singleDeployment)} onDone={onClusterConfirmed} />
                   )}
                 </>
               ) : undefined}
@@ -1517,6 +1517,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
           onApply={bulkLabel}
           onClose={() => setShowLabelModal(false)}
           seeds={labelledSpecies(media.flatMap(m => m.observations))}
+          projectIds={[...new Set(visible.flatMap(m => (selectedIds.has(m.id) ? projectByDeployment.get(m.deployment_id) ?? [] : [])))]}
         />
       )}
       {showTrainModal && (() => {

@@ -5,7 +5,8 @@
 // True for project_member and above (`useProjectRoles().canWrite`) on the deployment's project,
 // while the deployment is live. `loading` is true until both the roles and the deployment are
 // known: render no write control and no "view only" note until then. The deployment's project is
-// read once per deployment and cached for ten minutes, not per photo (03 #4).
+// read once per deployment and cached for ten minutes, not per photo (03 #4), and returned as
+// `projectId` (null until known) for the species picker's suggestions.
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../config/supabase'
 import { useProjectRoles } from './useProjectRoles'
@@ -22,7 +23,7 @@ async function deploymentScope(deploymentId: string): Promise<DeploymentScope | 
   return data as DeploymentScope | null
 }
 
-export function useCanLabel(deploymentId: string | null | undefined): { canLabel: boolean; loading: boolean } {
+export function useCanLabel(deploymentId: string | null | undefined): { canLabel: boolean; loading: boolean; projectId: string | null } {
   const roles = useProjectRoles()
   const scope = useQuery({
     queryKey: ['deployment-scope', deploymentId],
@@ -32,5 +33,5 @@ export function useCanLabel(deploymentId: string | null | undefined): { canLabel
   })
   const loading = roles.loading || (!!deploymentId && scope.isPending)
   const live = scope.data && !scope.data.deleted_at ? scope.data : null
-  return { canLabel: !loading && !!live && roles.canWrite(live.project_id), loading }
+  return { canLabel: !loading && !!live && roles.canWrite(live.project_id), loading, projectId: scope.data?.project_id ?? null }
 }

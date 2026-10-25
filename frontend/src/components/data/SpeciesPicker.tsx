@@ -1,9 +1,11 @@
 /**
  * SpeciesPicker: the shared taxon-validated species selector (AN-5).
  *
- * Offers the species picked recently and the species already labelled on the photos in view
- * (`seeds`) as soon as it opens, then searches the local `taxa` table, and asks iNaturalist only
- * when fewer than three local suggestions match (lib/speciesSuggestions). Selecting an iNat result
+ * Offers the species picked recently and the species already used in the projects in view
+ * (`projectIds`, from the view project_species, ww-backend #338) as soon as it opens; until that
+ * read answers, or with no project, the species labelled on the photos in view (`seeds`). Then it
+ * searches the local `taxa` table, and asks iNaturalist only when fewer than three local
+ * suggestions match (lib/speciesSuggestions). Selecting an iNat result
  * registers its full lineage into `taxa` (POST /api/inat/taxa) and returns the persisted row, so
  * callers write the taxon FK instead of an unvalidated string.
  *
@@ -16,6 +18,7 @@
 import { useState, useEffect, useCallback, useId, useMemo, useRef, useSyncExternalStore } from 'react'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../config/supabase'
+import { useProjectSpecies } from '../../hooks/useProjectSpecies'
 import { apiClient } from '../../lib/apiClient'
 import {
   INAT_BELOW, recentSpecies, rememberSpecies, seedMatches, speciesKey, subscribeRecentSpecies,
@@ -47,6 +50,8 @@ interface Props {
   disabled?: boolean
   /** Species already labelled where the picker is used, offered before any search. */
   seeds?: SpeciesOption[]
+  /** The projects in view: their species replace `seeds` once read. */
+  projectIds?: readonly string[]
 }
 
 const SOURCE_LABEL: Record<Source, string> = {
@@ -108,7 +113,7 @@ function seedSuggestions(q: string, recents: SpeciesOption[], labelled: SpeciesO
   }))
 }
 
-export function SpeciesPicker({ onSelect, placeholder, autoFocus, initialQuery = '', disabled, seeds = NO_SEEDS }: Props) {
+export function SpeciesPicker({ onSelect, placeholder, autoFocus, initialQuery = '', disabled, seeds = NO_SEEDS, projectIds }: Props) {
   const listId = useId()
   const queryClient = useQueryClient()
   const recents = useSyncExternalStore(subscribeRecentSpecies, recentSpecies)
@@ -131,7 +136,9 @@ export function SpeciesPicker({ onSelect, placeholder, autoFocus, initialQuery =
   }, [q, touched])
 
   const searching = q.length >= 2
-  const seedHits = useMemo(() => seedSuggestions(q, recents, seeds), [q, recents, seeds])
+  // Read when the list first opens; the page's own labels stand in until then.
+  const labelled = useProjectSpecies(projectIds, open) ?? seeds
+  const seedHits = useMemo(() => seedSuggestions(q, recents, labelled), [q, recents, labelled])
   const taxa = useQuery({
     queryKey: ['species-taxa', term],
     queryFn: () => searchTaxa(term),
@@ -141,7 +148,7 @@ export function SpeciesPicker({ onSelect, placeholder, autoFocus, initialQuery =
     placeholderData: keepPreviousData,
   })
   const taxaHits = searching ? (taxa.data ?? NO_SUGGESTIONS) : NO_SUGGESTIONS
-  const localForTerm = merge(seedSuggestions(term, recents, seeds), taxa.isSuccess && !taxa.isPlaceholderData ? taxa.data : NO_SUGGESTIONS, []).length
+  const localForTerm = merge(seedSuggestions(term, recents, labelled), taxa.isSuccess && !taxa.isPlaceholderData ? taxa.data : NO_SUGGESTIONS, []).length
   const inat = useQuery({
     queryKey: ['species-inat', term],
     queryFn: () => searchInat(term),

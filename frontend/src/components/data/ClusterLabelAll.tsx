@@ -13,6 +13,8 @@ import { SpeciesPicker, type SpeciesSelection } from './SpeciesPicker'
 interface Props {
   clusterId: string
   deploymentId: string
+  /** The deployment's project, whose species the picker suggests. */
+  projectId?: string
   onDone: (created: number, name: string) => void
 }
 
@@ -21,7 +23,7 @@ const SMALL: React.CSSProperties = {
   border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'transparent', cursor: 'pointer', whiteSpace: 'nowrap',
 }
 
-export function ClusterLabelAll({ clusterId, deploymentId, onDone }: Props) {
+export function ClusterLabelAll({ clusterId, deploymentId, projectId, onDone }: Props) {
   const [open, setOpen] = useState(false)
   const confirm = useConfirmCluster(deploymentId)
 
@@ -43,7 +45,8 @@ export function ClusterLabelAll({ clusterId, deploymentId, onDone }: Props) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
       <span style={{ width: 220 }}>
-        <SpeciesPicker autoFocus disabled={confirm.isPending} placeholder="Label all as…" onSelect={apply} />
+        <SpeciesPicker autoFocus disabled={confirm.isPending} placeholder="Label all as…" onSelect={apply}
+          projectIds={projectId ? [projectId] : undefined} />
       </span>
       <button type="button" onClick={() => setOpen(false)} aria-label="Cancel"
         style={{ ...SMALL, border: 'none', color: 'var(--text-muted)' }}>

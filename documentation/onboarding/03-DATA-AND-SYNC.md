@@ -46,7 +46,7 @@ permissions, verify against the **live** DB, not just the migrations.
 | `media` | Annotations grid + modal | RLS (read; uploads via backend) |
 | `media_assets` | embedded in `media` queries (renditions: provider, dimensions, bytes) | RLS read — a missing GRANT aborts the **whole** embedding query (prod, Jul 2026) |
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
-| `taxa` | SpeciesPicker (local search) | RLS read |
+| `taxa`, view `project_species` | SpeciesPicker (local search; the projects' species before typing, ww-backend #338) | RLS read |
 | `user_roles`, `project_invitations` | members panel, invitation banner; the user's own roles in Settings and the move picker | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below); a user reads only their own `user_roles` rows directly |
 | `media_embeddings` | the grid's *Needs review first* order (embedded in the `media` query, ww-backend #337); Wildlife Brain | RLS read for project viewers; writes service-role |
 | `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
