@@ -77,7 +77,8 @@ Overlay dialog with focus trap, ESC-to-close, and click-backdrop-to-close.
 
 ## `<DataTable>`
 
-Generic typed table with sort, search, column toggle, CSV + JSON export, and optional client paging.
+Generic typed table with sort, search, column toggle, CSV + JSON export, row selection, and optional
+client paging. With a selection, CSV exports the selected rows only.
 
 | Prop | Type | Description |
 |---|---|---|
@@ -85,7 +86,9 @@ Generic typed table with sort, search, column toggle, CSV + JSON export, and opt
 | `rows` / `rowKey` | `T[]` / `(row) => string` | data + stable key |
 | `searchable`, `searchPlaceholder` | | search box |
 | `exportFilename` | `string` | enables CSV + JSON buttons |
+| `exportJson` | `boolean` | `false` hides the JSON button (Insights > Deployments) |
 | `onRowClick`, `selectedKeys` | | row click + highlight |
+| `onSelectionChange` | `(keys) => void` | adds a checkbox column; `selectedKeys` holds the selection |
 | `toolbar` | `ReactNode` | extra content beside search |
 | `pageSize` | `number` | `0` = no paging |
 
@@ -132,7 +135,9 @@ Props: `status: AnnotationStatus`, `size: 'sm' | 'md'` (default `sm`), `label?` 
 ## `<VegaChart>`
 
 Thin wrapper around `vega-embed` with the shared `VEGA_CONFIG` theme. Pass a Vega-Lite spec; the
-chart sizes to its container. Used by `ObservationReports`, `ChartBuilder`, `ReportingPage`.
+chart sizes to its container. Used by `ReportsDashboard` (Insights > Reports, specs from
+`components/data/chartSpec.ts` over tables counted by `lib/observationSummary.ts`), `ObservationReports`,
+`ReportingPage`.
 
 ---
 

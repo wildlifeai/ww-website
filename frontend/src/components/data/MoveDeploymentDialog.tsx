@@ -7,6 +7,7 @@
 // which re-checks the rule and whose refusals come back as plain messages.
 import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Check } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
@@ -24,7 +25,7 @@ const SELECT: React.CSSProperties = {
   backgroundColor: 'var(--surface)', color: 'var(--text-color)', fontSize: '0.8125rem', boxSizing: 'border-box',
 }
 const TEXT: React.CSSProperties = { fontSize: '0.8125rem', margin: 0 }
-const NOTE: React.CSSProperties = { fontSize: '0.75rem', opacity: 0.7, margin: 0 }
+const NOTE: React.CSSProperties = { fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0 }
 const ERROR: React.CSSProperties = { fontSize: '0.75rem', color: 'var(--error, #ef4444)' }
 const BTN: React.CSSProperties = {
   padding: '0.4rem 0.9rem', fontSize: '0.8125rem', borderRadius: 'var(--radius)', cursor: 'pointer',
@@ -46,9 +47,9 @@ export function MoveDeploymentDialog({ deploymentId, onClose }: Props) {
   const close = () => onClose(moved.current)
 
   let body: React.ReactNode
-  if (query.isPending) body = <p style={{ opacity: 0.5 }}>Loading…</p>
+  if (query.isPending) body = <p style={NOTE}>Loading…</p>
   else if (query.isError) body = <p style={ERROR}>{query.error.message}</p>
-  else if (!query.data) body = <p style={{ opacity: 0.7 }}>This deployment is not available to you.</p>
+  else if (!query.data) body = <p style={NOTE}>This deployment is not available to you.</p>
   else body = <MoveForm context={query.data} onMoved={() => { moved.current = true }} onClose={close} />
 
   return <Modal open onClose={close} title="Move to project" size="sm">{body}</Modal>
@@ -76,7 +77,7 @@ function MoveForm({ context, onMoved, onClose }: {
   if (movedTo) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-        <p style={{ ...TEXT, color: 'var(--success, #10b981)' }}>{movedTo} ✓</p>
+        <p style={{ ...TEXT, display: 'flex', alignItems: 'center', gap: '0.25rem', color: 'var(--success, #10b981)' }}><Check size={14} aria-hidden />{movedTo}</p>
         {closeButton}
       </div>
     )
