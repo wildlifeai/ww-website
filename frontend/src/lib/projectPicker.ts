@@ -41,7 +41,7 @@ export function groupByOrganisation<P extends SelectableProject>(projects: P[]):
 /** The ticked projects' names for the picker's tooltip, cut after `max` names. */
 export function projectPickerTitle(projects: SelectableProject[], selectedProjectIds: string[], max = 12): string {
   const selected = new Set(selectedProjectIds)
-  const names = projects.filter(p => selected.has(p.id)).map(p => p.name)
+  const names = projects.flatMap(p => (selected.has(p.id) ? [p.name] : []))
   if (names.length === 0) return 'No project selected'
   const shown = names.slice(0, max).join('\n')
   return names.length > max ? `${shown}\nand ${names.length - max} more` : shown
