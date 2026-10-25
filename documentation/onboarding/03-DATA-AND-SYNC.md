@@ -311,8 +311,9 @@ instant in the **deployment's** timezone at display time.
   recomputes it from the new coordinates, and clears it when they are removed.
 - **Display** — [`frontend/src/lib/time.ts`](../../frontend/src/lib/time.ts) (`formatCaptureTime`,
   `getTimeOfDay`, `hourInTimezone`) renders the UTC instant in the deployment zone (with a label like
-  `10:44 am NZST`) and drives the day/night filter. **Store the IANA name, not a fixed offset**, so DST
-  is handled automatically (NZ is +12 in winter, +13 in summer).
+  `10:44 am NZST`). The review grid's day/night filter is off until the database can answer it (it
+  needs each photo's hour in its deployment's zone in the query). **Store the IANA name, not a fixed
+  offset**, so DST is handled automatically (NZ is +12 in winter, +13 in summer).
 - **Per-day counts**: Insights > Reports counts detections per day by `media.timestamp` in this zone,
   never by `observations.created_at` (the label time); those without one are counted under the chart.
 - **Graceful fallback** — when `timezone` is `NULL` (or the column isn't deployed yet) the UI falls

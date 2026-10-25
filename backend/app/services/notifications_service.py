@@ -78,6 +78,11 @@ def _is_human_verdict(o: dict) -> bool:
     return o.get("source_type") == "human" or o.get("classification_method") == "human"
 
 
+def _is_human_row(o: dict) -> bool:
+    """A row a person wrote, as domain.public_api.is_human_row and the frontend's isHumanRow."""
+    return o.get("source_type") == "human" or (not o.get("source_type") and o.get("classification_method") == "human")
+
+
 def _name(o: dict) -> str | None:
     return o.get("scientific_name") or o.get("vernacular_name")
 
@@ -95,6 +100,10 @@ def photo_detections(rows: list[dict], recent_ids: set[str]) -> list[str]:
     """
     run_names = [n for o in rows if o.get("id") in recent_ids and o.get("source_type") == "ai" and (n := _name(o))]
     human = [o for o in rows if _is_human_verdict(o)]
+    # A person's own row (UI audit decision 2) is the verdict over an AI row confirmed before it.
+    own = [o for o in human if _is_human_row(o)]
+    if own:
+        human = own
     consensus = next((o for o in rows if o.get("source_type") == "consensus"), None)
     if human:
         if all(o.get("observation_type") == "blank" and not _name(o) for o in human):
