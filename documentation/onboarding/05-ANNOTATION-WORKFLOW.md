@@ -13,7 +13,7 @@ highlighted nav tab already signals where you are.
 `MediaBrowser` and `InsightsPage` use a shared, branded `Ribbon` primitive
 (`components/ui/Ribbon.tsx`):
 
-- **Menu bar** — a leaf brand mark + ribbon tabs + a live status slot.
+- **Menu bar**: ribbon tabs and a live status slot (the header carries the logo).
 - **Ribbon body** — grouped categories, each with controls and a small caption.
 - **Dialog launcher** — the ⤢ corner arrow opens advanced settings (Word's group launcher).
 
@@ -92,12 +92,15 @@ Clicking a photo opens a **full-screen modal** (`MediaDetail.tsx`; its photo are
 
 | Action | Effect |
 |--------|--------|
-| **✓ Confirm** | Accept the AI label → `review_status='human_reviewed'`, sets `reviewer_id`; auto-advances. With no observation selected it confirms every unreviewed per-model AI row (`confirmAllTargets`); the consensus row (`source_type='consensus'`) stays `ai_reviewed` (#301) |
-| **✕ Blank** | False trigger → `observation_type='blank'`, clears species; auto-advances |
-| **Correct** | Change species via the taxon-validated `SpeciesPicker` (writes `taxon_id`) |
-| **▭ Box / Redraw / ✕** | Draw, replace, or delete the bounding box (writes the bbox quad) |
-| **+ Add Observation** | Create a new fully human-provenanced observation |
-| **🗑 Remove** (Del) | Delete the observation. Shown only to project members and above, checked with `has_project_role` (`lib/observationWrites.ts`); a delete that removes no row is reported as not removed (#183) |
+| **Confirm** (C) | Agree with the photo's verdict, or with the selected row: it becomes your label, one human row (`source_type='human'`, `lib/humanVerdict.ts`), and the viewer moves on. A photo a person already ruled on just moves on |
+| **Blank** (B) | False trigger: your label becomes `observation_type='blank'`; moves on |
+| **Label** (A) | Pick a species in the taxon-validated `SpeciesPicker` (writes `taxon_id`), with an optional count; it becomes your label. One human species label per photo |
+| **Box** | On your label: draw, replace or delete its box |
+| **Remove** (Del) | Clears your label's box first, then the label itself. AI rows cannot be removed |
+
+Every action shows Undo, and the AI rows stay as the model wrote them, so "AI said X, a person said Y"
+survives (UI audit decision 2). A write RLS refuses (0 rows) reports "Not saved" instead of
+reading as saved (#183). A viewer sees none of these actions.
 
 > With `FF_PER_CROP_CLASSIFY_ENABLED` on, AI produces **one observation per animal** rather than one
 > per image, so a mixed-species frame shows a card (and crop) per detection and `count` is reserved for

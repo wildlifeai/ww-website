@@ -17,6 +17,7 @@ import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS } from '../components/common'
 | Export | File | Used by |
 |---|---|---|
 | `<Ribbon>` | `Ribbon.tsx` | **Annotations + Insights command bars** (Word-style menu bar + grouped ribbon) |
+| `<Banner>`, `BannerSlot`, `BannerProgress` | `Banner.tsx` | Every notice: on a page, and stacked in the Layout's `BannerSlot` above every page (demo, invitations, quota) |
 | `<Modal>` | `Modal.tsx` | Advanced settings, create-project (the upload flow is a page now, `/upload-data`) |
 | `<DataTable>` | `DataTable.tsx` | Insights → Deployments / Projects tables |
 | `<FilterSelect>`, `<SearchInput>`, `<ColumnToggle>` | `ControlBar.tsx` | `FilterSelect` inside ribbon groups and the admin Devices toolbar; the other two inside `DataTable` |

@@ -70,27 +70,6 @@ export function isEdgeAi(o: ObservationStatusFields): boolean {
   return isAiLabel(o) && o.ai_origin === 'edge'
 }
 
-export interface AiOriginMeta {
-  icon: string
-  label: string
-  title: string
-}
-
-/**
- * Badge descriptor for an AI observation's producing layer, or null for
- * non-AI rows. Edge → 📟 Camera AI; anything else AI (incl. legacy rows with
- * no ai_origin) → ☁ Cloud AI, since the website pipeline is the only other
- * producer. Lets a surface show "📟 Camera AI: rat 87%" beside
- * "☁ Cloud AI: Rattus rattus 64%".
- */
-export function aiOriginMeta(o: ObservationStatusFields): AiOriginMeta | null {
-  if (!isAiLabel(o)) return null
-  if (o.ai_origin === 'edge') {
-    return { icon: '📟', label: 'Camera AI', title: "On-device (edge) camera model prediction, ingested from the photo's EXIF" }
-  }
-  return { icon: '☁', label: 'Cloud AI', title: 'Cloud pipeline prediction (SpeciesNet / Wildlife Brain)' }
-}
-
 // ── Photo verdict ────────────────────────────────────────────────────────────
 
 /** Fields the photo verdict reads; every surface's row type satisfies it. */
@@ -126,16 +105,6 @@ export function photoVerdict<T extends PresenceFields>(obs: readonly T[]): Photo
   }
   const top = human ?? obs[0] ?? null
   return { labelObs: top, isEmpty: !!top && !top.scientific_name && top.observation_type === 'blank' }
-}
-
-/**
- * The rows Confirm stamps human reviewed when no observation is selected (#301): the
- * per-model AI labels not yet reviewed, including older machine rows with no `source_type`.
- * The consensus row is a derived machine verdict and keeps `ai_reviewed`; the photo's verdict
- * follows the human row first.
- */
-export function confirmAllTargets<T extends ObservationStatusFields>(obs: readonly T[]): T[] {
-  return obs.filter(o => isAiLabel(o) && o.source_type !== 'consensus' && !isHumanReviewed(o))
 }
 
 // ── Boxes ────────────────────────────────────────────────────────────────────

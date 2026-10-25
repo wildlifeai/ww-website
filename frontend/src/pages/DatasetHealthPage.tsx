@@ -8,7 +8,7 @@ const SEVERITY_COLOR: Record<string, string> = { info: '#5b9cf6', warning: '#ff9
 
 function Stat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="glass-card" style={{ padding: '1rem 1.25rem', textAlign: 'center', flex: 1, minWidth: 120 }}>
+    <div className="card" style={{ padding: '1rem 1.25rem', textAlign: 'center', flex: 1, minWidth: 120 }}>
       <div style={{ fontSize: '1.6rem', fontWeight: 'bold' }}>{value}</div>
       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{label}</div>
     </div>
@@ -45,7 +45,7 @@ export function DatasetHealthPage() {
 
       {/* Conservation alerts */}
       {alerts.length > 0 && (
-        <div className="glass-card" style={{ padding: '1.25rem' }}>
+        <div className="card" style={{ padding: '1.25rem' }}>
           <h4 style={{ marginTop: 0 }}>Conservation alerts ({alerts.length})</h4>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {alerts.map((a) => (
@@ -60,7 +60,7 @@ export function DatasetHealthPage() {
       )}
 
       {/* Review funnel */}
-      <div className="glass-card" style={{ padding: '1.25rem' }}>
+      <div className="card" style={{ padding: '1.25rem' }}>
         <h4 style={{ marginTop: 0 }}>Review funnel</h4>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {Object.entries(health.review_funnel).map(([status, count]) => (
@@ -79,7 +79,7 @@ export function DatasetHealthPage() {
       </div>
 
       {/* AN-9: AI-vs-human agreement (QA) */}
-      <div className="glass-card" style={{ padding: '1.25rem' }}>
+      <div className="card" style={{ padding: '1.25rem' }}>
         <h4 style={{ marginTop: 0 }}>AI vs human agreement</h4>
         {qaLoading ? (
           <span style={MUTED}>Computing agreement…</span>
@@ -119,7 +119,7 @@ export function DatasetHealthPage() {
       </div>
 
       {/* Species coverage */}
-      <div className="glass-card" style={{ padding: '1.25rem' }}>
+      <div className="card" style={{ padding: '1.25rem' }}>
         <h4 style={{ marginTop: 0 }}>Species coverage</h4>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 360, overflowY: 'auto' }}>
           {health.species.map((s) => (

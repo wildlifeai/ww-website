@@ -14,7 +14,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchLiveObservations } from './liveObservations'
-import { readAllPages } from './readAllPages'
+import { chunk, readAllPages } from './readAllPages'
 
 export interface ActiveDeployment {
   id: string
@@ -47,12 +47,6 @@ export const ID_CHUNK = 100
 /** Newest messages read per chunk before falling back to one read per missed deployment. */
 export const TELEMETRY_WINDOW = 1000
 export const DETECTION_HOURS = 48
-
-export function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
-  return out
-}
 
 type DeploymentRow = Omit<ActiveDeployment, 'project_name' | 'device_name'> & {
   projects: { name: string } | null

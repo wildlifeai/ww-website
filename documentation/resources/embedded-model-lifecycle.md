@@ -154,10 +154,10 @@ background/negative classes, behaviour classes and sub-threshold scores are skip
 are registered (before the cloud pipeline, and regardless of the `run_ai` opt-out; the camera
 already decided in the field, so its result should not wait minutes for SpeciesNet), and again
 after the annotation pipeline (`auto_annotate_deployments`, idempotent), replace-don't-append
-like the SpeciesNet step. The annotation panel shows *📟 Camera AI: rat 87%* beside
-*☁ Cloud AI: Rattus rattus 64%* (`AiOriginBadge`, driven by `observations.ai_origin`), and a
-*📟 Camera AI on the device* line above the observations lists the raw per-class scores of
-every frame (`lib/cameraScores.ts`), so a frame the camera judged *no person 62%* still shows
+like the SpeciesNet step. The photo viewer's model opinions name each source (`opinionSource`
+in `lib/observations.ts`, from `observations.ai_origin`), so *Camera AI* sits beside the cloud
+model, and the camera's raw per-class scores (`lib/cameraScores.ts`) show once, under its
+Camera AI row or as their own entry, so a frame the camera judged *no person 62%* still shows
 the device's decision even though nothing is reflected for it.
 Gated on `FF_EDGE_REFLECT_ENABLED`. The ww-backend `dual_ai_v0` migration
 (`observations.ai_origin` + `device_alert_rules`) is **merged** and the flag is on

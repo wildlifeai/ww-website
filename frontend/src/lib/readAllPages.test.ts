@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readAllPages } from './readAllPages'
+import { chunk, readAllPages } from './readAllPages'
 
 describe('readAllPages', () => {
   it('reads one short page and stops', async () => {
@@ -39,5 +39,12 @@ describe('readAllPages', () => {
     const pages = [{ data: [1, 2], error: null }, { data: null, error: { message: 'denied' } }]
     let n = 0
     await expect(readAllPages(() => Promise.resolve(pages[n++]), 2)).rejects.toThrow('denied')
+  })
+})
+
+describe('chunk', () => {
+  it('splits into runs of at most the size', () => {
+    expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]])
+    expect(chunk([], 2)).toEqual([])
   })
 })

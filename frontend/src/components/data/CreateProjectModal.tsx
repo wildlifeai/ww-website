@@ -13,10 +13,12 @@
  *   insert           → projects table
  */
 import { useState, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Modal } from '../ui/Modal'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { useCreatableOrgs } from '../../hooks/useCreatableOrgs'
+import { PROJECT_ROLES_KEY } from '../../hooks/useProjectRoles'
 import { createProjectMessage } from '../../lib/projectCreation'
 
 // ── Reference data types (mirrors mobile ReferenceDataService) ───────────────
@@ -69,6 +71,7 @@ const ROW2: React.CSSProperties = {
 
 export function CreateProjectModal({ open, onClose, onCreated }: Props) {
   const { user } = useAuth()
+  const queryClient = useQueryClient()
 
   // ── Org resolution ─────────────────────────────────────────────────────────
   const { orgs, loading: orgsLoading } = useCreatableOrgs()
@@ -173,6 +176,9 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
 
     if (err) { setError(createProjectMessage(err)); return }
     if (data) {
+      // The database made the creator project_admin (handle_new_project): read the roles again so
+      // the new project is writable at once, not after the next refetch.
+      void queryClient.invalidateQueries({ queryKey: [PROJECT_ROLES_KEY] })
       onCreated(data as CreatedProject)
       resetForm()
       onClose()

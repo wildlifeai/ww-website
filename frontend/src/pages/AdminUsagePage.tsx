@@ -209,7 +209,7 @@ export function AdminUsagePage() {
       {!loading && rows.length > 0 && (
         <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
           {([['users', rows.length], ['photos', totals.photos.toLocaleString()], ['storage', fmtBytes(totals.bytes)], ['AI compute', fmtDuration(totals.sec)], ['over limit', overCount]] as [string, string | number][]).map(([label, value]) => (
-            <div key={label} className="glass-card" style={{ padding: '0.75rem 1rem', minWidth: 110 }}>
+            <div key={label} className="card" style={{ padding: '0.75rem 1rem', minWidth: 110 }}>
               <div style={{ fontSize: '1.4rem', fontWeight: 700, color: label === 'over limit' && overCount ? '#ef4444' : undefined }}>{value}</div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{label}</div>
             </div>

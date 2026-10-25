@@ -4,7 +4,8 @@
  * PostgREST stops at 1,000 rows without an error, so a list that can grow past that pages with
  * `.range()` until a short page (gotchas.md). `page(from, to)` builds the query afresh for each
  * range; give it a stable order with a unique column last, or rows repeat or go missing between
- * pages. Observations have their own reader, `fetchLiveObservations`.
+ * pages. Observations have their own reader, `fetchLiveObservations`. A long id list goes to
+ * the database in `chunk`s, so no request URL grows with the number of ids.
  */
 import { PAGE_SIZE } from './liveObservations'
 
@@ -26,4 +27,11 @@ export async function readAllPages<T>(
     rows.push(...got)
     if (got.length < pageSize) return rows
   }
+}
+
+/** `items` in runs of at most `size`. */
+export function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
 }

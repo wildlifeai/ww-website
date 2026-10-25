@@ -7,8 +7,8 @@
 import { useMyInvitations, useRespondToInvitation } from '../hooks/useProjectMembers'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { ROLE_LABELS } from '../lib/projectMembers'
-import { TriangleAlert, UserPlus } from 'lucide-react'
-import { Banner } from './common/Banner'
+import { UserPlus } from 'lucide-react'
+import { Banner } from './ui/Banner'
 
 const BTN: React.CSSProperties = {
   padding: '0.3rem 0.75rem', fontSize: '0.8rem', borderRadius: 'var(--radius)',
@@ -27,8 +27,9 @@ export function InvitationsBanner() {
       {invitations.data.map(inv => (
         <Banner
           key={inv.id}
+          tone="info"
           icon={UserPlus}
-          actions={(
+          action={(
             <>
               <button
                 disabled={respond.isPending}
@@ -52,7 +53,7 @@ export function InvitationsBanner() {
         </Banner>
       ))}
       {respond.isError && (
-        <Banner icon={TriangleAlert} tone="warning">{respond.error.message}</Banner>
+        <Banner tone="warning">{respond.error.message}</Banner>
       )}
     </>
   )

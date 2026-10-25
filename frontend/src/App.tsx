@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation, useParams } from 'react-router-dom'
 import {
-  Bell, Bot, Camera, ChartColumn, ChartLine, CircleHelp, History, Info, LogOut, RadioTower, Settings, Upload, Wrench,
+  Bell, Bot, Camera, ChartColumn, ChartLine, CircleHelp, History, LogOut, RadioTower, Settings, Upload, Wrench,
   type LucideIcon,
 } from 'lucide-react'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -18,7 +18,7 @@ import { useProjectRoles } from './hooks/useProjectRoles'
 import { useWritableProjects } from './hooks/useWritableProjects'
 import { UploadQuotaBanner } from './components/UploadQuotaBanner'
 import { InvitationsBanner } from './components/InvitationsBanner'
-import { Banner, BannerSlot } from './components/common/Banner'
+import { Banner, BannerSlot } from './components/ui/Banner'
 import { HomePage } from './pages/HomePage'
 import { LoginPage } from './pages/LoginPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
@@ -378,7 +378,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             {/* The demo session is a real (read-only) login, so the rest of the app needs no
                 demo-specific code paths. */}
             {isDemo && (
-              <Banner icon={Info}>
+              <Banner tone="info">
                 You&apos;re exploring a read-only demo with sample data.{' '}
                 <button
                   onClick={logout}

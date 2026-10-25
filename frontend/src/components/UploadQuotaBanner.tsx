@@ -7,8 +7,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../config/supabase'
 import { useAuth } from '../hooks/useAuth'
-import { TriangleAlert } from 'lucide-react'
-import { Banner } from './common/Banner'
+import { Banner } from './ui/Banner'
 
 interface MyUsage {
   photos_uploaded: number
@@ -35,7 +34,7 @@ export function UploadQuotaBanner() {
   if (!usage?.over_quota || dismissed) return null
 
   return (
-    <Banner icon={TriangleAlert} tone="warning" onDismiss={() => setDismissed(true)}>
+    <Banner tone="warning" onClose={() => setDismissed(true)}>
       You've exceeded a usage limit
       {usage.max_photos != null && usage.photos_uploaded > usage.max_photos && <> (<strong>{usage.photos_uploaded.toLocaleString()}</strong> / {usage.max_photos.toLocaleString()} photos)</>}.
       Everything still works, but please contact an administrator to review your quota.

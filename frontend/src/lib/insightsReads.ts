@@ -6,35 +6,10 @@
 // splits a long deployment list so no request URL grows with the number of deployments.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchLiveObservations } from './liveObservations'
+import { chunk, readAllPages } from './readAllPages'
 
-/** Rows per request: PostgREST's cap. */
-export const READ_PAGE = 1000
 /** Deployment ids per observation request (about 5.5 KB of URL). */
 export const IDS_PER_REQUEST = 150
-
-type PageResult<T> = { data: T[] | null; error: { message: string } | null }
-
-/** Every row of a read, one `.range()` page at a time until a short page. */
-export async function readAllPages<T>(
-  page: (from: number, to: number) => PromiseLike<PageResult<T>>,
-  size = READ_PAGE,
-): Promise<T[]> {
-  const rows: T[] = []
-  for (let from = 0; ; from += size) {
-    const { data, error } = await page(from, from + size - 1)
-    if (error) throw new Error(error.message)
-    const got = data ?? []
-    rows.push(...got)
-    if (got.length < size) return rows
-  }
-}
-
-/** `items` in runs of at most `size`. */
-export function chunk<T>(items: T[], size: number): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
-  return out
-}
 
 export interface InsightsDeployment {
   id: string

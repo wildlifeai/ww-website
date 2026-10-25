@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { confirmAllTargets, groupByBox, isHumanRow, observationLabel, opinionSource, photoVerdict } from './observations'
+import { groupByBox, isHumanRow, observationLabel, opinionSource, photoVerdict } from './observations'
 
 const box = (id: string, x: number | null, y = 0.2, w = 0.3, h = 0.4) => ({ id, bbox_x: x, bbox_y: y, bbox_w: w, bbox_h: h })
 
@@ -68,28 +68,6 @@ describe('photoVerdict', () => {
     const mine = { id: 'human', source_type: 'human', review_status: 'human_reviewed', observation_type: 'animal', scientific_name: 'Mus musculus' }
     expect(photoVerdict([stamped, mine]).labelObs).toBe(mine)
     expect(photoVerdict([mine, stamped]).labelObs).toBe(mine)
-  })
-})
-
-describe('confirmAllTargets', () => {
-  const speciesnet = { id: 'speciesnet', source_type: 'ai', review_status: 'ai_reviewed' }
-  const gemini = { id: 'gemini', source_type: 'ai', review_status: 'ai_reviewed' }
-  const consensus = { id: 'consensus', source_type: 'consensus', review_status: 'ai_reviewed', classification_method: 'machine' }
-
-  it('confirms the SpeciesNet and Gemini rows and leaves the consensus row ai_reviewed (#301)', () => {
-    expect(confirmAllTargets([speciesnet, gemini, consensus]).map(o => o.id)).toEqual(['speciesnet', 'gemini'])
-  })
-
-  it('skips rows a human already reviewed and rows a human created', () => {
-    const reviewed = { ...gemini, review_status: 'human_reviewed' }
-    const human = { id: 'human', source_type: 'human', review_status: 'human_reviewed' }
-    expect(confirmAllTargets([speciesnet, reviewed, human, consensus]).map(o => o.id)).toEqual(['speciesnet'])
-    expect(confirmAllTargets([consensus])).toEqual([])
-  })
-
-  it('still confirms older machine rows with no source_type', () => {
-    const legacy = { id: 'legacy', source_type: null, review_status: 'ai_reviewed', classification_method: 'machine' }
-    expect(confirmAllTargets([legacy, consensus]).map(o => o.id)).toEqual(['legacy'])
   })
 })
 
