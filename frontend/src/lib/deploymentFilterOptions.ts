@@ -3,7 +3,9 @@
  *
  * Deployments are often re-made at the same site, so their location names repeat ("User
  * Location" twice in the report). Each option names the location, the start date and, when the
- * grid spans several projects, the project, so two deployments never read the same.
+ * grid spans several projects, the project, so two deployments never read the same. Across
+ * several projects the options are also grouped by project (UI audit 02 #29): the menu lists
+ * them under a project heading with the shorter label, the trigger and search keep the full one.
  */
 
 export interface FilterDeployment {
@@ -17,6 +19,10 @@ export interface FilterDeployment {
 export interface FilterOption {
   value: string
   label: string
+  /** The project heading the option is listed under, when the deployments span projects. */
+  group?: string
+  /** The label under that heading: the full label without the project. */
+  menuLabel?: string
 }
 
 const DATE_FORMAT = { day: 'numeric', month: 'short', year: 'numeric' } as const
@@ -49,7 +55,8 @@ export function startDateLabel(iso: string | null | undefined, tz?: string | nul
 /**
  * One option per deployment, sorted by location name, then newest start first. `projectNames`
  * maps project id to name; the project is added to a label only when the deployments span more
- * than one project. Labels that still collide get the id prefix.
+ * than one project, and then the options are grouped and sorted by project first. Labels that
+ * still collide get the id prefix.
  */
 export function deploymentFilterOptions(
   deployments: FilterDeployment[],
@@ -61,19 +68,29 @@ export function deploymentFilterOptions(
     const parts = [name]
     const date = startDateLabel(d.deployment_start, d.timezone)
     if (date) parts.push(date)
-    if (multiProject) parts.push(projectNames.get(d.project_id) ?? d.project_id.slice(0, 8))
-    return { d, name, label: parts.join(' · '), start: d.deployment_start ? Date.parse(d.deployment_start) || 0 : 0 }
+    const menuLabel = parts.join(' · ')
+    const project = projectNames.get(d.project_id) ?? d.project_id.slice(0, 8)
+    if (multiProject) parts.push(project)
+    return { d, name, project, menuLabel, label: parts.join(' · '), start: d.deployment_start ? Date.parse(d.deployment_start) || 0 : 0 }
   })
 
   const seen = new Map<string, number>()
   for (const r of rows) seen.set(r.label, (seen.get(r.label) ?? 0) + 1)
-  for (const r of rows) if ((seen.get(r.label) ?? 0) > 1) r.label = `${r.label} · ${r.d.id.slice(0, 8)}`
+  for (const r of rows) {
+    if ((seen.get(r.label) ?? 0) > 1) {
+      r.label = `${r.label} · ${r.d.id.slice(0, 8)}`
+      r.menuLabel = `${r.menuLabel} · ${r.d.id.slice(0, 8)}`
+    }
+  }
 
   rows.sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    (multiProject ? a.project.localeCompare(b.project, undefined, { sensitivity: 'base' }) : 0)
+    || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
     || b.start - a.start
     || a.label.localeCompare(b.label))
-  return rows.map(r => ({ value: r.d.id, label: r.label }))
+  return rows.map(r => multiProject
+    ? { value: r.d.id, label: r.label, group: r.project, menuLabel: r.menuLabel }
+    : { value: r.d.id, label: r.label })
 }
 
 /** Options whose label contains every word of `query`, ignoring case. An empty query keeps all. */

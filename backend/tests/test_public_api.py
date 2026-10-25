@@ -475,3 +475,17 @@ def test_a_human_verdict_overrules_the_consensus():
     confirmed = {**_consensus("animal"), "review_status": "human_reviewed"}
     reviewed_rat = {**RAT, "review_status": "human_reviewed"}
     assert photo_verdict([confirmed, reviewed_rat]) == (reviewed_rat, False)
+
+
+def test_a_persons_own_row_overrules_an_ai_row_confirmed_earlier():
+    # Before decision 2 a reviewer stamped the AI row; now a correction is a human row beside it.
+    stamped_rat = {**RAT, "review_status": "human_reviewed"}
+    stoat = {
+        "id": "human",
+        "source_type": "human",
+        "review_status": "human_reviewed",
+        "observation_type": "animal",
+        "scientific_name": "Mustela erminea",
+    }
+    assert photo_verdict([stamped_rat, stoat]) == (stoat, False)
+    assert photo_verdict([stoat, stamped_rat]) == (stoat, False)

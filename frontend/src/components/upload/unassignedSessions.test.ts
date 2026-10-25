@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { buildSessions, resolutionBreakdown, SESSION_GAP_MS, unresolvedFileIndices, withoutTestPhotos } from './unassignedSessions'
+import {
+  BREAKDOWN_SHOWN, buildSessions, defaultDeploymentName, fileIndicesWithStatus, foldBreakdown, planBulkCreate,
+  resolutionBreakdown, selectForUpload, SESSION_GAP_MS, unresolvedFileIndices, withoutTestPhotos,
+} from './unassignedSessions'
+import type { ResolutionRow, TriageSession } from './unassignedSessions'
 
 const T0 = Date.UTC(2026, 6, 20, 8, 0, 0) // 20 Jul 2026 08:00Z
 
@@ -310,5 +314,114 @@ describe('resolutionBreakdown', () => {
       ['deployment EEFF0011', 'no_access'],
       ['no deployment info', 'unknown'],
     ])
+  })
+})
+
+describe('read-only claims', () => {
+  // A deployment in a project the user only views: /validate calls it valid, the
+  // writable list does not hold it, so the page records it as read_only.
+  const VIEWER = '77aa0000-0000-4000-8000-000000000001'
+  const OWN = 'aabbccdd-0000-4000-8000-000000000000'
+  const deployments = [{ id: OWN, project_id: 'p1', location_name: 'North Ridge' }]
+
+  it('names a read-only claim in the breakdown and finds its frames, BMP frames included', () => {
+    const { files, paths } = fixture([
+      { path: 'MEDIA/77AA0000/A0001.JPG', ms: T0 },
+      { path: 'MEDIA/77AA0000/A0002.BMP', ms: T0 + 1 },
+      { path: 'MEDIA/AABBCCDD/B0001.JPG', ms: T0 },
+      { path: 'IMG_0001.JPG', ms: T0 },
+    ])
+    const ids = [VIEWER, null, OWN, null]
+    const rows = resolutionBreakdown(files, paths, ids, deployments, { [VIEWER]: 'read_only' })
+    expect(rows.map((r) => [r.label, r.count, r.status])).toEqual([
+      ['deployment 77AA0000', 2, 'read_only'],
+      ['no deployment info', 1, 'unknown'],
+      ['North Ridge', 1, 'matched'],
+    ])
+    expect(fileIndicesWithStatus(files, paths, ids, rows, ['read_only', 'no_access'])).toEqual([0, 1])
+    expect(fileIndicesWithStatus(files, paths, ids, rows, ['no_access'])).toEqual([])
+    expect(fileIndicesWithStatus(files, paths, ids, rows, ['matched'])).toEqual([2])
+  })
+})
+
+function session(over: Partial<TriageSession>): TriageSession {
+  return {
+    key: 'k', indices: [0], firstMs: T0, lastMs: T0, cardFolder: null, folderCount: 0,
+    exifDeploymentId: null, deploymentId: null, skipped: false, ...over,
+  }
+}
+
+describe('defaultDeploymentName', () => {
+  it('prefers the camera id, then the card folder, then the date', () => {
+    expect(defaultDeploymentName(session({ exifDeploymentId: 'eab2aa23-1111-4000-8000-000000000000', cardFolder: 'EAB2AA23' })))
+      .toBe('Camera deployment eab2aa23')
+    expect(defaultDeploymentName(session({ cardFolder: 'EAB2AA23' }))).toBe('Card EAB2AA23')
+    expect(defaultDeploymentName(session({}))).toMatch(/^Photos from /)
+  })
+})
+
+describe('planBulkCreate', () => {
+  it('makes one deployment per undecided session and one per camera id', () => {
+    const ID = 'eab2aa23-1111-4000-8000-000000000000'
+    const plans = planBulkCreate([
+      session({ key: 'a', exifDeploymentId: ID }),
+      session({ key: 'b', cardFolder: 'CAFEF00D' }),
+      session({ key: 'c', exifDeploymentId: ID }),
+      session({ key: 'd', deploymentId: 'already' }),
+      session({ key: 'e', skipped: true }),
+      session({ key: 'f' }),
+    ])
+    expect(plans.map((p) => [p.exifDeploymentId, p.sessionKeys])).toEqual([
+      [ID, ['a', 'c']],
+      [null, ['b']],
+      [null, ['f']],
+    ])
+    expect(plans[1].name).toBe('Card CAFEF00D')
+  })
+
+  it('plans nothing when every session is decided', () => {
+    expect(planBulkCreate([session({ deploymentId: 'd' }), session({ skipped: true })])).toEqual([])
+  })
+})
+
+describe('selectForUpload', () => {
+  it('drops the excluded files and re-indexes the assignments to the kept list', () => {
+    const out = selectForUpload(['f0', 'f1', 'f2', 'f3', 'f4'], ['p0', 'p1', 'p2', 'p3', 'p4'], [1, 3], [
+      { deploymentId: 'd1', indices: [2, 3] },
+      { deploymentId: 'd2', indices: [1] },
+      { deploymentId: 'd3', indices: [4] },
+    ])
+    expect(out.files).toEqual(['f0', 'f2', 'f4'])
+    expect(out.paths).toEqual(['p0', 'p2', 'p4'])
+    expect(out.assignments).toEqual([
+      { deploymentId: 'd1', indices: [1] },
+      { deploymentId: 'd3', indices: [2] },
+    ])
+  })
+
+  it('keeps everything when nothing is excluded', () => {
+    const out = selectForUpload(['a', 'b'], ['pa', 'pb'], [])
+    expect(out).toEqual({ files: ['a', 'b'], paths: ['pa', 'pb'], assignments: [] })
+  })
+})
+
+describe('foldBreakdown', () => {
+  const row = (label: string, status: ResolutionRow['status']): ResolutionRow =>
+    ({ claim: label, deploymentId: null, label, count: 1, status })
+
+  it('leaves a short breakdown alone', () => {
+    const rows = Array.from({ length: BREAKDOWN_SHOWN }, (_, i) => row(`m${i}`, 'matched'))
+    expect(foldBreakdown(rows)).toBe(rows)
+  })
+
+  it('keeps every line that needs attention and fills the rest with matched lines, in order', () => {
+    const rows = [
+      ...Array.from({ length: 10 }, (_, i) => row(`m${i}`, 'matched')),
+      row('x', 'not_found'),
+      row('y', 'read_only'),
+    ]
+    const shown = foldBreakdown(rows).map((r) => r.label)
+    expect(shown).toHaveLength(BREAKDOWN_SHOWN)
+    expect(shown).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'x', 'y'])
   })
 })

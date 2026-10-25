@@ -7,8 +7,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../config/supabase'
 import { useAuth } from './useAuth'
 import {
-  cancelInvitation, inviteMember, listMembers, listMyInvitations, listPendingInvitations,
-  removeMember, respondToInvitation,
+  cancelInvitation, changeMemberRole, inviteMember, listMembers, listMyInvitations,
+  listPendingInvitations, removeMember, respondToInvitation,
   type ProjectMember, type ProjectRole,
 } from '../lib/projectMembers'
 
@@ -51,6 +51,16 @@ export function useRemoveMember(projectId: string) {
     mutationFn: (userId: string) => removeMember(supabase, projectId, userId, user?.id ?? ''),
     // Refetch rather than filter locally: the list shows what the database
     // holds, not what the panel hoped happened.
+    onSettled: () => qc.invalidateQueries({ queryKey: keys.members(projectId) }),
+  })
+}
+
+export function useChangeMemberRole(projectId: string) {
+  const qc = useQueryClient()
+  const { user } = useAuth()
+  return useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: ProjectRole }) =>
+      changeMemberRole(supabase, projectId, userId, role, user?.id ?? ''),
     onSettled: () => qc.invalidateQueries({ queryKey: keys.members(projectId) }),
   })
 }

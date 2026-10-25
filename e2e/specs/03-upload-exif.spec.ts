@@ -44,7 +44,7 @@ test.describe('SD-card upload with EXIF deployment binding', () => {
     await page.locator('input[webkitdirectory]').setInputFiles(SDCARD)
 
     // The page reads every frame's EXIF before it enables Upload.
-    const upload = page.getByRole('button', { name: /^⬆ Upload \d+ images?$/ })
+    const upload = page.getByRole('button', { name: /^Upload \d+ images?$/ })
     await expect(upload).toBeEnabled({ timeout: 120_000 })
     await page.getByRole('checkbox', { name: /Run AI analysis after upload/ }).uncheck()
     await upload.click()

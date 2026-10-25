@@ -49,6 +49,7 @@ export interface UploadDeployment {
   latitude: number | null
   longitude: number | null
   deployment_start: string | null
+  timezone?: string | null
 }
 
 /** The browser's "leave site?" prompt while batches are still sending. */
@@ -156,10 +157,18 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
   // Once the pipeline is terminal every batch has registered its media rows, so the optimistic
   // grid cards are redundant (the real rows dedup them out): drop them. This runs during render
   // on the phase change rather than in an effect, so the cards never outlive the terminal render.
+  // The dock follows the same edges: it folds to the pill once every batch is sent and the
+  // server is processing, so it stops covering the page, and opens again on the result
+  // (UI audit 01 E3). A user who opens it while processing keeps it open.
   const [lastPhase, setLastPhase] = useState(phase)
   if (phase !== lastPhase) {
     setLastPhase(phase)
-    if (phase === 'completed' || phase === 'failed') { setPendingUploads([]); setPendingSince(null) }
+    if (phase === 'completed' || phase === 'failed') {
+      setPendingUploads([])
+      setPendingSince(null)
+      if (dockState === 'minimised') setDockState('medium')
+    }
+    if (phase === 'processing' && lastPhase === 'uploading' && dockState === 'medium') setDockState('minimised')
   }
 
   // ── Job polling ────────────────────────────────────────────────────────────
@@ -368,7 +377,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
           {
             ts: Date.now(),
             level: 'info',
-            message: `🚀 Starting upload for ${files.length} image${files.length !== 1 ? 's' : ''} (${totalBatches} batch${totalBatches !== 1 ? 'es' : ''})…`,
+            message: `Starting upload for ${files.length} image${files.length !== 1 ? 's' : ''} (${totalBatches} batch${totalBatches !== 1 ? 'es' : ''})…`,
           },
         ],
         lastUpdateTs: Date.now(),
@@ -390,7 +399,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
               {
                 ts: Date.now(),
                 level: 'info',
-                message: `📦 Batch ${batchNum}/${totalBatches} — images ${i + 1}–${batchEnd}…`,
+                message: `Batch ${batchNum}/${totalBatches}: images ${i + 1}–${batchEnd}…`,
               },
             ],
             lastUpdateTs: Date.now(),
@@ -428,7 +437,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                   const why = driveInfo.reason === 'server_disabled'
                     ? 'Image storage is not configured on this server, so nothing was saved. Contact an administrator.'
                     : `Image storage was not used (${driveInfo.reason ?? 'unknown reason'}), so nothing was saved.`
-                  logs.push({ ts: Date.now(), level: 'error', message: `❌ ${why}` })
+                  logs.push({ ts: Date.now(), level: 'error', message: why })
                   uploadError = uploadError || why
                 }
                 // Server blocked images whose deployment the user can't access (enforced
@@ -437,7 +446,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                   logs.push({
                     ts: Date.now(),
                     level: 'warning',
-                    message: `🚫 ${driveInfo.blocked_deployments.length} deployment${driveInfo.blocked_deployments.length !== 1 ? 's' : ''} skipped — you don't have access to them.`,
+                    message: `${driveInfo.blocked_deployments.length} deployment${driveInfo.blocked_deployments.length !== 1 ? 's' : ''} skipped: you can't upload to them.`,
                   })
                 }
                 if (driveInfo.status === 'skipped') {
@@ -448,7 +457,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                   logs.push({
                     ts: Date.now(),
                     level: 'warning',
-                    message: `⏭️ Batch ${batchNum} skipped: ${reason}`,
+                    message: `Batch ${batchNum} skipped: ${reason}`,
                   })
                 } else if (driveInfo.job_id) {
                   jobs.push({
@@ -461,14 +470,14 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                     logs.push({
                       ts: Date.now(),
                       level: 'warning',
-                      message: `⏭️ ${driveInfo.duplicates_skipped} already exist (skipped).`,
+                      message: `${driveInfo.duplicates_skipped} already exist (skipped).`,
                     })
                   }
                   if ((driveInfo.file_count ?? 0) > 0) {
                     logs.push({
                       ts: Date.now(),
                       level: 'success',
-                      message: `✅ Buffered. Drive sync queued for ${driveInfo.file_count} images.`,
+                      message: `Buffered. Drive sync queued for ${driveInfo.file_count} images.`,
                     })
                   }
                 } else if (driveInfo.status === 'error') {
@@ -477,7 +486,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                   // gets a media row, so count it as failed and say so in the dock; a log line
                   // alone left "2 photos missing" invisible.
                   const why = `Batch ${batchNum} was not saved: ${driveInfo.error || 'unknown error'}`
-                  logs.push({ ts: Date.now(), level: 'error', message: `❌ ${why}` })
+                  logs.push({ ts: Date.now(), level: 'error', message: why })
                   uploadError = uploadError || why
                   failedInBatch = batchEnd - i
                 }
@@ -485,7 +494,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                 logs.push({
                   ts: Date.now(),
                   level: 'success',
-                  message: `✅ Images ${i + 1}–${batchEnd} extracted.`,
+                  message: `Images ${i + 1}–${batchEnd} extracted.`,
                 })
               }
 
@@ -520,7 +529,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                     {
                       ts: Date.now(),
                       level: 'error',
-                      message: `⏹️ Stopping — not sending the remaining ${remaining} photo${remaining === 1 ? '' : 's'}: the server refuses image storage, so they would be discarded too.`,
+                      message: `Stopping, not sending the remaining ${remaining} photo${remaining === 1 ? '' : 's'}: the server refuses image storage, so they would be discarded too.`,
                     },
                   ],
                   failedFiles: (prev.failedFiles ?? 0) + remaining,
@@ -545,7 +554,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                 {
                   ts: Date.now(),
                   level: 'error',
-                  message: `❌ Batch ${batchNum} failed: ${msg}`,
+                  message: `Batch ${batchNum} failed: ${msg}`,
                 },
               ],
               // Count the batch as FAILED - never as uploaded. Advancing

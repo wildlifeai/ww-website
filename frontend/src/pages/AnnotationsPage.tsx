@@ -2,10 +2,10 @@
 /**
  * AnnotationsPage — /annotations
  *
- * WS5: MediaBrowser with a branded Ribbon (deployment/species/status filters,
- *      thumbnail size), StatusBadge overlays, advanced-settings popup
- *      (date range, day/night), and URL-based deployment
- *      pre-selection for upload→annotations handoff (WS5-T6).
+ * WS5: MediaBrowser with a branded Ribbon (deployment and species filters, the
+ *      pager, thumbnail size), StatusBadge overlays, an Advanced filters dialog
+ *      (status, annotator, model, sex, life stage, date range), and URL-based
+ *      deployment pre-selection for the upload to annotations handoff (WS5-T6).
  */
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -37,6 +37,8 @@ export function AnnotationsPage() {
   const [searchParams] = useSearchParams()
   const initialDeploymentId = searchParams.get('deployment') ?? undefined
   const initialSpecies = searchParams.get('species') ?? undefined
+  // ?media=<id> (the UMAP explorer's photo link) opens that photo in the viewer.
+  const initialMediaId = searchParams.get('media') ?? undefined
 
   useEffect(() => {
     if (!user || !queryProjectIds) return
@@ -70,12 +72,13 @@ export function AnnotationsPage() {
   return (
     <div>
       {loading ? (
-        <p style={{ opacity: 0.5 }}>Loading deployments…</p>
+        <p style={{ color: 'var(--text-muted)' }}>Loading deployments…</p>
       ) : (
         <MediaBrowser
           deployments={shown}
           initialDeploymentId={initialDeploymentId}
           initialSpecies={initialSpecies}
+          initialMediaId={initialMediaId}
         />
       )}
     </div>

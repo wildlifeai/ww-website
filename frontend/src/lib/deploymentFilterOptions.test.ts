@@ -45,6 +45,21 @@ describe('deploymentFilterOptions', () => {
     expect(opts.map(o => o.label).sort()).toEqual(['Hut · Ridge', 'Hut · Sunset'])
   })
 
+  it('groups the options by project when the deployments span several', () => {
+    const names = new Map([[P1, 'Sunset'], [P2, 'Ridge']])
+    const opts = deploymentFilterOptions([
+      dep('a', 'Hut', '2026-06-08T08:00:00Z', P1),
+      dep('b', 'Beach', null, P2),
+      dep('c', 'Apple', null, P1),
+    ], names)
+    expect(opts).toEqual([
+      { value: 'b', label: 'Beach · Ridge', group: 'Ridge', menuLabel: 'Beach' },
+      { value: 'c', label: 'Apple · Sunset', group: 'Sunset', menuLabel: 'Apple' },
+      { value: 'a', label: 'Hut · 8 Jun 2026 · Sunset', group: 'Sunset', menuLabel: 'Hut · 8 Jun 2026' },
+    ])
+    expect(deploymentFilterOptions([dep('a', 'Hut', null)], names)[0]).toEqual({ value: 'a', label: 'Hut' })
+  })
+
   it('falls back to the id prefix for a missing name and for labels that still collide', () => {
     const opts = deploymentFilterOptions([
       dep('12345678-aaaa', null, null),
