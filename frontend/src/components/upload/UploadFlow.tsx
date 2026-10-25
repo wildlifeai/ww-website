@@ -40,7 +40,7 @@ import { supabase } from '../../config/supabase'
 import { fetchDeploymentsInProjects } from '../../lib/uploadTargets'
 import { useUploadStore, type UploadDeployment, type PendingUpload } from '../../contexts/UploadContext'
 import { useProjectSelection } from '../../hooks/useProjectSelection'
-import { useProjectRoles } from '../../hooks/useProjectRoles'
+import { PROJECT_ROLES_KEY, useProjectRoles } from '../../hooks/useProjectRoles'
 import './upload.css'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ export function UploadFlow() {
 
   // Projects the user can upload to: the triage offers their deployments, and files new ones
   // under them. Viewers are read-only (UI audit decision 1).
-  const { projects, isLoading: projectsLoading } = useProjectSelection()
+  const { projects, isLoading: projectsLoading, reloadProjects } = useProjectSelection()
   const roles = useProjectRoles()
   const writableProjects = useMemo(
     () => (roles.loading ? [] : projects.filter((p) => roles.canWrite(p.id))),
@@ -314,6 +314,9 @@ export function UploadFlow() {
         data: CamtrapImportResult
       }
       setCamtrapResult(res.data)
+      // The import created a project, its admin role included: refresh the picker and the roles.
+      reloadProjects()
+      void queryClient.invalidateQueries({ queryKey: [PROJECT_ROLES_KEY] })
     } catch (err: unknown) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const e = err as any

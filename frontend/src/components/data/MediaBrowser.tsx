@@ -469,16 +469,14 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
     const ids = Array.from(selectedIds)
     setPipelineLogs([`Starting AI pipeline for ${ids.length} images with models: ${models.join(', ')}…`])
     try {
-      const resp = await fetch('/api/media/run-selected', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ media_ids: ids, steps: models }),
-      })
-      if (!resp.ok) throw new Error('Pipeline request failed')
-      const data = await resp.json()
-      setPipelineLogs(prev => [...(prev || []), `✓ Job queued: ${data.data?.job_id ?? 'unknown'}`])
-    } catch (e: any) {
-      setPipelineLogs(prev => [...(prev || []), `⚠ Error: ${e?.message || 'unknown'}`])
+      // Through apiClient: the API's own origin and the session token. A bare relative fetch went
+      // to the site, not the API, and carried no token.
+      const res = await apiClient.post('/api/media/run-selected', { media_ids: ids, steps: models }) as {
+        data?: { job_id?: string }
+      }
+      setPipelineLogs(prev => [...(prev || []), `Job queued: ${res.data?.job_id ?? 'unknown'}`])
+    } catch (e) {
+      setPipelineLogs(prev => [...(prev || []), `Error: ${e instanceof Error ? e.message : 'unknown'}`])
     }
   }, [selectedIds])
 
