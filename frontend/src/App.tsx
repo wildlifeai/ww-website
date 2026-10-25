@@ -30,7 +30,6 @@ import { GuidesPage } from './pages/GuidesPage'
 import { FourZeroFourPage } from './pages/FourZeroFourPage'
 import { UploadProvider } from './contexts/UploadContext'
 import { DemoGuardProvider, RequireNotDemo } from './components/common/DemoGuard'
-import { ProgressDock } from './components/upload/ProgressDock'
 import { UndoToastHost } from './components/common/UndoToast'
 import './styles/index.css'
 
@@ -43,6 +42,8 @@ function lazyPage<M extends Record<K, React.ComponentType>, K extends keyof M>(l
   return React.lazy(() => load().then(m => ({ default: m[name] })))
 }
 
+// The upload dock floats over the page, so loading it after the first render shifts nothing.
+const ProgressDock = lazyPage(() => import('./components/upload/ProgressDock'), 'ProgressDock')
 const AdminUsagePage = lazyPage(() => import('./pages/AdminUsagePage'), 'AdminUsagePage')
 const AdminDevicesPage = lazyPage(() => import('./pages/AdminDevicesPage'), 'AdminDevicesPage')
 const ManifestPage = lazyPage(() => import('./pages/ManifestPage'), 'ManifestPage')
@@ -444,7 +445,7 @@ export default function App() {
         <BrowserRouter>
           <DemoGuardProvider>
           <UploadProvider>
-            <ProgressDock />
+            <Suspense fallback={null}><ProgressDock /></Suspense>
             <UndoToastHost />
             <Layout>
               {/* For the lazy pages: a guide and every signed-in page */}
