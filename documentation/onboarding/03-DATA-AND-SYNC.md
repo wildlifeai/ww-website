@@ -102,9 +102,11 @@ every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./
 
 Deleting photos soft-deletes their `media` rows only; their observations stay readable, because
 the `observations` read policy checks the deployment, not the photo. Every read that counts or
-lists observations (Insights, Realtime, the upload summary) goes through
+lists observations (Realtime, the upload summary) goes through
 `frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
-with no photo unless asked not to, and pages past the 1,000-row cap (#198).
+with no photo unless asked not to, and pages past the 1,000-row cap (#198). Insights reads no
+observations: ww-backend's `insights_observation_counts` and `deployment_daily_counts` (#334)
+count them by the same rule, and `frontend/src/lib/insightsReads.ts` calls them.
 
 **A deployment changes project only through the `move_deployment` RPC** (ww-backend#272); a
 direct UPDATE of `deployments.project_id` is refused with 42501. Insights > Deployments, Move to
@@ -331,6 +333,8 @@ instant in the **deployment's** timezone at display time.
   offset**, so DST is handled automatically (NZ is +12 in winter, +13 in summer).
 - **Per-day counts**: Insights > Reports counts detections per day by `media.timestamp` in this zone,
   never by `observations.created_at` (the label time); those without one are counted under the chart.
+  The database dates them (`deployment_daily_counts`, ww-backend #334), in the browser's zone when
+  the deployment has none.
 - **Graceful fallback** — when `timezone` is `NULL` (or the column isn't deployed yet) the UI falls
   back to the **viewer's browser** zone, i.e. the previous behaviour. Deployment queries fetch the
   column defensively (retry without it) so the app keeps working during the schema rollout.

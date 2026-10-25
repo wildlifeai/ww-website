@@ -3,10 +3,11 @@
  *
  * A fixed set (UI audit decision 4): four counters, top species, observation types, and
  * observations per deployment, or detections per day by species when exactly one deployment is
- * in view (decision 5, which folds the Reporting page in). The observations are counted once
- * (lib/observationSummary) and each chart gets its own small table; the bar charts stop at 15
- * rows and say how many are left out. One deployment with no animal observations shows its
- * monitoring period and photo count instead of a bare zero, as Reporting did.
+ * in view (decision 5, which folds the Reporting page in). The database counts the observations
+ * (ww-backend #334), lib/observationSummary sums its rows into each chart's own small table, and
+ * the bar charts stop at 15 rows and say how many are left out. One deployment with no animal
+ * observations shows its monitoring period and photo count instead of a bare zero, as Reporting
+ * did.
  */
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -18,7 +19,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { startDateLabel } from '../../lib/deploymentFilterOptions'
 import { countDeploymentPhotos } from '../../lib/insightsReads'
 import {
-  capRows, detectionsPerDay, perDayCsv, summariseObservations, type SummaryObservation,
+  capRows, detectionsPerDay, perDayCsv, summariseObservations, type DailyCount, type ObservationCount,
 } from '../../lib/observationSummary'
 import { countBarSpec, perDaySpec, typeArcSpec } from './chartSpec'
 
@@ -43,11 +44,15 @@ export interface SingleDeployment {
 }
 
 interface Props {
-  observations: SummaryObservation[]
+  counts: ObservationCount[]
   /** Deployment id to its filter label, for the per-deployment chart. */
   deploymentLabels: ReadonlyMap<string, string>
   /** Set when exactly one deployment is in view: the per-day chart, by capture day in its zone. */
   singleDeployment?: SingleDeployment | null
+  /** Its named observations per capture day; undefined while they load. */
+  dailyCounts?: DailyCount[]
+  /** The per-day read failed. */
+  dailyFailed?: boolean
   /** A species filter is on, so a zero is about that species, not the deployment. */
   speciesFiltered?: boolean
   loading?: boolean
@@ -62,15 +67,13 @@ function downloadText(text: string, filename: string) {
   URL.revokeObjectURL(url)
 }
 
-export function ReportsDashboard({ observations, deploymentLabels, singleDeployment, speciesFiltered, loading }: Props) {
-  const summary = useMemo(() => summariseObservations(observations, deploymentLabels), [observations, deploymentLabels])
+export function ReportsDashboard({
+  counts, deploymentLabels, singleDeployment, dailyCounts, dailyFailed, speciesFiltered, loading,
+}: Props) {
+  const summary = useMemo(() => summariseObservations(counts, deploymentLabels), [counts, deploymentLabels])
   const species = useMemo(() => capRows(summary.species, MAX_BARS), [summary])
   const perDeployment = useMemo(() => capRows(summary.deployments, MAX_BARS), [summary])
-  const zone = singleDeployment ? singleDeployment.timezone : undefined
-  const perDay = useMemo(
-    () => (zone === undefined ? null : detectionsPerDay(observations, zone)),
-    [observations, zone],
-  )
+  const perDay = useMemo(() => (dailyCounts ? detectionsPerDay(dailyCounts) : null), [dailyCounts])
 
   const speciesSpec = useMemo(() => countBarSpec(species.shown, { title: 'Species', italic: true }), [species])
   const typesSpec = useMemo(() => typeArcSpec(summary.types), [summary])
@@ -91,8 +94,8 @@ export function ReportsDashboard({ observations, deploymentLabels, singleDeploym
 
   // The CSV carries every species, not the eight the chart names.
   const downloadPerDay = () => {
-    if (!singleDeployment) return
-    const all = detectionsPerDay(observations, singleDeployment.timezone, Number.MAX_SAFE_INTEGER)
+    if (!singleDeployment || !dailyCounts) return
+    const all = detectionsPerDay(dailyCounts, Number.MAX_SAFE_INTEGER)
     downloadText(perDayCsv(all.rows, all.species), `detections-per-day-${singleDeployment.id.slice(0, 8)}.csv`)
   }
 
@@ -121,23 +124,16 @@ export function ReportsDashboard({ observations, deploymentLabels, singleDeploym
               <VegaChart spec={typesSpec} />
             </ChartPanel>
           </div>
-          {perDay && perDaySpecValue ? (
+          {singleDeployment ? (
             <ChartPanel
               title="Detections per day"
-              action={perDay.rows.length > 0 && (
+              action={perDay && perDay.rows.length > 0 && (
                 <button onClick={downloadPerDay} style={SMALL_BTN} title="Detections per day and species">
                   <Download size={12} aria-hidden />CSV
                 </button>
               )}
             >
-              {perDay.rows.length > 0
-                ? <VegaChart spec={perDaySpecValue} />
-                : perDay.undated === 0 && <p style={MUTED}>No named species.</p>}
-              {perDay.undated > 0 && (
-                <p style={{ ...MUTED, fontSize: '0.75rem', margin: '0.5rem 0 0' }}>
-                  {`Not shown: ${perDay.undated.toLocaleString()} detection${perDay.undated === 1 ? '' : 's'} without a capture time.`}
-                </p>
-              )}
+              <PerDayBody perDay={perDay} spec={perDaySpecValue} failed={dailyFailed} />
             </ChartPanel>
           ) : (
             <ChartPanel title="Observations per deployment" shown={perDeployment.shown.length} more={perDeployment.more}>
@@ -147,6 +143,26 @@ export function ReportsDashboard({ observations, deploymentLabels, singleDeploym
         </>
       )}
     </div>
+  )
+}
+
+/** The per-day chart, with the detections it leaves out counted under it. */
+function PerDayBody({ perDay, spec, failed }: {
+  perDay: ReturnType<typeof detectionsPerDay> | null; spec: ReturnType<typeof perDaySpec> | null; failed?: boolean
+}) {
+  if (failed) return <p style={MUTED}>Detections per day are not available.</p>
+  if (!perDay || !spec) return <p style={MUTED}>Loading…</p>
+  return (
+    <>
+      {perDay.rows.length > 0
+        ? <VegaChart spec={spec} />
+        : perDay.undated === 0 && <p style={MUTED}>No named species.</p>}
+      {perDay.undated > 0 && (
+        <p style={{ ...MUTED, fontSize: '0.75rem', margin: '0.5rem 0 0' }}>
+          {`Not shown: ${perDay.undated.toLocaleString()} detection${perDay.undated === 1 ? '' : 's'} without a capture time.`}
+        </p>
+      )}
+    </>
   )
 }
 

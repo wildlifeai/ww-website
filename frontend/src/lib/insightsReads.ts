@@ -1,15 +1,13 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The two reads behind Insights (UI audit 04 #8, #9): the selected projects' deployments and
-// their live observations. Both page past PostgREST's 1,000-row cap, and the observation read
-// splits a long deployment list so no request URL grows with the number of deployments.
+// The reads behind Insights (UI audit 04 #8, #9): the selected projects' deployments, and their
+// live observations as the database counts them (ww-backend #334), never the observations
+// themselves. Each pages past PostgREST's 1,000-row cap; the counts are POSTed to the functions,
+// so no request grows with the number of deployments.
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { fetchLiveObservations } from './liveObservations'
-import { chunk, readAllPages } from './readAllPages'
-
-/** Deployment ids per observation request (about 5.5 KB of URL). */
-export const IDS_PER_REQUEST = 150
+import type { DailyCount, ObservationCount } from './observationSummary'
+import { readAllPages } from './readAllPages'
 
 export interface InsightsDeployment {
   id: string
@@ -64,36 +62,52 @@ export async function countDeploymentPhotos(db: SupabaseClient, deploymentId: st
   return count ?? 0
 }
 
-export interface InsightsObservation {
-  id: string
-  deployment_id: string
-  scientific_name: string | null
-  observation_type: string | null
-  /** When the photo was taken (`media.timestamp`, UTC); null with no photo or no capture time. */
-  captured_at: string | null
-}
-
-type Embedded = { timestamp: string | null } | null
-type ObservationRow = Omit<InsightsObservation, 'captured_at'> & { media?: Embedded | Embedded[] }
+type Counted<T> = Omit<T, 'n'> & { n: number | string }
 
 /**
- * Every live observation of the deployments, read in runs of `IDS_PER_REQUEST` ids, with its
- * photo's capture time embedded in the same read (no request per row).
+ * The live observations of the listed deployments, counted by the database per deployment,
+ * species and type (`insights_observation_counts`, ww-backend #334): one request over their
+ * projects, however many deployments they hold, and one more per further 1,000 rows. With
+ * `narrow` (no project selected, deep links only) it asks for the listed deployments alone. A
+ * deep-linked deployment from a project that is not selected brings that project's other
+ * deployments too; they are dropped here, so the counts are those of the list.
  */
-export async function fetchInsightsObservations(
-  db: SupabaseClient, deploymentIds: string[],
-): Promise<InsightsObservation[]> {
-  const parts = await Promise.all(chunk(deploymentIds, IDS_PER_REQUEST).map(async ids => {
-    const { data, error } = await fetchLiveObservations<ObservationRow>(db, {
-      columns: 'id, deployment_id, scientific_name, observation_type',
-      mediaColumns: 'timestamp',
-      filter: q => q.in('deployment_id', ids),
-    })
-    if (error) throw new Error(error.message)
-    return (data ?? []).map(({ media, ...o }) => {
-      const photo = Array.isArray(media) ? media[0] : media
-      return { ...o, captured_at: photo?.timestamp ?? null }
-    })
-  }))
-  return parts.flat()
+export async function fetchObservationCounts(
+  db: SupabaseClient, deployments: Pick<InsightsDeployment, 'id' | 'project_id'>[], narrow: boolean,
+): Promise<ObservationCount[]> {
+  if (deployments.length === 0) return []
+  const ids = new Set(deployments.map(d => d.id))
+  const args = {
+    p_project_ids: [...new Set(deployments.map(d => d.project_id))],
+    ...(narrow ? { p_deployment_ids: [...ids] } : {}),
+  }
+  const rows = await readAllPages<Counted<ObservationCount>>((from, to) => db
+    .rpc('insights_observation_counts', args)
+    .order('deployment_id').order('scientific_name').order('observation_type')
+    .range(from, to))
+  const counts: ObservationCount[] = []
+  for (const r of rows) if (ids.has(r.deployment_id)) counts.push({ ...r, n: Number(r.n) })
+  return counts
+}
+
+/** The browser's zone, which dates the photos of a deployment that has none. */
+export function browserTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
+/**
+ * The deployment's named live observations per capture day and species, dated by the database
+ * (`deployment_daily_counts`, ww-backend #334) in the deployment's zone, or in `timeZone` (the
+ * page's, the browser's when empty) where it has none. Every species: the species filter
+ * applies to the rows, so changing it reads nothing.
+ */
+export async function fetchDailyCounts(
+  db: SupabaseClient, deploymentId: string, timeZone?: string | null,
+): Promise<DailyCount[]> {
+  const args = { p_deployment_ids: [deploymentId], p_fallback_tz: timeZone || browserTimeZone() }
+  const rows = await readAllPages<Counted<DailyCount>>((from, to) => db
+    .rpc('deployment_daily_counts', args)
+    .order('deployment_id').order('day').order('scientific_name')
+    .range(from, to))
+  return rows.map(r => ({ ...r, n: Number(r.n) }))
 }
