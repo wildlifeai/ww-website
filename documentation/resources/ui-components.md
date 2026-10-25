@@ -20,7 +20,7 @@ import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS } from '../components/common'
 | `<Modal>` | `Modal.tsx` | Advanced settings, create-project (the upload flow is a page now, `/upload-data`) |
 | `<DataTable>` | `DataTable.tsx` | Insights → Deployments / Projects tables |
 | `<ControlBar>`, `<FilterSelect>`, `<SearchInput>`, `<ColumnToggle>` | `ControlBar.tsx` | `FilterSelect` inside ribbon groups; `ControlBar` is the older flat toolbar |
-| `<StatusBadge>`, `deriveAnnotationStatus` | `StatusBadge.tsx` | Annotation thumbnail grid + modal |
+| `<StatusBadge>`, `deriveAnnotationStatus` | `StatusBadge.tsx`, `../../lib/annotationStatus.ts` | Annotation thumbnail grid + modal |
 | `<VegaChart>`, `VEGA_CONFIG` | `VegaChart.tsx` | All charts (Vega-Lite) |
 | `<ThreeStepGuide>` | `../common/ThreeStepGuide.tsx` | Marketing + signed-in landing |
 | `<PageHelp>` | `../common/PageHelp.tsx` | The "?" beside a page heading: Settings, Upload, upload triage, Prepare SD card |
@@ -78,7 +78,8 @@ Overlay dialog with focus trap, ESC-to-close, and click-backdrop-to-close.
 
 ## `<DataTable>`
 
-Generic typed table with sort, search, column toggle, CSV + JSON export, and optional client paging.
+Generic typed table with sort, search, column toggle, CSV + JSON export, row selection, and optional
+client paging. With a selection, CSV exports the selected rows only.
 
 | Prop | Type | Description |
 |---|---|---|
@@ -86,7 +87,9 @@ Generic typed table with sort, search, column toggle, CSV + JSON export, and opt
 | `rows` / `rowKey` | `T[]` / `(row) => string` | data + stable key |
 | `searchable`, `searchPlaceholder` | | search box |
 | `exportFilename` | `string` | enables CSV + JSON buttons |
+| `exportJson` | `boolean` | `false` hides the JSON button (Insights > Deployments) |
 | `onRowClick`, `selectedKeys` | | row click + highlight |
+| `onSelectionChange` | `(keys) => void` | adds a checkbox column; `selectedKeys` holds the selection |
 | `toolbar` | `ReactNode` | extra content beside search |
 | `pageSize` | `number` | `0` = no paging |
 
@@ -133,7 +136,9 @@ Props: `status: AnnotationStatus`, `size: 'sm' | 'md'` (default `sm`), `label?` 
 ## `<VegaChart>`
 
 Thin wrapper around `vega-embed` with the shared `VEGA_CONFIG` theme. Pass a Vega-Lite spec; the
-chart sizes to its container. Used by `ObservationReports`, `ChartBuilder`, `ReportingPage`.
+chart sizes to its container. Used by `ReportsDashboard` (Insights > Reports, specs from
+`components/data/chartSpec.ts` over tables counted by `lib/observationSummary.ts`), `ObservationReports`,
+`ReportingPage`.
 
 ---
 

@@ -153,6 +153,18 @@ def test_human_blank_verdict_overrules_a_consensus_animal():
     assert ns.photo_detections(rows, {"sn", "fusion"}) == []
 
 
+def test_a_persons_own_row_names_the_photo_over_an_ai_row_confirmed_earlier():
+    stamped_rat = {**RAT, "review_status": "human_reviewed"}
+    stoat = {
+        "id": "h",
+        "source_type": "human",
+        "review_status": "human_reviewed",
+        "observation_type": "animal",
+        "scientific_name": "Mustela erminea",
+    }
+    assert ns.photo_detections([stamped_rat, stoat], {"sn"}) == ["Mustela erminea"]
+
+
 def test_human_verdict_names_the_photo_over_a_consensus_blank():
     corrected = {**RAT, "scientific_name": "Rattus norvegicus", "review_status": "human_reviewed"}
     assert ns.photo_detections([corrected, _consensus("blank")], {"sn", "fusion"}) == ["Rattus norvegicus"]
