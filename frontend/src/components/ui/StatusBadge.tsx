@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 // ─────────────────────────────────────────────────────────────────────────────
 // StatusBadge — annotation lifecycle state for a media item
 //
@@ -13,8 +12,9 @@
 // field) genuine failures surface as 'issue'.
 // ─────────────────────────────────────────────────────────────────────────────
 import { Check, Cpu, Hourglass, X, type LucideIcon } from 'lucide-react'
+import type { AnnotationStatus } from '../../lib/annotationStatus'
 
-export type AnnotationStatus = 'pending' | 'issue' | 'ai' | 'reviewed'
+export type { AnnotationStatus }
 
 export interface StatusBadgeProps {
   status: AnnotationStatus
@@ -95,40 +95,3 @@ export function StatusBadge({ status, size = 'sm', label }: StatusBadgeProps) {
     </span>
   )
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper — derive status from media/observation data
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Infer an AnnotationStatus for a media item from its observations.
- *
- * AN-2 contract — `review_status` is authoritative (see lib/observations.ts):
- *   - `hasReviewed` — any observation a human has validated
- *                     (review_status human_reviewed / expert_reviewed / consensus_approved)
- *   - `hasAi`       — any observation carrying an AI-produced label
- *   - `hasError`    — an explicit pipeline error flag (reserved for BE-2)
- *
- * Precedence: error ▸ reviewed ▸ ai ▸ pending.
- * Fallback (no observations at all) → 'pending': the image is still working
- * its way through the pipeline, so show a neutral colourless badge instead of
- * a red error.
- *
- * Callers should derive `hasReviewed` / `hasAi` with `isHumanReviewed` /
- * `isAiLabel` from lib/observations.ts so every surface agrees.
- */
-export function deriveAnnotationStatus({
-  hasReviewed,
-  hasAi,
-  hasError = false,
-}: {
-  hasReviewed: boolean
-  hasAi: boolean
-  hasError?: boolean
-}): AnnotationStatus {
-  if (hasError)    return 'issue'
-  if (hasReviewed) return 'reviewed'
-  if (hasAi)       return 'ai'
-  return 'pending' // no observations yet → still processing
-}
-

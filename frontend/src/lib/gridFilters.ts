@@ -150,5 +150,5 @@ export function hasAnyFilter(f: GridFilters): boolean {
 
 /** A stable key for a query: changes exactly when the rows it can return change. */
 export function gridQueryKey(deploymentIds: readonly string[], f: GridFilters): string {
-  return JSON.stringify([deploymentIds, { ...f, species: [...f.species].sort() }])
+  return JSON.stringify([deploymentIds, { ...f, species: f.species.toSorted() }])
 }

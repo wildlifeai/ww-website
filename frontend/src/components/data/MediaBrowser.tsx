@@ -16,7 +16,8 @@ import { FilterSelect } from '../ui/ControlBar'
 import { MultiSelect } from '../ui/MultiSelect'
 import { Ribbon } from '../ui/Ribbon'
 import { Banner, BannerProgress, type BannerTone } from '../ui/Banner'
-import { StatusBadge, deriveAnnotationStatus } from '../ui/StatusBadge'
+import { StatusBadge } from '../ui/StatusBadge'
+import { deriveAnnotationStatus } from '../../lib/annotationStatus'
 import { Modal } from '../ui/Modal'
 import { isHumanReviewed, isAiLabel, photoVerdict, observationLabel } from '../../lib/observations'
 import { apiClient } from '../../lib/apiClient'
@@ -258,6 +259,8 @@ function ProcessingBanner({ deployments }: { deployments: Props['deployments'] }
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+// Already far over the 300-line limit on dev; splitting it is its own change.
+// react-doctor-disable-next-line react-doctor/no-giant-component
 export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies, initialMediaId }: Props) {
   const { user } = useAuth()
   const roles = useProjectRoles()
