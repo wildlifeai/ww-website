@@ -23,6 +23,7 @@ import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS } from '../components/common'
 | `<StatusBadge>`, `deriveAnnotationStatus` | `StatusBadge.tsx`, `../../lib/annotationStatus.ts` | Annotation thumbnail grid + modal |
 | `<VegaChart>`, `VEGA_CONFIG` | `VegaChart.tsx` | All charts (Vega-Lite) |
 | `<ThreeStepGuide>` | `../common/ThreeStepGuide.tsx` | Marketing + signed-in landing |
+| `<PageHelp>` | `../common/PageHelp.tsx` | The "?" beside a page heading: Settings, Upload, upload triage, Prepare SD card |
 
 ---
 
@@ -146,6 +147,15 @@ chart sizes to its container. Used by `ReportsDashboard` (Insights > Reports, sp
 Three-card "how it works" component shared by the marketing page and the signed-in landing.
 Props: `steps: GuideStep[]` (`{ icon, title, description, linkTo, linkLabel }`), optional `heading`.
 Presets: `DEFAULT_SIGNED_IN_STEPS`, `DEFAULT_MARKETING_STEPS` from `../components/common`.
+
+---
+
+## `<PageHelp>`
+
+A "?" button beside a page heading. Clicking it opens one or two sentences about the page and a
+link to its guide; Escape or a click outside closes it. The page then carries no line of
+explanation of its own. Props: `label` (the button's accessible name, e.g. "About settings"),
+`guide` (the guide's route), optional `guideLabel`, and the summary as children.
 
 ---
 
