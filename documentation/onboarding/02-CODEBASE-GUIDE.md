@@ -79,7 +79,7 @@ password) or uses Forgot password.
 | `/toolkit` | `ToolkitPage` | SD-card prep, privileged model upload, iNaturalist, CamtrapDP export |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
-| `/field` | `FieldPage` | Realtime: active deployments with their newest LoRaWAN check-in, read-only (`lib/realtimeReads.ts`) |
+| `/field` | `FieldPage` | Realtime: active deployments with their newest LoRaWAN check-in from the `deployment_latest_lorawan` view, read-only (`lib/realtimeReads.ts`) |
 | `/upload-data` | `UploadDataPage` (→ `UploadFlow`) | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
 | `/upload-model` | `UploadModelPage` | Edge Impulse → Vela model upload (org managers) |
