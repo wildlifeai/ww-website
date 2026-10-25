@@ -11,6 +11,7 @@
   --border: #e2e8f0;
   --error: #ef4444;
   --success: #10b981;
+  --warning: #f59e0b;
   
   --radius: 8px;
   /* Inter is loaded in main.tsx (@fontsource/inter, latin, 400 to 700). */
@@ -71,7 +72,10 @@ body {
   opacity: 0.9;
 }
 
-.card {
+/* .glass-card is an old name for .card that was never defined; pages still carrying it
+   (AdminUsagePage's stat tiles among them) get the card style. New code uses .card. */
+.card,
+.glass-card {
   background-color: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -159,6 +163,30 @@ body {
    interactive display + selection controls keep their space. */
 @media (max-width: 1180px) {
   .ribbon-stats { display: none; }
+}
+
+/* App shell (UI audit 01 A1, F5): the header, page padding and the ribbon share one
+   breakpoint. Below 900px tabs and the Upload button show their icon only and ribbon groups
+   wrap instead of scrolling; the logo drops its name first, below 1100px. */
+.app-main { padding: 2rem 0; }
+.hdr-gap { padding-right: 1.5rem; }
+.hdr-tab { padding: 0 1rem; }
+.ribbon-body { overflow-x: auto; }
+.banner-slot { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1rem; }
+.banner-slot:empty { display: none; }
+.picker-row[aria-checked="true"] { background-color: rgba(76, 175, 80, 0.05) !important; }
+.menu-item:hover,
+.picker-row:hover { background-color: rgba(76, 175, 80, 0.1) !important; }
+@media (max-width: 1100px) {
+  .hdr-logo { display: none; }
+}
+@media (max-width: 900px) {
+  .app-main { padding: 1rem 0; }
+  .hdr-gap { padding-right: 0.75rem; }
+  .hdr-tab { padding: 0 0.6rem; }
+  .hdr-text { display: none; }
+  .picker-label { max-width: 96px !important; }
+  .ribbon-body { flex-wrap: wrap; }
 }
 
 /* Review grid cards (#283): a click opens the photo, the circle selects it. The circle shows on

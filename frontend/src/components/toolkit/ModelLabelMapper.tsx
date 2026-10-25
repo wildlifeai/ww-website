@@ -1,7 +1,7 @@
 // Copyright (c) 2024
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// ModelLabelMapper — post-upload step that captures what a model's output
+// ModelLabelMapper: post-upload step that captures what a model's output
 // classes mean: which are target species (predicts: taxon, mapped via
 // SpeciesPicker), which are a type such as a person (predicts: type, an
 // observation_type) and which are background/negative classes. Saved to
@@ -141,10 +141,10 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
     }
   }
 
-  if (loading) return <p style={{ opacity: 0.5, fontSize: '0.85rem' }}>Loading model labels…</p>
+  if (loading) return <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Loading model labels…</p>
   if (labels.length === 0) {
     return (
-      <p style={{ fontSize: '0.85rem', opacity: 0.65 }}>
+      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
         This model reported no labels, so there's nothing to map. You can still use it.
       </p>
     )
@@ -154,8 +154,8 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
 
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '1rem', marginTop: '1rem', backgroundColor: 'var(--surface)' }}>
-      <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>🏷️ What do this model's labels mean?</div>
-      <p style={{ fontSize: '0.8rem', opacity: 0.7, margin: '0 0 0.875rem 0', lineHeight: 1.5 }}>
+      <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>What do this model's labels mean?</div>
+      <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: '0 0 0.875rem 0', lineHeight: 1.5 }}>
         Tell us which of <strong>{modelName || 'this model'}</strong>'s output classes are species
         to detect (mapped to a taxon), which are a type such as a person, and which are
         background/negative classes. This lets the site show the camera's on-device predictions
@@ -195,8 +195,8 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
                     onSelect={sel => setSpecies(label, sel)}
                   />
                   {entry?.scientific_name && (
-                    <div style={{ fontSize: '0.72rem', opacity: 0.7, marginTop: '0.2rem' }}>
-                      → <em>{entry.scientific_name}</em>{entry.vernacular_name ? ` (${entry.vernacular_name})` : ''}
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>
+                      Maps to <em>{entry.scientific_name}</em>{entry.vernacular_name ? ` (${entry.vernacular_name})` : ''}
                     </div>
                   )}
                 </div>
@@ -216,7 +216,7 @@ export function ModelLabelMapper({ modelId, onDone }: { modelId: string; onDone?
           {saving ? 'Saving…' : 'Save label mapping'}
         </button>
         {unmappedTargets.length > 0 && (
-          <span style={{ fontSize: '0.72rem', opacity: 0.6 }}>
+          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
             {unmappedTargets.length} target label{unmappedTargets.length > 1 ? 's' : ''} not yet mapped to a species
           </span>
         )}
