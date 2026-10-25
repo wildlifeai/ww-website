@@ -102,7 +102,7 @@ export function UmapExplorerPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', color: 'var(--text-color)' }}>
-      <div className="glass-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h3 style={{ margin: 0 }}>UMAP Explorer</h3>
           <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{points.length} points · {clusterCount} clusters · coloured by cluster</span>
@@ -114,15 +114,15 @@ export function UmapExplorerPage() {
       </div>
 
       {error ? (
-        <div className="glass-card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--error)' }}>
+        <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--error)' }}>
           Could not load the map: {error.message}
         </div>
       ) : points.length === 0 ? (
-        <div className="glass-card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+        <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
           No embeddings yet. Run the Wildlife Brain from the Clusters page.
         </div>
       ) : (
-        <div className="glass-card" style={{ padding: '1rem', position: 'relative' }}>
+        <div className="card" style={{ padding: '1rem', position: 'relative' }}>
           <canvas
             ref={canvasRef}
             width={W}

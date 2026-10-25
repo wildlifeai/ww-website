@@ -154,7 +154,7 @@ function deriveSteps(state: PipelineState, phase: string): StepsResult {
   else aiStatus = 'done'
   const aiDetail =
     aiStatus === 'pending' ? 'Waiting for upload to finish'
-    : aiStatus === 'error' ? 'Analysis failed — see technical details'
+    : aiStatus === 'error' ? 'Analysis failed: see the technical details'
     : aiStatus === 'done' ? 'Species identified'
     : 'Detecting animals, then identifying species'
   const aiStep: StepView = {
@@ -173,9 +173,9 @@ function deriveSteps(state: PipelineState, phase: string): StepsResult {
         : 'Saving to Google Drive failed. See technical details.',
     }
   } else if (aiFailed) {
-    issue = { level: 'error', text: 'AI analysis hit an error on some deployments. Your photos are safe — you can retry from Processing history.' }
+    issue = { level: 'error', text: 'AI analysis hit an error on some deployments. Your photos are safe; you can retry from Processing history.' }
   } else if (dt.skipped > 0) {
-    issue = { level: 'warn', text: `${dt.skipped} photo${dt.skipped !== 1 ? 's' : ''} skipped — already in your library. Nothing to do.` }
+    issue = { level: 'warn', text: `${dt.skipped} photo${dt.skipped !== 1 ? 's' : ''} skipped: already in your library. Nothing to do.` }
   }
 
   return { steps: [uploadStep, driveStep, aiStep], issue }

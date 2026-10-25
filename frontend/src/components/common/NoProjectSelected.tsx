@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useProjectSelection } from '../../hooks/useProjectSelection'
-import { useCanCreateProject } from '../../hooks/useCanCreateProject'
+import { useCreatableOrgs } from '../../hooks/useCreatableOrgs'
 
 /**
  * Shown in place of a page's data when the project picker has nothing ticked (#214), or when the
@@ -9,7 +9,7 @@ import { useCanCreateProject } from '../../hooks/useCanCreateProject'
 export function NoProjectSelected() {
   const { projects, selectAll } = useProjectSelection()
   const none = projects.length === 0
-  const canCreate = useCanCreateProject(none)
+  const { canCreate } = useCreatableOrgs(none)
   return (
     <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
       <p style={{ margin: '0 0 1rem 0', color: 'var(--text-muted)' }}>

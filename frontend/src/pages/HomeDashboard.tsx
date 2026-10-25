@@ -12,7 +12,7 @@ import { Folder, FolderPlus, X } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { useWritableProjects } from '../hooks/useWritableProjects'
-import { useCanCreateProject } from '../hooks/useCanCreateProject'
+import { useCreatableOrgs } from '../hooks/useCreatableOrgs'
 import { useFeatureEnabled } from '../hooks/useFeatureEnabled'
 import { supabase } from '../config/supabase'
 import { ThreeStepGuide } from '../components/common/ThreeStepGuide'
@@ -147,7 +147,7 @@ export function HomeDashboard() {
     },
   })
   const ordered = selectedFirst(projects ?? [], selectedProjectIds)
-  const canCreate = useCanCreateProject(!isLoading && ordered.length === 0)
+  const { canCreate } = useCreatableOrgs(!isLoading && ordered.length === 0)
   // Dataset Health is behind FF_INTELLIGENCE_ENABLED (decision 6): one cached probe, not one per card.
   const showHealth = useFeatureEnabled('intelligence', ordered[0]?.id)
 

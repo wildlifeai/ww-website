@@ -242,7 +242,7 @@ function ClusterPanel({
   )
 
   return (
-    <div className="glass-card" style={{ padding: '1rem 1.25rem' }}>
+    <div className="card" style={{ padding: '1rem 1.25rem' }}>
       {/* Header row */}
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
         {/* Contact strip (always visible, max 5 thumbs) */}
@@ -460,7 +460,7 @@ export function ClusterReviewPage() {
 
   if (!clustersQ.data?.embedding_run_id) {
     return (
-      <div className="glass-card" style={{ padding: '2rem', textAlign: 'center', maxWidth: 560, margin: '2rem auto' }}>
+      <div className="card" style={{ padding: '2rem', textAlign: 'center', maxWidth: 560, margin: '2rem auto' }}>
         <h3 style={{ marginTop: 0 }}>No Wildlife Brain run yet</h3>
         {canWrite ? (
           <>
@@ -496,7 +496,7 @@ export function ClusterReviewPage() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', color: 'var(--text-color)' }}>
       {/* Header */}
-      <div className="glass-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
+      <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h3 style={{ margin: 0 }}>Cluster Review</h3>
           <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>

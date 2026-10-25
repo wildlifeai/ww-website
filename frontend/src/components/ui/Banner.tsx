@@ -1,9 +1,10 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Banner: the one notice strip for a page (UI audit 02 #28). A tone sets the colour and the
-// default icon (DESIGN.md semantic colours); an action sits on the right and `onClose` adds a
-// dismiss button. Anything below the message (a progress bar) goes in `footer`.
+// Banner: the one notice strip (UI audit 01 A5, 02 #28), on a page and in the Layout's BannerSlot
+// above every page. A tone sets the colour and the default icon (DESIGN.md semantic colours); an
+// action sits on the right and `onClose` adds a dismiss button. Anything below the message (a
+// progress bar) goes in `footer`.
 import type { ReactNode } from 'react'
 import { CircleCheck, CircleAlert, Info, TriangleAlert, X, type LucideIcon } from 'lucide-react'
 
@@ -58,6 +59,11 @@ export function Banner({ tone, children, icon, action, onClose, footer }: Props)
       {footer}
     </div>
   )
+}
+
+/** Where the Layout stacks banners above the page; it takes no space when none shows. */
+export function BannerSlot({ children }: { children: ReactNode }) {
+  return <div className="banner-slot">{children}</div>
 }
 
 /** A thin progress track for a banner footer; `pct` is 0 to 100. */

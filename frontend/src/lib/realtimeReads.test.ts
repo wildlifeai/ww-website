@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  chunk, fetchActiveDeployments, fetchLatestTelemetry, newestPerDeployment, summariseDetections,
+  fetchActiveDeployments, fetchLatestTelemetry, newestPerDeployment, summariseDetections,
   ID_CHUNK, TELEMETRY_WINDOW, type MessageRow,
 } from './realtimeReads'
 import { PAGE_SIZE } from './liveObservations'
@@ -39,13 +39,6 @@ const message = (deployment: string, at: string, battery = 80): MessageRow => ({
   deployment_id: deployment,
   received_at: at,
   lorawan_parsed_messages: [{ battery_level: battery, sd_card_used_capacity: 10 }],
-})
-
-describe('chunk', () => {
-  it('splits into pieces of at most the size', () => {
-    expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]])
-    expect(chunk([], 2)).toEqual([])
-  })
 })
 
 describe('newestPerDeployment', () => {

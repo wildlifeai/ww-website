@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  chunk, countDeploymentPhotos, fetchInsightsDeployments, fetchInsightsObservations, IDS_PER_REQUEST, READ_PAGE, readAllPages,
+  countDeploymentPhotos, fetchInsightsDeployments, fetchInsightsObservations, IDS_PER_REQUEST,
 } from './insightsReads'
+import { PAGE_SIZE } from './liveObservations'
 
 type Call = [string, ...unknown[]]
 type Page = { data: unknown[] | null; error: { message: string } | null }
@@ -29,40 +30,17 @@ function fakeDb(answer: (calls: Call[], index: number) => Page) {
   return { db: db as unknown as SupabaseClient, queries }
 }
 
-describe('readAllPages', () => {
-  it('reads until a short page', async () => {
-    const asked: [number, number][] = []
-    const rows = await readAllPages<number>(async (from, to) => {
-      asked.push([from, to])
-      return { data: from < 4 ? [from, from + 1] : [from], error: null }
-    }, 2)
-    expect(rows).toEqual([0, 1, 2, 3, 4])
-    expect(asked).toEqual([[0, 1], [2, 3], [4, 5]])
-  })
-
-  it('throws the first error', async () => {
-    await expect(readAllPages(async () => ({ data: null, error: { message: 'nope' } }))).rejects.toThrow('nope')
-  })
-})
-
-describe('chunk', () => {
-  it('splits into runs', () => {
-    expect(chunk([1, 2, 3, 4, 5], 2)).toEqual([[1, 2], [3, 4], [5]])
-    expect(chunk([], 3)).toEqual([])
-  })
-})
-
 describe('fetchInsightsDeployments', () => {
   it('pages past 1,000 deployments and flattens the project and device names', async () => {
     const page = (n: number) => Array.from({ length: n }, (_, i) => ({
       id: `d${i}`, project_id: 'p1', projects: { name: 'Hut' }, devices: null,
     }))
-    const { db, queries } = fakeDb((_, i) => ({ data: page(i === 0 ? READ_PAGE : 3), error: null }))
+    const { db, queries } = fakeDb((_, i) => ({ data: page(i === 0 ? PAGE_SIZE : 3), error: null }))
     const rows = await fetchInsightsDeployments(db, ['p1'], [])
-    expect(rows).toHaveLength(READ_PAGE + 3)
+    expect(rows).toHaveLength(PAGE_SIZE + 3)
     expect(rows[0]).toEqual({ id: 'd0', project_id: 'p1', project_name: 'Hut', device_name: '-' })
     expect(queries[0]).toContainEqual(['in', 'project_id', ['p1']])
-    expect(queries[1]).toContainEqual(['range', READ_PAGE, 2 * READ_PAGE - 1])
+    expect(queries[1]).toContainEqual(['range', PAGE_SIZE, 2 * PAGE_SIZE - 1])
   })
 
   it('includes deep-linked deployments beside the selected projects', async () => {
