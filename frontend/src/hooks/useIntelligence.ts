@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
 import { supabase } from '../config/supabase'
+import { settleWithLimit } from '../lib/settleWithLimit'
 
 export interface SpeciesCoverage {
   scientific_name: string
@@ -68,12 +69,16 @@ export interface ProjectQa {
   perDeployment: QaDeploymentResult[]
 }
 
+/** QA report calls in flight at once until a project-level route exists (UI audit 03 #19). */
+const QA_CONCURRENCY = 4
+
 /**
  * Fan out the per-deployment QA report (`/api/qa/report/{id}`) across the
- * project's deployments and aggregate into a single precision proxy. Individual
- * disabled/failed calls are skipped; if none succeed, `enabled` is false.
+ * project's deployments, four at a time, and aggregate into a single precision
+ * proxy. Individual disabled/failed calls are skipped; if none succeed,
+ * `enabled` is false.
  */
-export function useProjectQa(projectId?: string) {
+export function useProjectQa(projectId?: string, enabled = true) {
   return useQuery({
     queryKey: ['qa', 'project', projectId],
     queryFn: async (): Promise<ProjectQa> => {
@@ -87,22 +92,19 @@ export function useProjectQa(projectId?: string) {
       let anyEnabled = false
       const perDeployment: QaDeploymentResult[] = []
 
-      await Promise.all(list.map(async d => {
-        try {
-          const r = (await apiClient.get(`/api/qa/report/${d.id}`)) as any
-          anyEnabled = true
-          const m = r.data
-          perDeployment.push({
-            deployment_id: d.id,
-            location_name: d.location_name,
-            n_compared: m.n_compared ?? 0,
-            matches: m.matches ?? 0,
-            precision: m.precision ?? null,
-          })
-        } catch {
-          // FEATURE_DISABLED or transient error → skip this deployment.
-        }
-      }))
+      // A disabled or failed call is skipped (the settled result is ignored).
+      await settleWithLimit(list, QA_CONCURRENCY, async d => {
+        const r = (await apiClient.get(`/api/qa/report/${d.id}`)) as any
+        anyEnabled = true
+        const m = r.data
+        perDeployment.push({
+          deployment_id: d.id,
+          location_name: d.location_name,
+          n_compared: m.n_compared ?? 0,
+          matches: m.matches ?? 0,
+          precision: m.precision ?? null,
+        })
+      })
 
       const n = perDeployment.reduce((a, p) => a + p.n_compared, 0)
       const matches = perDeployment.reduce((a, p) => a + p.matches, 0)
@@ -116,6 +118,6 @@ export function useProjectQa(projectId?: string) {
           .sort((a, b) => b.n_compared - a.n_compared),
       }
     },
-    enabled: !!projectId,
+    enabled: !!projectId && enabled,
   })
 }

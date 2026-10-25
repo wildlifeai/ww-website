@@ -42,13 +42,17 @@ src/
 ### Signed-in navigation
 
 Defined as `USER_TABS` in `App.tsx`. The active tab is highlighted, so pages no longer repeat
-their own title. Lifecycle order: **prepare → collect → analyse**. The 📡 **Realtime** tab appears only
-when the user has an active deployment.
+their own title, and a deep route lights its parent tab (`lib/navTabs.ts`). Lifecycle order:
+**prepare → collect → analyse**. The 📡 **Realtime** tab appears only when one of the user's
+projects has a device that sends or has sent LoRaWAN data, at least one `lorawan_messages` row the
+user can read (`hooks/useHasRealtimeData.ts`, UI audit decision 7). Below 900 px the tabs show
+their icon only. Write controls (the header Upload button, Home's upload step, Toolkit's Prepare
+SD card) hide for a user who can write to no project (`hooks/useWritableProjects.ts`).
 
 | Tab | Route | Page |
 |-----|-------|------|
-| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (upload, SD-card prep, manifest, model upload) |
-| 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with an active deployment) |
+| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (SD-card prep, model upload, iNaturalist, CamtrapDP export; each card by role) |
+| 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with LoRaWAN data) |
 | 🏷️ Annotations | `/annotations` | `AnnotationsPage` → `MediaBrowser` (+ full-screen modal) |
 | 📈 Insights | `/insights` | `InsightsPage` (projects, deployments, charts, maps) |
 
@@ -71,17 +75,17 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 
 | Route | Page | Purpose |
 |-------|------|---------|
-| `/toolkit` | `ToolkitPage` | Upload, SD-card prep, manifest, privileged model upload |
+| `/toolkit` | `ToolkitPage` | SD-card prep, privileged model upload, iNaturalist, CamtrapDP export |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
 | `/field` | `FieldPage` | Realtime: active deployments with their newest LoRaWAN check-in, read-only (`lib/realtimeReads.ts`) |
 | `/upload-data` | `UploadDataPage` (→ `UploadFlow`) | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
 | `/upload-model` | `UploadModelPage` | Edge Impulse → Vela model upload (org managers) |
-| `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters |
-| `/review/:id` | `ReviewQueuePage` | Active-learning review queue |
-| `/umap/:id` | `UmapExplorerPage` | Embedding-space exploration |
-| `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project) |
+| `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters, unconfirmed and biggest first, ten per page |
+| `/review/:id` | `ReviewQueuePage` | Retired Review Queue: redirects to `/annotations?deployment=:id` |
+| `/umap/:id` | `UmapExplorerPage` | Embedding-space map of a deployment; a click opens that photo in the grid |
+| `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project), behind `FF_INTELLIGENCE_ENABLED`. Links to a flagged page show only when `useFeatureEnabled` says the feature answers |
 | `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history, 50 at a time up to the API's 200; `?job=<id>` opens that job's row |
 | `/notifications` | `NotificationsPage` | Notification inbox, read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router), filtered in the query and paged with "Load more"; the unread count (a server-side count) drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
 | `/settings` | `SettingsPage` | Projects, account, integrations, organisation API keys |
@@ -97,9 +101,8 @@ Toolkit), `/my-data-legacy` → `/insights`, `/upload/logs` → `/processing` (j
 Processing history). `ReportingPage`, `MyDataPage` and `UploadLogsPage` are only these redirects
 until their routes leave `App.tsx` ([UI audit](../development%20reports/2026-10_ui-audit/README.md),
 decisions 3 and 5). `LabelingPage` was **removed**: its rich editor now lives in the Annotations
-full-screen modal (see [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md)). `EventReviewPage` is
-currently **unrouted** (`/events/:id` was removed from `App.tsx`; the file remains pending
-re-route-or-delete).
+full-screen modal (see [05-ANNOTATION-WORKFLOW](./05-ANNOTATION-WORKFLOW.md)). `EventReviewPage` was
+**deleted** (UI audit decision 3).
 
 **Fallback**: any unmatched path renders `FourZeroFourPage` (404) — the wildcard `*` route at the
 end of `App.tsx`. Client-side only: the Cloudflare Pages SPA fallback still serves HTTP 200.

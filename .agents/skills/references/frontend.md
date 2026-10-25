@@ -30,7 +30,9 @@ Rules:
   (#154). Keep that guard, and key new effects on `user?.id` where the object is not needed.
 * A page filtered by the top-bar project picker reads `queryProjectIds` and `noProjectSelected`
   from `useProjectSelection` and renders `NoProjectSelected` when nothing is ticked. An empty
-  selection means none, never all; the rule lives in `lib/projectSelection.ts` (#214).
+  selection means none, never all; the rule lives in `lib/projectSelection.ts` (#214). Sign-in
+  selects one project, the one whose newest deployment started last (`defaultProjectId`), read
+  in the same request as the project list.
 * The project list refetches when the user returns to the tab, at most every 30 s
   (`lib/tabReturnRefresh.ts`), without a loading state. A website write that creates, deletes,
   restores or renames a project calls `reloadProjects()`, or the top-bar and upload pickers miss
@@ -46,6 +48,13 @@ Rules:
 * Read observations for a count, chart or species list through `fetchLiveObservations`
   (`lib/liveObservations.ts`), never a bare `from('observations')`: a deleted photo leaves its
   observations behind ([03-DATA-AND-SYNC](../../../documentation/onboarding/03-DATA-AND-SYNC.md), #198).
+* A route whose feature flag is off answers HTTP 200 with `FEATURE_DISABLED`, which `apiClient`
+  throws. Show a link to a flagged page (Dataset Health, UMAP, Cluster Review) only when
+  `useFeatureEnabled(feature, id)` is true: one cached probe per feature, not one per row
+  (`lib/featureFlags.ts`, UI audit decision 6).
+* A route that raises `HTTPException` (every `/api/inat` route) reaches `apiClient` as code
+  `UNKNOWN` with the `detail` as its message, and the status is lost, so match the message
+  (`lib/inatOff.ts`, `inatErrorNotice` in `lib/inatPublish.ts`).
 * React Doctor fails a PR that introduces any warning (`react-doctor.yml`, `blocking: warning`,
   scope `changed`). Check before pushing, from `frontend/`:
   `npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes`. Rules
