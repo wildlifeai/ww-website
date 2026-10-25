@@ -1,21 +1,33 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { Check, CircleCheck, Download, LoaderCircle, Package, RefreshCw } from 'lucide-react'
 import { apiClient } from '../../lib/apiClient'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { useJob } from '../../hooks/useJob'
+import { useProjectSelection } from '../../hooks/useProjectSelection'
+import { useWritableProjects } from '../../hooks/useWritableProjects'
+import { PICKER_SEARCH_MIN, filterProjects } from '../../lib/projectPicker'
+import { toSelectableProject } from '../../lib/projectSelection'
 import { ErrorBanner } from '../common'
+import { PageHelp } from '../common/PageHelp'
 
 type Step = 'configure' | 'generating' | 'ready'
 
+/** The guide that holds the background: why an SD card, the two camera variants, what to do after. */
+const SD_CARD_GUIDE = '/guides/preparing-an-sd-card'
+
 export function GenerateManifest() {
   const { user } = useAuth()
+  const { selectedProjectIds } = useProjectSelection()
+  const { writable } = useWritableProjects()
 
   const [step, setStep] = useState<Step>('configure')
   const [jobId, setJobId] = useState<string | null>(null)
 
-  // Project-based state
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('')
+  // Project-based state: the user's choice, else the default derived below.
+  const [chosenProjectId, setChosenProjectId] = useState<string>('')
+  const [projectQuery, setProjectQuery] = useState('')
   const [selectedFirmwareId, setSelectedFirmwareId] = useState<string>('')
 
   // Fetch Himax firmware versions from DB
@@ -46,8 +58,8 @@ export function GenerateManifest() {
     return firmwares.find((f: any) => f.id === himaxFirmwareId)
   }, [firmwares, himaxFirmwareId])
 
-  // Fetch accessible projects
-  const { data: projects, isLoading: isLoadingProjects } = useQuery({
+  // Fetch accessible projects with their AI model
+  const { data: allProjects, isLoading: isLoadingProjects } = useQuery({
     queryKey: ['allProjects', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -62,20 +74,33 @@ export function GenerateManifest() {
     enabled: !!user
   })
 
-  // Auto-select first project
-  useEffect(() => {
-    if (projects?.length && !selectedProjectId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSelectedProjectId(projects[0].id)
-    } else if (projects && !projects.length) {
-      setSelectedProjectId('')
-    }
-  }, [projects, selectedProjectId])
+  // Only the projects the user can write to: a camera is set up for a project they work in.
+  const projects = useMemo(() => {
+    const ids = new Set(writable.map(p => p.id))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (allProjects ?? []).flatMap((p: any) => (ids.has(p.id) ? [{ ...p, ...toSelectableProject(p) }] : []))
+  }, [allProjects, writable])
+
+  // Default to the single project ticked in the header, else the first one (UI audit 01 D2).
+  const selectedProjectId = useMemo(() => {
+    if (chosenProjectId && projects.some(p => p.id === chosenProjectId)) return chosenProjectId
+    const headerPick = selectedProjectIds.length === 1 ? selectedProjectIds[0] : null
+    if (headerPick && projects.some(p => p.id === headerPick)) return headerPick
+    return projects[0]?.id ?? ''
+  }, [chosenProjectId, projects, selectedProjectIds])
+
+  // Above ten projects the select gets a search box; the chosen project always stays listed.
+  const searchable = projects.length > PICKER_SEARCH_MIN
+  const projectOptions = useMemo(() => {
+    const matches = filterProjects(projects, searchable ? projectQuery : '')
+    const chosen = projects.find(p => p.id === selectedProjectId)
+    return chosen && !matches.includes(chosen) ? [chosen, ...matches] : matches
+  }, [projects, searchable, projectQuery, selectedProjectId])
 
   // Resolve model info from selected project
   const projectModelInfo = useMemo(() => {
-    if (!projects || !selectedProjectId) return null
-    const project = projects.find((p: any) => p.id === selectedProjectId) as any
+    if (!selectedProjectId) return null
+    const project = projects.find(p => p.id === selectedProjectId)
     if (!project) return null
     if (!project.model_id || !project.ai_models) return { hasModel: false }
 
@@ -91,9 +116,6 @@ export function GenerateManifest() {
       incomplete: false,
       name: model.name,
       version: model.version,
-      firmwareModelId: fwId,
-      versionNumber: verNum,
-      filename: `${fwId}V${verNum}.TFL`,
     }
   }, [projects, selectedProjectId])
 
@@ -140,8 +162,7 @@ export function GenerateManifest() {
   }
 
   // Get the selected project name for the summary
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const selectedProject = projects?.find((p: any) => p.id === selectedProjectId) as any
+  const selectedProject = projects.find(p => p.id === selectedProjectId)
 
   const selectStyle = {
     width: '100%',
@@ -161,12 +182,13 @@ export function GenerateManifest() {
 
   return (
     <div>
-      <h3 style={{ marginBottom: '0.5rem' }}>Prepare SD Card</h3>
-      <p style={{ opacity: 0.7, marginBottom: '1.5rem', lineHeight: 1.5 }}>
-        While the mobile app can update your camera wirelessly, AI Models and System Software are large files that take a long time to send over Bluetooth.
-        <br/><br/>
-        For the fastest setup, download this package to your computer and move it to your SD card. When you insert the card into your Wildlife Watcher, it will instantly recognize the files and skip the long wireless wait.
-      </p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', marginBottom: '1.5rem' }}>
+        <h2 style={{ margin: 0 }}>Prepare SD card</h2>
+        <PageHelp label="About preparing an SD card" guide={SD_CARD_GUIDE} guideLabel="Read the SD card guide">
+          A package of camera software and your project&apos;s AI model to copy to an SD card, faster
+          than sending it over Bluetooth.
+        </PageHelp>
+      </div>
 
       {/* ── Step indicator ──────────────────────────────────── */}
       <div style={{
@@ -184,18 +206,20 @@ export function GenerateManifest() {
               key={s}
               style={{
                 flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.3rem',
                 padding: '0.5rem 0.75rem',
                 borderRadius: 'var(--radius)',
-                textAlign: 'center',
                 fontWeight: isActive ? 600 : 400,
                 backgroundColor: isActive ? 'var(--primary)' : isDone ? 'rgba(76,175,80,0.12)' : 'var(--surface)',
-                color: isActive ? '#fff' : isDone ? 'var(--success, #4caf50)' : 'var(--text-color)',
+                color: isActive ? '#fff' : isDone ? 'var(--success)' : 'var(--text-muted)',
                 border: `1px solid ${isActive ? 'var(--primary)' : 'var(--border)'}`,
-                opacity: isActive || isDone ? 1 : 0.5,
-                transition: 'all 0.2s ease',
+                transition: 'background-color 0.2s ease, color 0.2s ease',
               }}
             >
-              {isDone ? '✓ ' : ''}{labels[i]}
+              {isDone && <Check size={14} aria-hidden="true" />}{labels[i]}
             </div>
           )
         })}
@@ -208,18 +232,19 @@ export function GenerateManifest() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
 
               {!user ? (
-                <div style={{ padding: '0.5rem', color: 'var(--warning, #f59e0b)' }}>
+                <div style={{ padding: '0.5rem', color: 'var(--warning)' }}>
                   Please log in to access your projects.
                 </div>
               ) : (
                 <>
                   {/* Firmware selector */}
                   <div>
-                    <label style={labelStyle}>Himax Firmware Version</label>
+                    <label htmlFor="manifest-firmware" style={labelStyle}>Himax firmware version</label>
                     {isLoadingFirmwares ? (
-                      <div style={{ padding: '0.5rem', opacity: 0.6 }}>Loading firmwares from database...</div>
+                      <div style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>Loading firmware…</div>
                     ) : (
                       <select
+                        id="manifest-firmware"
                         value={himaxFirmwareId}
                         onChange={(e) => setSelectedFirmwareId(e.target.value)}
                         style={selectStyle}
@@ -231,70 +256,63 @@ export function GenerateManifest() {
                         ))}
                       </select>
                     )}
-                    <p style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: '0.25rem' }}>
-                      Select the Himax firmware version to deploy to the camera. The MANIFEST
-                      includes BOTH camera variants (RP3 colour + HM0360 night/IR) when available:
-                      the selected image plus the latest active image of the other variant.
-                    </p>
                   </div>
 
                   {/* Project selector */}
                   <div>
-                    <label style={labelStyle}>Project & Species Brain</label>
+                    <label htmlFor="manifest-project" style={labelStyle}>Project</label>
                     {isLoadingProjects ? (
-                      <div style={{ padding: '0.5rem', opacity: 0.6 }}>Loading projects…</div>
-                    ) : projects && projects.length > 0 ? (
-                      <select
-                        value={selectedProjectId}
-                        onChange={(e) => setSelectedProjectId(e.target.value)}
-                        style={selectStyle}
-                      >
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                        {projects.map((p: any) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name} {p.organisations?.name ? `(${p.organisations.name})` : ''}
-                          </option>
-                        ))}
-                      </select>
+                      <div style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>Loading projects…</div>
+                    ) : projects.length > 0 ? (
+                      <>
+                        {searchable && (
+                          <input
+                            value={projectQuery}
+                            onChange={e => setProjectQuery(e.target.value)}
+                            placeholder={`Search ${projects.length} projects`}
+                            aria-label="Search projects"
+                            style={{ ...selectStyle, marginBottom: '0.375rem', boxSizing: 'border-box' }}
+                          />
+                        )}
+                        <select
+                          id="manifest-project"
+                          value={selectedProjectId}
+                          onChange={(e) => setChosenProjectId(e.target.value)}
+                          style={selectStyle}
+                        >
+                          {projectOptions.map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} {p.organisation ? `(${p.organisation})` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </>
                     ) : (
                       <div style={{ padding: '0.5rem', color: 'var(--error)' }}>
-                        No accessible projects found.
+                        No project you can prepare a camera for.
                       </div>
                     )}
-                    <p style={{ fontSize: '0.75rem', opacity: 0.6, marginTop: '0.25rem' }}>
-                      Choose which project this camera belongs to. This includes the project's Species Brain — the Camera AI model that identifies animals on the device.
-                    </p>
                   </div>
 
-                  {/* Model info (read-only) */}
+                  {/* Model (read-only): name and version only; the firmware ids are in the guide */}
                   {projectModelInfo && (
                     <div style={{
                       borderTop: '1px solid var(--border)',
                       paddingTop: '1rem',
-                      marginTop: '0.5rem',
+                      fontSize: '0.8125rem',
                     }}>
                       {projectModelInfo.hasModel ? (
                         projectModelInfo.incomplete ? (
-                          <div style={{ color: 'var(--warning, #f59e0b)' }}>
-                            ⚠️ Model <strong>{projectModelInfo.name}</strong> is missing firmware IDs.
-                            Please ensure it has a model family and version number assigned.
+                          <div style={{ color: 'var(--warning)' }}>
+                            The AI model <strong>{projectModelInfo.name}</strong> has no model family or version
+                            number yet, so it cannot go on a camera. Ask an organisation manager to set them.
                           </div>
                         ) : (
-                          <div>
-                            <h4 style={{ marginBottom: '0.5rem' }}>✅ Model Info</h4>
-                            <div style={{ fontSize: '0.8125rem', display: 'grid', gap: '0.25rem' }}>
-                              <div><strong>Model:</strong> {projectModelInfo.name} v{projectModelInfo.version}</div>
-                              <div><strong>Firmware ID (OP 14):</strong> <code>{projectModelInfo.firmwareModelId}</code></div>
-                              <div><strong>Version (OP 15):</strong> <code>{projectModelInfo.versionNumber}</code></div>
-                              <div><strong>Filename:</strong> <code>{projectModelInfo.filename}</code></div>
-                            </div>
-                          </div>
+                          <div><strong>AI model:</strong> {projectModelInfo.name} v{projectModelInfo.version}</div>
                         )
                       ) : (
-                        <div style={{ fontSize: '0.8125rem', opacity: 0.8, color: 'var(--primary)' }}>
-                          🤖 <strong>Note on AI Identification:</strong>
-                          <br/>
-                          This project doesn't have an AI model assigned yet. The setup folder will include the camera system and settings, but it won't be able to identify species automatically. You can add a "Species Brain" later via the Project Settings in the app.
+                        <div style={{ color: 'var(--text-muted)' }}>
+                          This project has no AI model yet, so the package holds the camera software and settings only.
                         </div>
                       )}
                     </div>
@@ -310,9 +328,10 @@ export function GenerateManifest() {
               className="btn"
               disabled={generateMutation.isPending || !formIsValid()}
               onClick={() => generateMutation.mutate()}
-              style={{ padding: '0.75rem 2rem' }}
+              style={{ padding: '0.75rem 2rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}
             >
-              {generateMutation.isPending ? '⏳ Submitting…' : '📦 Generate Setup Folder'}
+              <Package size={16} aria-hidden="true" />
+              {generateMutation.isPending ? 'Submitting…' : 'Generate setup folder'}
             </button>
           </div>
 
@@ -331,12 +350,13 @@ export function GenerateManifest() {
             border: '1px solid var(--border)',
             borderRadius: 'var(--radius)',
           }}>
+            <style>{'@keyframes manifest-spin { to { transform: rotate(360deg) } }'}</style>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-              <div style={{ fontSize: '1.25rem', animation: 'spin 1s linear infinite' }}>⚙️</div>
+              <LoaderCircle size={20} color="var(--primary)" aria-hidden="true" style={{ animation: 'manifest-spin 1s linear infinite' }} />
               <div>
                 <div style={{ fontWeight: 600 }}>Generating setup folder…</div>
-                <div style={{ fontSize: '0.8125rem', opacity: 0.7 }}>
-                  {selectedProject?.name} • {selectedFirmware?.name || 'Loading...'}
+                <div style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
+                  {selectedProject?.name}, {selectedFirmware?.name || 'Loading…'}
                 </div>
               </div>
             </div>
@@ -386,8 +406,8 @@ export function GenerateManifest() {
             borderRadius: 'var(--radius)',
             marginBottom: '1.5rem',
           }}>
-            <div style={{ fontWeight: 600, fontSize: '1.0625rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>
-              ✅ Setup folder ready!
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600, fontSize: '1.0625rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>
+              <CircleCheck size={18} aria-hidden="true" /> Setup folder ready
             </div>
 
             <div style={{ fontSize: '0.8125rem', display: 'grid', gap: '0.375rem', marginBottom: '1.25rem' }}>
@@ -404,42 +424,30 @@ export function GenerateManifest() {
                 <a
                   href={job.result_url}
                   className="btn"
-                  style={{ textDecoration: 'none', display: 'inline-block', padding: '0.625rem 1.5rem' }}
+                  style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.625rem 1.5rem' }}
                 >
-                  📥 Download Setup Folder
+                  <Download size={16} aria-hidden="true" /> Download setup folder
                 </a>
               )}
               <button
                 onClick={handleReset}
-                style={{
-                  padding: '0.625rem 1.5rem',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius)',
-                  backgroundColor: 'transparent',
-                  color: 'var(--text-color)',
-                  cursor: 'pointer',
-                  fontSize: '0.875rem',
-                }}
+                className="btn btn-outline"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', padding: '0.625rem 1.5rem', fontSize: '0.875rem' }}
               >
-                🔄 Generate New Setup
+                <RefreshCw size={15} aria-hidden="true" /> Generate another
               </button>
             </div>
           </div>
 
-          {/* Next Steps checklist */}
-          <div style={{
-            padding: '1.5rem',
-            backgroundColor: 'var(--surface)',
-            border: '1px solid var(--primary)',
-            borderRadius: 'var(--radius)',
-          }}>
-            <h4 style={{ marginTop: 0, marginBottom: '1rem', color: 'var(--primary)' }}>Next Steps Checklist:</h4>
-            <ul style={{ listStyleType: 'none', paddingLeft: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <li><label style={{ cursor: 'pointer' }}><input type="checkbox" style={{ marginRight: '0.5rem' }} /> Unzip the downloaded folder.</label></li>
-              <li><label style={{ cursor: 'pointer' }}><input type="checkbox" style={{ marginRight: '0.5rem' }} /> Copy the "MANIFEST" folder with its contents as it is to the root of your SD card.</label></li>
-              <li><label style={{ cursor: 'pointer' }}><input type="checkbox" style={{ marginRight: '0.5rem' }} /> Insert the card in your Wildlife Watcher and power on the device.</label></li>
-              <li><label style={{ cursor: 'pointer' }}><input type="checkbox" style={{ marginRight: '0.5rem' }} /> Connect the device with your app and start monitoring.</label></li>
-            </ul>
+          {/* Next steps: the short version; the guide has the detail */}
+          <div className="card">
+            <h3 style={{ marginTop: 0, marginBottom: '0.75rem', fontSize: '1rem' }}>Next steps</h3>
+            <ol style={{ paddingLeft: '1.25rem', margin: 0, display: 'flex', flexDirection: 'column', gap: '0.4rem', fontSize: '0.875rem' }}>
+              <li>Unzip the downloaded folder.</li>
+              <li>Copy the MANIFEST folder, as it is, to the root of the SD card.</li>
+              <li>Put the card in the camera and power it on.</li>
+              <li>Connect to the camera from the mobile app and start monitoring.</li>
+            </ol>
           </div>
         </div>
       )}

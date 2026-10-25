@@ -28,7 +28,7 @@ src/
 │   │                       #   FilterSelect, StatusBadge, VegaChart) — see resources/ui-components.md
 │   ├── data/               # feature components (MediaBrowser, MediaDetail, SpeciesPicker,
 │   │                       #   DeploymentMap, ObservationReports, ChartBuilder, …)
-│   ├── upload/             # UploadFlow (+ UnassignedTriage, upload.css), ProgressDock
+│   ├── upload/             # UploadFlow (+ UnassignedTriage, DeploymentPicker, upload.css), ProgressDock
 │   ├── toolkit/            # GenerateManifest, UploadModel, PipelineStatusBox
 │   └── common/             # nav/shared bits
 ├── contexts/UploadContext.tsx  # global upload store (survives navigation)
@@ -42,13 +42,17 @@ src/
 ### Signed-in navigation
 
 Defined as `USER_TABS` in `App.tsx`. The active tab is highlighted, so pages no longer repeat
-their own title. Lifecycle order: **prepare → collect → analyse**. The 📡 **Realtime** tab appears only
-when the user has an active deployment.
+their own title, and a deep route lights its parent tab (`lib/navTabs.ts`). Lifecycle order:
+**prepare → collect → analyse**. The 📡 **Realtime** tab appears only when one of the user's
+projects has a device that sends or has sent LoRaWAN data, at least one `lorawan_messages` row the
+user can read (`hooks/useHasRealtimeData.ts`, UI audit decision 7). Below 900 px the tabs show
+their icon only. Write controls (the header Upload button, Home's upload step, Toolkit's Prepare
+SD card) hide for a user who can write to no project (`hooks/useWritableProjects.ts`).
 
 | Tab | Route | Page |
 |-----|-------|------|
-| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (upload, SD-card prep, manifest, model upload) |
-| 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with an active deployment) |
+| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (SD-card prep, model upload, iNaturalist, CamtrapDP export; each card by role) |
+| 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with LoRaWAN data) |
 | 🏷️ Annotations | `/annotations` | `AnnotationsPage` → `MediaBrowser` (+ full-screen modal) |
 | 📈 Insights | `/insights` | `InsightsPage` (projects, deployments, charts, maps) |
 
@@ -71,7 +75,7 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 
 | Route | Page | Purpose |
 |-------|------|---------|
-| `/toolkit` | `ToolkitPage` | Upload, SD-card prep, manifest, privileged model upload |
+| `/toolkit` | `ToolkitPage` | SD-card prep, privileged model upload, iNaturalist, CamtrapDP export |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
 | `/field` | `FieldPage` | Active-deployment view (LoRaWAN heartbeats) |
@@ -83,8 +87,8 @@ which must be on the Supabase project's redirect allow-list (#187). A new accoun
 | `/umap/:id` | `UmapExplorerPage` | Embedding-space map of a deployment; a click opens that photo in the grid |
 | `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project), behind `FF_INTELLIGENCE_ENABLED`. Links to a flagged page show only when `useFeatureEnabled` says the feature answers |
 | `/reporting/:id` | `ReportingPage` | Diel activity, CamtrapDP / Darwin Core exports |
-| `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history |
-| `/notifications` | `NotificationsPage` | Notification inbox — read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router); the unread count drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
+| `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history, 50 at a time up to the API's 200; `?job=<id>` opens that job's row |
+| `/notifications` | `NotificationsPage` | Notification inbox, read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router), filtered in the query and paged with "Load more"; the unread count (a server-side count) drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
 | `/settings` | `SettingsPage` | Projects, account, integrations, organisation API keys |
 | `/admin/usage` | `AdminUsagePage` | Per-user usage limits (platform admin) |
 | `/admin/devices` | `AdminDevicesPage` | Every device with its organisation and latest deployment, read-only (platform admin) |

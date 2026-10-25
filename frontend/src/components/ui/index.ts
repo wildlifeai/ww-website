@@ -10,7 +10,8 @@ export type { RibbonProps, RibbonTabDef, RibbonGroupDef } from './Ribbon'
 export { DataTable } from './DataTable'
 export type { DataTableProps, Column } from './DataTable'
 
-export { StatusBadge, deriveAnnotationStatus } from './StatusBadge'
+export { StatusBadge } from './StatusBadge'
+export { deriveAnnotationStatus } from '../../lib/annotationStatus'
 export type { StatusBadgeProps, AnnotationStatus } from './StatusBadge'
 
 export { VegaChart } from './VegaChart'

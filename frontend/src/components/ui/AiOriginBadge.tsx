@@ -1,14 +1,15 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // AiOriginBadge — which AI layer produced an observation
 //
-//   📟 Camera AI  — the camera's on-device (edge) model, ingested from EXIF
-//   ☁ Cloud AI   — the website pipeline (SpeciesNet / Wildlife Brain)
+//   Camera AI: the camera's on-device (edge) model, ingested from EXIF
+//   Cloud AI: the website pipeline (SpeciesNet / Wildlife Brain)
 //
-// Shown beside the species label so a rat frame reads
-// "📟 Camera AI: rat 87%" next to "☁ Cloud AI: Rattus rattus 64%".
-// Renders nothing for non-AI (human/imported) observations.
+// Shown beside the species label so a rat frame reads "Camera AI: rat 87%" next to
+// "Cloud AI: Rattus rattus 64%". Renders nothing for non-AI (human/imported) observations.
+// The icon is a lucide one picked here; aiOriginMeta's emoji icon is not used.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { Camera, Cloud } from 'lucide-react'
 import { aiOriginMeta, type ObservationStatusFields } from '../../lib/observations'
 
 const TONE: Record<string, { bg: string; border: string; color: string }> = {
@@ -19,7 +20,9 @@ const TONE: Record<string, { bg: string; border: string; color: string }> = {
 export function AiOriginBadge({ obs, size = 'sm' }: { obs: ObservationStatusFields; size?: 'sm' | 'md' }) {
   const meta = aiOriginMeta(obs)
   if (!meta) return null
-  const tone = obs.ai_origin === 'edge' ? TONE.edge : TONE.cloud
+  const edge = obs.ai_origin === 'edge'
+  const tone = edge ? TONE.edge : TONE.cloud
+  const Icon = edge ? Camera : Cloud
   const isSm = size === 'sm'
   return (
     <span
@@ -40,7 +43,7 @@ export function AiOriginBadge({ obs, size = 'sm' }: { obs: ObservationStatusFiel
         userSelect: 'none',
       }}
     >
-      <span aria-hidden>{meta.icon}</span>
+      <Icon size={isSm ? 10 : 12} aria-hidden />
       {meta.label}
     </span>
   )

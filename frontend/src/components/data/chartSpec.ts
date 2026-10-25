@@ -1,127 +1,85 @@
 /**
- * chartSpec — shared Vega-Lite spec builder + option metadata for the Reports
- * dashboard and the chart builder. Kept component-free so both can import it.
+ * chartSpec: the Vega-Lite specs of the Insights > Reports charts. Each takes a small table
+ * already counted by lib/observationSummary, never the raw observations (UI audit 04 #8).
  */
-import { VEGA_CONFIG, withBarLabels } from '../../lib/vegaSpec'
-import type { Observation } from './ObservationReports'
+import { VEGA_CONFIG, withBarLabels, type Spec } from '../../lib/vegaSpec'
+import type { CountRow, DayRow } from '../../lib/observationSummary'
+import { OTHER_SPECIES } from '../../lib/observationSummary'
 
-export type ChartType = 'bar_h' | 'bar_v' | 'arc' | 'line'
-export type GroupBy = 'scientific_name' | 'observation_type' | 'deployment' | 'month'
+const SCHEMA = 'https://vega.github.io/schema/vega-lite/v5.json'
+const BAR_COLOUR = '#4caf50'
 
-export interface UserChartDef {
-  id: string
-  title: string
-  chartType: ChartType
-  groupBy: GroupBy
-}
-
-export interface EnrichedObs extends Observation {
-  location_name: string
-}
-
-export const CHART_TYPE_OPTIONS: { value: ChartType; label: string }[] = [
-  { value: 'bar_h', label: 'Horizontal bar' },
-  { value: 'bar_v', label: 'Vertical bar' },
-  { value: 'arc',   label: 'Pie / donut' },
-  { value: 'line',  label: 'Line over time' },
-]
-
-export const GROUP_BY_OPTIONS: { value: GroupBy; label: string; hint?: string }[] = [
-  { value: 'scientific_name',  label: 'Species (scientific name)' },
-  { value: 'observation_type', label: 'Observation type' },
-  { value: 'deployment',       label: 'Deployment location' },
-  { value: 'month',            label: 'Month (trend over time)', hint: 'Best with Line chart' },
-]
-
-export const GROUP_BY_LABELS: Record<GroupBy, string> = {
-  scientific_name:  'Species',
-  observation_type: 'Observation type',
-  deployment:       'Deployment',
-  month:            'Month',
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function buildVegaSpec(chart: UserChartDef, data: EnrichedObs[]): Record<string, any> {
-  const isMonth = chart.groupBy === 'month'
-  const field = chart.groupBy === 'deployment'
-    ? 'location_name'
-    : chart.groupBy === 'month'
-    ? 'created_at'
-    : chart.groupBy
-
-  const dimEncoding = isMonth
-    ? { field, type: 'temporal', timeUnit: 'yearmonth', title: 'Month' }
-    : {
-        field,
-        type: 'nominal',
-        title: GROUP_BY_LABELS[chart.groupBy],
-        ...(chart.groupBy === 'scientific_name' ? { axis: { labelFontStyle: 'italic', labelLimit: 160 } } : {}),
-      }
-
-  const transforms = []
-  if (chart.groupBy === 'scientific_name') {
-    transforms.push({ filter: 'datum.scientific_name != null && datum.scientific_name !== ""' })
-  }
-  if (chart.groupBy === 'deployment') {
-    transforms.push({ filter: 'datum.location_name != null && datum.location_name !== ""' })
-  }
-
-  const countEnc = { aggregate: 'count', type: 'quantitative', title: 'Count' }
-
-  const tooltip = [
-    isMonth
-      ? { field, type: 'temporal', timeUnit: 'yearmonth', title: 'Month' }
-      : { field, type: 'nominal', title: GROUP_BY_LABELS[chart.groupBy] },
-    { aggregate: 'count', title: 'Count' },
-  ]
-
-  const colorEnc = isMonth
-    ? { value: '#4caf50' }
-    : {
-        field,
-        type: 'nominal',
-        scale: { scheme: 'tableau10' },
-        legend: chart.chartType === 'arc' ? { title: null } : null,
-      }
-
-  const base = {
-    $schema: 'https://vega.github.io/schema/vega-lite/v5.json',
+/** Horizontal bars, one per row, most first, each with its count at the end. */
+export function countBarSpec(rows: CountRow[], opts: { title: string; italic?: boolean }): Spec {
+  return withBarLabels({
+    $schema: SCHEMA,
     width: 'container',
-    data: { values: data },
-    transform: transforms,
+    height: { step: 22 },
+    data: { values: rows },
+    mark: { type: 'bar', cornerRadiusEnd: 3 },
+    encoding: {
+      y: {
+        field: 'label', type: 'nominal', sort: '-x', title: null,
+        axis: { labelLimit: 220, ...(opts.italic ? { labelFontStyle: 'italic' } : {}) },
+      },
+      x: { field: 'count', type: 'quantitative', title: 'Count' },
+      color: { value: BAR_COLOUR },
+      tooltip: [{ field: 'label', type: 'nominal', title: opts.title }, { field: 'count', type: 'quantitative', title: 'Count' }],
+    },
+    config: VEGA_CONFIG,
+  }, 'h')
+}
+
+const TYPE_DOMAIN = ['animal', 'human', 'vehicle', 'blank', 'unknown']
+const TYPE_RANGE = ['#4caf50', '#2196f3', '#ff9800', '#9e9e9e', '#607d8b']
+
+/** Observation types as a donut. */
+export function typeArcSpec(rows: CountRow[]): Spec {
+  return {
+    $schema: SCHEMA,
+    width: 'container',
+    height: 260,
+    data: { values: rows },
+    mark: { type: 'arc', innerRadius: 50, outerRadius: 100 },
+    encoding: {
+      theta: { field: 'count', type: 'quantitative' },
+      color: { field: 'label', type: 'nominal', scale: { domain: TYPE_DOMAIN, range: TYPE_RANGE }, legend: { title: null } },
+      tooltip: [{ field: 'label', type: 'nominal', title: 'Type' }, { field: 'count', type: 'quantitative', title: 'Count' }],
+    },
     config: VEGA_CONFIG,
   }
+}
 
-  switch (chart.chartType) {
-    case 'bar_h':
-      return withBarLabels({
-        ...base,
-        height: 280,
-        mark: { type: 'bar', cornerRadiusEnd: 3 },
-        encoding: { y: { ...dimEncoding, sort: '-x', title: null }, x: countEnc, color: colorEnc, tooltip },
-      }, 'h')
-    case 'bar_v':
-      return withBarLabels({
-        ...base,
-        height: 280,
-        mark: { type: 'bar', cornerRadiusTopLeft: 3, cornerRadiusTopRight: 3 },
-        encoding: { x: { ...dimEncoding, sort: '-y', title: null, axis: { ...(dimEncoding as { axis?: object }).axis, labelAngle: -35 } }, y: countEnc, color: colorEnc, tooltip },
-      }, 'v')
-    case 'arc':
-      return {
-        ...base,
-        height: 260,
-        mark: { type: 'arc', innerRadius: 50, outerRadius: 100 },
-        encoding: { theta: countEnc, color: { field, type: 'nominal', scale: { scheme: 'tableau10' }, legend: { title: null } }, tooltip },
-      }
-    case 'line':
-      return {
-        ...base,
-        height: 260,
-        mark: { type: 'line', point: true, strokeWidth: 2 },
-        encoding: { x: { ...dimEncoding, axis: { labelAngle: -35 } }, y: countEnc, color: isMonth ? undefined : { field, type: 'nominal', scale: { scheme: 'tableau10' }, legend: { title: null } }, tooltip },
-      }
-    default:
-      return base
+const SPECIES_COLOURS = ['#4caf50', '#2196f3', '#ff9800', '#e91e63', '#9c27b0', '#00bcd4', '#ff5722', '#8bc34a']
+const OTHER_COLOUR = '#9e9e9e'
+
+/**
+ * Detections per day, stacked by species (the Reporting page's chart, UI audit decision 5).
+ * `species` is the legend order; "Other species" is grey.
+ */
+export function perDaySpec(rows: DayRow[], species: string[]): Spec {
+  return {
+    $schema: SCHEMA,
+    width: 'container',
+    height: 280,
+    data: { values: rows },
+    mark: { type: 'bar', cornerRadiusTopLeft: 2, cornerRadiusTopRight: 2 },
+    encoding: {
+      // The day is a calendar date already taken in the deployment's zone: read it as UTC
+      // so the browser's own zone cannot move it.
+      x: { field: 'day', type: 'temporal', timeUnit: 'utcyearmonthdate', title: null, axis: { labelAngle: -35, format: '%d %b' } },
+      y: { field: 'count', type: 'quantitative', aggregate: 'sum', title: 'Detections' },
+      color: {
+        field: 'species', type: 'nominal',
+        scale: { domain: species, range: species.map((s, i) => (s === OTHER_SPECIES ? OTHER_COLOUR : SPECIES_COLOURS[i % SPECIES_COLOURS.length])) },
+        legend: { title: null, labelFontStyle: 'italic', orient: 'bottom' },
+      },
+      tooltip: [
+        { field: 'day', type: 'temporal', timeUnit: 'utcyearmonthdate', title: 'Date' },
+        { field: 'species', type: 'nominal', title: 'Species' },
+        { field: 'count', type: 'quantitative', title: 'Detections' },
+      ],
+    },
+    config: VEGA_CONFIG,
   }
 }

@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { ChevronDown, ChevronUp, ChevronsUpDown, Download } from 'lucide-react'
 import { ColumnToggle, SearchInput } from './ControlBar'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -28,8 +29,11 @@ export interface DataTableProps<T> {
   /** Show a search box that filters across all non-hidden columns. */
   searchable?: boolean
   searchPlaceholder?: string
-  /** Filename stem (no extension). When provided, CSV + JSON export buttons appear. */
+  /** Filename stem (no extension). When provided, CSV + JSON export buttons appear. With a
+   *  selection, CSV exports the selected rows only. */
   exportFilename?: string
+  /** Offer the JSON export beside CSV. Default true. */
+  exportJson?: boolean
   emptyMessage?: string
   /** Called when a data row is clicked (not the header). */
   onRowClick?: (row: T) => void
@@ -63,6 +67,17 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+const EXPORT_BTN: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.375rem',
+  padding: '0.375rem 0.75rem',
+  fontSize: '0.8125rem',
+  backgroundColor: 'transparent',
+  color: 'var(--primary)',
+  border: '1px solid var(--primary)',
+}
+
 function getVal<T>(row: T, col: Column<T>): string {
   if (col.getValue) return String(col.getValue(row) ?? '')
   const v = (row as Record<string, unknown>)[col.key]
@@ -80,6 +95,7 @@ export function DataTable<T>({
   searchable = false,
   searchPlaceholder = 'Search…',
   exportFilename,
+  exportJson = true,
   emptyMessage = 'No records found.',
   onRowClick,
   selectedKeys,
@@ -140,15 +156,17 @@ export function DataTable<T>({
   const totalPages = pageSize > 0 ? Math.ceil(sorted.length / pageSize) : 1
   const paged = pageSize > 0 ? sorted.slice((page - 1) * pageSize, page * pageSize) : sorted
 
-  // Export
-  const exportCsv = () => {
+  // Export: the selected rows when there is a selection, otherwise every row the search keeps.
+  const selectedCount = onSelectionChange && selectedKeys ? selectedKeys.size : 0
+  const downloadCsv = () => {
     const visKeys = visibleColumns
     const headers = visKeys.map(c => c.label)
-    const data = sorted.map(row => visKeys.map(col => getVal(row, col)))
+    const source = selectedCount > 0 ? rows.filter(r => selectedKeys!.has(rowKey(r))) : sorted
+    const data = source.map(row => visKeys.map(col => getVal(row, col)))
     downloadBlob(new Blob([toCsv(headers, data)], { type: 'text/csv' }), `${exportFilename}.csv`)
   }
 
-  const exportJson = () => {
+  const downloadJson = () => {
     const visKeys = visibleColumns
     const data = sorted.map(row =>
       Object.fromEntries(visKeys.map(col => [col.key, getVal(row, col)]))
@@ -205,32 +223,16 @@ export function DataTable<T>({
             )}
             {exportFilename && (
               <>
-                <button
-                  onClick={exportCsv}
-                  className="btn"
-                  style={{
-                    padding: '0.375rem 0.75rem',
-                    fontSize: '0.8125rem',
-                    backgroundColor: 'transparent',
-                    color: 'var(--primary)',
-                    border: '1px solid var(--primary)',
-                  }}
-                >
-                  ⬇ CSV
+                <button onClick={downloadCsv} className="btn" style={EXPORT_BTN}>
+                  <Download size={14} aria-hidden />
+                  {selectedCount > 0 ? `CSV (${selectedCount} selected)` : 'CSV'}
                 </button>
-                <button
-                  onClick={exportJson}
-                  className="btn"
-                  style={{
-                    padding: '0.375rem 0.75rem',
-                    fontSize: '0.8125rem',
-                    backgroundColor: 'transparent',
-                    color: 'var(--primary)',
-                    border: '1px solid var(--primary)',
-                  }}
-                >
-                  ⬇ JSON
-                </button>
+                {exportJson && (
+                  <button onClick={downloadJson} className="btn" style={EXPORT_BTN}>
+                    <Download size={14} aria-hidden />
+                    JSON
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -271,11 +273,13 @@ export function DataTable<T>({
                   {col.label}
                   {col.sortable !== false && (
                     <span style={{
-                      opacity: sortCol === col.key ? 1 : 0.3,
+                      color: sortCol === col.key ? 'var(--text-color)' : 'var(--text-muted)',
                       marginLeft: '4px',
-                      fontSize: '0.7rem',
+                      verticalAlign: 'middle',
                     }}>
-                      {sortCol === col.key ? (sortAsc ? '▲' : '▼') : '⇅'}
+                      {sortCol !== col.key
+                        ? <ChevronsUpDown size={12} aria-hidden />
+                        : sortAsc ? <ChevronUp size={12} aria-label="ascending" /> : <ChevronDown size={12} aria-label="descending" />}
                     </span>
                   )}
                 </th>
@@ -287,7 +291,7 @@ export function DataTable<T>({
               <tr>
                 <td
                   colSpan={visibleColumns.length + (onSelectionChange ? 1 : 0)}
-                  style={{ ...tdStyle, textAlign: 'center', opacity: 0.5, padding: '2.5rem' }}
+                  style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-muted)', padding: '2.5rem' }}
                 >
                   {emptyMessage}
                 </td>
@@ -350,7 +354,7 @@ export function DataTable<T>({
           justifyContent: 'space-between',
           marginTop: '0.75rem',
           fontSize: '0.8125rem',
-          opacity: 0.75,
+          color: 'var(--text-muted)',
         }}>
           <span>
             {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, sorted.length)} of{' '}

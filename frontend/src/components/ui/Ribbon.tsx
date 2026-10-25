@@ -1,16 +1,17 @@
 /**
- * Ribbon — a branded, Microsoft-Word-style command surface.
+ * Ribbon: a Microsoft-Word-style command surface.
  *
  *   ┌───────────────────────────────────────────────────────────────┐
- *   │ 🌿  [ Tab ][ Tab ][ Tab ]                         status… │  ← menu bar
+ *   │ [ Tab ][ Tab ][ Tab ]                             status… │  ← menu bar
  *   ├───────────────────────────────────────────────────────────────┤
  *   │  ⌄group⌄ │ ⌄group⌄ │ ⌄group⌄                    ⤢          │  ← ribbon body
  *   │  controls  controls   controls                              │
  *   │  CAPTION    CAPTION     CAPTION                              │
  *   └───────────────────────────────────────────────────────────────┘
  *
- * - **Menu bar**: a leaf brand mark + ribbon tabs (controlled or uncontrolled)
- *   + an optional right-aligned status slot.
+ * - **Menu bar**: ribbon tabs (controlled or uncontrolled) + an optional
+ *   right-aligned status slot. The header carries the brand; the ribbon has no mark of its own.
+ * - **Narrow screens**: below 900px the groups wrap onto more rows (`.ribbon-body` in index.css).
  * - **Ribbon body**: the active tab's grouped categories. Each group has its
  *   controls on top and a small caption underneath, divided like Word's ribbon.
  * - **Advanced settings**: an optional per-group dialog launcher (the ⤢ arrow),
@@ -35,7 +36,8 @@ export interface RibbonGroupDef {
 export interface RibbonTabDef {
   id: string
   label: string
-  icon?: string
+  /** A short glyph or a lucide icon element before the label. */
+  icon?: React.ReactNode
   groups: RibbonGroupDef[]
 }
 
@@ -46,7 +48,7 @@ export interface RibbonProps {
   /** Uncontrolled initial tab. */
   defaultTabId?: string
   onTabChange?: (id: string) => void
-  /** Optional short wordmark next to the leaf brand mark. */
+  /** Optional short wordmark before the tabs. */
   brandLabel?: string
   /** Right-aligned status content in the menu bar (e.g. result counts). */
   status?: React.ReactNode
@@ -82,20 +84,9 @@ const MENUBAR: React.CSSProperties = {
   minHeight: 40,
 }
 
-const BRAND: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', gap: 8,
-  padding: '0 0.875rem', borderRight: '1px solid var(--border)', flexShrink: 0,
-}
-
-const BRAND_CHIP: React.CSSProperties = {
-  width: 24, height: 24, borderRadius: 6,
-  background: 'linear-gradient(135deg, var(--primary, #4caf50), #2e7d32)',
-  color: '#fff', display: 'grid', placeItems: 'center', fontSize: 13,
-  boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
-}
-
 const BRAND_WORD: React.CSSProperties = {
-  fontSize: '0.8125rem', fontWeight: 700, letterSpacing: '0.02em', opacity: 0.85, whiteSpace: 'nowrap',
+  display: 'flex', alignItems: 'center', padding: '0 0.875rem', borderRight: '1px solid var(--border)',
+  fontSize: '0.8125rem', fontWeight: 700, letterSpacing: '0.02em', whiteSpace: 'nowrap', flexShrink: 0,
 }
 
 const STATUS: React.CSSProperties = {
@@ -103,9 +94,10 @@ const STATUS: React.CSSProperties = {
   fontSize: '0.75rem', padding: '0 0.875rem', whiteSpace: 'nowrap',
 }
 
+// No overflowX here: .ribbon-body scrolls wide rows and wraps them below 900px (index.css).
 const BODY: React.CSSProperties = {
   display: 'flex', alignItems: 'stretch',
-  padding: '0.4rem 0.25rem', overflowX: 'auto',
+  padding: '0.4rem 0.25rem',
 }
 
 const GROUP: React.CSSProperties = {
@@ -119,7 +111,7 @@ const GROUP_CONTENT: React.CSSProperties = {
 
 const GROUP_CAPTION: React.CSSProperties = {
   textAlign: 'center', fontSize: '0.625rem', textTransform: 'uppercase',
-  letterSpacing: '0.05em', opacity: 0.5, marginTop: 6, fontWeight: 600, whiteSpace: 'nowrap',
+  letterSpacing: '0.05em', color: 'var(--text-muted)', marginTop: 6, fontWeight: 600, whiteSpace: 'nowrap',
 }
 
 const LAUNCHER: React.CSSProperties = {
@@ -132,10 +124,10 @@ function tabStyle(active: boolean): React.CSSProperties {
   return {
     padding: '0 1rem', minHeight: 40, border: 'none', background: active ? 'var(--surface)' : 'transparent',
     cursor: 'pointer', fontSize: '0.8125rem', whiteSpace: 'nowrap',
-    color: active ? 'var(--primary)' : 'var(--text-color)',
-    fontWeight: active ? 700 : 500, opacity: active ? 1 : 0.72,
+    color: active ? 'var(--primary)' : 'var(--text-muted)',
+    fontWeight: active ? 700 : 500,
     boxShadow: active ? 'inset 0 -3px 0 0 var(--primary)' : 'none',
-    transition: 'background 0.12s, opacity 0.12s',
+    transition: 'background 0.12s, color 0.12s',
   }
 }
 
@@ -146,6 +138,7 @@ export function Ribbon({ tabs, activeTabId, defaultTabId, onTabChange, brandLabe
   const active = activeTabId ?? internal
   const setActive = (id: string) => { onTabChange?.(id); if (activeTabId === undefined) setInternal(id) }
   const current = tabs.find(t => t.id === active) ?? tabs[0]
+  const hasBody = (current?.groups.length ?? 0) > 0 || aside != null
 
   // Clicking the active tab collapses/expands the filter row; clicking another
   // tab switches to it (and expands).
@@ -165,24 +158,21 @@ export function Ribbon({ tabs, activeTabId, defaultTabId, onTabChange, brandLabe
     <div style={containerStyle}>
       {/* ── Menu bar ──────────────────────────────────────── */}
       <div style={MENUBAR}>
-        <div style={BRAND}>
-          <span style={BRAND_CHIP} aria-hidden>🌿</span>
-          {brandLabel && <span style={BRAND_WORD}>{brandLabel}</span>}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        {brandLabel && <span style={BRAND_WORD}>{brandLabel}</span>}
+        <div style={{ display: 'flex', alignItems: 'stretch', flexWrap: 'wrap' }}>
           {tabs.map(t => {
             const on = t.id === active
             return (
               <button
                 key={t.id}
                 onClick={() => onTabClick(t.id)}
-                title={on ? (collapsed ? 'Show filters' : 'Hide filters') : undefined}
+                title={on && hasBody ? (collapsed ? 'Show filters' : 'Hide filters') : undefined}
                 style={tabStyle(on)}
                 onMouseEnter={e => { if (!on) e.currentTarget.style.background = 'rgba(0,0,0,0.04)' }}
                 onMouseLeave={e => { if (!on) e.currentTarget.style.background = 'transparent' }}
               >
                 {t.icon && <span style={{ marginRight: 6 }}>{t.icon}</span>}{t.label}
-                {on && <span style={{ marginLeft: 6, fontSize: '0.6rem', opacity: 0.6 }}>{collapsed ? '▸' : '▾'}</span>}
+                {on && hasBody && <span style={{ marginLeft: 6, fontSize: '0.6rem', opacity: 0.6 }}>{collapsed ? '▸' : '▾'}</span>}
               </button>
             )
           })}
@@ -190,9 +180,10 @@ export function Ribbon({ tabs, activeTabId, defaultTabId, onTabChange, brandLabe
         {status != null && <div style={STATUS}>{status}</div>}
       </div>
 
-      {/* ── Ribbon body (collapsible via the active tab) ───── */}
-      {!collapsed && (
-      <div style={BODY}>
+      {/* ── Ribbon body (collapsible via the active tab). A tab with no groups and no aside
+          has no body at all, rather than an empty row. ── */}
+      {!collapsed && hasBody && (
+      <div className="ribbon-body" style={BODY}>
         {current?.groups.map((g, i) => (
           <div
             key={g.id}
@@ -213,11 +204,6 @@ export function Ribbon({ tabs, activeTabId, defaultTabId, onTabChange, brandLabe
             <div style={GROUP_CAPTION}>{g.title}</div>
           </div>
         ))}
-        {(!current || current.groups.length === 0) && (
-          <div style={{ padding: '0.6rem 0.875rem', fontSize: '0.75rem', opacity: 0.45 }}>
-            No options for this view.
-          </div>
-        )}
         {aside != null && (
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.5rem 0 0.875rem', flexShrink: 0 }}>
             {aside}

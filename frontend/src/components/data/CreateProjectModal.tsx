@@ -2,11 +2,12 @@
 /**
  * CreateProjectModal
  *
- * Creates a new project using direct Supabase writes — the same underlying
+ * Creates a new project using direct Supabase writes, the same underlying
  * schema the mobile app uses (no extra backend endpoint needed).
  *
  * Data flow:
- *   organisation_id  ← user_roles (scope_type='organisation', scope_id=org_id)
+ *   organisation_id  ← useCreatableOrgs (lib/projectCreation: the organisations the
+ *                      projects INSERT policy accepts; a choice when there are several)
  *   capture_methods / sampling_designs / activity_sensitivity / ai_models
  *                    ← queried directly from Supabase reference tables
  *   insert           → projects table
@@ -15,6 +16,8 @@ import { useState, useEffect } from 'react'
 import { Modal } from '../ui/Modal'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
+import { useCreatableOrgs } from '../../hooks/useCreatableOrgs'
+import { createProjectMessage } from '../../lib/projectCreation'
 
 // ── Reference data types (mirrors mobile ReferenceDataService) ───────────────
 
@@ -68,7 +71,9 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
   const { user } = useAuth()
 
   // ── Org resolution ─────────────────────────────────────────────────────────
-  const [orgId, setOrgId] = useState<string | null>(null)
+  const { orgs, loading: orgsLoading } = useCreatableOrgs()
+  const [pickedOrg, setPickedOrg] = useState('')
+  const orgId = orgs.some(o => o.id === pickedOrg) ? pickedOrg : (orgs[0]?.id ?? '')
 
   // ── Reference data ─────────────────────────────────────────────────────────
   const [captureMethods,  setCaptureMethods]  = useState<CaptureMethod[]>([])
@@ -102,9 +107,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
       supabase.from('sampling_designs').select('id, value, description').is('deleted_at', null).order('id'),
       supabase.from('activity_sensitivity').select('id, value, description').is('deleted_at', null).order('id'),
       supabase.from('ai_models').select('id, name, version').order('name'),
-      // Resolve the user's organisation from their role assignments
-      supabase.from('user_roles').select('scope_id').eq('user_id', user.id).eq('scope_type', 'organisation').eq('is_active', true).limit(1),
-    ]).then(([cm, sd, as_, ai, roles]) => {
+    ]).then(([cm, sd, as_, ai]) => {
       const methods = (cm.data ?? []) as CaptureMethod[]
       const designs = (sd.data ?? []) as SamplingDesign[]
 
@@ -117,10 +120,6 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
       if (methods.length)  setCaptureMethodId(String(methods[0].id))
       if (designs.length)  setSamplingDesignId(String(designs[0].id))
 
-      // Store org ID
-      const orgRole = (roles.data ?? [])[0] as { scope_id: string } | undefined
-      if (orgRole) setOrgId(orgRole.scope_id)
-
       setRefLoading(false)
     })
   }, [open, user])
@@ -130,7 +129,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
     setCaptureMethodId(''); setSamplingDesignId('')
     setSensitivityId(''); setTimelapseInterval('30')
     setAiModelId(''); setIsBaited(false); setIsMonitoringMarked(false)
-    setError(null)
+    setPickedOrg(''); setError(null)
   }
 
   // Determine which conditional fields to show based on capture method label
@@ -141,7 +140,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) return
-    if (!orgId) { setError('No organisation found for your account. Ask your org admin to add you first.'); return }
+    if (!orgId) { setError('You cannot create projects yet. Ask an organisation manager to add you.'); return }
     if (!name.trim()) { setError('Project name is required.'); return }
 
     setSaving(true)
@@ -172,7 +171,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
 
     setSaving(false)
 
-    if (err) { setError(err.message); return }
+    if (err) { setError(createProjectMessage(err)); return }
     if (data) {
       onCreated(data as CreatedProject)
       resetForm()
@@ -200,24 +199,33 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
           <button
             type="submit"
             form="create-project-form"
-            disabled={saving || refLoading}
-            style={{ padding: '0.5rem 1.25rem', fontSize: '0.875rem', border: 'none', borderRadius: 'var(--radius)', background: 'var(--primary)', color: '#fff', cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1 }}
+            disabled={saving || refLoading || !orgId}
+            style={{ padding: '0.5rem 1.25rem', fontSize: '0.875rem', border: 'none', borderRadius: 'var(--radius)', background: 'var(--primary)', color: '#fff', cursor: saving ? 'wait' : 'pointer', opacity: saving || !orgId ? 0.7 : 1 }}
           >
-            {saving ? 'Creating…' : '+ Create Project'}
+            {saving ? 'Creating…' : 'Create project'}
           </button>
         </div>
       }
     >
-      {refLoading ? (
-        <p style={{ opacity: 0.5, textAlign: 'center', padding: '2rem 0' }}>Loading…</p>
+      {refLoading || orgsLoading ? (
+        <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0' }}>Loading…</p>
       ) : !orgId ? (
-        <div style={{ padding: '1.5rem', textAlign: 'center', opacity: 0.7 }}>
-          <p>You don't appear to belong to an organisation yet.</p>
-          <p style={{ fontSize: '0.875rem' }}>Ask your organisation admin to add you, then try again.</p>
-        </div>
+        <p style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+          You cannot create projects yet. Ask an organisation manager to add you.
+        </p>
       ) : (
         <form id="create-project-form" onSubmit={handleSubmit}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.125rem' }}>
+
+            {/* An organisation choice only when the user may create in more than one. */}
+            {orgs.length > 1 && (
+              <label style={LABEL}>
+                Organisation
+                <select value={orgId} onChange={e => setPickedOrg(e.target.value)} style={SELECT}>
+                  {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              </label>
+            )}
 
             {/* ── Name + Description ─────────────────────────────── */}
             <label style={LABEL}>
@@ -320,7 +328,7 @@ export function CreateProjectModal({ open, onClose, onCreated }: Props) {
             </div>
 
             {error && (
-              <p style={{ color: 'var(--error, #f44336)', fontSize: '0.875rem', margin: 0 }}>⚠ {error}</p>
+              <p role="alert" style={{ color: 'var(--error, #f44336)', fontSize: '0.875rem', margin: 0 }}>{error}</p>
             )}
           </div>
         </form>

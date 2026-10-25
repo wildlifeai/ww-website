@@ -15,6 +15,8 @@ export interface TriageDeployment {
   project_id: string
   location_name: string | null
   name?: string | null
+  deployment_start?: string | null
+  timezone?: string | null
 }
 
 /** A deployment's display name: the location, else the row name, else the id prefix. */
@@ -180,7 +182,14 @@ export function unresolvedFileIndices(
   return out
 }
 
-export type ResolutionStatus = 'matched' | 'not_found' | 'no_access' | 'unknown'
+/**
+ * What /api/deployments/validate and the role check say about a claim that matched no deployment
+ * the user can upload to: it does not exist, it is in a project the user is not in, or the user
+ * can see it but only as a viewer (decision 1 of the 2026-10 UI audit: viewers do not upload).
+ */
+export type ClaimVerdict = 'not_found' | 'no_access' | 'read_only'
+
+export type ResolutionStatus = 'matched' | 'unknown' | ClaimVerdict
 
 /** One line of the "where these photos will go" summary: a claimed deployment and its fate. */
 export interface ResolutionRow {
@@ -191,6 +200,16 @@ export interface ResolutionRow {
   label: string
   count: number
   status: ResolutionStatus
+}
+
+/** What a frame claims to belong to: its EXIF deployment id, else its card folder, else null. */
+export function fileClaim(file: File, path: string | undefined, exifId: string | null | undefined): string | null {
+  return exifId ?? cardFolderOf(path ?? file.name) ?? null
+}
+
+/** The shared 8-hex prefix a claim is grouped under, so a run's EXIF frames and its id-less BMP frames meet. */
+export function claimKey(claim: string | null): string {
+  return claim ? claim.toUpperCase().slice(0, 8) : ''
 }
 
 /**
@@ -207,12 +226,12 @@ export function resolutionBreakdown(
   filePaths: string[],
   exifIds: (string | null)[],
   deployments: TriageDeployment[],
-  invalid: Record<string, 'no_access' | 'not_found'>,
+  invalid: Record<string, ClaimVerdict>,
 ): ResolutionRow[] {
   const groups = new Map<string, { claim: string | null; count: number }>()
   files.forEach((f, i) => {
-    const claim = exifIds[i] ?? cardFolderOf(filePaths[i] ?? f.name) ?? null
-    const key = claim ? claim.toUpperCase().slice(0, 8) : ''
+    const claim = fileClaim(f, filePaths[i], exifIds[i])
+    const key = claimKey(claim)
     const g = groups.get(key)
     if (g) {
       g.count += 1
@@ -242,4 +261,109 @@ export function resolutionBreakdown(
     })
   }
   return rows.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+}
+
+/** "Where these photos will go" lines shown before "Show all". */
+export const BREAKDOWN_SHOWN = 8
+
+/**
+ * The lines shown while the breakdown is folded: every line that needs attention
+ * (anything not matched), then the largest matched lines up to BREAKDOWN_SHOWN, in
+ * the breakdown's order.
+ */
+export function foldBreakdown(rows: ResolutionRow[]): ResolutionRow[] {
+  if (rows.length <= BREAKDOWN_SHOWN) return rows
+  const attention = rows.filter((r) => r.status !== 'matched')
+  const room = Math.max(0, BREAKDOWN_SHOWN - attention.length)
+  const keep = new Set([...attention, ...rows.filter((r) => r.status === 'matched').slice(0, room)])
+  return rows.filter((r) => keep.has(r))
+}
+
+/**
+ * Indices of the frames whose breakdown line has one of `statuses`, for example the ones in a
+ * project the user cannot upload to, which are left out. A frame belongs to the line of its
+ * claim's 8-hex key, as in `resolutionBreakdown`.
+ */
+export function fileIndicesWithStatus(
+  files: File[],
+  filePaths: string[],
+  exifIds: (string | null)[],
+  rows: ResolutionRow[],
+  statuses: ResolutionStatus[],
+): number[] {
+  const wanted = new Set(statuses)
+  const keys = new Set<string>()
+  for (const r of rows) if (r.claim && wanted.has(r.status)) keys.add(claimKey(r.claim))
+  if (keys.size === 0) return []
+  const out: number[] = []
+  files.forEach((f, i) => {
+    if (keys.has(claimKey(fileClaim(f, filePaths[i], exifIds[i])))) out.push(i)
+  })
+  return out
+}
+
+/** The name a new deployment made from a session starts with: the camera's id, else the card folder, else the date. */
+export function defaultDeploymentName(session: TriageSession): string {
+  if (session.exifDeploymentId) return `Camera deployment ${session.exifDeploymentId.slice(0, 8)}`
+  if (session.cardFolder) return `Card ${session.cardFolder}`
+  return `Photos from ${fmt(session.firstMs)}`
+}
+
+/** One deployment "create one deployment per session" makes, and the sessions it takes. */
+export interface BulkCreatePlan {
+  name: string
+  /** Create the row under the id the camera stamped, so the phone's later sync converges on it. */
+  exifDeploymentId: string | null
+  sessionKeys: string[]
+}
+
+/**
+ * The deployments "create one deployment per session" makes for the sessions still undecided.
+ * Sessions that carry the same camera id (one run split by a long gap) share one deployment:
+ * the id can be created only once, and the camera says they belong together.
+ */
+export function planBulkCreate(sessions: TriageSession[]): BulkCreatePlan[] {
+  const out: BulkCreatePlan[] = []
+  const byExifId = new Map<string, BulkCreatePlan>()
+  for (const s of sessions) {
+    if (s.deploymentId || s.skipped) continue
+    const existing = s.exifDeploymentId ? byExifId.get(s.exifDeploymentId) : undefined
+    if (existing) {
+      existing.sessionKeys.push(s.key)
+      continue
+    }
+    const plan: BulkCreatePlan = { name: defaultDeploymentName(s), exifDeploymentId: s.exifDeploymentId, sessionKeys: [s.key] }
+    if (s.exifDeploymentId) byExifId.set(s.exifDeploymentId, plan)
+    out.push(plan)
+  }
+  return out
+}
+
+/**
+ * The files an upload sends: every staged file except `exclude` (read-only frames, and triaged
+ * sessions left unassigned, which the server would only drop), with the session assignments
+ * re-indexed to the kept list.
+ */
+export function selectForUpload<T>(
+  files: T[],
+  paths: string[],
+  exclude: Iterable<number>,
+  assignments: { deploymentId: string; indices: number[] }[] = [],
+): { files: T[]; paths: string[]; assignments: { deploymentId: string; indices: number[] }[] } {
+  const drop = new Set(exclude)
+  const newIndex = new Map<number, number>()
+  const kept: T[] = []
+  const keptPaths: string[] = []
+  files.forEach((f, i) => {
+    if (drop.has(i)) return
+    newIndex.set(i, kept.length)
+    kept.push(f)
+    keptPaths.push(paths[i] ?? '')
+  })
+  const remapped: { deploymentId: string; indices: number[] }[] = []
+  for (const g of assignments) {
+    const indices = g.indices.flatMap((i) => (newIndex.has(i) ? [newIndex.get(i)!] : []))
+    if (indices.length > 0) remapped.push({ deploymentId: g.deploymentId, indices })
+  }
+  return { files: kept, paths: keptPaths, assignments: remapped }
 }
