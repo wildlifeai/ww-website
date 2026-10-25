@@ -1,26 +1,22 @@
 /**
- * ProgressDock — fixed bottom-right upload progress indicator.
+ * ProgressDock, fixed bottom-right upload progress indicator.
  *
  * Three visual states driven by `dockState` from UploadContext:
  *
  *   hidden     Nothing rendered.
- *   minimised  Compact pill: semaphore dot + label + expand button.
+ *   minimised  Compact pill: semaphore dot + label + expand and dismiss.
  *   medium     Card with full PipelineStatusBox + controls.
  *
- * "Full logs" navigates to /upload/logs (a dedicated page).
- *
- * Completion behaviour:
- *   success → automatically shows a "View Annotations" link in the dock.
- *   failure → shows a "View Logs" link.
- *   The user dismisses the dock manually via the × button.
+ * UploadContext folds the card to the pill once every batch is sent and the
+ * server is processing, and opens it again on the result (UI audit 01 E3).
+ * The finished card offers one next step: the results on Insights on success
+ * (the page has already moved to Review), or the job's log in Processing history
+ * on failure. Dismiss stays reachable while stalled.
  */
-import { useEffect, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate } from 'react-router-dom'
+import { ArrowRight, Minus, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { PipelineStatusBox } from '../toolkit/PipelineStatusBox'
-import { supabase } from '../../config/supabase'
-import { fetchLiveObservations } from '../../lib/liveObservations'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -49,73 +45,34 @@ function dockLabel(phase: string, totalFiles: number, activeJobPhase?: string | 
   }
 }
 
-function fmtHour(h: number): string {
-  const ampm = h < 12 ? 'am' : 'pm'
-  const h12 = h % 12 === 0 ? 12 : h % 12
-  return `${h12}${ampm}`
+const DOCK_BASE: React.CSSProperties = {
+  position: 'fixed',
+  bottom: '1.25rem',
+  right: '1.25rem',
+  zIndex: 300,
+  boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+  borderRadius: 'var(--radius)',
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// UploadSummaryLine — one-line headline of what the AI found in this upload, so
-// the user gets the gist without leaving the page (species · detections · peak).
-// ─────────────────────────────────────────────────────────────────────────────
+const BTN_ICON: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  padding: '0.2rem 0.35rem',
+  borderRadius: '4px',
+  color: 'var(--text-muted)',
+  lineHeight: 1,
+  flexShrink: 0,
+}
 
-interface Summary { species: number; detections: number; peakHour: number | null }
-
-async function fetchUploadSummary(deploymentIds: string[]): Promise<Summary | null> {
-  // Live photos only: a deleted photo's detections leave the summary (#198).
-  const { data, error } = await fetchLiveObservations(supabase, {
-    columns: 'scientific_name, observation_type',
-    mediaColumns: 'timestamp',
-    requirePhoto: true,
-    filter: q => q.in('deployment_id', deploymentIds).eq('source_type', 'ai'),
-  })
-  if (error) return null
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = (data ?? []) as any[]
-  const species = new Set(rows.map(r => r.scientific_name).filter(Boolean)).size
-  const detections = rows.filter(r => r.observation_type && r.observation_type !== 'blank').length
-  const hourCounts = new Array(24).fill(0)
-  let any = false
-  for (const r of rows) {
-    const m = Array.isArray(r.media) ? r.media[0] : r.media
-    const ts = m?.timestamp
-    if (!ts) continue
-    const h = new Date(ts).getHours()
-    if (!Number.isNaN(h)) { hourCounts[h]++; any = true }
+const PULSE = `
+  @keyframes dock-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(0.75); }
   }
-  const peakHour = any ? hourCounts.indexOf(Math.max(...hourCounts)) : null
-  return { species, detections, peakHour }
-}
-
-function UploadSummaryLine({ deploymentIds }: { deploymentIds: string[] }) {
-  const { data: summary, isPending } = useQuery({
-    queryKey: ['upload-summary', deploymentIds.join(',')],
-    queryFn: () => fetchUploadSummary(deploymentIds),
-    enabled: deploymentIds.length > 0,
-    // Read once per finished upload: a later upload to the same deployments must not open on
-    // this one's numbers.
-    gcTime: 0,
-  })
-  const loading = isPending && deploymentIds.length > 0
-
-  if (loading) return <span style={{ fontSize: '0.78rem', opacity: 0.6 }}>Summarising results…</span>
-  if (!summary) return null
-
-  if (summary.detections === 0) {
-    return <span style={{ fontSize: '0.8125rem', opacity: 0.8 }}>📊 No animals detected in this upload</span>
-  }
-  const parts = [
-    `${summary.species} species`,
-    `${summary.detections} detection${summary.detections !== 1 ? 's' : ''}`,
-  ]
-  if (summary.peakHour != null) parts.push(`peak ${fmtHour(summary.peakHour)}`)
-  return (
-    <span style={{ fontSize: '0.8125rem', fontWeight: 600 }}>
-      📊 {parts.join(' · ')}
-    </span>
-  )
-}
+`
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
@@ -123,47 +80,11 @@ function UploadSummaryLine({ deploymentIds }: { deploymentIds: string[] }) {
 
 export function ProgressDock() {
   const { pipelineState, phase, dockState, setDockState, clearUpload, uploadedDeploymentIds } = useUploadStore()
-  const navigate = useNavigate()
-  const prevPhaseRef = useRef<string>('')
-
-  // Auto-expand from minimised to medium when upload starts
-  useEffect(() => {
-    if (
-      dockState === 'minimised' &&
-      (phase === 'uploading' || phase === 'processing')
-    ) {
-      // Keep minimised if user explicitly minimised
-    }
-  }, [phase, dockState])
-
-  // When phase transitions to completed/failed, auto-expand if still minimised
-  useEffect(() => {
-    const prev = prevPhaseRef.current
-    prevPhaseRef.current = phase
-
-    if (
-      (phase === 'completed' || phase === 'failed') &&
-      prev !== 'completed' &&
-      prev !== 'failed' &&
-      dockState === 'minimised'
-    ) {
-      setDockState('medium')
-    }
-
-    // Auto-navigate to annotations on clean success (no failed jobs)
-    if (
-      phase === 'completed' &&
-      prev !== 'completed' &&
-      !pipelineState.jobs.some((j) => j.status === 'failed' || j.status === 'completed_with_errors')
-    ) {
-      // Don't force-navigate — show the link. Less disruptive.
-    }
-  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (dockState === 'hidden') return null
 
   const color = semaphoreColor(phase)
-  // Active job's current backend phase — used to distinguish Drive sync vs AI analysis
+  // Active job's current backend phase, used to distinguish Drive sync vs AI analysis
   const activeJobPhase = pipelineState.jobs.find(
     (j) => j.status === 'processing' || j.status === 'in_progress',
   )?.currentPhase
@@ -173,41 +94,41 @@ export function ProgressDock() {
   const hasErrors = pipelineState.jobs.some(
     (j) => j.status === 'failed' || j.status === 'completed_with_errors',
   )
+  // Dismiss is offered whenever finished or stalled, so a job that hangs never traps
+  // the dock; never while batches are still sending (clearing is refused then).
+  const canDismiss = isDone || phase === 'stalled'
 
-  // WS5-T6: smart link — deep-link to the exact deployment when only one was uploaded
-  const annotationsLink = uploadedDeploymentIds.length === 1
-    ? `/annotations?deployment=${uploadedDeploymentIds[0]}`
-    : '/annotations'
-
-  // Results/insights — species diversity + activity summaries. For a single
-  // deployment, the per-deployment Reporting page (real species × time charts);
-  // otherwise the project-wide Insights → Reports tab.
-  const insightsLink = uploadedDeploymentIds.length === 1
-    ? `/reporting/${uploadedDeploymentIds[0]}`
+  // The results: Insights' Reports tab, narrowed to the deployment when only one was uploaded.
+  const resultsLink = uploadedDeploymentIds.length === 1
+    ? `/insights?tab=reports&deployment=${encodeURIComponent(uploadedDeploymentIds[0])}`
     : '/insights?tab=reports'
 
-  // ── Shared styles ──────────────────────────────────────────────────────────
-  const DOCK_BASE: React.CSSProperties = {
-    position: 'fixed',
-    bottom: '1.25rem',
-    right: '1.25rem',
-    zIndex: 300,
-    boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
-    borderRadius: 'var(--radius)',
-  }
+  // The failed job's row in Processing history, which keeps its log after a reload.
+  const failedJob = pipelineState.jobs.find((j) => j.status === 'failed')
+    ?? pipelineState.jobs.find((j) => j.status === 'completed_with_errors')
+  const logLink = failedJob ? `/processing?job=${encodeURIComponent(failedJob.id)}` : null
+  // The one next step once it has finished: the results on a clean run, else the log (when a job has one).
+  const nextStep = !isDone ? null : phase === 'completed' && !hasErrors ? 'results' : logLink ? 'log' : null
 
-  const BTN_ICON: React.CSSProperties = {
-    background: 'none',
-    border: 'none',
-    cursor: 'pointer',
-    padding: '0.2rem 0.35rem',
-    borderRadius: '4px',
-    color: 'var(--text-color)',
-    fontSize: '0.875rem',
-    opacity: 0.65,
-    lineHeight: 1,
-    flexShrink: 0,
-  }
+  const dot = (size: number) => (
+    <span
+      style={{
+        display: 'inline-block',
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        backgroundColor: color,
+        flexShrink: 0,
+        animation: isActive ? 'dock-pulse 1.5s ease-in-out infinite' : undefined,
+      }}
+    />
+  )
+
+  const dismiss = canDismiss && (
+    <button type="button" style={BTN_ICON} onClick={clearUpload} title="Dismiss" aria-label="Dismiss">
+      <X size={16} aria-hidden="true" />
+    </button>
+  )
 
   // ── Minimised pill ─────────────────────────────────────────────────────────
   if (dockState === 'minimised') {
@@ -217,44 +138,27 @@ export function ProgressDock() {
           ...DOCK_BASE,
           display: 'flex',
           alignItems: 'center',
-          gap: '0.5rem',
-          padding: '0.5rem 0.875rem',
+          gap: '0.25rem',
+          padding: '0.25rem 0.375rem 0.25rem 0.5rem',
           backgroundColor: 'var(--surface)',
           border: '1px solid var(--border)',
-          cursor: 'pointer',
-          userSelect: 'none',
         }}
-        onClick={() => setDockState('medium')}
-        title="Expand upload progress"
       >
-        {/* Semaphore dot */}
-        <span
-          style={{
-            display: 'inline-block',
-            width: 9,
-            height: 9,
-            borderRadius: '50%',
-            backgroundColor: color,
-            flexShrink: 0,
-            animation: isActive ? 'dock-pulse 1.5s ease-in-out infinite' : undefined,
-          }}
-        />
-        <span style={{ fontSize: '0.8125rem', fontWeight: 500, whiteSpace: 'nowrap' }}>
-          {label}
-        </span>
         <button
-          style={BTN_ICON}
-          onClick={(e) => { e.stopPropagation(); clearUpload() }}
-          title="Dismiss"
+          type="button"
+          onClick={() => setDockState('medium')}
+          title="Expand upload progress"
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem',
+            padding: '0.25rem 0.375rem', background: 'none', border: 'none', cursor: 'pointer',
+            color: 'var(--text-color)', fontSize: '0.8125rem', fontWeight: 500, whiteSpace: 'nowrap',
+          }}
         >
-          ✕
+          {dot(9)}
+          {label}
         </button>
-        <style>{`
-          @keyframes dock-pulse {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50%       { opacity: 0.4; transform: scale(0.75); }
-          }
-        `}</style>
+        {dismiss}
+        <style>{PULSE}</style>
       </div>
     )
   }
@@ -266,7 +170,7 @@ export function ProgressDock() {
         ...DOCK_BASE,
         width: '360px',
         // Cap to the viewport so a tall pipeline log never pushes the header (and its
-        // minimise/expand/dismiss controls) off the top of the screen. The body scrolls instead.
+        // minimise/dismiss controls) off the top of the screen. The body scrolls instead.
         maxHeight: 'calc(100vh - 2.5rem)',
         display: 'flex',
         flexDirection: 'column',
@@ -275,7 +179,7 @@ export function ProgressDock() {
         overflow: 'hidden',
       }}
     >
-      {/* Card header — pinned, always reachable */}
+      {/* Card header, pinned, always reachable */}
       <div style={{
         flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -284,114 +188,60 @@ export function ProgressDock() {
         backgroundColor: 'var(--surface)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span
-            style={{
-              display: 'inline-block',
-              width: 8, height: 8, borderRadius: '50%',
-              backgroundColor: color, flexShrink: 0,
-              animation: isActive ? 'dock-pulse 1.5s ease-in-out infinite' : undefined,
-            }}
-          />
+          {dot(8)}
           <span style={{ fontWeight: 600, fontSize: '0.875rem' }}>{label}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
           <button
-            style={BTN_ICON}
-            onClick={() => navigate('/upload/logs')}
-            title="View full logs"
-          >
-            ⤢
-          </button>
-          <button
+            type="button"
             style={BTN_ICON}
             onClick={() => setDockState('minimised')}
             title="Minimise"
+            aria-label="Minimise"
           >
-            −
+            <Minus size={16} aria-hidden="true" />
           </button>
-          {/* Dismiss is available whenever finished OR stalled — so a job that
-              hangs (e.g. an upload started mid-processing) never traps the dock. */}
-          {(isDone || phase === 'stalled') && (
-            <button
-              style={BTN_ICON}
-              onClick={clearUpload}
-              title="Dismiss"
-            >
-              ✕
-            </button>
-          )}
+          {dismiss}
         </div>
       </div>
 
-      {/* Pipeline status box — the only scrollable region, so the header + footer CTA stay put */}
+      {/* Pipeline status box, the only scrollable region, so the header + footer CTA stay put */}
       <div style={{ padding: '0.75rem', overflowY: 'auto', flex: 1, minHeight: 0 }}>
         <PipelineStatusBox state={pipelineState} phase={phase} />
       </div>
 
-      {/* Completion CTA */}
-      {isDone && (
+      {/* The one next step once it has finished */}
+      {nextStep && (
         <div style={{
           flexShrink: 0,
           padding: '0.625rem 0.875rem',
           borderTop: '1px solid var(--border)',
-          display: 'flex', flexDirection: 'column', gap: '0.5rem',
           backgroundColor: 'var(--surface)',
           fontSize: '0.8125rem',
         }}>
-          {/* One-line headline of what the AI found in this upload */}
-          {phase === 'completed' && !hasErrors && uploadedDeploymentIds.length > 0 && (
-            <UploadSummaryLine deploymentIds={uploadedDeploymentIds} />
-          )}
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          {phase === 'completed' && !hasErrors && (
-            <>
-              {/* See the AI results straight away — species diversity + activity. */}
-              <Link
-                to={insightsLink}
-                style={{ color: 'var(--primary)', fontWeight: 600, textDecoration: 'none' }}
-                onClick={() => setDockState('minimised')}
-              >
-                📊 See Insights →
-              </Link>
-              <Link
-                to={annotationsLink}
-                style={{ color: 'var(--text-color)', fontWeight: 600, textDecoration: 'none', opacity: 0.75 }}
-                // Keep the upload state + logs around (minimised) instead of clearing,
-                // so the user can still see what happened after navigating away.
-                onClick={() => setDockState('minimised')}
-              >
-                🏷️ Review &amp; label
-              </Link>
-            </>
-          )}
-          {(phase === 'failed' || hasErrors) && (
+          {nextStep === 'results' ? (
             <Link
-              to="/upload/logs"
-              style={{ color: 'var(--error, #f44336)', fontWeight: 600, textDecoration: 'none' }}
+              to={resultsLink}
+              style={{ color: 'var(--primary)', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+              // Keep the upload state + logs around (minimised) instead of clearing,
+              // so the user can still see what happened after navigating away.
+              onClick={() => setDockState('minimised')}
             >
-              View full logs →
+              See the results <ArrowRight size={14} aria-hidden="true" />
+            </Link>
+          ) : logLink && (
+            <Link
+              to={logLink}
+              style={{ color: 'var(--error, #f44336)', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
+              onClick={() => setDockState('minimised')}
+            >
+              Open the log in Processing history <ArrowRight size={14} aria-hidden="true" />
             </Link>
           )}
-          <button
-            style={{
-              marginLeft: 'auto', background: 'none', border: 'none',
-              cursor: 'pointer', fontSize: '0.8125rem',
-              color: 'var(--text-color)', opacity: 0.6,
-            }}
-            onClick={clearUpload}
-          >
-            Dismiss
-          </button>
-          </div>
         </div>
       )}
 
-      <style>{`
-        @keyframes dock-pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50%       { opacity: 0.4; transform: scale(0.75); }
-        }
-      `}</style>
+      <style>{PULSE}</style>
     </div>
   )
 }
