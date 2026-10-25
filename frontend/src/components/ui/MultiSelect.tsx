@@ -4,13 +4,16 @@
  * Mirrors FilterSelect's look but allows multiple choices. The trigger shows the
  * single label when one is picked, or "N <noun>s" for several, or `allLabel`
  * when nothing is selected (i.e. no filter). With `searchable`, a box at the top of the menu
- * narrows a long list as you type.
+ * narrows a long list as you type. Options that carry a `group` are listed under a heading per
+ * group, and show their `menuLabel` there when they have one (the full label still drives the
+ * trigger and the search).
  */
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ChevronDown } from 'lucide-react'
 import { matchOptions } from '../../lib/deploymentFilterOptions'
 
-interface Option { value: string; label: string }
+interface Option { value: string; label: string; group?: string; menuLabel?: string }
 
 interface Props {
   values: string[]
@@ -18,13 +21,21 @@ interface Props {
   options: Option[]
   /** Shown on the trigger when nothing is selected. */
   allLabel?: string
-  /** Singular noun for the "N nouns" summary (e.g. "deployment"). */
+  /** Singular noun, e.g. "deployment". */
   noun?: string
+  /** Plural for the "N nouns" summary and the search box; defaults to noun + "s". */
+  nounPlural?: string
   /** Show a type-to-filter box above the options. */
   searchable?: boolean
+  /** Called each time the menu opens, e.g. to load the options on first use. */
+  onOpen?: () => void
+  /** The options are still loading. */
+  loading?: boolean
+  /** Shown under the options, e.g. that the list is incomplete. */
+  note?: string
 }
 
-export function MultiSelect({ values, onChange, options, allLabel = 'All', noun = 'item', searchable = false }: Props) {
+export function MultiSelect({ values, onChange, options, allLabel = 'All', noun = 'item', nounPlural = `${noun}s`, searchable = false, onOpen, loading = false, note }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const ref = useRef<HTMLDivElement>(null)
@@ -71,7 +82,7 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
     ? allLabel
     : values.length === 1
       ? (options.find(o => o.value === values[0])?.label ?? `1 ${noun}`)
-      : `${values.length} ${noun}s`
+      : `${values.length} ${nounPlural}`
 
   const active = values.length > 0
   const shown = searchable ? matchOptions(options, query) : options
@@ -86,6 +97,7 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
             const r = ref.current?.getBoundingClientRect()
             if (r) setPos({ top: r.bottom + 4, left: r.left })
             setQuery('')
+            onOpen?.()
           }
           setOpen(o => !o)
         }}
@@ -100,7 +112,7 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
         title={summary}
       >
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{summary}</span>
-        <span style={{ opacity: 0.6, fontSize: '0.7rem' }}>▾</span>
+        <ChevronDown size={14} aria-hidden style={{ flexShrink: 0, color: 'var(--text-muted)' }} />
       </button>
 
       {open && pos && createPortal(
@@ -111,7 +123,7 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
           boxShadow: '0 4px 16px rgba(0,0,0,0.15)', overflow: 'hidden',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.4rem 0.6rem', borderBottom: '1px solid var(--border)', fontSize: '0.75rem' }}>
-            <span style={{ opacity: 0.7 }}>{values.length} selected</span>
+            <span style={{ color: 'var(--text-muted)' }}>{values.length} selected</span>
             {active && (
               <button onClick={() => onChange([])} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.75rem' }}>
                 Clear
@@ -122,7 +134,7 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
             <div style={{ padding: '0.4rem 0.6rem', borderBottom: '1px solid var(--border)' }}>
               <input
                 type="search" autoFocus value={query} onChange={e => setQuery(e.target.value)}
-                placeholder={`Search ${noun}s`} aria-label={`Search ${noun}s`}
+                placeholder={`Search ${nounPlural}`} aria-label={`Search ${nounPlural}`}
                 onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
                 style={{
                   width: '100%', boxSizing: 'border-box', padding: '0.3rem 0.5rem', fontSize: '0.8125rem',
@@ -133,13 +145,26 @@ export function MultiSelect({ values, onChange, options, allLabel = 'All', noun 
             </div>
           )}
           <div style={{ maxHeight: 280, overflowY: 'auto', padding: '0.25rem 0' }}>
-            {shown.length === 0 && <div style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem', opacity: 0.5 }}>{options.length === 0 ? 'No options' : 'No matches'}</div>}
-            {shown.map(o => (
-              <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0.75rem', fontSize: '0.8125rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={values.includes(o.value)} onChange={() => toggle(o.value)} style={{ accentColor: 'var(--primary)', cursor: 'pointer' }} />
-                <span title={o.label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.label}</span>
-              </label>
+            {shown.length === 0 && (
+              <div style={{ padding: '0.5rem 0.75rem', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                {loading ? 'Loading…' : options.length === 0 ? 'No options' : 'No matches'}
+              </div>
+            )}
+            {shown.map((o, i) => (
+              <Fragment key={o.value}>
+                {o.group !== undefined && o.group !== shown[i - 1]?.group && (
+                  <div style={{ padding: '0.4rem 0.75rem 0.15rem', fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {o.group}
+                  </div>
+                )}
+                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.35rem 0.75rem', fontSize: '0.8125rem', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={values.includes(o.value)} onChange={() => toggle(o.value)} style={{ accentColor: 'var(--primary)', cursor: 'pointer' }} />
+                  <span title={o.label} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.group !== undefined ? (o.menuLabel ?? o.label) : o.label}</span>
+                </label>
+              </Fragment>
             ))}
+            {loading && shown.length > 0 && <div style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading…</div>}
+            {note && <div style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>{note}</div>}
           </div>
         </div>,
         document.body,

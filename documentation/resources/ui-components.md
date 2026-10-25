@@ -20,7 +20,7 @@ import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS } from '../components/common'
 | `<Modal>` | `Modal.tsx` | Advanced settings, create-project (the upload flow is a page now, `/upload-data`) |
 | `<DataTable>` | `DataTable.tsx` | Insights → Deployments / Projects tables |
 | `<FilterSelect>`, `<SearchInput>`, `<ColumnToggle>` | `ControlBar.tsx` | `FilterSelect` inside ribbon groups and the admin Devices toolbar; the other two inside `DataTable` |
-| `<StatusBadge>`, `deriveAnnotationStatus` | `StatusBadge.tsx` | Annotation thumbnail grid + modal |
+| `<StatusBadge>`, `deriveAnnotationStatus` | `StatusBadge.tsx`, `../../lib/annotationStatus.ts` | Annotation thumbnail grid + modal |
 | `<VegaChart>`, `VEGA_CONFIG` | `VegaChart.tsx` | All charts (Vega-Lite) |
 | `<ThreeStepGuide>` | `../common/ThreeStepGuide.tsx` | Marketing + signed-in landing |
 

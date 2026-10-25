@@ -194,16 +194,26 @@ def is_human_reviewed(o: Dict[str, Any]) -> bool:
     return not status and (o.get("classification_method") == "human" or o.get("source_type") == "human")
 
 
+def is_human_row(o: Dict[str, Any]) -> bool:
+    """The frontend's ``isHumanRow``: a row a person wrote (``source_type='human'``, or an older
+    row with no ``source_type`` whose label a person authored). An AI row a reviewer confirmed
+    before UI audit decision 2 keeps ``source_type='ai'`` and is not one."""
+    return o.get("source_type") == "human" or (not o.get("source_type") and o.get("classification_method") == "human")
+
+
 def photo_verdict(obs: List[Dict[str, Any]]) -> tuple[Optional[Dict[str, Any]], bool]:
     """Which observation a photo's card shows, and whether it shows Empty (#170).
 
     A port of the frontend's ``photoVerdict`` in lib/observations.ts, which the grid uses; keep
     the two the same. A human verdict wins. Otherwise the consensus row decides presence: blank
     is Empty, anything else takes its name from the first named per-model row. With neither,
-    the first row. ``obs`` is in the order the observations were written.
+    the first row. A person's own row (``is_human_row``) is preferred over an AI row a reviewer
+    confirmed before decision 2. ``obs`` is in the order the observations were written.
     """
     reviewed = [o for o in obs if is_human_reviewed(o)]
-    human = next((o for o in reviewed if o.get("source_type") != "consensus"), None)
+    human = next((o for o in reviewed if is_human_row(o)), None)
+    if human is None:
+        human = next((o for o in reviewed if o.get("source_type") != "consensus"), None)
     if human is None and reviewed:
         human = reviewed[0]
     consensus = next((o for o in obs if o.get("source_type") == "consensus"), None)
