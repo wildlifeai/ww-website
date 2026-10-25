@@ -54,7 +54,7 @@ export function DeploymentPicker({
               {g.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </optgroup>
           ))
-          : shown.flatMap((g) => g.options).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          : shown.flatMap((g) => g.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>))}
       </select>
     </div>
   )
