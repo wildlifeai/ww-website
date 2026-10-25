@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applySelectIntent, cardClickIntent, cardKeyIntent, circleClickIntent } from './cardSelection'
+import { applySelectIntent, arrowTarget, cardClickIntent, cardKeyIntent, circleClickIntent } from './cardSelection'
 
 const click = (mods: Partial<{ ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }> = {}) =>
   ({ ctrlKey: false, metaKey: false, shiftKey: false, ...mods })
@@ -100,5 +100,26 @@ describe('applySelectIntent', () => {
 
   it('range ignores an anchor that is not in the grid', () => {
     expect([...applySelectIntent(state(['z'], 'z'), 'range', 'c', ORDER).selected].sort()).toEqual(['c', 'z'])
+  })
+})
+
+describe('Shift+Space and arrow keys', () => {
+  const card = {}
+
+  it('selects a range on Shift+Space', () => {
+    expect(cardKeyIntent({ key: ' ', shiftKey: true, target: card, currentTarget: card })).toBe('range')
+  })
+
+  it('steps one card left or right and one row up or down', () => {
+    expect(arrowTarget('ArrowRight', 0, 10, 4)).toBe(1)
+    expect(arrowTarget('ArrowLeft', 5, 10, 4)).toBe(4)
+    expect(arrowTarget('ArrowDown', 1, 10, 4)).toBe(5)
+    expect(arrowTarget('ArrowUp', 5, 10, 4)).toBe(1)
+  })
+
+  it('stays put at an edge or for other keys', () => {
+    expect(arrowTarget('ArrowLeft', 0, 10, 4)).toBeNull()
+    expect(arrowTarget('ArrowDown', 8, 10, 4)).toBeNull()
+    expect(arrowTarget('a', 3, 10, 4)).toBeNull()
   })
 })
