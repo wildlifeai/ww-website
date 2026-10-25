@@ -7,6 +7,7 @@
 // and shows what was stored, including the time zone recomputed from the coordinates.
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Check } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { supabase } from '../../config/supabase'
 import {
@@ -26,7 +27,7 @@ const INPUT: React.CSSProperties = {
 }
 const LABEL: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.8125rem', fontWeight: 500 }
 const ROW2: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }
-const NOTE: React.CSSProperties = { fontSize: '0.75rem', fontWeight: 400, opacity: 0.7 }
+const NOTE: React.CSSProperties = { fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-muted)' }
 const ERROR: React.CSSProperties = { fontSize: '0.75rem', fontWeight: 400, color: 'var(--error, #ef4444)' }
 const BTN: React.CSSProperties = {
   padding: '0.4rem 0.9rem', fontSize: '0.8125rem', borderRadius: 'var(--radius)', cursor: 'pointer',
@@ -44,9 +45,9 @@ export function EditLocationDialog({ deploymentId, onClose }: Props) {
   const close = () => onClose(saved)
 
   let body: React.ReactNode
-  if (query.isPending) body = <p style={{ opacity: 0.5 }}>Loading…</p>
+  if (query.isPending) body = <p style={NOTE}>Loading…</p>
   else if (query.isError) body = <p style={ERROR}>{query.error.message}</p>
-  else if (!query.data) body = <p style={{ opacity: 0.7 }}>This deployment is not available to you.</p>
+  else if (!query.data) body = <p style={NOTE}>This deployment is not available to you.</p>
   else {
     body = (
       // A fresh read after a save remounts the form, so it shows what the database holds.
@@ -130,7 +131,7 @@ function LocationFields({ stored, saved, onSaved, onCancel }: {
       <div style={NOTE}>Time zone: {stored.timezone ?? 'none'}. It follows the coordinates when you save.</div>
 
       {error && <div style={ERROR}>{error}</div>}
-      {saved && !dirty && !error && <div style={{ fontSize: '0.8125rem', color: 'var(--success, #10b981)' }}>Saved ✓</div>}
+      {saved && !dirty && !error && <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8125rem', color: 'var(--success, #10b981)' }}><Check size={14} aria-hidden />Saved</div>}
 
       <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
         <button type="button" onClick={onCancel} style={BTN}>{saved && !dirty ? 'Close' : 'Cancel'}</button>
