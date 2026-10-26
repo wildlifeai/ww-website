@@ -69,6 +69,7 @@ RELATIONS = {
     ("deployments", "projects"): ("projects", "project_id", "id", True),
     ("deployments", "devices"): ("devices", "device_id", "id", True),
     ("deployments", "deployment_statuses"): ("deployment_statuses", "deployment_status_id", "id", True),
+    ("devices", "deployments"): ("deployments", "id", "device_id", False),
     ("media", "deployments"): ("deployments", "deployment_id", "id", True),
     ("media", "observations"): ("observations", "id", "media_id", False),
     ("lorawan_messages", "deployments"): ("deployments", "deployment_id", "id", True),

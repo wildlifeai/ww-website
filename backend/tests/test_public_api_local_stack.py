@@ -32,12 +32,7 @@ def _seed(svc, run: str, n: int) -> SimpleNamespace:
     org = svc.table("organisations").insert({"name": f"Public API test {run} {n}", "slug": f"public-api-test-{run}-{n}"}).execute().data[0]["id"]
     project = svc.table("projects").insert({"name": f"Project {n}", "organisation_id": org}).execute().data[0]["id"]
     eui = f"70B3D57ED00{run[:4].upper()}{n}"
-    device = (
-        svc.table("devices")
-        .insert({"name": f"Cam {n}", "bluetooth_id": f"bt-{run}-{n}", "organisation_id": org, "device_eui": eui})
-        .execute()
-        .data[0]["id"]
-    )
+    device = svc.table("devices").insert({"name": f"Cam {n}", "bluetooth_id": f"bt-{run}-{n}", "device_eui": eui}).execute().data[0]["id"]
     deployment = (
         svc.table("deployments")
         .insert({"name": f"Dep {n}", "location_name": "Here", "deployment_start": "2026-10-01T00:00:00Z", "project_id": project, "device_id": device})

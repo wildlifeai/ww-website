@@ -313,9 +313,64 @@ def test_a_deployment_outside_the_organisation_is_not_found(api):
     assert api.call("GET", "/api/v1/deployments/not-a-uuid").status_code == 422
 
 
-def test_devices_are_the_organisations_own(api):
-    assert _ids(api.call("GET", "/api/v1/devices")) == [CAM_A]
-    assert _ids(api.call("GET", "/api/v1/devices", key="b")) == [CAM_B]
+def test_devices_are_the_cameras_deployed_in_the_organisations_projects(api):
+    """Org A's camera, lent to org B's project, is in both lists. Org B's own camera, never
+    deployed, is in neither: a camera's ``organisation_id`` plays no part (ww-backend#346)."""
+    resp = api.call("GET", "/api/v1/devices")
+    assert _ids(resp) == [CAM_A] and resp.json()["meta"]["total"] == 1
+    assert resp.json()["data"][0] == {"id": CAM_A, "name": "Cam A", "bluetooth_id": "AA", "device_eui": "EUI-A", "created_at": "2026-01-01"}
+    assert _ids(api.call("GET", "/api/v1/devices", key="b")) == [CAM_A]
+
+
+def test_the_camera_list_needs_a_live_deployment_in_a_live_project(monkeypatch):
+    import asyncio
+
+    from app.domain.public_api import list_devices
+
+    live, gone, other = _id(111), _id(112), _id(113)
+    twice, lent, dep_deleted, in_deleted_project, cam_deleted, never, only_other = (_id(n) for n in range(121, 128))
+
+    def cam(n_id, created, org=None, deleted_at=None):
+        return {"id": n_id, "name": n_id[-3:], "bluetooth_id": n_id, "organisation_id": org, "deleted_at": deleted_at, "created_at": created}
+
+    def dep(n, device, project, deleted_at=None):
+        return {"id": _id(n), "name": "d", "project_id": project, "device_id": device, "deleted_at": deleted_at, "created_at": "2026-06-01"}
+
+    db = FakeDB(
+        {
+            "projects": [
+                {"id": live, "name": "Live", "organisation_id": ORG_A, "deleted_at": None},
+                {"id": gone, "name": "Gone", "organisation_id": ORG_A, "deleted_at": GONE},
+                {"id": other, "name": "Other", "organisation_id": ORG_B, "deleted_at": None},
+            ],
+            "devices": [
+                cam(twice, "2026-05-03", org=ORG_B),  # registered by org B, deployed twice in org A
+                cam(lent, "2026-05-01"),
+                cam(dep_deleted, "2026-05-04", org=ORG_A),
+                cam(in_deleted_project, "2026-05-05", org=ORG_A),
+                cam(cam_deleted, "2026-05-06", deleted_at=GONE),
+                cam(never, "2026-05-07", org=ORG_A),
+                cam(only_other, "2026-05-02", org=ORG_A),
+            ],
+            "deployments": [
+                dep(131, twice, live),
+                dep(132, twice, live),
+                dep(133, lent, live),
+                dep(134, lent, other),
+                dep(135, dep_deleted, live, deleted_at=GONE),
+                dep(136, in_deleted_project, gone),
+                dep(137, cam_deleted, live),
+                dep(138, only_other, other),
+            ],
+        }
+    )
+    monkeypatch.setattr("app.domain.public_api.create_service_client", db.client)
+
+    records, total = asyncio.run(list_devices(ORG_A))
+    assert [r["id"] for r in records] == [twice, lent] and total == 2
+    assert set(records[0]) == {"id", "name", "bluetooth_id", "device_eui", "created_at"}
+    assert asyncio.run(list_devices(ORG_A, limit=1, offset=1)) == ([records[1]], 2)
+    assert [r["id"] for r in asyncio.run(list_devices(ORG_B))[0]] == [only_other, lent]
 
 
 def test_telemetry_follows_the_deployment_not_the_camera(api):

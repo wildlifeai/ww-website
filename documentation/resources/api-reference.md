@@ -113,11 +113,12 @@ router exists only to mint the shared read-only demo session server-side. Detail
 ## Admin
 
 Prefix `/api/admin`. System admins only: `401` without a valid JWT, `403` for anyone else.
-Reads every organisation with the service role, because RLS keeps these rows organisation-scoped.
+Reads as the caller: under RLS a `ww_admin` reads every camera (ww-backend#346), deployment,
+project and organisation.
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Backs `/admin/devices` |
+| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Cameras belong to no organisation, so `organisation` is the latest deployment's project's, `null` without one. Backs `/admin/devices` |
 
 ---
 
@@ -300,7 +301,7 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/camtrapdp/import` | Needs an active `organisation_member` or `organisation_manager` role, the rule for creating a project; the new project goes in that organisation. Not the demo. Import a CamtrapDP `.zip`: multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device of the importing organisation, reused by a re-import and never shared with another organisation. A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
+| `POST /api/camtrapdp/import` | Needs an active `organisation_member` or `organisation_manager` role, the rule for creating a project; the new project goes in that organisation. Not the demo. Import a CamtrapDP `.zip`: multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device whose `bluetooth_id` is a uuid5 of the importing organisation and the name, so a re-import by that organisation reuses it and no other organisation does; the device carries no `organisation_id` (cameras belong to no organisation, ww-backend#346). A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
 
 > An API key starts the same export with `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
 
@@ -426,7 +427,7 @@ account cannot create or revoke. Organisation managers do this in Settings, Inte
 | `DELETE /api/v1/api-keys/{key_id}?organisation_id=` | JWT · organisation manager | Revoke a key (sets `revoked_at`); 404 if the organisation has no such unrevoked key |
 | `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | Deployments in the organisation's projects, newest first, with `project_name`, `device_name` and `status` (`planned`, `started`, `ended`). Filters `?project_id=&status=&limit=&offset=` |
 | `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | One of those deployments |
-| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The organisation's own cameras (`devices.organisation_id`), newest first |
+| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The live cameras with a live deployment, open or ended, in a live project of the organisation. Cameras belong to no organisation (ww-backend#346), so a camera lent to another organisation's project is in both lists. `id`, `name`, `bluetooth_id`, `device_eui`, `created_at`, newest registered first (`created_at`, then `id`). `?limit=&offset=` |
 | `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | The camera's `lorawan_messages` whose deployment is in one of the organisation's projects (ww-backend#323), newest first, with the parsed `battery_level`, `sd_card_used_capacity` and `model_output`. `?date_from=&date_to=&limit=` (≤ 1,000). An EUI with none answers `[]` |
 | `GET /api/v1/observations` | `X-API-Key` · `observations:read` | One verdict per live photo with at least one live observation, chosen as the grid's `photoVerdict` chooses it (#170; `photo_verdict` is its port): the label fields of the observation the card shows, `is_empty`, and `human_reviewed` when any observation is reviewed. Photos in `media.created_at` then `id` order, their observations in `created_at` order. `?project_id=&deployment_id=&limit=&offset=` |
 | `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | The [CamtrapDP export](#camtrapdp-export) job for the key's organisation: the same body and package, with `export-camtrap-dp` called with the service role and `organisation_id` (ww-backend#290). 404 for a project outside the organisation, and while `FF_CAMTRAPDP_EXPORT_ENABLED` is off. Returns `{ job_id }` |
