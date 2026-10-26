@@ -52,11 +52,14 @@ class Settings(BaseSettings):
         True,
         description="POST /api/exports/camtrapdp starts the export job with the original photos (#328). Off: FEATURE_DISABLED",
     )
-    CAMTRAPDP_EXPORT_BUCKET: str = Field("exports", description="Private Supabase Storage bucket the export ZIPs go to")
+    CAMTRAPDP_EXPORT_CONTAINER: str = Field(
+        "camtrapdp-exports",
+        description="Private Azure Blob container, in AZURE_STORAGE_CONNECTION_STRING's account, the export ZIPs go to",
+    )
     CAMTRAPDP_EXPORT_MAX_BYTES: int = Field(
         4 * 1024**3,
         ge=1,
-        description="Largest export ZIP, spooled on the job's local disk and sent as one standard Storage upload",
+        description="Largest export ZIP, spooled on the job's local disk, then uploaded to Azure Blob in blocks",
     )
     FF_PIPELINE_ENABLED: bool = Field(False, description="Enable AI pipeline inference endpoints")
     FF_GBF_REPORT_ENABLED: bool = Field(False, description="GET /api/reports/gbf, the GBF contribution report (#371). Off: FEATURE_DISABLED")
@@ -272,7 +275,9 @@ class Settings(BaseSettings):
     BMP_JPEG_QUALITY: int = Field(90, ge=1, le=100, description="JPEG quality for re-compressed BMP frames")
 
     # ── Azure Storage (Temporary Image Buffer) ────────────────────────
-    AZURE_STORAGE_CONNECTION_STRING: str = Field("", description="Azure Storage Account connection string for blob buffering")
+    AZURE_STORAGE_CONNECTION_STRING: str = Field(
+        "", description="Azure Storage Account connection string for the upload buffer and the CamtrapDP export ZIPs"
+    )
     AZURE_STORAGE_CONTAINER_NAME: str = Field("wildlife-watcher-uploads", description="Default container name in Azure Blob Storage")
 
     # ── Media Registry renditions (Supabase Storage public bucket; originals stay in Drive) ──
@@ -302,6 +307,11 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         """Parse comma-separated CORS origins into a list."""
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+    @property
+    def camtrapdp_export_enabled(self) -> bool:
+        """The export with the original photos is on, and there is Azure Blob storage for its ZIPs."""
+        return self.FF_CAMTRAPDP_EXPORT_ENABLED and bool(self.AZURE_STORAGE_CONNECTION_STRING)
 
 
 # The required fields come from the environment, which pyright cannot see.

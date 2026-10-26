@@ -123,8 +123,11 @@ body text. Section titles sit at `1.5rem`; only the logged-out hero uses
 
 Inter is self-hosted: `main.tsx` imports the latin subset of `@fontsource/inter`
 in weights 400, 500, 600 and 700 (`font-display: swap`), so the face the
-tokens describe is the one the browser renders. Until October 2026 nothing
-loaded it and the site rendered in the system fallback.
+tokens describe is the one the browser renders. `vite.config.ts` preloads every
+latin normal weight it finds in the build, so the first paint already uses them:
+the swap shifted the public pages (#228). Another subset or an italic needs the
+pattern in `preloadFonts` widened. Until October 2026 nothing loaded it and the
+site rendered in the system fallback.
 
 ## Components
 

@@ -114,11 +114,12 @@ router exists only to mint the shared read-only demo session server-side. Detail
 ## Admin
 
 Prefix `/api/admin`. System admins only: `401` without a valid JWT, `403` for anyone else.
-Reads every organisation with the service role, because RLS keeps these rows organisation-scoped.
+Reads as the caller: under RLS a `ww_admin` reads every camera (ww-backend#346), deployment,
+project and organisation.
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Backs `/admin/devices` |
+| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Cameras belong to no organisation, so `organisation` is the latest deployment's project's, `null` without one. Backs `/admin/devices` |
 
 ---
 
@@ -145,6 +146,7 @@ are readable by any signed-in user, and an API key's jobs are read with `GET /ap
 
 | Method · Path | Description |
 |---|---|
+| `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id |
 | `GET /api/jobs/{job_id}` | Status + `progress`, `current_phase`, ordered `events[]`, `summary` |
 | `GET /api/jobs/{job_id}/result` | Result of a completed job (`result_url`); `409` if not yet complete |
 
@@ -302,7 +304,7 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/camtrapdp/import` | Needs an active `organisation_member` or `organisation_manager` role, the rule for creating a project; the new project goes in that organisation. Not the demo. Import a CamtrapDP `.zip`: multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device of the importing organisation, reused by a re-import and never shared with another organisation. A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
+| `POST /api/camtrapdp/import` | Needs an active `organisation_member` or `organisation_manager` role, the rule for creating a project; the new project goes in that organisation. Not the demo. Import a CamtrapDP `.zip`: multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device whose `bluetooth_id` is a uuid5 of the importing organisation and the name, so a re-import by that organisation reuses it and no other organisation does; the device carries no `organisation_id` (cameras belong to no organisation, ww-backend#346). A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
 
 > An API key starts the same export with `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
 
@@ -315,7 +317,7 @@ and the Download CamtrapDP buttons then fall back to the Edge Function's metadat
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_viewer` check decides (viewers and organisation managers export too, ww-backend #331); `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from Drive with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private `CAMTRAPDP_EXPORT_BUCKET` (default `exports`) under `camtrapdp/<job_id>.zip`, `result_url` is a signed link valid for 24 hours, and exports older than 7 days are deleted when the next one is stored. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
+| `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_viewer` check decides (viewers and organisation managers export too, ww-backend #331); `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from Drive with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`) as `<job_id>.zip`, `result_url` is a read-only link valid for 24 hours that needs no sign-in, and the storage account's lifecycle rule deletes the ZIP 7 days after it is written. Without `AZURE_STORAGE_CONNECTION_STRING` the route answers `FEATURE_DISABLED`, as with the flag off, and the website falls back to the metadata-only package. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
 
 ---
 
@@ -356,7 +358,8 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 | `GET /api/brain/umap/{deployment_id}` | Persisted 2-D UMAP scatter coordinates |
 | `GET /api/brain/outliers/{deployment_id}` | HDBSCAN-rejected images (expert-review candidates) |
 | `GET /api/brain/similar/{media_id}` | Nearest neighbours (`?n=20`, 1 to 100) among the photos of the anchor's organisation, in deployments the caller can read. `NOT_FOUND` envelope when the photo has no embedding |
-| `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | **Write** (see [Access](#access)). Confirm a cluster as a taxon → bulk-creates human observations for its members |
+| `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | **Write** (see [Access](#access)), demo refused. Confirm a cluster as a taxon: body `{ taxon_id?, scientific_name?, vernacular_name? }`. Adds a human row (carrying the run and cluster id) for each member with no human verdict yet; a member a person already labelled is skipped, so a cluster never overwrites a person's label (UI audit decision 2). → `{ cluster_assignment_id, observations_created, observation_ids, skipped }`. `ALREADY_CONFIRMED` envelope for a confirmed cluster |
+| `POST /api/brain/clusters/{cluster_assignment_id}/unconfirm` | **Write**, demo refused. Undo a confirm: deletes the human rows with the cluster's deployment, run and cluster id that still carry its label (a row a person has relabelled since stays), and sets the cluster back to `open` with no taxon, `confirmed_by` or `confirmed_at`. → `{ cluster_assignment_id, observations_deleted, kept }`. `NOT_CONFIRMED` envelope for a cluster that is not confirmed |
 | `GET /api/brain/embedding-runs/{deployment_id}` | List embedding runs (model version, status, image count) |
 | `POST /api/brain/reprocess/deployment/{deployment_id}` | **Write** (see [Access](#access)). Supersede current runs and re-embed a deployment. The worker checks it can embed first, so a failed check leaves the current clusters in place |
 | `POST /api/brain/reprocess/project/{project_id}` | **Write** (see [Access](#access)). Reprocess every deployment in a project |
@@ -372,7 +375,8 @@ Same prefix; the queue/score endpoints are additionally gated by **`FF_ACTIVE_LE
 |---|---|
 | `POST /api/brain/recalculate-al-scores/{deployment_id}` | **Write** (see [Access](#access)). Recompute active-learning scores for a deployment |
 | `GET /api/brain/review-queue/{deployment_id}` | Media ranked by `active_learning_score` DESC with AI label + score reasons (`?limit=50`) |
-| `POST /api/brain/review/{media_id}` | **Write** (see [Access](#access)). Record a reviewer decision (`approve` / `reassign` / `expert`) → human observation |
+| `POST /api/brain/review/{media_id}` | **Write** (see [Access](#access)), demo refused, `FF_WILDLIFE_BRAIN_ENABLED` only. Record a reviewer decision (`approve` / `reassign` → `human_reviewed`, `expert` → `expert_reviewed`) as the photo's human row: added when it has none, updated when it has one |
+| `POST /api/brain/review/batch` | **Write** per photo, demo refused, `FF_WILDLIFE_BRAIN_ENABLED` only. One decision on up to 500 photos: body `{ media_ids, decision: 'reassign' \| 'expert', taxon_id?, scientific_name?, vernacular_name? }` (`reassign` needs `taxon_id` or `scientific_name`; more than 500 is `422`). The same meaning as the per-photo route, written in chunks of 50. Without a species, `expert` keeps a photo's own label and changes its status. Photos the caller may not change are skipped, `403` when that is all of them. → `{ created, updated, observation_ids, skipped: [{ media_id, reason: 'not_writable' \| 'not_found' }] }` |
 
 ---
 
@@ -399,6 +403,7 @@ Prefix `/api/qa`. JWT required; gated by **`FF_ACTIVE_LEARNING_ENABLED`** (the r
 | Method · Path | Description |
 |---|---|
 | `GET /api/qa/report/{deployment_id}` | **Read** (see [Access](#access)), `404` otherwise. AI-vs-human agreement (a precision proxy over images carrying both an AI and a human label) |
+| `GET /api/qa/report/project/{project_id}` | **Read**, `404` otherwise. The same for the project's live deployments in one answer (Dataset Health): `{ project_id, n_compared, matches, precision, per_deployment: [{ deployment_id, location_name, n_compared, matches, precision }] }`, `per_deployment` holding the deployments with a photo compared, most first |
 
 ---
 
@@ -439,10 +444,10 @@ account cannot create or revoke. Organisation managers do this in Settings, Inte
 | `DELETE /api/v1/api-keys/{key_id}?organisation_id=` | JWT · organisation manager | Revoke a key (sets `revoked_at`); 404 if the organisation has no such unrevoked key |
 | `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | Deployments in the organisation's projects, newest first, with `project_name`, `device_name` and `status` (`planned`, `started`, `ended`). Filters `?project_id=&status=&limit=&offset=` |
 | `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | One of those deployments |
-| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The organisation's own cameras (`devices.organisation_id`), newest first |
+| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The live cameras with a live deployment, open or ended, in a live project of the organisation. Cameras belong to no organisation (ww-backend#346), so a camera lent to another organisation's project is in both lists. `id`, `name`, `bluetooth_id`, `device_eui`, `created_at`, newest registered first (`created_at`, then `id`). `?limit=&offset=` |
 | `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | The camera's `lorawan_messages` whose deployment is in one of the organisation's projects (ww-backend#323), newest first, with the parsed `battery_level`, `sd_card_used_capacity` and `model_output`. `?date_from=&date_to=&limit=` (≤ 1,000). An EUI with none answers `[]` |
 | `GET /api/v1/observations` | `X-API-Key` · `observations:read` | One verdict per live photo with at least one live observation, chosen as the grid's `photoVerdict` chooses it (#170; `photo_verdict` is its port): the label fields of the observation the card shows, `is_empty`, and `human_reviewed` when any observation is reviewed. Photos in `media.created_at` then `id` order, their observations in `created_at` order. `?project_id=&deployment_id=&limit=&offset=` |
-| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | The [CamtrapDP export](#camtrapdp-export) job for the key's organisation: the same body and package, with `export-camtrap-dp` called with the service role and `organisation_id` (ww-backend#290). 404 for a project outside the organisation, and while `FF_CAMTRAPDP_EXPORT_ENABLED` is off. Returns `{ job_id }` |
+| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | The [CamtrapDP export](#camtrapdp-export) job for the key's organisation: the same body and package, with `export-camtrap-dp` called with the service role and `organisation_id` (ww-backend#290). 404 for a project outside the organisation, and while `FF_CAMTRAPDP_EXPORT_ENABLED` is off or `AZURE_STORAGE_CONNECTION_STRING` is unset. Returns `{ job_id }` |
 | `GET /api/v1/jobs/{job_id}` | `X-API-Key` · `export:camtrapdp` | A job one of the organisation's keys started (`organisation_id` in `api_jobs.job_data`): `status`, `progress`, `message`, `error`, `result_url`. Any other job answers 404; `/api/jobs/{id}` does not serve these jobs to signed-in users |
 
 ---

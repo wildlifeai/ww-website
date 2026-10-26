@@ -27,6 +27,7 @@ How to deploy the Wildlife Watcher V2 platform (backend + frontend) to productio
 | **Supabase** | `qegeovogqxiouqbrxmnh` (Dev_Wildlife_Watcher) | `nuhwmubvygxyddkycmpa` (Stag_Wildlife_Watcher) |
 | **Azure Container App** | `ww-backend-dev` (WW-AE RG) | `ww-backend` (WW-AE RG) |
 | **Azure Blob Container** | `wildlife-watcher-uploads-dev` | `wildlife-watcher-uploads` (storage account `wwuploadsae`) |
+| **CamtrapDP export ZIPs** | `camtrapdp-exports`, shared with staging | `camtrapdp-exports` (same account) |
 | **Frontend** | Cloudflare Pages preview deploys (per branch) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
 | **Google Drive** | `Data/dev` — `1-F6cQc5lpYOJNSPKRs7i79Gh539N5hUT` | `Data/Production` — `1apf13KX075Fv4K0A2nbaTqOmCwZ9vJzr` |
 
@@ -54,16 +55,16 @@ GitHub Actions (CI/CD)
         │
         ▼
 Azure Container App ("ww-backend" / "ww-backend-dev")  ──REDIS_URL set──▶  ARQ GPU worker
-  ├── FastAPI API Server (port 8000)                                       ("ww-embedding-worker-dev",
+  ├── FastAPI API Server (port 8000)                                       ("ww-embedding-worker[-dev]",
   ├── Job dispatch: ARQ when REDIS_URL is set, else in-process asyncio       --target worker, serverless T4)
   └── Supabase sync for job persistence (api_jobs table)
 ```
 
 > **Note**: heavy ML work (SpeciesNet, BioCLIP, DINOv3) runs in a **separate ARQ GPU worker**, not in
-> the API container — the lean `--target api` image carries no ML deps. The worker is **live on dev**
-> (serverless T4, scale-to-zero, since 2026-07-03); **production is API-only** until the prod worker is
-> provisioned. With `REDIS_URL` unset, `dispatch.py` falls back to running jobs in-process.
-> Live state: [cloud-infrastructure.md](cloud-infrastructure.md) · stand up the prod worker:
+> the API container, because the lean `--target api` image carries no ML deps. Each environment has its
+> own worker (serverless T4, scale-to-zero): **dev since 2026-07-03, production since 2026-07-26**.
+> With `REDIS_URL` unset, `dispatch.py` falls back to running jobs in-process.
+> Live state: [cloud-infrastructure.md](cloud-infrastructure.md) · how the prod worker was built:
 > [prod-worker-provisioning-runbook.md](prod-worker-provisioning-runbook.md).
 
 ### Manual Deployment
@@ -131,7 +132,22 @@ The frontend is a static React+Vite app deployed to **Cloudflare Pages** with au
 
 ### Preview Deployments
 
-Every push to a non-production branch creates a preview deployment at `https://<branch>.<project>.pages.dev`. This is automatic — no configuration needed.
+Which branches Cloudflare builds is the project's branch control, under **Settings → Builds &
+deployments** ([Cloudflare's docs](https://developers.cloudflare.com/pages/configuration/branch-build-controls/)).
+On 26 Oct 2026 it built `main` (production) and `dev` (preview,
+`https://dev.ww-website.pages.dev`) and nothing else: none of the 32 feature and Dependabot pull
+request heads checked, back to June 2026, has a Cloudflare build. Each build reports as a
+`Cloudflare Pages` check run on its commit, with the build's own URL
+(`https://<id>.ww-website.pages.dev`) and the branch alias in its summary, and creates no GitHub
+deployment. Cloudflare never builds a pull request from a fork.
+
+To build every other branch of this repo, and so give each pull request a preview and an E2E run
+([`e2e/README.md`](../../e2e/README.md#in-ci)): **Preview branch: Custom branches**, **Include
+Preview branches** `*`, **Exclude Preview branches** `dependabot/*`. The cost is builds: dev and
+main had 144 pushes, each one built, in the 30 days to 26 Oct 2026, and pull requests outside
+Dependabot had 204 `ci.yml` runs in the same days, each one a push Cloudflare would build. The
+Free plan allows 500 builds a month, one at a time, so a pull request's build can hold up a dev
+build ([limits](https://developers.cloudflare.com/pages/platform/limits/)).
 
 ---
 
@@ -146,7 +162,7 @@ See [00-GETTING-STARTED.md](../onboarding/00-GETTING-STARTED.md#environment-vari
 - [ ] `SENTRY_DSN` is set for error tracking
 - [ ] `LOG_LEVEL` is `info` (not `debug`)
 - [ ] `RATE_LIMIT_PER_MINUTE` is appropriate for your traffic
-- [ ] `AZURE_STORAGE_CONNECTION_STRING` is set for image buffering
+- [ ] `AZURE_STORAGE_CONNECTION_STRING` is set for image buffering and the CamtrapDP export ZIPs
 - [ ] `GOOGLE_DRIVE_ENABLED` is set to `true` if Drive uploads are needed
 
 ### Azure Container App Environment Variables
@@ -184,7 +200,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 
 | Var | Enables |
 |-----|---------|
-| `AZURE_STORAGE_CONNECTION_STRING` (+ `AZURE_STORAGE_CONTAINER_NAME`) | Blob buffering of originals — **this is the one that bites.** The container *name* alone does nothing; without the **connection string** every upload logs `azure_storage_not_configured_for_store` and no media rows are created. |
+| `AZURE_STORAGE_CONNECTION_STRING` (+ `AZURE_STORAGE_CONTAINER_NAME`) | Blob buffering of originals. **This is the one that bites.** The container *name* alone does nothing; without the **connection string** every upload logs `azure_storage_not_configured_for_store` and no media rows are created. It also stores the CamtrapDP export ZIPs (`CAMTRAPDP_EXPORT_CONTAINER`); without it the export answers `FEATURE_DISABLED`. |
 | `SUPABASE_MEDIA_BUCKET` | Supabase Storage bucket for media. |
 | `GOOGLE_DRIVE_ENABLED=true` + `GOOGLE_SERVICE_ACCOUNT_JSON` + `GOOGLE_DRIVE_FOLDER_ID` | Drive archival. **Folder ID alone does nothing** — without `ENABLED` + the service account, queued uploads stay `pending_drive_uploads` and the images never become servable. |
 
@@ -302,9 +318,9 @@ vector database.
    incompatible vector dims. DR is automatic — the vectors are a Postgres table under Supabase PITR, so
    the `/api/brain/backup` job is now a **no-op**.
 
-> The heavy ML inference (DINOv3/SpeciesNet on GPU) is a separate concern — see the `gpu` profile +
-> `embedding-worker` in `docker-compose.yml`, which also needs Redis + ARQ before it can run as a
-> cloud worker (the API currently runs jobs in-process; see [Scaling](#scaling)).
+> The heavy ML inference (DINOv3/SpeciesNet on GPU) is a separate concern. In both cloud environments
+> it runs on the ARQ GPU worker (see [Scaling](#scaling)); locally it is the `gpu` profile's
+> `embedding-worker` in `docker-compose.yml`, which gets jobs only when the API has `REDIS_URL` set.
 
 ---
 
