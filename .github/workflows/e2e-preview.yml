@@ -1,0 +1,75 @@
+name: E2E on Cloudflare builds
+
+# Starts e2e.yml against each Cloudflare Pages build, on the branch that was
+# built, with the URL of that build (see e2e/README.md, "In CI").
+#
+# Cloudflare reports a build as a "Cloudflare Pages" check run on the commit,
+# not as a GitHub deployment, and the check run's summary lists the
+# deployment's own URL (https://<id>.ww-website.pages.dev) before the branch
+# alias. This workflow runs when a check suite completes, reads that URL and
+# dispatches e2e.yml on the branch. A dispatched run reports on the commit that
+# was built, so its checks show on the pull request; a check_suite run like
+# this one reports on main's latest commit instead, which is why the jobs are
+# not here.
+#
+# Every app's check suite (GitGuardian, CodeQL, Cloudflare) starts this
+# workflow, and all but Cloudflare's stop at the job's `if` without a runner.
+# Not started:
+# - main: the production build, and the seeded account lives on dev only.
+# - dependabot/*: a dispatched run gets the dev environment's secrets, and the
+#   seed password must not reach the package versions a Dependabot pull
+#   request bumps.
+# - a fork: Cloudflare builds no pull request from a fork, and a fork's check
+#   suite has no head branch.
+# - a commit its branch has moved past: the newer build starts its own run.
+#   A branch deleted meanwhile counts as moved.
+#
+# Which branches Cloudflare builds is the Pages project's branch control
+# setting, not this repo: dev and main on 26 Oct 2026, so this starts a run for
+# each push to dev and none for a pull request. See the deployment guide,
+# "Preview Deployments", for the setting that would add pull request branches.
+# check_suite only fires from the copy of this file on the default branch.
+
+on:
+  check_suite:
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+  contents: read
+
+jobs:
+  dispatch:
+    name: Start E2E on the Cloudflare build
+    if: >-
+      github.event.check_suite.app.slug == 'cloudflare-workers-and-pages'
+      && github.event.check_suite.conclusion == 'success'
+      && github.event.check_suite.head_branch
+      && github.event.check_suite.head_branch != 'main'
+      && !startsWith(github.event.check_suite.head_branch, 'dependabot/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch e2e.yml against the build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          SUITE_ID: ${{ github.event.check_suite.id }}
+          BRANCH: ${{ github.event.check_suite.head_branch }}
+          SHA: ${{ github.event.check_suite.head_sha }}
+        run: |
+          url=$(gh api "repos/$GH_REPO/check-suites/$SUITE_ID/check-runs" \
+            --jq '.check_runs[] | select(.name == "Cloudflare Pages") | .output.summary' \
+            | grep -oE 'https://[a-z0-9-]+\.ww-website\.pages\.dev' | head -n 1)
+          test -n "$url" || { echo "::error::no pages.dev URL in the Cloudflare Pages check run of suite $SUITE_ID"; exit 1; }
+
+          # Empty when the branch is gone, merged and deleted while Cloudflare built
+          head=$(gh api "repos/$GH_REPO/branches/$BRANCH" --jq .commit.sha 2>/dev/null || true)
+          if [ "$head" != "$SHA" ]; then
+            echo "::notice::$BRANCH is no longer at $SHA (now ${head:-deleted}), so this build is not tested"
+            exit 0
+          fi
+
+          gh workflow run e2e.yml --ref "$BRANCH" -f base_url="$url" -f suite=smoke
+          echo "Started e2e.yml on $BRANCH at $SHA against $url" >> "$GITHUB_STEP_SUMMARY"
