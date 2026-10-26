@@ -17,7 +17,7 @@ The GBF contribution report shows funders and councils what your projects add to
 | 6, invasive alien species | For each invasive species: detections, the rate, the sites with it out of the sites monitored, a monthly trend, and the sites where it was detected for the first time |
 | 4, threatened species | The same for each threatened species, and how many were recorded |
 | 20, monitoring effort | Cameras, sites, camera-nights, photos taken, photos checked by AI and photos reviewed by people |
-| 21, open data | Not reported yet |
+| 21, open data | For each project, its GBIF dataset: the records it publishes and when it was last published, beside the project's reviewed detections in the period |
 | 22, participation | How many people reviewed photos, as a count, never names |
 
 A tile shows the three species with the highest rate; the downloads have them all. Each tile's title links to the target's text.
@@ -32,10 +32,15 @@ A tile shows the three species with the highest rate; the downloads have them al
 - **Sites.** A site is a deployment. It is monitored when the deployment overlaps the period or has photos in it. The sites with a species are the deployments with at least one detection of it.
 - **First detections.** Deployments where the species was detected in the period and in no earlier photo at that deployment.
 - **Invasive and threatened.** From the website's species list. Invasive means introduced or invasive in New Zealand; the list covers New Zealand only. Threatened means Vulnerable, Endangered or Critically Endangered on the IUCN Red List. A species can be both, and then it counts under both targets.
+- **Open data.** Records come from the [GBIF](https://www.gbif.org) dataset linked to the project, read from GBIF at most once a day. A project with no linked dataset shows "Not published". For comparison, reviewed detections are the detections counted from the photos a person reviewed.
 - **Reviewed photos and people.** A photo is reviewed when a person added or confirmed a label on it. The people are the different reviewers of the period's photos.
 
 The report carries a method version (`gbf-1`), so a downloaded report says how it was computed.
 
+## Linking a project to its GBIF dataset
+
+A project admin opens **Settings**, clicks the project and, in **Details**, pastes the dataset's key or its gbif.org link under **GBIF dataset**, then selects **Save**. The website checks the dataset with GBIF before saving it. Clear the box and save to unlink it.
+
 ## Reading the CSV
 
-The first rows give the report, the period, the projects, the method version and the caveat above. The table under them has five columns: `target`, `subject` (the species' scientific name, empty for a figure about the whole report), `metric`, `month` (empty for the whole period) and `value`. Rates are the `rate_per_100_camera_nights` rows.
+The first rows give the report, the period, the projects, the method version and the caveat above. The table under them has five columns: `target`, `subject` (the species' scientific name, or the project for Target 21, empty for a figure about the whole report), `metric`, `month` (empty for the whole period) and `value`. Rates are the `rate_per_100_camera_nights` rows.

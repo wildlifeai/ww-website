@@ -133,7 +133,7 @@ report, answering `FEATURE_DISABLED` without `FF_GBF_REPORT_ENABLED`), `models`,
 **Key domain modules**: `exif`, `photo_preprocessing`, `pipeline` (SpeciesNet steps), `events`,
 `clustering`, `wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
 `intelligence`, `media_registry` / `media_resolver`, `model`, `manifest`, `camtrapdp`, `camtrapdp_export`, `inaturalist`,
-`public_api`, `gbf_report`.
+`public_api`, `gbf_report` + `gbif_dataset` (the GBF report and a project's GBIF dataset).
 
 ### Adding a feature (backend)
 

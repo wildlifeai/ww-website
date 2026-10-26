@@ -1,7 +1,7 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The GBF contribution report (#371): what the selected projects contribute to targets 6, 4, 20
-and 22 of the Kunming-Montreal Global Biodiversity Framework over a period.
+"""The GBF contribution report (#371): what the selected projects contribute to targets 6, 4, 20,
+21 and 22 of the Kunming-Montreal Global Biodiversity Framework over a period.
 
 Site-level evidence from wherever the cameras are, never the GBF's national indicators. The
 definitions, which the guide's method section quotes (``gbf-contribution-report.md``):
@@ -16,6 +16,8 @@ definitions, which the guide's method section quotes (``gbf-contribution-report.
 - **Species flags** come from ``taxa``, through ``observations.taxon_id``, else the scientific
   name: invasive is ``invasive_status`` (New Zealand), threatened is an IUCN
   ``conservation_status`` of Vulnerable or worse. A species can be both.
+- **Reviewed detections** (Target 21): detections counted from the photos a person reviewed,
+  beside what each project's GBIF dataset publishes (``domain/gbif_dataset.py``).
 
 Dates are UTC days, the period's last day included. ``build_report`` is pure, so the tests pin
 each figure on fixed data; ``gbf_report`` reads the rows with the service role, so the router
@@ -31,6 +33,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from app.domain.events import _cluster_temporal
+from app.domain.gbif_dataset import with_gbif_figures
 from app.domain.public_api import is_human_reviewed, photo_verdict
 from app.services.db_utils import read_all, rows_of
 from app.services.supabase_client import create_service_client
@@ -207,6 +210,15 @@ def _species_figures(
     }
 
 
+def reviewed_detections(photos: Iterable[Photo], deployments: List[Row]) -> Dict[str, int]:
+    """Detections of any species from the photos a person reviewed, per project."""
+    project_of = {str(d["id"]): str(d["project_id"]) for d in deployments}
+    out: Dict[str, int] = defaultdict(int)
+    for d in detections(p for p in photos if p.reviewed):
+        out[project_of.get(d.deployment_id, "")] += 1
+    return out
+
+
 def _target(species: List[Row], sites: int) -> Row:
     species.sort(key=lambda s: (s["rate"] is None, -(s["rate"] or 0), -s["detections"], s["scientific_name"] or ""))
     return {"sites_monitored": sites, "species_recorded": len(species), "species": species}
@@ -246,6 +258,7 @@ def build_report(
         if d.species in taxon_of:
             found[d.species].append(d)
     figures = {sp: _species_figures(taxon_of[sp], dets, total_nights, nights_by_month, seen_before, names) for sp, dets in found.items()}
+    reviewed = reviewed_detections(photos, deployments)
 
     return {
         "method_version": METHOD_VERSION,
@@ -262,7 +275,19 @@ def build_report(
             "photos_with_ai": sum(p.ai for p in photos),
             "photos_reviewed": sum(p.reviewed for p in photos),
         },
-        "target_21": None,  # #373
+        # GBIF's own figures are added by gbf_report, which may call out.
+        "target_21": {
+            "reviewed_detections": sum(reviewed.values()),
+            "datasets": [
+                {
+                    "project_id": p["id"],
+                    "project_name": p.get("name"),
+                    "dataset_key": p.get("gbif_dataset_key"),
+                    "reviewed_detections": reviewed.get(str(p["id"]), 0),
+                }
+                for p in projects
+            ],
+        },
         "target_22": {"reviewers": len(set().union(*(p.reviewers for p in photos)))},
     }
 
@@ -300,7 +325,9 @@ def _flagged_taxa(svc) -> List[Row]:
 
 def _read_report(project_ids: List[str], first: date, last: date) -> Optional[Row]:
     svc = create_service_client()
-    projects = rows_of(svc.table("projects").select("id, name").in_("id", project_ids).is_("deleted_at", "null").order("name").execute())
+    projects = rows_of(
+        svc.table("projects").select("id, name, gbif_dataset_key").in_("id", project_ids).is_("deleted_at", "null").order("name").execute()
+    )
     if len(projects) != len(set(project_ids)):
         return None
     deployments = read_all(
@@ -335,4 +362,7 @@ async def gbf_report(project_ids: List[str], first: date, last: date) -> Optiona
     """The report for live projects, or None when one of them is not (deleted or unknown).
 
     Reads with the service role: the caller's access to every project is checked before."""
-    return await asyncio.to_thread(_read_report, project_ids, first, last)
+    report = await asyncio.to_thread(_read_report, project_ids, first, last)
+    if report is not None:
+        report["target_21"]["datasets"] = await with_gbif_figures(report["target_21"]["datasets"])
+    return report

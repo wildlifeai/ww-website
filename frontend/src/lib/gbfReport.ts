@@ -28,6 +28,20 @@ export interface GbfSpeciesTarget {
   species: GbfSpecies[]
 }
 
+/** Target 21: one project's GBIF dataset beside its reviewed detections in the period (#373). */
+export interface GbfDataset {
+  project_id: string
+  project_name: string | null
+  dataset_key: string | null
+  /** not_published: no dataset linked; not_found: GBIF no longer has it; unavailable: GBIF did not answer. */
+  status: 'published' | 'not_published' | 'not_found' | 'unavailable'
+  title: string | null
+  doi: string | null
+  published_records: number | null
+  last_published: string | null
+  reviewed_detections: number
+}
+
 export interface GbfReport {
   method_version: string
   period: { from: string; to: string }
@@ -43,7 +57,7 @@ export interface GbfReport {
     photos_with_ai: number
     photos_reviewed: number
   }
-  target_21: null
+  target_21: { reviewed_detections: number; datasets: GbfDataset[] }
   target_22: { reviewers: number }
 }
 
@@ -121,10 +135,24 @@ function speciesRows(target: number, t: GbfSpeciesTarget): Cell[][] {
   return rows
 }
 
+function openDataRows(datasets: GbfDataset[]): Cell[][] {
+  return datasets.flatMap((d): Cell[][] => {
+    const name = d.project_name ?? d.project_id
+    return [
+      [21, name, 'status', null, d.status],
+      [21, name, 'published_records', null, d.published_records],
+      [21, name, 'reviewed_detections', null, d.reviewed_detections],
+      [21, name, 'last_published', null, d.last_published],
+      [21, name, 'doi', null, d.doi],
+    ]
+  })
+}
+
 /**
  * The report as CSV: the period and projects first, then one figure per row, as
- * `target, subject, metric, month, value`. The subject is the species' scientific name, empty for
- * a figure about the whole report; the month is empty for a figure over the whole period.
+ * `target, subject, metric, month, value`. The subject is the species' scientific name, or the
+ * project for Target 21, and empty for a figure about the whole report; the month is empty for a
+ * figure over the whole period.
  */
 export function gbfCsv(report: GbfReport): string {
   const e = report.target_20
@@ -146,6 +174,7 @@ export function gbfCsv(report: GbfReport): string {
     [20, null, 'photos', null, e.photos],
     [20, null, 'photos_with_ai', null, e.photos_with_ai],
     [20, null, 'photos_reviewed', null, e.photos_reviewed],
+    ...openDataRows(report.target_21.datasets),
     [22, null, 'reviewers', null, report.target_22.reviewers],
   ]
   return rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n'

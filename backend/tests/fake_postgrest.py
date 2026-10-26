@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 COLUMNS = {
-    "projects": {"id", "name", "organisation_id", "deleted_at", "created_at"},
+    "projects": {"id", "name", "organisation_id", "gbif_dataset_key", "deleted_at", "created_at"},
     "deployments": {
         "id",
         "name",

@@ -840,6 +840,24 @@
         "title": "FillTimezonesRequest",
         "type": "object"
       },
+      "GbifDatasetRequest": {
+        "properties": {
+          "dataset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The GBIF dataset key or its gbif.org link; empty or null clears it",
+            "title": "Dataset"
+          }
+        },
+        "title": "GbifDatasetRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -5196,6 +5214,66 @@
           }
         },
         "summary": "Delete Project",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/projects/{project_id}/gbif-dataset": {
+      "put": {
+        "description": "Link the project to the GBIF dataset it publishes to, or clear the link (#373).\n\nThe key is checked with GBIF before it is saved. The save runs as the caller, so\n``projects_update_policy`` decides: a ``project_admin`` of the project or ``ww_admin``. Anyone\nelse who can see the project gets ``403``, a project they cannot see ``404``. Behind\n``FF_GBF_REPORT_ENABLED``, with the report it feeds.",
+        "operationId": "set_gbif_dataset_api_projects__project_id__gbif_dataset_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GbifDatasetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Gbif Dataset",
         "tags": [
           "projects"
         ]

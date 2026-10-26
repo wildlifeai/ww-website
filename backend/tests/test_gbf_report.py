@@ -136,7 +136,11 @@ def test_monitoring_effort():
     assert r["camera_nights_by_month"] == [{"month": "2026-01", "camera_nights": 19}]
     assert r["method_version"] == "gbf-1"
     assert r["period"] == {"from": "2026-01-01", "to": "2026-01-31"}
-    assert r["target_21"] is None
+    # One detection from reviewed photos: the kiwi. The reviewed blank is no detection.
+    assert r["target_21"] == {
+        "reviewed_detections": 1,
+        "datasets": [{"project_id": P1, "project_name": "Alpha", "dataset_key": None, "reviewed_detections": 1}],
+    }
 
 
 # ── Detections and the 30-minute rule ───────────────────────────────

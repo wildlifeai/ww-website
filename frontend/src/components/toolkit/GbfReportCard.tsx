@@ -10,9 +10,10 @@ import { Download, Leaf } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { apiClient } from '../../lib/apiClient'
 import { saveFile } from '../../lib/camtrapExport'
+import { gbifDatasetUrl } from '../../lib/gbifDataset'
 import {
   GBF_CAVEAT, GBF_GUIDE, defaultPeriod, fetchGbfReport, gbfCsv, gbfFilename, periodProblem, speciesLabel, targetUrl,
-  type GbfReport, type GbfSpecies, type GbfSpeciesTarget,
+  type GbfDataset, type GbfReport, type GbfSpecies, type GbfSpeciesTarget,
 } from '../../lib/gbfReport'
 import { useProjectSelection } from '../../hooks/useProjectSelection'
 import { ToolCard } from './ToolCard'
@@ -114,7 +115,9 @@ function ReportTiles({ report }: { report: GbfReport }) {
           <div>{plural(e.photos, 'photo', 'photos')}: {n(e.photos_with_ai)} checked by AI, {n(e.photos_reviewed)} by people</div>
         </Tile>
         <Tile target={21} title="Open data">
-          <div style={{ color: 'var(--text-muted)' }}>Not reported yet.</div>
+          {report.target_21.datasets.map(d => (
+            <OpenData key={d.project_id} dataset={d} named={report.target_21.datasets.length > 1} />
+          ))}
         </Tile>
         <Tile target={22} title="Participation">
           <div>{plural(report.target_22.reviewers, 'person', 'people')} reviewed photos</div>
@@ -163,6 +166,29 @@ function SpeciesFigures({ target, none }: { target: GbfSpeciesTarget; none: stri
       ))}
       {target.species.length > 3 && <div style={{ color: 'var(--text-muted)' }}>and {n(target.species.length - 3)} more in the download</div>}
     </>
+  )
+}
+
+const DATASET_STATUS: Record<Exclude<GbfDataset['status'], 'published'>, string> = {
+  not_published: 'Not published',
+  not_found: 'GBIF no longer has the linked dataset',
+  unavailable: 'GBIF did not answer. Try again later.',
+}
+
+function OpenData({ dataset: d, named }: { dataset: GbfDataset; named: boolean }) {
+  return (
+    <div>
+      {named && <div style={{ fontWeight: 500 }}>{d.project_name ?? d.project_id}</div>}
+      {d.status === 'published' && d.dataset_key ? (
+        <>
+          <a href={gbifDatasetUrl(d.dataset_key)} target="_blank" rel="noopener noreferrer">{d.title || 'GBIF dataset'}</a>
+          <div>{plural(d.published_records ?? 0, 'record', 'records')} on GBIF{d.last_published && `, published ${d.last_published}`}</div>
+        </>
+      ) : (
+        <div style={{ color: 'var(--text-muted)' }}>{DATASET_STATUS[d.status as keyof typeof DATASET_STATUS]}</div>
+      )}
+      <div style={{ color: 'var(--text-muted)' }}>{plural(d.reviewed_detections, 'reviewed detection', 'reviewed detections')} in the period</div>
+    </div>
   )
 }
 

@@ -25,7 +25,13 @@ const report: GbfReport = {
   target_6: { sites_monitored: 2, species_recorded: 1, species: [rat] },
   target_4: { sites_monitored: 2, species_recorded: 0, species: [] },
   target_20: { cameras: 2, sites: 2, camera_nights: 19, photos: 40, photos_with_ai: 38, photos_reviewed: 5 },
-  target_21: null,
+  target_21: {
+    reviewed_detections: 4,
+    datasets: [{
+      project_id: 'p1', project_name: 'Alpha, north', dataset_key: 'k1', status: 'published', title: 'Ridge',
+      doi: '10.15468/abc123', published_records: 1234, last_published: '2026-03-19', reviewed_detections: 4,
+    }],
+  },
   target_22: { reviewers: 2 },
 }
 
@@ -97,6 +103,9 @@ describe('gbfCsv', () => {
     expect(table).toContain('20,,camera_nights,2026-01,19')
     expect(table).toContain('20,,photos_reviewed,,5')
     expect(table).toContain('22,,reviewers,,2')
-    expect(table.every(row => row.split(',').length === 5)).toBe(true)
+    expect(table).toContain('21,"Alpha, north",published_records,,1234')
+    expect(table).toContain('21,"Alpha, north",reviewed_detections,,4')
+    expect(table).toContain('21,"Alpha, north",doi,,10.15468/abc123')
+    expect(table.every(row => row.replace(/"[^"]*"/g, 'x').split(',').length === 5)).toBe(true)
   })
 })
