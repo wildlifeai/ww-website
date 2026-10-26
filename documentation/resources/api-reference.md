@@ -76,6 +76,7 @@ On error:
 - [Deployments](#deployments)
 - [CamtrapDP Import](#camtrapdp-import)
 - [CamtrapDP Export](#camtrapdp-export)
+- [Reports](#reports)
 - [Wildlife Brain — Embeddings & Clustering](#wildlife-brain--embeddings--clustering)
 - [Conservation Intelligence](#conservation-intelligence)
 - [QA](#qa)
@@ -113,11 +114,12 @@ router exists only to mint the shared read-only demo session server-side. Detail
 ## Admin
 
 Prefix `/api/admin`. System admins only: `401` without a valid JWT, `403` for anyone else.
-Reads every organisation with the service role, because RLS keeps these rows organisation-scoped.
+Reads as the caller: under RLS a `ww_admin` reads every camera (ww-backend#346), deployment,
+project and organisation.
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Backs `/admin/devices` |
+| `GET /api/admin/devices` | Every live device, read-only (#343). Each row is `{ id, name, bluetooth_id, device_eui, organisation: { id, name } \| null, latest_deployment: { id, name, deployment_start, deployment_end, project: { id, name } } \| null }`, ordered by name; `meta.total` is the count. Soft-deleted devices are left out. The latest deployment is the live one with the most recent `deployment_start` in a live project. Cameras belong to no organisation, so `organisation` is the latest deployment's project's, `null` without one. Backs `/admin/devices` |
 
 ---
 
@@ -125,12 +127,13 @@ Reads every organisation with the service role, because RLS keeps these rows org
 
 Prefix `/api/projects`. JWT required. **Reads go direct to Supabase** under RLS
 (`supabase.from('projects')`) — there is no `GET /api/projects`; this router covers creation and
-the soft delete and its Undo.
+the soft delete and its Undo, and the link to a GBIF dataset.
 
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/projects` | JWT · active `organisation_member` or `organisation_manager` | Create a project in the caller's organisation: body `{ name, description? }`. `403` without such a role |
 | `DELETE /api/projects/{project_id}` | JWT · `project_admin` or `ww_admin` | Soft-delete, cascading to deployments → media → observations under one `deleted_at`. The database decides and cascades in one transaction: `soft_delete_project` runs as the caller and allows a `project_admin` of the project or `ww_admin`. Anyone else who can see the project, an organisation manager included, gets `403`; a project the caller cannot see is `404`. Returns the shared `deleted_at` so the client can offer Undo |
+| `PUT /api/projects/{project_id}/gbif-dataset` | JWT · `project_admin` or `ww_admin` | Link the project to its GBIF dataset (#373), body `{ dataset }`: the dataset key or its gbif.org link, `null` or blank to clear. The key is checked with GBIF first: `422` when it is not a key or GBIF has no such dataset, `503` when GBIF does not answer. The update runs as the caller under `projects_update_policy`: `403` for anyone else who can see the project, `404` for one they cannot. Not the demo. Returns `{ id, gbif_dataset_key, dataset: { title, doi, ... } }`. Behind `FF_GBF_REPORT_ENABLED` (`FEATURE_DISABLED`) |
 | `POST /api/projects/{project_id}/restore` | JWT · `project_admin` or `ww_admin` | Undo that delete, body `{ deleted_at }` (with a time zone offset, `422` otherwise). `restore_project` runs as the caller under the same rule and clears exactly that `deleted_at` on the project and the rows deleted with it. Returns `{ id, restored }`, `restored` false when nothing was deleted at that time; `403` for anyone else, `404` for an unknown project, `409` with nothing restored when a camera in it has since got another open deployment (one per camera, ww-backend #320), naming the camera |
 
 ---
@@ -143,6 +146,7 @@ are readable by any signed-in user, and an API key's jobs are read with `GET /ap
 
 | Method · Path | Description |
 |---|---|
+| `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id |
 | `GET /api/jobs/{job_id}` | Status + `progress`, `current_phase`, ordered `events[]`, `summary` |
 | `GET /api/jobs/{job_id}/result` | Result of a completed job (`result_url`); `409` if not yet complete |
 
@@ -206,6 +210,9 @@ and `temperature_c`/`battery_pct` (parsed from `UserComment` telemetry). The ful
 ## iNaturalist Integration
 
 OAuth connect + observation publish/poll. Gated by `FF_INAT_ENABLED` (404 when off). JWT unless noted.
+The routes that store or use a person's token (`/auth`, `/callback`, `/token`, `/status`,
+`/observations`, `/publish`) answer `503` with the reason when `INAT_CLIENT_SECRET`, which keys the
+token encryption, is missing or shorter than 32 characters (`services/inat_oauth.py::token_key_problem`).
 Prefix `/api/inat`. The Annotations bulk "Upload to iNaturalist" / "Sync IDs" flows build on these —
 see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 
@@ -213,14 +220,14 @@ see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 |---|---|---|
 | `GET /api/inat/auth` | JWT | Start OAuth → `{ authorization_url, state }` |
 | `GET /api/inat/callback` | None (state) | OAuth redirect handler → stores tokens, 302 to `/toolkit?inat=connected` |
-| `POST /api/inat/token` | JWT | Exchange an authorization code for tokens (the non-redirect path) |
+| `POST /api/inat/token` | JWT | Connect with a personal API token pasted from iNaturalist (no OAuth app), body `{ api_token }`; checked against iNaturalist, then stored encrypted. It lasts about 24 h |
 | `GET /api/inat/status` | JWT | Connection status (`connected`, `inat_username`, …) |
 | `POST /api/inat/disconnect` | JWT | Revoke stored tokens |
 | `POST /api/inat/observations` | JWT | Create an observation — body `{ species_guess, latitude, longitude, observed_on, geoprivacy?, … }` |
 | `GET /api/inat/observations/{observation_id}/status` | None | Identification status for one observation |
 | `POST /api/inat/observations/poll` | JWT | Batch status for ≤200 observation ids (`{ observation_ids: [...] }`) |
-| `POST /api/inat/publish` | JWT · write | Only photos in projects the caller can **write** to are published, `403` when that is none of them. **Publish WW media to iNat**: consolidates bursts by temporal gap, drops human/vehicle/blank by-catch, proxy-uploads photos. Body `{ media_ids, gap_seconds?, geoprivacy? }` (default `obscured`) → `observations_created`, `photos_uploaded`, `skipped_*`, `errors` |
-| `POST /api/inat/sync` | JWT | **Pull community IDs back** — batch-polls `quality_grade` + `community_taxon`, updates `sync_status`, writes `source_type='consensus'` observations into WW. Idempotent → `checked`, `updated`, `research`, `disagreement`, `observations_written` |
+| `POST /api/inat/publish` | JWT · write | Only photos in projects the caller can **write** to are published, `403` when that is none of them. **Publish WW media to iNat**: consolidates bursts by temporal gap, leaves out a photo whose card label is not an animal or that any row says shows a person, proxy-uploads photos. Body `{ media_ids, gap_seconds?, geoprivacy? }` (default `obscured`) → `observations_created`, `photos_uploaded`, `skipped_*`, `errors`, `remaining_media_ids`. It starts no photo after about two minutes, inside the ingress timeout, and hands back the photos it did not reach: send them again (`useINat().publish` does) and a burst carries on in the observation it started. A burst holding a photo the caller already published joins that photo's observation |
+| `POST /api/inat/sync` | JWT | **Pull community IDs back**: polls `quality_grade` and the community taxon of the caller's published observations, updates `sync_status` (the badge), and is meant to write the community taxon into WW as `source_type='consensus'` observations. Today the community taxon is never read, so only `sync_status` changes and nothing is written ([what happens today](../development%20reports/inaturalist-integration.md#what-happens-today-checked-25-oct-2026-123)) → `checked`, `updated`, `research`, `disagreement`, `observations_written` |
 | `GET /api/inat/taxa/search` | JWT | iNat taxa autocomplete — backs the `SpeciesPicker` alongside the local `taxa` table |
 | `POST /api/inat/taxa` | JWT | Register an iNat taxon + its lineage locally, returning a real `taxon_id` |
 
@@ -300,7 +307,7 @@ Prefix `/api/camtrapdp`. Gated by `FF_CAMTRAPDP_IMPORT_ENABLED`.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/camtrapdp/import` | Needs an active `organisation_member` or `organisation_manager` role, the rule for creating a project; the new project goes in that organisation. Not the demo. Import a CamtrapDP `.zip`: multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device of the importing organisation, reused by a re-import and never shared with another organisation. A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
+| `POST /api/camtrapdp/import` | Needs an active `organisation_member` or `organisation_manager` role, the rule for creating a project; the new project goes in that organisation. Not the demo. Import a CamtrapDP `.zip`: multipart `file`, `annotation_mode` (default `final`), `run_ai` (default `false`) → creates deployments + media + observations. `annotation_mode=final` treats the package as a finished dataset (provenance mapped from `classificationMethod`; media with no observation get a reviewed `blank`); `unprocessed` leaves unlabelled media bare as work to do. `run_ai=true` additionally runs SpeciesNet + Wildlife Brain on the image-backed imported deployments → returns `ai_job_id`. Each `cameraID` becomes a placeholder device whose `bluetooth_id` is a uuid5 of the importing organisation and the name, so a re-import by that organisation reuses it and no other organisation does; the device carries no `organisation_id` (cameras belong to no organisation, ww-backend#346). A camera keeps one open deployment (no `deploymentEnd`, ww-backend #320): a further open one, from the package or an earlier import, gets a placeholder device of its own and a warning naming the camera and the deployment |
 
 > An API key starts the same export with `POST /api/v1/export/camtrapdp` (see [Public Data API](#public-data-api-v1)).
 
@@ -314,6 +321,17 @@ and the Download CamtrapDP buttons then fall back to the Edge Function's metadat
 | Method · Path | Description |
 |---|---|
 | `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_viewer` check decides (viewers and organisation managers export too, ww-backend #331); `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from Drive with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`) as `<job_id>.zip`, `result_url` is a read-only link valid for 24 hours that needs no sign-in, and the storage account's lifecycle rule deletes the ZIP 7 days after it is written. Without `AZURE_STORAGE_CONNECTION_STRING` the route answers `FEATURE_DISABLED`, as with the flag off, and the website falls back to the metadata-only package. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
+
+---
+
+## Reports
+
+Prefix `/api/reports`. JWT required, the demo account included: it only reads. Gated by
+`FF_GBF_REPORT_ENABLED`, off by default (`FEATURE_DISABLED`).
+
+| Method · Path | Description |
+|---|---|
+| `GET /api/reports/gbf?project_ids=<id>,<id>&from=<date>&to=<date>` | The GBF contribution report (#371): what the projects contribute to targets 6, 4, 20 and 22 of the Global Biodiversity Framework over UTC days `from` to `to`, both included. Needs read access to every project, `404` otherwise and for a deleted one; `422` for a malformed id or `from` after `to`. Returns `{ method_version, period: { from, to }, projects: [{ id, name }], camera_nights_by_month: [{ month, camera_nights }], target_6, target_4, target_20, target_21, target_22 }`. `target_6` (invasive species) and `target_4` (IUCN Vulnerable or worse) are each `{ sites_monitored, species_recorded, species }`, every species `{ taxon_id, scientific_name, common_name, conservation_status, invasive, detections, rate, sites_with, monthly: [{ month, detections, rate }], first_detections: [{ deployment_id, deployment_name, date }] }`, highest rate first; a species can be in both. `target_20` is `{ cameras, sites, camera_nights, photos, photos_with_ai, photos_reviewed }` and `target_22` is `{ reviewers }`, a count. `target_21` is `{ reviewed_detections, datasets }`, a dataset per project `{ project_id, project_name, dataset_key, status, title, doi, published_records, last_published, reviewed_detections }` with `status` `published`, `not_published` (no key), `not_found` or `unavailable`: GBIF's answers are cached for a day and a GBIF failure never fails the report (#373). The definitions (photo verdict, detections by the 30-minute rule, camera-nights, rate per 100 camera-nights, sites) are in `domain/gbf_report.py`. Rate limit 10/minute |
 
 ---
 
@@ -343,7 +361,8 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 | `GET /api/brain/umap/{deployment_id}` | Persisted 2-D UMAP scatter coordinates |
 | `GET /api/brain/outliers/{deployment_id}` | HDBSCAN-rejected images (expert-review candidates) |
 | `GET /api/brain/similar/{media_id}` | Nearest neighbours (`?n=20`, 1 to 100) among the photos of the anchor's organisation, in deployments the caller can read. `NOT_FOUND` envelope when the photo has no embedding |
-| `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | **Write** (see [Access](#access)). Confirm a cluster as a taxon → bulk-creates human observations for its members |
+| `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | **Write** (see [Access](#access)), demo refused. Confirm a cluster as a taxon: body `{ taxon_id?, scientific_name?, vernacular_name? }`. Adds a human row (carrying the run and cluster id) for each member with no human verdict yet; a member a person already labelled is skipped, so a cluster never overwrites a person's label (UI audit decision 2). → `{ cluster_assignment_id, observations_created, observation_ids, skipped }`. `ALREADY_CONFIRMED` envelope for a confirmed cluster |
+| `POST /api/brain/clusters/{cluster_assignment_id}/unconfirm` | **Write**, demo refused. Undo a confirm: deletes the human rows with the cluster's deployment, run and cluster id that still carry its label (a row a person has relabelled since stays), and sets the cluster back to `open` with no taxon, `confirmed_by` or `confirmed_at`. → `{ cluster_assignment_id, observations_deleted, kept }`. `NOT_CONFIRMED` envelope for a cluster that is not confirmed |
 | `GET /api/brain/embedding-runs/{deployment_id}` | List embedding runs (model version, status, image count) |
 | `POST /api/brain/reprocess/deployment/{deployment_id}` | **Write** (see [Access](#access)). Supersede current runs and re-embed a deployment. The worker checks it can embed first, so a failed check leaves the current clusters in place |
 | `POST /api/brain/reprocess/project/{project_id}` | **Write** (see [Access](#access)). Reprocess every deployment in a project |
@@ -359,7 +378,8 @@ Same prefix; the queue/score endpoints are additionally gated by **`FF_ACTIVE_LE
 |---|---|
 | `POST /api/brain/recalculate-al-scores/{deployment_id}` | **Write** (see [Access](#access)). Recompute active-learning scores for a deployment |
 | `GET /api/brain/review-queue/{deployment_id}` | Media ranked by `active_learning_score` DESC with AI label + score reasons (`?limit=50`) |
-| `POST /api/brain/review/{media_id}` | **Write** (see [Access](#access)). Record a reviewer decision (`approve` / `reassign` / `expert`) → human observation |
+| `POST /api/brain/review/{media_id}` | **Write** (see [Access](#access)), demo refused, `FF_WILDLIFE_BRAIN_ENABLED` only. Record a reviewer decision (`approve` / `reassign` → `human_reviewed`, `expert` → `expert_reviewed`) as the photo's human row: added when it has none, updated when it has one |
+| `POST /api/brain/review/batch` | **Write** per photo, demo refused, `FF_WILDLIFE_BRAIN_ENABLED` only. One decision on up to 500 photos: body `{ media_ids, decision: 'reassign' \| 'expert', taxon_id?, scientific_name?, vernacular_name? }` (`reassign` needs `taxon_id` or `scientific_name`; more than 500 is `422`). The same meaning as the per-photo route, written in chunks of 50. Without a species, `expert` keeps a photo's own label and changes its status. Photos the caller may not change are skipped, `403` when that is all of them. → `{ created, updated, observation_ids, skipped: [{ media_id, reason: 'not_writable' \| 'not_found' }] }` |
 
 ---
 
@@ -386,6 +406,7 @@ Prefix `/api/qa`. JWT required; gated by **`FF_ACTIVE_LEARNING_ENABLED`** (the r
 | Method · Path | Description |
 |---|---|
 | `GET /api/qa/report/{deployment_id}` | **Read** (see [Access](#access)), `404` otherwise. AI-vs-human agreement (a precision proxy over images carrying both an AI and a human label) |
+| `GET /api/qa/report/project/{project_id}` | **Read**, `404` otherwise. The same for the project's live deployments in one answer (Dataset Health): `{ project_id, n_compared, matches, precision, per_deployment: [{ deployment_id, location_name, n_compared, matches, precision }] }`, `per_deployment` holding the deployments with a photo compared, most first |
 
 ---
 
@@ -426,7 +447,7 @@ account cannot create or revoke. Organisation managers do this in Settings, Inte
 | `DELETE /api/v1/api-keys/{key_id}?organisation_id=` | JWT · organisation manager | Revoke a key (sets `revoked_at`); 404 if the organisation has no such unrevoked key |
 | `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | Deployments in the organisation's projects, newest first, with `project_name`, `device_name` and `status` (`planned`, `started`, `ended`). Filters `?project_id=&status=&limit=&offset=` |
 | `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | One of those deployments |
-| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The organisation's own cameras (`devices.organisation_id`), newest first |
+| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The live cameras with a live deployment, open or ended, in a live project of the organisation. Cameras belong to no organisation (ww-backend#346), so a camera lent to another organisation's project is in both lists. `id`, `name`, `bluetooth_id`, `device_eui`, `created_at`, newest registered first (`created_at`, then `id`). `?limit=&offset=` |
 | `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | The camera's `lorawan_messages` whose deployment is in one of the organisation's projects (ww-backend#323), newest first, with the parsed `battery_level`, `sd_card_used_capacity` and `model_output`. `?date_from=&date_to=&limit=` (≤ 1,000). An EUI with none answers `[]` |
 | `GET /api/v1/observations` | `X-API-Key` · `observations:read` | One verdict per live photo with at least one live observation, chosen as the grid's `photoVerdict` chooses it (#170; `photo_verdict` is its port): the label fields of the observation the card shows, `is_empty`, and `human_reviewed` when any observation is reviewed. Photos in `media.created_at` then `id` order, their observations in `created_at` order. `?project_id=&deployment_id=&limit=&offset=` |
 | `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | The [CamtrapDP export](#camtrapdp-export) job for the key's organisation: the same body and package, with `export-camtrap-dp` called with the service role and `organisation_id` (ww-backend#290). 404 for a project outside the organisation, and while `FF_CAMTRAPDP_EXPORT_ENABLED` is off or `AZURE_STORAGE_CONNECTION_STRING` is unset. Returns `{ job_id }` |

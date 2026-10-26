@@ -28,7 +28,7 @@ services:
       # iNaturalist OAuth
       - INAT_CLIENT_ID=${INAT_CLIENT_ID:-}
       - INAT_CLIENT_SECRET=${INAT_CLIENT_SECRET:-}
-      - INAT_REDIRECT_URI=${INAT_REDIRECT_URI:-https://wildlifewatcher.ai/inat/callback}
+      - INAT_REDIRECT_URI=${INAT_REDIRECT_URI:-http://localhost:8000/api/inat/callback}
       # Feature Flags
       - FF_INAT_ENABLED=${FF_INAT_ENABLED:-false}
       - FF_ML_ENABLED=${FF_ML_ENABLED:-false}
@@ -37,6 +37,7 @@ services:
       - PUBLIC_API_RATE_LIMIT_PER_MINUTE=${PUBLIC_API_RATE_LIMIT_PER_MINUTE:-60}
       - FF_PIPELINE_ENABLED=${FF_PIPELINE_ENABLED:-false}
       - FF_ACTIVE_LEARNING_ENABLED=${FF_ACTIVE_LEARNING_ENABLED:-false}
+      - FF_GBF_REPORT_ENABLED=${FF_GBF_REPORT_ENABLED:-false}
       # Dual AI: reflect the camera's own NN scores from EXIF as edge observations
       # beside the cloud pipeline's. Defined in config.py and gating
       # domain/edge_reflection.py, but never forwarded here, so the edge half of

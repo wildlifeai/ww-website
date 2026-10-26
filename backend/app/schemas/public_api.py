@@ -51,6 +51,27 @@ class ApiKeyInfo(BaseModel):
     created_at: Optional[str] = None
 
 
+# ── Devices ──────────────────────────────────────────────────────────
+
+
+class DeviceOut(BaseModel):
+    """A camera with a deployment, open or ended, in one of the organisation's projects.
+
+    Cameras belong to no organisation, so a camera lent to another organisation's project is
+    in both organisations' lists.
+    """
+
+    id: str
+    name: str
+    bluetooth_id: str
+    device_eui: Optional[str] = Field(None, description="The camera's LoRaWAN EUI, which the telemetry endpoint takes")
+    created_at: Optional[str] = Field(None, description="When the camera was registered")
+
+
+class DevicesResponse(ApiResponse):
+    data: List[DeviceOut] = Field(default_factory=list)
+
+
 # ── Telemetry ────────────────────────────────────────────────────────
 
 

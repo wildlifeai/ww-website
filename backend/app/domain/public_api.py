@@ -97,24 +97,31 @@ async def get_deployment(org_id: str, deployment_id: str) -> Optional[Dict[str, 
 # ── Devices and telemetry ───────────────────────────────────────────
 
 
+# The camera columns a partner gets: not ``organisation_id``, unused since ww-backend#346, nor
+# ``modified_by``, a user who may be in another organisation.
+_DEVICE_COLUMNS = "id, name, bluetooth_id, device_eui, created_at"
+
+
 async def list_devices(
     org_id: str,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[List[Dict[str, Any]], int]:
-    """The organisation's own cameras (``devices.organisation_id``), newest first."""
+    """The cameras deployed in the organisation's projects, newest registered first.
+
+    Cameras belong to no organisation (ww-backend#346). A live camera is listed when it has a
+    live deployment, open or ended, in a live project of the organisation, so a camera lent to
+    another organisation's project is in both lists, once each. Returns (records, total).
+    """
     client = create_service_client()
-    response = (
-        client.table("devices")
-        .select("*", count=CountMethod.exact)
-        .eq("organisation_id", org_id)
-        .is_("deleted_at", "null")
-        .order("created_at", desc=True)
-        .order("id")
-        .range(offset, offset + limit - 1)
-        .execute()
+    query = _in_org(
+        client.table("devices").select(f"{_DEVICE_COLUMNS}, deployments!inner(id, {_PROJECT})", count=CountMethod.exact),
+        org_id,
+        deployments="deployments",
     )
-    return rows_of(response), response.count or 0
+    response = query.is_("deleted_at", "null").order("created_at", desc=True).order("id").range(offset, offset + limit - 1).execute()
+    records = [{k: v for k, v in row.items() if k != "deployments"} for row in rows_of(response)]
+    return records, response.count or 0
 
 
 async def get_telemetry(

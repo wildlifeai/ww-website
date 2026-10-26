@@ -147,7 +147,14 @@ confirm fails with `permission denied for table observations`, that's the missin
 | Surface | Route | Purpose |
 |---------|-------|---------|
 | Cluster review | `/clusters/:id` | Bulk-confirm an HDBSCAN cluster to one species; reassign, flag for an expert or publish to iNaturalist the photos selected in a cluster |
-| Dataset health | `/intelligence/:id` | Review funnel + AI-vs-human agreement |
+| Dataset health | `/intelligence/:id` | Review funnel + AI-vs-human agreement, one `GET /api/qa/report/project/{id}` for the project |
+
+Cluster review writes the same one human row per photo through the backend
+(`domain/human_verdicts.py`). *Confirm* labels only the members nobody has labelled, and the toast
+says how many it skipped and offers Undo, which deletes the rows that confirm wrote (not a row
+relabelled since) and reopens the cluster. *Reassign* and *Flag for expert* send the selection in
+one request (`POST /api/brain/review/batch`, up to 500 photos), adding a photo's human row or
+updating the one it has.
 
 Cluster review's *Publish to iNaturalist* calls `POST /api/inat/publish`, so it needs the account
 connected in Toolkit and a deployment with a location, and names each encounter by its photos'

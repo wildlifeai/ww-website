@@ -215,24 +215,35 @@ def test_any_other_deployment_error_still_fails_the_import():
         _import(db, _pkg(("d1", "CAM1", "2026-01-01T00:00:00Z", "")))
 
 
-def _legacy_device(org):
-    name = "[imported] CAM1"
-    return {"id": f"dev-{org}", "name": name, "organisation_id": org, "bluetooth_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{name}"))}
+NAME = "[imported] CAM1"
+
+
+def _device(seed, organisation_id=None):
+    return {"id": f"dev-{seed}", "name": NAME, "organisation_id": organisation_id, "bluetooth_id": str(uuid.uuid5(uuid.NAMESPACE_DNS, seed))}
+
+
+def test_the_device_is_found_by_its_scoped_bluetooth_id_alone():
+    """Cameras belong to no organisation (ww-backend#346): the lookup ignores organisation_id."""
+    db = _Db(devices=[_device(f"imported-{ORG}-{NAME}", organisation_id="org-2")])
+
+    _import(db, _pkg(("d1", "CAM1", "2026-01-01T00:00:00Z", "")))
+
+    assert len(db.rows("devices")) == 1 and db.rows("deployments")[0]["device_id"] == f"dev-imported-{ORG}-{NAME}"
 
 
 def test_another_organisations_camera_of_the_same_name_is_not_reused():
-    db = _Db(devices=[_legacy_device("org-2")])
+    db = _Db(devices=[_device(f"imported-org-2-{NAME}"), _device(f"imported-{NAME}")])
 
     _import(db, _pkg(("d1", "CAM1", "2026-01-01T00:00:00Z", "")))
 
     (dep,) = db.rows("deployments")
     device = next(d for d in db.rows("devices") if d["id"] == dep["device_id"])
-    assert device["organisation_id"] == ORG and device["id"] != "dev-org-2"
+    assert device["bluetooth_id"] == str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{ORG}-{NAME}"))
 
 
-def test_a_device_from_before_the_organisation_seed_is_reused_by_its_own_organisation():
-    db = _Db(devices=[_legacy_device(ORG)])
+def test_a_new_device_carries_no_organisation():
+    db = _Db()
 
-    _import(db, _pkg(("d1", "CAM1", "2026-01-01T00:00:00Z", "")))
+    _import(db, _pkg(("d1", "CAM1", "2026-01-01T00:00:00Z", ""), ("d2", "CAM1", "2026-03-01T00:00:00Z", "")))
 
-    assert len(db.rows("devices")) == 1 and db.rows("deployments")[0]["device_id"] == f"dev-{ORG}"
+    assert len(db.rows("devices")) == 2 and all("organisation_id" not in d for d in db.rows("devices"))
