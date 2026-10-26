@@ -3,10 +3,11 @@
 """An in-memory stand-in for the PostgREST calls the public API makes, for scoping tests.
 
 It evaluates ``select`` with embeds (``name!inner(...)``, nested), filters on the table or on
-an embed (``projects.organisation_id``), ``order`` (also ``foreign_table``), ``range``,
-``limit`` and ``count="exact"``, as PostgREST does for these cases: a filter on an embed trims
-that embed, and drops the parent row only when the embed is ``!inner``. ``update`` and
-``upsert`` are enough for the API key and job stores.
+an embed (``projects.organisation_id``), ``or_`` on the table, ``order`` (also
+``foreign_table``), ``range``, ``limit`` and ``count="exact"``, as PostgREST does for these
+cases: a filter on an embed trims that embed, and drops the parent row only when the embed is
+``!inner``. Two timestamps with a zone compare as instants, as ``timestamptz`` does. ``update``
+and ``upsert`` are enough for the API key and job stores.
 
 A column the table does not have fails the test, so a query naming a column that is not in
 ww-backend's schema is caught here and not in production. ``COLUMNS`` lists the columns of
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import copy
 import re
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -120,6 +122,7 @@ class Query:
         self.tree: Optional[dict] = None
         self.count = False
         self.filters: list[tuple[str, str, Any]] = []
+        self.logic: list[Any] = []
         self.orders: dict[str, list[tuple[str, bool, Optional[bool]]]] = {}
         self.offset, self.limit_n = 0, None
         self.mode, self.payload = "select", None
@@ -160,6 +163,14 @@ class Query:
 
     def gt(self, path, value):
         return self._filter(path, "gt", value)
+
+    def lt(self, path, value):
+        return self._filter(path, "lt", value)
+
+    def or_(self, filters: str):
+        """``a.lt.1,and(b.eq.2,c.lt.3)``: PostgREST's logic tree, on the table's own columns."""
+        self.logic.append(_logic(self.table, "or", filters))
+        return self
 
     def order(self, column, *, desc=False, nullsfirst=None, foreign_table=None):
         self.orders.setdefault(foreign_table or "", []).append((column, desc, nullsfirst))
@@ -242,6 +253,8 @@ class Query:
         for row in self.db.rows(self.table):
             if not all(_test(row, self.table, c, op, v) for c, op, v in self._filters_at("")):
                 continue
+            if not all(matches(row) for matches in self.logic):
+                continue
             built = self._materialize(self.table, row, tree, "")
             if built is None:
                 continue
@@ -261,6 +274,32 @@ class Query:
         return SimpleNamespace(data=copy.deepcopy(page), count=total if self.count else None)
 
 
+def _logic(table: str, op: str, body: str):
+    """A row predicate for one ``or(...)`` or ``and(...)`` body."""
+    tests = []
+    for part in _split(body):
+        nested = re.match(r"^(and|or)\((.*)\)$", part, re.S)
+        if nested:
+            tests.append(_logic(table, nested[1], nested[2]))
+        else:
+            column, fop, value = part.split(".", 2)
+            tests.append(lambda row, c=column, o=fop, v=value: _test(row, table, c, o, v))
+    combine = all if op == "and" else any
+    return lambda row: combine(t(row) for t in tests)
+
+
+def _instants(actual: Any, value: Any) -> tuple[Any, Any]:
+    """Two ISO timestamps with a zone compare as instants, as timestamptz does; anything else as given."""
+    if isinstance(actual, str) and isinstance(value, str) and "T" in actual and "T" in value:
+        try:
+            a, b = datetime.fromisoformat(actual), datetime.fromisoformat(value)
+        except ValueError:
+            return actual, value
+        if a.tzinfo and b.tzinfo:
+            return a, b
+    return actual, value
+
+
 def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
     if "->>" in column:  # job_data->>user_id
         col, key = column.split("->>")
@@ -268,15 +307,16 @@ def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
     else:
         _check_column(table, column)
         actual = row.get(column)
-    if op == "eq":
-        return actual is not None and str(actual) == str(value)
     if op == "is":
         return actual is None
     if op == "in":
         return actual in value
     if actual is None:
         return False
-    return {"gte": actual >= value, "lte": actual <= value, "gt": actual > value}[op]
+    actual, value = _instants(actual, value)
+    if op == "eq":
+        return actual == value if isinstance(actual, datetime) else str(actual) == str(value)
+    return {"gte": actual >= value, "lte": actual <= value, "gt": actual > value, "lt": actual < value}[op]
 
 
 class FakeDB:
