@@ -99,9 +99,9 @@ annotation `StatusBadge` stays top-left). Colour by `inat_observations.sync_stat
 | `disagreement` | amber | community taxon differs from your label |
 | `failed` | red | upload failed |
 
-`MediaBrowser` loads badge state with a **graceful** `inat_observation_media → inat_observations`
-lookup (if the Phase-1 tables aren't migrated yet, it shows no badges rather than breaking). Clicking
-the badge opens the iNat observation.
+The review grid (`hooks/useGridInat.ts`) loads badge state with a **graceful**
+`inat_observation_media → inat_observations` lookup (if the Phase-1 tables aren't migrated yet, it
+shows no badges rather than breaking). Clicking the badge opens the iNat observation.
 
 Selection + publish live in a new **"iNaturalist" ribbon tab**: Account (connect / ✓ username),
 Selection (toggle + count), Publish (⬆ Upload N), Community IDs (↻ Sync). In select mode, clicking a
@@ -141,7 +141,7 @@ Returns `checked`, `updated`, `research`, `disagreement`, `observations_written`
 | API | `…/routers/inaturalist.py` | `/publish`, `/sync` (+ existing auth/observation routes) |
 | Frontend | `…/hooks/useINat.ts` | status / connect / publish / sync |
 | Frontend | `…/components/data/INatBadge.tsx` | dove badge |
-| Frontend | `…/components/data/MediaBrowser.tsx` | selection, badges, ribbon tab |
+| Frontend | `…/hooks/useGridInat.ts` | the review grid's badges and publish |
 | Frontend | `…/pages/ToolkitPage.tsx` | Connect iNaturalist card |
 
 ---

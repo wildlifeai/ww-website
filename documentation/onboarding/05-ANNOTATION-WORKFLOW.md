@@ -6,7 +6,9 @@ spend their time in.
 ## Entry point: the Media tab (`/annotations`)
 
 `/annotations` → `AnnotationsPage` → `MediaBrowser`. The page has **no title text** — the
-highlighted nav tab already signals where you are.
+highlighted nav tab already signals where you are. `MediaBrowser` holds the grid's choices and wires
+its parts: the hooks `hooks/useGrid*.ts` (the page query, thumbnails, selection, Actions,
+iNaturalist, groups, viewer) and the components `components/data/Grid*.tsx`.
 
 ### The Ribbon (Microsoft-Word-style command bar)
 

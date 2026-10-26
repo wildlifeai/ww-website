@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  applyFilterOps, applyOrder, gridFilterPlan, gridQueryKey, gridScopePlan, gridSortPlan, hasAdvancedFilters, hasAnyFilter,
-  NO_FILTERS,
+  advancedFilterCount, applyFilterOps, applyOrder, clearedAdvanced, gridFilterPlan, gridQueryKey, gridScopePlan, gridSortPlan,
+  hasAdvancedFilters, hasAnyFilter, NO_FILTERS,
   type FilterableQuery,
 } from './gridFilters'
 import { DAY_START_HOUR, NIGHT_START_HOUR } from './time'
@@ -175,6 +175,13 @@ describe('filter summaries', () => {
     expect(hasAdvancedFilters(f({ dateTo: '2026-01-01' }))).toBe(true)
     expect(hasAdvancedFilters(f({ timeOfDay: 'night' }))).toBe(true)
     expect(hasAnyFilter(NO_FILTERS)).toBe(false)
+  })
+
+  it('counts the advanced filters, a date range once, and clears them keeping the species', () => {
+    const set = f({ species: ['x'], status: 'ai', dateFrom: '2026-01-01', dateTo: '2026-02-01', timeOfDay: 'day' })
+    expect(advancedFilterCount(NO_FILTERS)).toBe(0)
+    expect(advancedFilterCount(set)).toBe(3)
+    expect(clearedAdvanced(set)).toEqual(f({ species: ['x'] }))
   })
 
   it('keys a query by its deployments and filters, ignoring species order', () => {

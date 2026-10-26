@@ -213,10 +213,18 @@ export function applyOrder<Q extends { order(column: string, options: Omit<Order
   return q
 }
 
-/** The filters set in the Advanced filters dialog (everything but deployment and species). */
-export function hasAdvancedFilters(f: GridFilters): boolean {
-  return !!(f.status || f.annotator || f.model || f.annotationType || f.sex || f.lifeStage || f.dateFrom || f.dateTo || f.timeOfDay)
+/** How many filters are set in the Advanced filters dialog (all but deployment and species); a date range counts once. */
+export function advancedFilterCount(f: GridFilters): number {
+  return [f.status, f.annotator, f.model, f.annotationType, f.sex, f.lifeStage, f.dateFrom || f.dateTo, f.timeOfDay].filter(Boolean).length
 }
+
+/** Any filter set in the Advanced filters dialog. */
+export function hasAdvancedFilters(f: GridFilters): boolean {
+  return advancedFilterCount(f) > 0
+}
+
+/** The advanced filters cleared, keeping the species choice. */
+export const clearedAdvanced = (f: GridFilters): GridFilters => ({ ...NO_FILTERS, species: f.species })
 
 /** Any filter beyond the deployment choice. */
 export function hasAnyFilter(f: GridFilters): boolean {
