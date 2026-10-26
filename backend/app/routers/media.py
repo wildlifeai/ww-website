@@ -155,19 +155,11 @@ async def enqueue_thumbnail_backfill(
     if not settings.FF_MEDIA_REGISTRY_ENABLED:
         return _registry_disabled(req_id)
 
-    from app.jobs.definitions import backfill_thumbnails_job
-    from app.jobs.runner import enqueue_local_job
-    from app.jobs.store import create_job
+    from app.jobs.definitions import start_thumbnail_backfill
 
-    # Owner and deployment let the job show in the user's processing history and
-    # drive the Annotations "being processed" banner for that deployment.
-    job_id = await create_job(
-        user_id=user.id,
-        kind="media_prep",
-        label=f"Thumbnails for deployment {deployment_id[:8]}",
-        deployment_ids=[deployment_id],
-    )
-    enqueue_local_job(backfill_thumbnails_job(job_id, deployment_id))
+    # The job shows in the user's processing history and drives the grid's "Processing…" for
+    # that deployment; a thumbnails job still waiting there (an upload's) is reused.
+    job_id = await start_thumbnail_backfill(deployment_id, user.id)
     return ApiResponse(
         data={"job_id": job_id, "status": "queued", "deployment_id": deployment_id},
         meta=ApiMeta(request_id=req_id),

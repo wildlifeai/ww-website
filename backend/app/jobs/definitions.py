@@ -1658,6 +1658,12 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                 )
             await complete_phase(job_id, ProgressPhase.AI_PIPELINE)
 
+        # ── Thumbnails when the AI does not run: they are its first step, so make them here ──
+        if thumbnails_need_their_own_job(_dep_ids, _steps, _run_ai):
+            for _dep_id in _dep_ids:
+                await start_thumbnail_backfill(_dep_id, _user_id, delay_s=THUMBNAIL_DEBOUNCE_SECONDS)
+            logger.info("thumbnails_queued_without_ai", job_id=job_id, deployments=len(_dep_ids))
+
         # ── Final status (Drive sync + AI pipeline done) ──────────────────
         job_data = await get_job(job_id)
         summary = job_data.summary if job_data else None
@@ -1724,6 +1730,57 @@ async def backfill_thumbnails_job(job_id: str, deployment_id: str):
     except Exception as e:
         logger.error("job_failed", job_type="backfill_thumbnails", job_id=job_id, error=str(e))
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+
+
+# An upload arrives in chunks of about 10 photos, each its own upload job: its thumbnails job
+# waits this long so the later chunks join it instead of starting their own.
+THUMBNAIL_DEBOUNCE_SECONDS = 20
+# Deployment id -> the thumbnails job waiting to start in this process.
+_pending_thumbnails: dict[str, str] = {}
+
+
+def thumbnails_need_their_own_job(deployment_ids: list[str], steps: list, run_ai: bool) -> bool:
+    """An upload whose AI does not run (run_ai off, or no AI configured) still needs thumbnails.
+
+    They are the AI pipeline's first step (media_prep), so without this its photos would have
+    none, and the review grid would say "Processing…" with nothing running.
+    """
+    from app.config import settings
+
+    return bool(deployment_ids) and settings.FF_MEDIA_REGISTRY_ENABLED and not (steps and run_ai)
+
+
+async def start_thumbnail_backfill(deployment_id: str, user_id: str | None, delay_s: float = 0) -> str:
+    """Start ``backfill_thumbnails_job`` for one deployment in this process; returns its job id.
+
+    The job carries its owner and deployment, so it shows in Processing history and the review
+    grid's "Processing…" covers that deployment while it waits and runs. A job still waiting for
+    the deployment is reused; one that has started gets a follow-up, which picks up the photos it
+    missed (the backfill only makes the thumbnails that are missing).
+    """
+    from app.jobs.runner import enqueue_local_job
+
+    waiting = _pending_thumbnails.get(deployment_id)
+    if waiting:
+        return waiting
+    job_id = await create_job(
+        user_id=user_id,
+        kind="media_prep",
+        label=f"Thumbnails for deployment {deployment_id[:8]}",
+        deployment_ids=[deployment_id],
+    )
+    _pending_thumbnails[deployment_id] = job_id
+
+    async def _run() -> None:
+        try:
+            if delay_s:
+                await asyncio.sleep(delay_s)
+        finally:
+            _pending_thumbnails.pop(deployment_id, None)
+        await backfill_thumbnails_job(job_id, deployment_id)
+
+    enqueue_local_job(_run())
+    return job_id
 
 
 async def embed_deployment_job(job_id: str, deployment_id: str, model_name: str | None = None):

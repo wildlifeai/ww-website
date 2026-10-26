@@ -5,6 +5,9 @@
 // A stuck card offers Retry, which runs the deployment's thumbnail backfill; the grid also
 // starts that backfill once by itself per deployment and browser session (#175).
 
+/** Thumbnail backfills run at most this many at a time, the rest queued (UI audit 02 #23). */
+export const THUMBNAIL_RETRY_CONCURRENCY = 2
+
 /** How long after a photo is registered its thumbnail may still legitimately be on its way. */
 export const THUMBNAIL_GRACE_MS = 10 * 60 * 1000
 
@@ -33,6 +36,14 @@ export function busyDeployments(
     if (j.status === 'queued' || j.status === 'processing') (j.deployment_ids ?? []).forEach(id => busy.add(id))
   }
   return busy
+}
+
+/**
+ * The running jobs only make thumbnails (kind `media_prep`: an upload without the AI, or a
+ * Retry), so the grid's banner must not say the AI is analysing these photos.
+ */
+export function onlyMakingThumbnails(jobs: ReadonlyArray<{ kind?: string | null }>): boolean {
+  return jobs.length > 0 && jobs.every(j => j.kind === 'media_prep')
 }
 
 /**
