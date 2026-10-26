@@ -229,6 +229,7 @@ def api(monkeypatch):
         monkeypatch.setattr(f"{target}.create_service_client", db.client)
     monkeypatch.setattr(settings, "FF_PUBLIC_API_ENABLED", True)
     monkeypatch.setattr(settings, "FF_CAMTRAPDP_EXPORT_ENABLED", True)
+    monkeypatch.setattr(settings, "AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true")
     enqueued = []
 
     async def enqueue(name, *args, **kwargs):
@@ -388,6 +389,12 @@ def test_export_of_a_project_outside_the_organisation_is_not_found(api, project)
 
 def test_export_is_off_without_its_flag(api, monkeypatch):
     monkeypatch.setattr(api.settings, "FF_CAMTRAPDP_EXPORT_ENABLED", False)
+    assert api.call("POST", "/api/v1/export/camtrapdp", json={"project_id": PROJECT_A}).status_code == 404
+    assert api.enqueued == []
+
+
+def test_export_is_off_without_storage_for_its_zips(api, monkeypatch):
+    monkeypatch.setattr(api.settings, "AZURE_STORAGE_CONNECTION_STRING", "")
     assert api.call("POST", "/api/v1/export/camtrapdp", json={"project_id": PROJECT_A}).status_code == 404
     assert api.enqueued == []
 
