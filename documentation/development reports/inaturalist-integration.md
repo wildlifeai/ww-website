@@ -1,7 +1,8 @@
 # iNaturalist Integration — Design & Implementation
 
-> **Status:** Phases 1–4 implemented (2026-06-08). Schema authored in `ww-backend`
-> (pending `npm run db:change`); backend + frontend code in `ww-website`.
+> **Status:** Phases 1–4 implemented (2026-06-08), behind `FF_INAT_ENABLED`. Schema in `ww-backend`;
+> the tables exist on dev (checked 25 Oct 2026). The sync-back updates the badge only and writes no
+> identifications ([§6](#what-happens-today-checked-25-oct-2026-123)).
 > **Owners:** web platform.
 
 Lets a Wildlife Watcher user link their **personal iNaturalist account**, publish reviewed
@@ -139,6 +140,32 @@ job calls for everyone.
    rather than duplicating). Runs under the service role (RLS-bypassing; the schema grants it).
 
 Returns `checked`, `updated`, `research`, `disagreement`, `observations_written`.
+
+### What happens today (checked 25 Oct 2026, #123)
+
+The round trip stops at the badge: no identification from iNaturalist reaches `observations`.
+
+- **When it runs.** `InatAutoSync` (mounted in `App.tsx`) calls `POST /api/inat/sync` once per
+  browser session for a signed-in user whose `/api/inat/status` says connected; Settings,
+  Integrations, *Sync now* calls it on demand. Nothing is scheduled: no worker cron, nothing at API
+  startup. Each call covers the caller's own observations only.
+- **What it reads.** Up to 200 of the caller's rows in `uploaded`, `needs_id`, `research` or
+  `disagreement`, in no order, so past 200 which ones are polled is arbitrary. A row marked `failed`
+  (any of its photos failed to upload) is never polled again.
+- **The community taxon is never read.** `batch_poll_observations` (and `get_observation_status`)
+  read `community_taxon.name`, but `GET /v1/observations` has no `community_taxon` object, only
+  `community_taxon_id` and `taxon` (checked against two public observations on the live API). So
+  `community_taxon` is always null: `sync_status` follows `quality_grade` alone (`research`,
+  `needs_id`, or `uploaded` for casual), which recolours the dove badge; `disagreement` never
+  happens; `_write_consensus` never runs, and *Sync now* always reports 0 community IDs written.
+- **Nothing goes the other way.** A label changed in Wildlife Watcher after publishing is not sent to
+  iNaturalist; `species_guess` stays what it was at publish.
+
+Fixing the read (`taxon.name` when `taxon.id == community_taxon_id`, else the taxon of
+`community_taxon_id`) would switch on step 3 as written. Decide first what the rows should mean: at
+research grade the row is `consensus_approved`, which `photo_verdict` and the pipeline's
+`without_human_verdicts` count as a human verdict, so the card would show iNaturalist's taxon where
+no person labelled the photo, and later pipeline runs would skip those photos.
 
 ---
 
