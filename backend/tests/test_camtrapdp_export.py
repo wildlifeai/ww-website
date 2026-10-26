@@ -3,7 +3,7 @@
 """The CamtrapDP export with the original photos (#328): domain, job and route.
 
 Fakes stand in for ww-backend's export-camtrap-dp (a metadata ZIP shaped like its package.ts
-output), for Drive (a fetch function) and for Storage.
+output), for Drive (a fetch function) and for Azure Blob Storage.
 """
 
 import csv
@@ -337,17 +337,16 @@ def job_env(tmp_path, monkeypatch):
     monkeypatch.setattr(fn, "download_package", _fake_function(rows, calls))
     monkeypatch.setattr(export, "_fetch_original", FakeDrive(fail={f"gdrive://{_mid(2)}": None}))
     monkeypatch.setattr(export, "FETCH_BACKOFF_S", 0)
+    monkeypatch.setattr("app.config.settings.AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true")
     uploads = {}
 
-    async def upload(bucket, path, local_path, content_type):
-        uploads[(bucket, path)] = local_path.read_bytes()
-        return True
+    async def upload(container, blob, local_path, content_type):
+        uploads[(container, blob, content_type)] = local_path.read_bytes()
 
-    monkeypatch.setattr("app.services.storage.upload_file_to_storage", upload)
+    monkeypatch.setattr("app.services.azure_storage.upload_file", upload)
     monkeypatch.setattr(
-        "app.services.storage.signed_download_url", lambda bucket, path, ttl, name: f"https://signed/{bucket}/{path}?ttl={ttl}&name={name}"
+        "app.services.azure_storage.read_link", lambda container, blob, ttl, name: f"https://blob/{container}/{blob}?ttl={ttl}&name={name}"
     )
-    monkeypatch.setattr("app.services.storage.delete_older_than", AsyncMock(return_value=0))
     return SimpleNamespace(svc=svc, calls=calls, uploads=uploads)
 
 
@@ -359,11 +358,11 @@ async def test_job_packages_stores_links_and_notifies(job_env, monkeypatch):
 
     job = await store.get_job(job_id)
     assert job.status.value == "completed_with_errors"
-    assert job.result_url.startswith(f"https://signed/exports/camtrapdp/{job_id}.zip?ttl=86400&name=camtrapdp-{PROJECT}-")
+    assert job.result_url.startswith(f"https://blob/camtrapdp-exports/{job_id}.zip?ttl=86400&name=camtrapdp-{PROJECT}-")
     assert "1 of 2 photos" in job.message and "24 hours" in job.message
     assert job_env.calls[0][1] == "user-jwt"
     ((key, data),) = job_env.uploads.items()
-    assert key == ("exports", f"camtrapdp/{job_id}.zip")
+    assert key == ("camtrapdp-exports", f"{job_id}.zip", "application/zip")
     with zipfile.ZipFile(io.BytesIO(data)) as out:
         assert f"media/{DEP_A}/{_mid(1)}.jpg" in out.namelist()
         assert _mid(2) in json.loads(out.read("datapackage.json"))["description"]
@@ -386,11 +385,36 @@ async def test_job_fails_with_the_functions_message(job_env, monkeypatch):
 async def test_job_fails_when_storage_refuses(job_env, monkeypatch):
     from app.jobs import definitions, store
 
-    monkeypatch.setattr("app.services.storage.upload_file_to_storage", AsyncMock(return_value=False))
+    monkeypatch.setattr("app.services.azure_storage.upload_file", AsyncMock(side_effect=OSError("connection reset")))
     job_id = await store.create_job(user_id="user-1", kind="export")
     await definitions.export_camtrapdp_originals_job(job_id, {"project_id": PROJECT}, {"user_token": "t"})
     job = await store.get_job(job_id)
     assert job.status.value == "failed" and "could not be saved" in job.error and job.result_url is None
+
+
+async def test_job_fails_when_no_link_can_be_signed(job_env, monkeypatch):
+    from app.jobs import definitions, store
+    from app.services.azure_storage import AzureStorageError
+
+    def no_key(*args):
+        raise AzureStorageError("The connection string has no AccountKey to sign a link with")
+
+    monkeypatch.setattr("app.services.azure_storage.read_link", no_key)
+    job_id = await store.create_job(user_id="user-1", kind="export")
+    await definitions.export_camtrapdp_originals_job(job_id, {"project_id": PROJECT}, {"user_token": "t"})
+    job = await store.get_job(job_id)
+    assert job.status.value == "failed" and "no download link" in job.error and job.result_url is None
+
+
+async def test_job_without_storage_fails_before_reading_anything(job_env, monkeypatch):
+    from app.jobs import definitions, store
+
+    monkeypatch.setattr("app.config.settings.AZURE_STORAGE_CONNECTION_STRING", "")
+    job_id = await store.create_job(user_id="user-1", kind="export")
+    await definitions.export_camtrapdp_originals_job(job_id, {"project_id": PROJECT}, {"user_token": "t"})
+    job = await store.get_job(job_id)
+    assert job.status.value == "failed" and "no storage for exports" in job.error
+    assert not job_env.calls and not job_env.uploads
 
 
 def test_the_job_is_registered_for_the_worker():
@@ -413,6 +437,7 @@ def route(monkeypatch):
     monkeypatch.setattr(exports, "enqueue_job", enqueue)
     monkeypatch.setattr(exports, "create_job", AsyncMock(return_value="job-1"))
     monkeypatch.setattr(exports.settings, "FF_CAMTRAPDP_EXPORT_ENABLED", True)
+    monkeypatch.setattr(exports.settings, "AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true")
     yield SimpleNamespace(module=exports, enqueue=enqueue)
     app.dependency_overrides.pop(get_current_user, None)
 
@@ -440,6 +465,13 @@ def test_route_hides_another_organisations_project(client, route, monkeypatch):
 
 def test_route_is_off_behind_its_flag(client, route, monkeypatch):
     monkeypatch.setattr(route.module.settings, "FF_CAMTRAPDP_EXPORT_ENABLED", False)
+    assert _post(client).json()["error"]["code"] == "FEATURE_DISABLED"
+    route.enqueue.assert_not_awaited()
+
+
+def test_route_is_off_without_storage_for_its_zips(client, route, monkeypatch):
+    # The website then falls back to the metadata-only package.
+    monkeypatch.setattr(route.module.settings, "AZURE_STORAGE_CONNECTION_STRING", "")
     assert _post(client).json()["error"]["code"] == "FEATURE_DISABLED"
     route.enqueue.assert_not_awaited()
 

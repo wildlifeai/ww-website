@@ -3,7 +3,7 @@
 > **Status:** 🟢 Living — the authoritative map of every cloud resource the platform uses, what it's
 > for, and how to keep it from drifting into sprawl. Pairs with [deployment-guide](deployment-guide.md)
 > (*how to deploy*); this doc is *what exists and how to maintain it*. **Re-audit quarterly** (see the
-> [review checklist](#periodic-review-checklist)). Last updated: **2026-07-09**.
+> [review checklist](#periodic-review-checklist)). Last updated: **2026-10-26**.
 
 > ### ✅ Single-RG AU East (migration complete — 2026-06-30)
 > The org runs **only the `WW-AE` resource group** (`australiaeast`). The old `WW-Website` RG and the three
@@ -17,7 +17,7 @@ or orphaned, and both are bugs.
 
 | Provider | What it hosts |
 |----------|---------------|
-| **Azure** | Backend API + ARQ worker (Container Apps), container registry, upload blob buffer, Redis broker, logs |
+| **Azure** | Backend API + ARQ worker (Container Apps), container registry, upload blob buffer, CamtrapDP export ZIPs, Redis broker, logs |
 | **Supabase** | Postgres + RLS, Auth, Storage (renditions), the system of record — **two projects** (dev / prod) |
 | **Cloudflare** | Frontend (Pages + per-branch previews), DNS for `wildlifewatcher.ai`, CDN |
 | **Google Drive** | Permanent original-image archive (`gdrive://`) |
@@ -46,7 +46,7 @@ extra Log Analytics workspaces — that is the main source of sprawl and cost co
 |----------|------|---------|--------|-------------|
 | `ww-env` | Container Apps **environment** | Hosts all container apps; workload profiles **`Consumption`** (CPU apps) + **`gpu-t4`** (`Consumption-GPU-NC8as-T4`, serverless T4 for the worker); KEDA. | ✅ | Region-locked — recreating it means recreating its apps. GPU profile: `az containerapp env workload-profile list -g WW-AE -n ww-env`. |
 | `wwregistry` | Container Registry (ACR) | Image repos `ww-backend` (api, `--target api`) + `ww-backend-worker` (worker). | ✅ | Standard SKU, admin-enabled; `az acr build` builds in-cloud (no local Docker). Login server `wwregistry.azurecr.io`. **`weekly-purge` task** keeps sha tags to the 5 newest per repo (SHA-only filter; `stable`/`latest`/`dev-latest` immune) — see the cost-review action. |
-| `wwuploadsae` | Storage account | **Azure Blob** temporary upload buffer (deleted after Drive archival). | ✅ | Connection string is an ACA secret on the apps. |
+| `wwuploadsae` | Storage account | **Azure Blob** temporary upload buffer (deleted after Drive archival), one container per environment. Also `camtrapdp-exports`, the private container for the CamtrapDP export ZIPs (#387), shared by dev and prod: job ids never collide and nothing lists it. | ✅ | Connection string is an ACA secret on the apps. Public blob access is off for the account, so export links are read-only SAS links. The exports' lifecycle rule is [below](#wwuploadsae-lifecycle-rule). |
 | `ww-redis-dev` | Container App | **ARQ broker** (internal `redis:7-alpine`, TCP, `exposedPort=6379`). 0.25 vCPU / 0.5 Gi (right-sized 2026-08-03). | ✅ | Reach app-to-app via the **short name** `redis://ww-redis-dev:6379` (the `.internal.*` FQDN times out for TCP). **Not KEDA-reachable** — see the worker row. |
 | `ww-backend-dev` | Container App | **Dev API** (`--target api`), **min-0** (scale-to-zero), external ingress. `REDIS_URL` → offloads jobs to the worker. FQDN `ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io`. | ✅ | Dev Supabase project; secrets as **ACA secrets**. **`min-replicas` is set by CI, not by hand** — see the note below. |
 | `ww-embedding-worker-dev` | Container App | **Dev ML worker** (`--target worker`) on the **`gpu-t4` serverless T4 GPU** profile. SpeciesNet detect + per-crop BioCLIP + DINOv3 (Wildlife Brain, live). ~1–2 s/image vs ~30–50 s on CPU. | ✅ | `EMBEDDING_DEVICE=cuda` / `BIOCLIP_DEVICE=cuda` (SpeciesNet auto-detects CUDA). Gated DINOv3 weights need the **`HF_TOKEN`** ACA secret (else `image_count=0`). Scales **0↔1** via **KEDA Postgres scaler on `api_jobs`** (see below). Secrets as ACA secrets. |
@@ -107,6 +107,36 @@ the same shared pooler host (IPv4). **Verified: scales to 0 when idle** (GPU T4,
 (→ `True`). Pipeline code is GPU-ready: BioCLIP/DINOv3 read `BIOCLIP_DEVICE`/`EMBEDDING_DEVICE`
 (`services/bioclip_service.py`, `services/dinov3.py`); SpeciesNet passes no device and auto-detects CUDA.
 The `ww-backend-worker:dev-latest` image already ships CUDA-enabled torch.
+
+### `wwuploadsae` lifecycle rule
+
+The export job writes each ZIP once and hands out a read-only link valid for 24 hours. A lifecycle
+rule deletes the ZIP 7 days after it is written. Azure runs the rule about once a day, so a ZIP can
+outlive 7 days by up to a day. Nothing in the code sweeps old exports.
+
+```json
+{
+  "rules": [
+    {
+      "enabled": true,
+      "name": "deleteCamtrapdpExports",
+      "type": "Lifecycle",
+      "definition": {
+        "filters": { "blobTypes": ["blockBlob"], "prefixMatch": ["camtrapdp-exports/"] },
+        "actions": { "baseBlob": { "delete": { "daysAfterModificationGreaterThan": 7 } } }
+      }
+    }
+  ]
+}
+```
+
+`management-policy create` replaces the account's whole policy. The account had none on
+2026-10-26; if `az storage account management-policy show --account-name wwuploadsae -g WW-AE`
+returns one, add this rule to its `rules` instead. With the JSON above saved as `lifecycle.json`:
+
+```bash
+az storage account management-policy create --account-name wwuploadsae -g WW-AE --policy @lifecycle.json
+```
 
 ### Cost review — 2026-07-28 (30 days, Jun 30 – Jul 29: **NZ$212.84**)
 
