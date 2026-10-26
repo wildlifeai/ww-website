@@ -313,9 +313,9 @@ async def api_export_camtrapdp(
     """Start a CamtrapDP export of one project with its original photos, as the Download button does.
 
     Returns ``{job_id}``; poll ``GET /api/v1/jobs/{job_id}`` for the signed link. Behind
-    ``FF_CAMTRAPDP_EXPORT_ENABLED``, like the Download button's export.
+    ``FF_CAMTRAPDP_EXPORT_ENABLED`` and the export storage, like the Download button's export.
     """
-    if not settings.FF_CAMTRAPDP_EXPORT_ENABLED:
+    if not settings.camtrapdp_export_enabled:
         raise HTTPException(404, detail="CamtrapDP export is not enabled")
     org_id = key["organisation_id"]
     project_id = str(body.project_id)

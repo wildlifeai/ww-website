@@ -84,6 +84,7 @@ def stack(monkeypatch):
     monkeypatch.setattr(supabase_client, "_service_client", svc)
     monkeypatch.setattr(settings, "FF_PUBLIC_API_ENABLED", True)
     monkeypatch.setattr(settings, "FF_CAMTRAPDP_EXPORT_ENABLED", True)
+    monkeypatch.setattr(settings, "AZURE_STORAGE_CONNECTION_STRING", "UseDevelopmentStorage=true")
     enqueued = []
 
     async def enqueue(name, *args, **kwargs):
