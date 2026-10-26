@@ -58,6 +58,7 @@ Before changing any shared contract, identify the owning repository.
 | EXIF metadata format                  | Firmware          |
 | LoRaWAN payload format                | Firmware          |
 | CONFIG.TXT structure                  | `ww-hardware`     |
+| Live preview console protocol         | Firmware (`_Documentation/live_preview.md`, shared with `_Tools/live_view.py`) |
 | Shared storage usage                  | Backend ecosystem |
 | Shared deployment/device/project data | Backend ecosystem |
 

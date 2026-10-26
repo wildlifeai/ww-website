@@ -51,7 +51,7 @@ SD card) hide for a user who can write to no project (`hooks/useWritableProjects
 
 | Tab | Route | Page |
 |-----|-------|------|
-| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (SD-card prep, model upload, iNaturalist, CamtrapDP export; each card by role) |
+| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (SD-card prep, motion live view, model upload, iNaturalist, CamtrapDP export; each card by role) |
 | 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with LoRaWAN data) |
 | 🏷️ Annotations | `/annotations` | `AnnotationsPage` → `MediaBrowser` (+ full-screen modal) |
 | 📈 Insights | `/insights` | `InsightsPage` (projects, deployments, charts, maps) |
@@ -76,12 +76,13 @@ password) or uses Forgot password.
 
 | Route | Page | Purpose |
 |-------|------|---------|
-| `/toolkit` | `ToolkitPage` | SD-card prep, privileged model upload, iNaturalist, CamtrapDP export |
+| `/toolkit` | `ToolkitPage` | SD-card prep, motion live view, privileged model upload, iNaturalist, CamtrapDP export |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
 | `/field` | `FieldPage` | Realtime: active deployments with their newest LoRaWAN check-in from the `deployment_latest_lorawan` view, read-only (`lib/realtimeReads.ts`) |
 | `/upload-data` | `UploadDataPage` (→ `UploadFlow`) | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
+| `/live-view` | `LiveViewPage` | A WW500's live picture, motion grid and motion ops over its USB cable through Web Serial (Chrome or Edge on a computer), no backend. The console protocol is `lib/liveView.ts` and `lib/liveViewSession.ts`, ported from the firmware's `live_preview.md` (#400) |
 | `/upload-model` | `UploadModelPage` | Edge Impulse → Vela model upload (org managers) |
 | `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters, unconfirmed and biggest first, ten per page |
 | `/review/:id` | `ReviewQueuePage` | Retired Review Queue: redirects to `/annotations?deployment=:id` |

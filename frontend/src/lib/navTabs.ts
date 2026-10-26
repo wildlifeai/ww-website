@@ -9,6 +9,7 @@ export type NavTabId = 'toolkit' | 'field' | 'annotations' | 'insights'
 const PARENT_TAB: [prefix: string, tab: NavTabId][] = [
   ['/toolkit', 'toolkit'],
   ['/manifest', 'toolkit'],
+  ['/live-view', 'toolkit'],
   ['/upload-model', 'toolkit'],
   ['/field', 'field'],
   ['/annotations', 'annotations'],

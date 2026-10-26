@@ -7,7 +7,7 @@
 // needs write access to a project, the model and GBIF cards are for organisation managers, and
 // the export needs read access only (ww-backend #331), so viewers and the demo export too.
 // (Monitoring lives in Realtime; configuration in Settings.)
-import { Bot, Download, Globe, MemoryStick, Package, Wrench } from 'lucide-react'
+import { Bot, Download, Globe, MemoryStick, Package, ScanEye, Wrench } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { useProjectRoles } from '../hooks/useProjectRoles'
@@ -47,6 +47,14 @@ export function ToolkitPage() {
             <Link to="/manifest" className="btn" style={LINK_BUTTON}>Prepare an SD card</Link>
           </ToolCard>
         )}
+
+        <ToolCard
+          icon={ScanEye}
+          title="Motion live view"
+          description="See a camera's live picture over its USB cable, where it detects motion and whether that would wake it, and tune its motion settings."
+        >
+          <Link to="/live-view" className="btn" style={LINK_BUTTON}>Open live view</Link>
+        </ToolCard>
 
         {isOrgManager && (
           <ToolCard
