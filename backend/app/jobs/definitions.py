@@ -550,7 +550,8 @@ async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: d
 
     ``selection`` is an ``ExportSelection`` and ``caller`` an ``ExportCaller`` as dicts: a user's
     token for the Download buttons, or an organisation id for an API key (#327). The work is in
-    ``domain/camtrapdp_export.py``. The ZIP is built in a temporary directory removed at the end.
+    ``domain/camtrapdp_export.py``. The ZIP is built in a temporary directory removed at the end,
+    after it is uploaded to the Azure Blob container ``CAMTRAPDP_EXPORT_CONTAINER``.
     """
     import tempfile
     from pathlib import Path
@@ -559,6 +560,11 @@ async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: d
     from app.domain import camtrapdp_export as export
 
     logger.info("job_start", job_type="export_camtrapdp_originals", job_id=job_id)
+    if not settings.AZURE_STORAGE_CONNECTION_STRING:
+        # Refuse before reading every original from Drive, not at the end.
+        await update_job(job_id, status=JobStatus.FAILED, error="This server has no storage for exports. Try again later.")
+        logger.error("job_failed", job_type="export_camtrapdp_originals", job_id=job_id, error="AZURE_STORAGE_CONNECTION_STRING is not set")
+        return
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.02, message="Reading the project's records…")
     sel = export.ExportSelection(**selection)
     last_write = 0.0
@@ -587,7 +593,7 @@ async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: d
                 )
                 await update_job(job_id, progress=0.92, message="Saving the export…")
                 filename = export.export_filename(sel.project_id)
-                url = await export.store_export(zip_path, job_id, filename, settings.CAMTRAPDP_EXPORT_BUCKET)
+                url = await export.store_export(zip_path, job_id, filename, settings.CAMTRAPDP_EXPORT_CONTAINER)
     except export.ExportError as e:
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
         logger.warning("job_failed", job_type="export_camtrapdp_originals", job_id=job_id, error=str(e))
