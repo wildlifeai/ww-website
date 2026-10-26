@@ -169,7 +169,9 @@ modal opened from the header and the older `AnalyseImages` page behind `/upload-
 drifted, and the modal was too small for the triage step, so both were folded into the page.)
 **Images always sync to Google Drive**, the old "Sync to Google Drive" toggle was removed; Drive is
 the default long-term store. AI analysis runs after upload by default and can be switched off per
-upload (`run_ai`); for CamtrapDP imports it is opt-in.
+upload (`run_ai`); for CamtrapDP imports it is opt-in. Thumbnails are the AI pipeline's first step,
+so an upload whose AI does not run (switched off, or no AI configured) starts the thumbnails job
+itself, one per deployment, which the upload's chunks share (`start_thumbnail_backfill`).
 
 > [!IMPORTANT]
 > Media rows are created **inside the Drive job, only for files bound to a deployment**. Two
@@ -327,10 +329,11 @@ instant in the **deployment's** timezone at display time.
   every deployment at once (idempotent, system admins only). Editing a deployment's location (`PATCH /api/deployments/{id}/location`)
   recomputes it from the new coordinates, and clears it when they are removed.
 - **Display** — [`frontend/src/lib/time.ts`](../../frontend/src/lib/time.ts) (`formatCaptureTime`,
-  `getTimeOfDay`, `hourInTimezone`) renders the UTC instant in the deployment zone (with a label like
-  `10:44 am NZST`). The review grid's day/night filter is off until the database can answer it (it
-  needs each photo's hour in its deployment's zone in the query). **Store the IANA name, not a fixed
-  offset**, so DST is handled automatically (NZ is +12 in winter, +13 in summer).
+  `DAY_START_HOUR`) renders the UTC instant in the deployment zone (with a label like
+  `10:44 am NZST`) and sets which hours are day. The review grid's day/night filter reads
+  `media.local_hour`, the capture hour in this zone, which ww-backend's triggers keep (#335).
+  **Store the IANA name, not a fixed offset**, so DST is handled automatically (NZ is +12 in
+  winter, +13 in summer).
 - **Per-day counts**: Insights > Reports counts detections per day by `media.timestamp` in this zone,
   never by `observations.created_at` (the label time); those without one are counted under the chart.
   The database dates them (`deployment_daily_counts`, ww-backend #334), in the browser's zone when

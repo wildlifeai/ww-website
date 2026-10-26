@@ -23,7 +23,7 @@ import re
 import shutil
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -42,10 +42,9 @@ FETCH_CONCURRENCY = 6
 # Size assumed for a photo when no photo in the export has a recorded size.
 ASSUMED_PHOTO_BYTES = 1_000_000
 
-# Where finished exports live in the bucket, how long a link works, and when a ZIP is deleted.
-STORAGE_FOLDER = "camtrapdp"
+# How long a link to a finished export works. A lifecycle rule on the storage account deletes
+# the ZIP 7 days after it is written (documentation/resources/cloud-infrastructure.md).
 LINK_TTL_SECONDS = 24 * 3600
-RETENTION = timedelta(days=7)
 # One export at a time per deployment of this backend, so its local disk holds one at most.
 EXPORT_LOCK = "camtrapdp-export"
 
@@ -317,8 +316,8 @@ def export_filename(project_id: str, when: Optional[datetime] = None) -> str:
     return f"camtrapdp-{project_id}-{(when or datetime.now(timezone.utc)).date().isoformat()}.zip"
 
 
-def storage_path(job_id: str) -> str:
-    return f"{STORAGE_FOLDER}/{job_id}.zip"
+def blob_name(job_id: str) -> str:
+    return f"{job_id}.zip"
 
 
 async def build_export(
@@ -381,20 +380,18 @@ async def _fetch_original(file_path: str) -> Optional[bytes]:
     return resolved[0] if resolved else None
 
 
-async def store_export(zip_path: Path, job_id: str, filename: str, bucket: str) -> str:
-    """Upload the ZIP to the private bucket and return a link that works for a day.
+async def store_export(zip_path: Path, job_id: str, filename: str, container: str) -> str:
+    """Upload the ZIP to the private Azure Blob container and return a link that works for a day."""
+    from app.services import azure_storage
 
-    Also deletes exports older than ``RETENTION``, best-effort.
-    """
-    from app.services.storage import delete_older_than, signed_download_url, upload_file_to_storage
-
-    path = storage_path(job_id)
-    if not await upload_file_to_storage(bucket, path, zip_path, "application/zip"):
-        raise ExportError("The export could not be saved. Try again later.")
-    url = await asyncio.to_thread(signed_download_url, bucket, path, LINK_TTL_SECONDS, filename)
-    if not url:
-        raise ExportError("The export was saved but no download link could be made. Try again later.")
-    removed = await delete_older_than(bucket, STORAGE_FOLDER, datetime.now(timezone.utc) - RETENTION)
-    if removed:
-        logger.info("camtrapdp_exports_expired", removed=removed)
-    return url
+    name = blob_name(job_id)
+    try:
+        await azure_storage.upload_file(container, name, zip_path, "application/zip")
+    except Exception as exc:  # noqa: BLE001 - the user sees one message, the log has the cause
+        logger.error("camtrapdp_export_store_failed", job_id=job_id, error=str(exc))
+        raise ExportError("The export could not be saved. Try again later.") from exc
+    try:
+        return azure_storage.read_link(container, name, LINK_TTL_SECONDS, filename)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("camtrapdp_export_link_failed", job_id=job_id, error=str(exc))
+        raise ExportError("The export was saved but no download link could be made. Try again later.") from exc

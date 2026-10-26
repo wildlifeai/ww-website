@@ -12,7 +12,7 @@ from __future__ import annotations
 import structlog
 from fastapi import APIRouter, Depends, Request
 
-from app.authz import require_deployment_access
+from app.authz import require_deployment_access, require_project_access
 from app.config import settings
 from app.dependencies import get_current_user
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
@@ -22,16 +22,32 @@ logger = structlog.get_logger()
 router = APIRouter(prefix="/api/qa", tags=["qa"])
 
 
+def _disabled(req_id):
+    return ApiResponse(
+        error=ApiError(code="FEATURE_DISABLED", message="QA disabled (FF_ACTIVE_LEARNING_ENABLED)."),
+        meta=ApiMeta(request_id=req_id),
+    )
+
+
 @router.get("/report/{deployment_id}", dependencies=[Depends(require_deployment_access)])
 async def qa_report_endpoint(request: Request, deployment_id: str, user=Depends(get_current_user)):
     """AI-vs-human agreement (precision proxy) for a deployment."""
     req_id = getattr(request.state, "request_id", None)
     if not settings.FF_ACTIVE_LEARNING_ENABLED:
-        return ApiResponse(
-            error=ApiError(code="FEATURE_DISABLED", message="QA disabled (FF_ACTIVE_LEARNING_ENABLED)."),
-            meta=ApiMeta(request_id=req_id),
-        )
+        return _disabled(req_id)
 
     from app.domain.active_learning import qa_report
 
     return ApiResponse(data=await qa_report(deployment_id), meta=ApiMeta(request_id=req_id))
+
+
+@router.get("/report/project/{project_id}", dependencies=[Depends(require_project_access)])
+async def qa_project_report_endpoint(request: Request, project_id: str, user=Depends(get_current_user)):
+    """AI-vs-human agreement for a project, with a line per deployment, in one request."""
+    req_id = getattr(request.state, "request_id", None)
+    if not settings.FF_ACTIVE_LEARNING_ENABLED:
+        return _disabled(req_id)
+
+    from app.domain.active_learning import qa_project_report
+
+    return ApiResponse(data=await qa_project_report(project_id), meta=ApiMeta(request_id=req_id))

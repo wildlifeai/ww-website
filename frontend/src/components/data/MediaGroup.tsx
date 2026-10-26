@@ -4,7 +4,7 @@ import { ChevronRight } from 'lucide-react'
 // ─────────────────────────────────────────────────────────────────────────────
 // MediaGroup: collapsible section that wraps a group of thumbnail cards.
 //
-// Used by MediaBrowser when a "group by" mode is active. Each group gets a
+// Used by the review grid (GridBody) when a "group by" mode is active. Each group gets a
 // header with the group name, item count, and a collapse toggle. The grid owns
 // the open state, so it can collapse or expand every group at once.
 // ─────────────────────────────────────────────────────────────────────────────

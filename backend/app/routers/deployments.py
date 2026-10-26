@@ -52,7 +52,8 @@ async def create_deployment(
     a caller with no role on the project gets 404 (so other tenants' project IDs can't be
     probed), a project_viewer 403. Auto-creates a placeholder device because deployments require a
     non-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the
-    ``(deployment_start, device_id)`` unique index.
+    ``(deployment_start, device_id)`` unique index. Like every camera it belongs to no
+    organisation (ww-backend#346).
     """
     # Access guard: 404 unless the caller can read the project, 403 unless they can change it.
     await assert_write(user.id, project_id=body.project_id)
@@ -71,11 +72,6 @@ async def create_deployment(
 
     def _create() -> Dict[str, Any]:
         svc = create_service_client()
-        proj = svc.table("projects").select("id, organisation_id").eq("id", body.project_id).limit(1).execute()
-        if not proj.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-        org_id = rows_of(proj)[0].get("organisation_id")
-
         if supplied_id:
             existing = svc.table("deployments").select("id").eq("id", supplied_id).limit(1).execute()
             if existing.data:
@@ -90,7 +86,6 @@ async def create_deployment(
                 "id": device_id,
                 "bluetooth_id": str(uuid.uuid4()),
                 "name": f"[manual] {name}"[:100],
-                "organisation_id": org_id,
                 "modified_by": user.id,
             }
         ).execute()

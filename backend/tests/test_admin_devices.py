@@ -1,6 +1,6 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Admin device list (#343): system admins only, joined shape, pages past 1,000 rows."""
+"""Admin device list (#343): system admins only, read as the caller, joined shape, pages past 1,000 rows."""
 
 from types import SimpleNamespace
 
@@ -46,24 +46,23 @@ def _svc(devices, deployments):
     return _Svc(), calls
 
 
-def _device(i, org=("org-1", "Org One")):
-    return {
-        "id": f"dev-{i:05d}",
-        "name": f"Cam {i:05d}",
-        "bluetooth_id": f"bt-{i}",
-        "device_eui": None,
-        "organisations": {"id": org[0], "name": org[1]} if org else None,
-    }
+def _device(i):
+    return {"id": f"dev-{i:05d}", "name": f"Cam {i:05d}", "bluetooth_id": f"bt-{i}", "device_eui": None}
 
 
-def _deployment(dep_id, device_id, start, project=("proj-1", "Project One"), project_deleted=None):
+def _deployment(dep_id, device_id, start, project=("proj-1", "Project One"), project_deleted=None, org=("org-1", "Org One")):
     return {
         "id": dep_id,
         "name": f"Deployment {dep_id}",
         "device_id": device_id,
         "deployment_start": start,
         "deployment_end": None,
-        "projects": {"id": project[0], "name": project[1], "deleted_at": project_deleted},
+        "projects": {
+            "id": project[0],
+            "name": project[1],
+            "deleted_at": project_deleted,
+            "organisations": {"id": org[0], "name": org[1]} if org else None,
+        },
     }
 
 
@@ -85,13 +84,14 @@ def test_list_devices_pages_past_the_row_cap():
     assert sum(1 for r in rows if r["latest_deployment"]) == 1200
 
 
-def test_list_devices_joins_organisation_and_latest_live_deployment():
+def test_list_devices_joins_the_latest_live_deployment_and_its_projects_organisation():
+    """Cameras belong to no organisation (ww-backend#346): the one shown is the project's."""
     from app.domain.admin_devices import list_devices
 
-    devices = [_device(1), _device(2, org=None)]
+    devices = [_device(1), _device(2)]
     deployments = [
         _deployment("old", "dev-00001", "2025-01-01T00:00:00+00:00"),
-        _deployment("new", "dev-00001", "2026-03-01T00:00:00+00:00", project=("proj-2", "Project Two")),
+        _deployment("new", "dev-00001", "2026-03-01T00:00:00+00:00", project=("proj-2", "Project Two"), org=("org-2", "Org Two")),
         # Newer still, but its project is deleted, so it is not the device's deployment.
         _deployment("gone", "dev-00001", "2026-06-01T00:00:00+00:00", project_deleted="2026-07-01T00:00:00+00:00"),
     ]
@@ -104,7 +104,7 @@ def test_list_devices_joins_organisation_and_latest_live_deployment():
         "name": "Cam 00001",
         "bluetooth_id": "bt-1",
         "device_eui": None,
-        "organisation": {"id": "org-1", "name": "Org One"},
+        "organisation": {"id": "org-2", "name": "Org Two"},
         "latest_deployment": {
             "id": "new",
             "name": "Deployment new",
@@ -134,24 +134,30 @@ def test_route_refuses_an_unauthenticated_caller(client):
 
 
 def test_route_refuses_a_non_admin(api, monkeypatch):
+    from app.dependencies import get_user_client
+    from app.main import app
+
     async def not_admin(user_id):
         return False
 
-    def no_service_client():
-        raise AssertionError("a refused call must not reach the service role")
+    def no_read():
+        raise AssertionError("a refused call must not read the devices")
 
     monkeypatch.setattr("app.authz.is_system_admin", not_admin)
-    monkeypatch.setattr("app.routers.admin.create_service_client", no_service_client)
+    app.dependency_overrides[get_user_client] = no_read
     assert api.get("/api/admin/devices").status_code == 403
 
 
-def test_route_returns_the_joined_list_for_a_system_admin(api, monkeypatch):
+def test_route_reads_as_the_caller_for_a_system_admin(api, monkeypatch):
+    from app.dependencies import get_user_client
+    from app.main import app
+
     async def admin(user_id):
         return True
 
-    svc, _ = _svc([_device(1)], [_deployment("d1", "dev-00001", "2026-01-01T00:00:00+00:00")])
+    user_client, _ = _svc([_device(1)], [_deployment("d1", "dev-00001", "2026-01-01T00:00:00+00:00")])
     monkeypatch.setattr("app.authz.is_system_admin", admin)
-    monkeypatch.setattr("app.routers.admin.create_service_client", lambda: svc)
+    app.dependency_overrides[get_user_client] = lambda: user_client
 
     resp = api.get("/api/admin/devices")
 
