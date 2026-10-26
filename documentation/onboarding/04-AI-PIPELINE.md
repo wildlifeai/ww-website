@@ -16,7 +16,7 @@ classify) and the **Wildlife Brain** (DINOv3 embeddings → clustering → activ
 > **Where it runs in the cloud.** Everything below executes in a **dedicated ARQ GPU worker**
 > (`--target worker`, serverless T4), *not* in the API container — the lean `--target api` image has no
 > ML deps. The API only enqueues. So **AI detection is off on any backend without `REDIS_URL` + a
-> deployed worker**: dev has both (since 2026-07-03), production does not yet. Flags must be set on the
+> deployed worker**: dev has both since 2026-07-03, production since 2026-07-26. Flags must be set on the
 > **worker**, not just the API. See [cloud-infrastructure](../resources/cloud-infrastructure.md) and
 > [prod-worker-provisioning-runbook](../resources/prod-worker-provisioning-runbook.md).
 

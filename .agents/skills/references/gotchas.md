@@ -150,6 +150,15 @@ let a transport error surface as a silent success.
 
 ---
 
+## Supabase Storage refuses any file over 50 MB
+
+Both Supabase projects are on the Free plan, whose upload limit is 50 MB for every bucket,
+whatever the bucket's own limit says. The CamtrapDP export stored its ZIPs there and failed
+past about 50 photos (#387). A file that can grow, like an export, goes to Azure Blob instead:
+`services/azure_storage.upload_file` streams it in blocks and `read_link` signs a read-only link.
+
+---
+
 ## Object URLs and React StrictMode
 
 Create and revoke an object URL (`URL.createObjectURL`) inside the **same** effect. StrictMode,

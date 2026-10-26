@@ -5895,7 +5895,7 @@
     },
     "/api/v1/export/camtrapdp": {
       "post": {
-        "description": "Start a CamtrapDP export of one project with its original photos, as the Download button does.\n\nReturns ``{job_id}``; poll ``GET /api/v1/jobs/{job_id}`` for the signed link. Behind\n``FF_CAMTRAPDP_EXPORT_ENABLED``, like the Download button's export.",
+        "description": "Start a CamtrapDP export of one project with its original photos, as the Download button does.\n\nReturns ``{job_id}``; poll ``GET /api/v1/jobs/{job_id}`` for the signed link. Behind\n``FF_CAMTRAPDP_EXPORT_ENABLED`` and the export storage, like the Download button's export.",
         "operationId": "api_export_camtrapdp_api_v1_export_camtrapdp_post",
         "requestBody": {
           "content": {
