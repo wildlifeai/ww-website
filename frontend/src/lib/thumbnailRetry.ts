@@ -39,6 +39,14 @@ export function busyDeployments(
 }
 
 /**
+ * The running jobs only make thumbnails (kind `media_prep`: an upload without the AI, or a
+ * Retry), so the grid's banner must not say the AI is analysing these photos.
+ */
+export function onlyMakingThumbnails(jobs: ReadonlyArray<{ kind?: string | null }>): boolean {
+  return jobs.length > 0 && jobs.every(j => j.kind === 'media_prep')
+}
+
+/**
  * Deployments with a card showing "No thumbnail", sorted: the grid starts their backfill once
  * by itself (#175). `cards` are the photos with no image to show and no Retry requested yet.
  */

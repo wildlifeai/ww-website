@@ -4,10 +4,12 @@
 // ProcessingBanner: explains blank thumbnails and missing labels on the review grid. When an
 // upload or AI run is still processing a deployment the user is looking at, the grid would
 // otherwise show empty cards with no reason. Driven by the user's active jobs (GET /api/jobs),
-// intersected with the deployments currently in view.
+// intersected with the deployments currently in view. A run that only makes thumbnails (an
+// upload without the AI, or a Retry) says so, not that the AI is analysing.
 import { Link } from 'react-router-dom'
 import { ChartColumn, RefreshCw } from 'lucide-react'
 import { useJobsList } from '../../hooks/useJobs'
+import { onlyMakingThumbnails } from '../../lib/thumbnailRetry'
 import { Banner, BannerProgress } from '../ui/Banner'
 import { SMALL_BTN } from './gridStyles'
 
@@ -29,6 +31,15 @@ export function ProcessingBanner({ deployments }: { deployments: readonly { id: 
   const pct = Math.round(Math.max(0, ...active.map(j => j.progress ?? 0)) * 100)
   // Insights takes the deployment parameter once per deployment.
   const insightsLink = `/insights?tab=reports${depIds.map(id => `&deployment=${encodeURIComponent(id)}`).join('')}`
+
+  if (onlyMakingThumbnails(active)) {
+    return (
+      <Banner tone="info" icon={RefreshCw} footer={<BannerProgress pct={pct} />}>
+        <strong>Making thumbnails {pct}%</strong>: {isOne ? 'deployment ' : 'deployments '}
+        <strong>{shown}</strong>. The photos appear as they are ready.
+      </Banner>
+    )
+  }
 
   return (
     <Banner

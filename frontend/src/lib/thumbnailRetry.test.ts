@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  AUTO_RETRY_KEY, THUMBNAIL_GRACE_MS, busyDeployments, dueForAutoRetry, isThumbnailStuck, readAutoRetried,
-  rememberAutoRetried, showsBusyDeployment, stuckDeployments,
+  AUTO_RETRY_KEY, THUMBNAIL_GRACE_MS, busyDeployments, dueForAutoRetry, isThumbnailStuck, onlyMakingThumbnails,
+  readAutoRetried, rememberAutoRetried, showsBusyDeployment, stuckDeployments,
 } from './thumbnailRetry'
 
 const DEP = 'a15e8ed9-daa9-4a03-9823-5283e1cc6ace'
@@ -40,6 +40,18 @@ describe('busyDeployments', () => {
 
   it('is empty before the job list has loaded', () => {
     expect(busyDeployments(undefined).size).toBe(0)
+  })
+})
+
+describe('onlyMakingThumbnails', () => {
+  it('is true when every running job only makes thumbnails, as an upload without the AI does', () => {
+    expect(onlyMakingThumbnails([{ kind: 'media_prep' }, { kind: 'media_prep' }])).toBe(true)
+  })
+
+  it('is false when an AI job runs too, or a job has no kind, or nothing runs', () => {
+    expect(onlyMakingThumbnails([{ kind: 'media_prep' }, { kind: 'ai_pipeline' }])).toBe(false)
+    expect(onlyMakingThumbnails([{ kind: null }])).toBe(false)
+    expect(onlyMakingThumbnails([])).toBe(false)
   })
 })
 
