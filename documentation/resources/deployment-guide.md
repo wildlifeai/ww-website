@@ -55,16 +55,16 @@ GitHub Actions (CI/CD)
         │
         ▼
 Azure Container App ("ww-backend" / "ww-backend-dev")  ──REDIS_URL set──▶  ARQ GPU worker
-  ├── FastAPI API Server (port 8000)                                       ("ww-embedding-worker-dev",
+  ├── FastAPI API Server (port 8000)                                       ("ww-embedding-worker[-dev]",
   ├── Job dispatch: ARQ when REDIS_URL is set, else in-process asyncio       --target worker, serverless T4)
   └── Supabase sync for job persistence (api_jobs table)
 ```
 
 > **Note**: heavy ML work (SpeciesNet, BioCLIP, DINOv3) runs in a **separate ARQ GPU worker**, not in
-> the API container — the lean `--target api` image carries no ML deps. The worker is **live on dev**
-> (serverless T4, scale-to-zero, since 2026-07-03); **production is API-only** until the prod worker is
-> provisioned. With `REDIS_URL` unset, `dispatch.py` falls back to running jobs in-process.
-> Live state: [cloud-infrastructure.md](cloud-infrastructure.md) · stand up the prod worker:
+> the API container, because the lean `--target api` image carries no ML deps. Each environment has its
+> own worker (serverless T4, scale-to-zero): **dev since 2026-07-03, production since 2026-07-26**.
+> With `REDIS_URL` unset, `dispatch.py` falls back to running jobs in-process.
+> Live state: [cloud-infrastructure.md](cloud-infrastructure.md) · how the prod worker was built:
 > [prod-worker-provisioning-runbook.md](prod-worker-provisioning-runbook.md).
 
 ### Manual Deployment
@@ -303,9 +303,9 @@ vector database.
    incompatible vector dims. DR is automatic — the vectors are a Postgres table under Supabase PITR, so
    the `/api/brain/backup` job is now a **no-op**.
 
-> The heavy ML inference (DINOv3/SpeciesNet on GPU) is a separate concern — see the `gpu` profile +
-> `embedding-worker` in `docker-compose.yml`, which also needs Redis + ARQ before it can run as a
-> cloud worker (the API currently runs jobs in-process; see [Scaling](#scaling)).
+> The heavy ML inference (DINOv3/SpeciesNet on GPU) is a separate concern. In both cloud environments
+> it runs on the ARQ GPU worker (see [Scaling](#scaling)); locally it is the `gpu` profile's
+> `embedding-worker` in `docker-compose.yml`, which gets jobs only when the API has `REDIS_URL` set.
 
 ---
 
