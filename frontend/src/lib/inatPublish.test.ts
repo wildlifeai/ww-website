@@ -56,7 +56,7 @@ describe('inatPublishNotice', () => {
   it('never shows success when nothing was published, and says why', () => {
     const n = inatPublishNotice(answer({ skipped_already_published: 2, skipped_bycatch: 1 }))
     expect(n.ok).toBe(false)
-    expect(n.text).toBe('Nothing published. Skipped 3: 2 already on iNaturalist, 1 not labelled as an animal.')
+    expect(n.text).toBe('Nothing published. Skipped 3: 2 already on iNaturalist, 1 not an animal or showing a person.')
     expect(n.link).toBeUndefined()
     expect(inatPublishNotice(answer()).text).toBe('Nothing published. None of these photos were found.')
   })

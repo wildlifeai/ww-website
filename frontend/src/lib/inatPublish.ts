@@ -76,7 +76,7 @@ export function inatPublishNotice(r: InatPublishAnswer): CardNotice {
   if (skipped > 0) {
     const why = [
       r.skipped_already_published > 0 && `${r.skipped_already_published} already on iNaturalist`,
-      r.skipped_bycatch > 0 && `${r.skipped_bycatch} not labelled as an animal`,
+      r.skipped_bycatch > 0 && `${r.skipped_bycatch} not an animal or showing a person`,
     ].filter(Boolean)
     lines.push(`Skipped ${skipped}: ${why.join(', ')}.`)
   }

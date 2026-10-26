@@ -66,9 +66,10 @@ Already implemented before this work; surfaced in Phase 3.
 `domain/inaturalist_publish.py → publish_media_to_inat(user_id, media_ids, gap_seconds, geoprivacy)`
 exposed at **`POST /api/inat/publish`**.
 
-1. **By-catch filter**: a photo speaks through its newest human review, else its AI rows
-   (`_photo_labels`); keep it only when that label is an `animal`, so a reviewer's `blank` or `human`
-   outvotes the AI. Unprocessed media are dropped too.
+1. **By-catch filter**: a photo goes up under the label its card shows
+   (`public_api.photo_verdict`, the grid's `photoVerdict`), so a reviewer's Empty or person outvotes
+   the AI. It stays off unless that label is an `animal`, and whenever any row, a model's or a
+   person's, says `human` (`_photo_label`). Unprocessed media are dropped too.
 2. **Idempotency** — skip media already in `inat_observation_media`.
 3. **Burst consolidation** — cluster per deployment by temporal gap (`Δt < gap_seconds`, default 60 s);
    each burst → **one iNat observation with all its photos**. Untimed images each stand alone.
@@ -83,7 +84,8 @@ exposed at **`POST /api/inat/publish`**.
 Returns a summary: `observations_created`, `photos_uploaded`, `skipped_bycatch`,
 `skipped_already_published`, `errors`, and a per-observation list.
 
-> **Privacy / by-catch:** human/vehicle/blank are never uploaded; default geoprivacy is `obscured`.
+> **Privacy / by-catch:** a photo showing a person, or labelled anything but an animal, is never
+> uploaded; default geoprivacy is `obscured`.
 
 ---
 

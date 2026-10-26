@@ -3,7 +3,7 @@
 """Publish Wildlife Watcher media to a user's iNaturalist account.
 
 Consolidates selected media into temporal-burst observations (one iNat
-observation per encounter), filters by-catch (human/vehicle/blank), uploads each
+observation per encounter), filters by-catch (see _photo_label), uploads each
 photo through the backend proxy, and records the mapping in inat_observations /
 inat_observation_media for status tracking + community-ID sync.
 
@@ -25,14 +25,15 @@ from app.domain.inaturalist import (
     upload_observation_photo,
 )
 from app.domain.media_resolver import resolve_media
-from app.services.db_utils import rows_of
+from app.domain.public_api import photo_verdict
+from app.services.db_utils import read_all, rows_of
 from app.services.inat_oauth import get_user_token
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
 
-BYCATCH_TYPES = {"human", "vehicle", "blank"}
-_HUMAN_REVIEWED = {"human_reviewed", "expert_reviewed", "consensus_approved"}
+# What photo_verdict reads, and the order it expects (the order the rows were written).
+_OBS_COLUMNS = "id, media_id, observation_type, scientific_name, vernacular_name, review_status, source_type, classification_method, created_at"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -72,22 +73,24 @@ def _cluster_bursts(media: List[dict], gap_seconds: int) -> List[List[dict]]:
     return bursts
 
 
-def _photo_labels(obs: List[dict]) -> List[dict]:
-    """The observations that speak for one photo: its newest human review, else all its rows.
+def _photo_label(obs: List[dict]) -> Optional[dict]:
+    """The label a photo goes to iNaturalist under, or None when it stays off.
 
-    A reassign or a later label adds a row instead of replacing the earlier one, so counting every
-    human row lets a superseded label win (a cluster confirmed as A and then reassigned to B went
-    up as A), and an AI "animal" row outlived a reviewer's "blank" or "human".
+    The label is the one the photo's card shows (``public_api.photo_verdict``), so a reviewer's
+    Empty or person outvotes the AI. The photo stays off unless that label is an animal, and
+    whenever any row, a model's or a person's, says a person is in it.
     """
-    reviewed = [o for o in obs if o.get("source_type") == "human" or o.get("review_status") in _HUMAN_REVIEWED]
-    if not reviewed:
-        return obs
-    return [max(reviewed, key=lambda o: o.get("updated_at") or o.get("created_at") or "")]
+    if any(o.get("observation_type") == "human" for o in obs):
+        return None
+    label, is_empty = photo_verdict(obs)
+    if is_empty or label is None or label.get("observation_type") != "animal":
+        return None
+    return label
 
 
 def _best_species(burst: List[dict]) -> Optional[str]:
-    """Most-common scientific name in a burst, each photo by its own label (see _photo_labels)."""
-    names = [o["scientific_name"] for m in burst for o in m["_animal_obs"] if o.get("scientific_name")]
+    """Most-common scientific name in a burst, each photo by its own label (see _photo_label)."""
+    names = [m["_label"]["scientific_name"] for m in burst if m["_label"].get("scientific_name")]
     if not names:
         return None
     return Counter(names).most_common(1)[0][0]
@@ -104,7 +107,7 @@ async def publish_media_to_inat(
 ) -> Dict[str, Any]:
     """Consolidate selected WW media into iNaturalist observations and upload them.
 
-    - Filters out by-catch (human/vehicle/blank) and media with no animal label.
+    - Filters out by-catch: a photo whose label is not an animal, or that shows a person.
     - Skips media already published (idempotent via inat_observation_media).
     - Clusters the rest per deployment into temporal bursts; each burst becomes
       one iNat observation carrying all its photos.
@@ -120,12 +123,11 @@ async def publish_media_to_inat(
         media = rows_of(
             svc.table("media").select("id, deployment_id, file_path, file_name, timestamp").in_("id", media_ids).is_("deleted_at", "null").execute()
         )
-        obs = rows_of(
-            svc.table("observations")
-            .select("media_id, observation_type, scientific_name, vernacular_name, review_status, source_type, created_at, updated_at")
-            .in_("media_id", media_ids)
-            .is_("deleted_at", "null")
-            .execute()
+        # 200 photos can carry more than 1,000 rows (one per model, a consensus, a person's).
+        obs = read_all(
+            lambda: (
+                svc.table("observations").select(_OBS_COLUMNS).in_("media_id", media_ids).is_("deleted_at", "null").order("created_at").order("id")
+            )
         )
         dep_ids = sorted({m["deployment_id"] for m in media})
         deps = (
@@ -150,17 +152,17 @@ async def publish_media_to_inat(
         "observations": [],
     }
 
-    # By-catch filter: keep only media whose label (see _photo_labels) is an animal.
+    # By-catch filter: keep only media whose label (see _photo_label) is an animal.
     keep: List[dict] = []
     for m in media:
         if m["id"] in already:
             result["skipped_already_published"] += 1
             continue
-        animal = [o for o in _photo_labels(obs_by_media.get(m["id"], [])) if o.get("observation_type") == "animal"]
-        if not animal:
+        label = _photo_label(obs_by_media.get(m["id"], []))
+        if label is None:
             result["skipped_bycatch"] += 1
             continue
-        m["_animal_obs"] = animal
+        m["_label"] = label
         keep.append(m)
 
     by_dep: Dict[str, List[dict]] = {}
