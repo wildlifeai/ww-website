@@ -761,6 +761,80 @@
         "title": "DeploymentLocationRequest",
         "type": "object"
       },
+      "DeviceOut": {
+        "description": "A camera with a deployment, open or ended, in one of the organisation's projects.\n\nCameras belong to no organisation, so a camera lent to another organisation's project is\nin both organisations' lists.",
+        "properties": {
+          "bluetooth_id": {
+            "title": "Bluetooth Id",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the camera was registered",
+            "title": "Created At"
+          },
+          "device_eui": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The camera's LoRaWAN EUI, which the telemetry endpoint takes",
+            "title": "Device Eui"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "bluetooth_id"
+        ],
+        "title": "DeviceOut",
+        "type": "object"
+      },
+      "DevicesResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "DevicesResponse",
+        "type": "object"
+      },
       "EmbedRequest": {
         "description": "Request to embed + cluster a deployment.\n\n``mode='server'`` enqueues a GPU embedding job. ``mode='client_vectors'``\naccepts vectors computed in-browser (WebGPU); HDBSCAN/UMAP still run server-side.",
         "properties": {
@@ -1929,7 +2003,7 @@
   "paths": {
     "/api/admin/devices": {
       "get": {
-        "description": "Every live device with its organisation and latest live deployment (read-only, #343).\n\nSystem admins only (``403`` otherwise): devices stay organisation-scoped under RLS\n(ww-backend#313), so this is the one place a ``ww_admin`` sees them all.",
+        "description": "Every live device with its latest live deployment and that project's organisation (read-only, #343).\n\nSystem admins only (``403`` otherwise). Reads as the caller: under RLS a ``ww_admin`` sees\nevery camera (ww-backend#346), deployment, project and organisation.",
         "operationId": "admin_list_devices_api_admin_devices_get",
         "parameters": [
           {
@@ -2898,7 +2972,7 @@
     },
     "/api/camtrapdp/import": {
       "post": {
-        "description": "Import a CamtrapDP v1.0 ZIP package.\n\nCreates a new project, placeholder devices for each unique cameraID,\nand inserts all deployments, media, and observations from the package.\n\nThe authenticated user becomes project admin of the new project.\nPlaceholder devices are named '[imported] <cameraID>' and are linked\nto the user's primary organisation.",
+        "description": "Import a CamtrapDP v1.0 ZIP package.\n\nCreates a new project, placeholder devices for each unique cameraID,\nand inserts all deployments, media, and observations from the package.\n\nThe authenticated user becomes project admin of the new project.\nPlaceholder devices are named '[imported] <cameraID>'; a re-import by\nthe same organisation reuses them.",
         "operationId": "import_camtrapdp_api_camtrapdp_import_post",
         "parameters": [
           {
@@ -3031,7 +3105,7 @@
     },
     "/api/deployments": {
       "post": {
-        "description": "Create a deployment in a project the caller can change (manual upload assignment).\n\nThe rule of ww-backend's deployments INSERT policy, project_member or above (``assert_write``):\na caller with no role on the project gets 404 (so other tenants' project IDs can't be\nprobed), a project_viewer 403. Auto-creates a placeholder device because deployments require a\nnon-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the\n``(deployment_start, device_id)`` unique index.",
+        "description": "Create a deployment in a project the caller can change (manual upload assignment).\n\nThe rule of ww-backend's deployments INSERT policy, project_member or above (``assert_write``):\na caller with no role on the project gets 404 (so other tenants' project IDs can't be\nprobed), a project_viewer 403. Auto-creates a placeholder device because deployments require a\nnon-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the\n``(deployment_start, device_id)`` unique index. Like every camera it belongs to no\norganisation (ww-backend#346).",
         "operationId": "create_deployment_api_deployments_post",
         "parameters": [
           {
@@ -5633,7 +5707,7 @@
     },
     "/api/v1/devices": {
       "get": {
-        "description": "List the organisation's own cameras.",
+        "description": "The cameras deployed in the organisation's projects, newest registered first.\n\nA camera is listed when it has a deployment, open or ended, in one of the organisation's\nprojects. Cameras belong to no organisation, so a camera lent to another organisation's\nproject is in both lists. A page is at most 1,000 cameras; page with ``offset``.",
         "operationId": "api_list_devices_api_v1_devices_get",
         "parameters": [
           {
@@ -5664,7 +5738,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DevicesResponse"
+                }
               }
             },
             "description": "Successful Response"

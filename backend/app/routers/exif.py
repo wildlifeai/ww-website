@@ -79,7 +79,8 @@ async def _auto_create_deployments(deployment_ids: List[str], project_id: str, u
     frames. Reusing the same UUID means every future upload from that device binds
     automatically. Guarded like POST /api/deployments: 404 if the caller has no role on
     the project, 403 below project_member. A placeholder device is created
-    because deployments need a non-null device_id + a unique (start, device_id).
+    because deployments need a non-null device_id + a unique (start, device_id);
+    like every camera it belongs to no organisation (ww-backend#346).
     """
     from app.domain.photo_preprocessing import resolve_timezone  # noqa: F401 (parity w/ create_deployment)
 
@@ -93,11 +94,6 @@ async def _auto_create_deployments(deployment_ids: List[str], project_id: str, u
         if not to_create:
             return []
 
-        proj = svc.table("projects").select("id, organisation_id").eq("id", project_id).limit(1).execute()
-        if not proj.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-        org_id = rows_of(proj)[0].get("organisation_id")
-
         created: List[str] = []
         for dep_id in to_create:
             device_id = str(uuid.uuid4())
@@ -106,7 +102,6 @@ async def _auto_create_deployments(deployment_ids: List[str], project_id: str, u
                     "id": device_id,
                     "bluetooth_id": str(uuid.uuid4()),
                     "name": f"[SD card] {dep_id[:8]}",
-                    "organisation_id": org_id,
                     "modified_by": user_id,
                 }
             ).execute()

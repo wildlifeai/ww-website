@@ -36,6 +36,7 @@ except ImportError:
 #   demo viewer is granted on this project; a0…001 is the seed admin/owner.
 DEMO_PROJECT_ID = "c0000000-0000-0000-0000-000000000001"
 SEED_ADMIN_ID = "a0000000-0000-0000-0000-000000000001"
+DEMO_BLUETOOTH_ID = "demo-cam-01"
 DEFAULT_FIXTURES = Path(__file__).resolve().parent.parent / "test-fixtures" / "camera-trap"
 DEFAULT_BUCKET = "media-renditions"  # public bucket (renditions/CDN) — URLs are directly servable
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
@@ -50,16 +51,14 @@ def ensure_deployment(svc, project_id: str) -> str:
     if existing.data:
         return existing.data[0]["id"]
 
-    proj = svc.table("projects").select("organisation_id").eq("id", project_id).single().execute()
-    org_id = proj.data["organisation_id"]
-
-    dev = svc.table("devices").select("id").eq("organisation_id", org_id).limit(1).execute()
+    # Cameras belong to no organisation (ww-backend#346): find the demo camera by its id.
+    dev = svc.table("devices").select("id").eq("bluetooth_id", DEMO_BLUETOOTH_ID).limit(1).execute()
     if dev.data:
         device_id = dev.data[0]["id"]
     else:
         device_id = (
             svc.table("devices").insert({
-                "bluetooth_id": "demo-cam-01", "organisation_id": org_id,
+                "bluetooth_id": DEMO_BLUETOOTH_ID,
                 "name": "Demo Camera", "modified_by": SEED_ADMIN_ID,
             }).execute().data[0]["id"]
         )
