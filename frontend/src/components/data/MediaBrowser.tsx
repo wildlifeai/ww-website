@@ -25,7 +25,7 @@ import { mediaDeleteOutcome, type MediaDeleteResponse } from '../../lib/mediaDel
 import { showErrorToast, showUndoToast } from '../common/undoToastBus'
 import { BulkLabelModal } from './BulkLabelModal'
 import { type SpeciesSelection } from './SpeciesPicker'
-import { formatCaptureTime } from '../../lib/time'
+import { DAY_START_HOUR, NIGHT_START_HOUR, formatCaptureTime } from '../../lib/time'
 import { useQueryClient } from '@tanstack/react-query'
 import { MediaGroup } from './MediaGroup'
 import { ClusterLabelAll } from './ClusterLabelAll'
@@ -156,6 +156,11 @@ const TWO_LINES: React.CSSProperties = { display: '-webkit-box', WebkitLineClamp
 const SEX_VALUES = ['female', 'male', 'unknown']
 const LIFE_STAGE_VALUES = ['adult', 'subadult', 'juvenile', 'hatchling', 'unknown']
 const capitalised = (s: string) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) })
+const clock = (h: number) => `${String(h).padStart(2, '0')}:00`
+const TIME_OF_DAY_OPTIONS = [
+  { value: 'day', label: `Day (${clock(DAY_START_HOUR)} to ${clock(NIGHT_START_HOUR)})` },
+  { value: 'night', label: `Night (${clock(NIGHT_START_HOUR)} to ${clock(DAY_START_HOUR)})` },
+]
 
 /** Labels view: at most this many cards per photo; the viewer shows the rest. */
 const MAX_LABEL_CARDS = 4
@@ -794,7 +799,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   }, [filtered, imageView])
 
   const advancedActive = hasAdvancedFilters(filters)
-  const advancedCount = [filters.status, filters.annotator, filters.model, filters.annotationType, filters.sex, filters.lifeStage, filters.dateFrom || filters.dateTo]
+  const advancedCount = [filters.status, filters.annotator, filters.model, filters.annotationType, filters.sex, filters.lifeStage, filters.dateFrom || filters.dateTo, filters.timeOfDay]
     .filter(Boolean).length
   const clearAdvanced = () => setFilters(clearedAdvanced)
   const editDraft = (patch: Partial<GridFilters>) => setDraft(d => (d ? { ...d, ...patch } : d))
@@ -1488,6 +1493,13 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
                 />
               </label>
             </div>
+          </section>
+
+          {/* Time of day: the capture hour in the deployment's zone */}
+          <section>
+            <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.5rem' }}>Time of day</div>
+            <FilterSelect value={draft.timeOfDay} onChange={v => editDraft({ timeOfDay: v as GridFilters['timeOfDay'] })} placeholder="Any time"
+              options={TIME_OF_DAY_OPTIONS} />
           </section>
 
         </div>

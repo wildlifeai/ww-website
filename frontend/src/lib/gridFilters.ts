@@ -7,14 +7,13 @@
 // `!inner` keeps photos with a matching row, a plain embed plus `alias=is.null` keeps photos with
 // none (an anti-join). One alias per filter, so two filters may be met by two different rows,
 // as when they ran in the browser.
-//
-// Not here: day or night. It needs each photo's hour in its deployment's zone, which PostgREST
-// cannot compute; see the audit report's database needs.
 
 import { HUMAN_REVIEWED_STATES } from './observations'
+import { DAY_START_HOUR, NIGHT_START_HOUR } from './time'
 
 export type GridStatus = '' | 'ai' | 'reviewed' | 'pending'
 export type GridAnnotationType = '' | 'bbox' | 'whole'
+export type GridTimeOfDay = '' | 'day' | 'night'
 
 export interface GridFilters {
   species: string[]
@@ -27,16 +26,21 @@ export interface GridFilters {
   /** YYYY-MM-DD, inclusive; compared in UTC as before. */
   dateFrom: string
   dateTo: string
+  /** By the capture hour in the deployment's zone; photos with no capture time match neither. */
+  timeOfDay: GridTimeOfDay
 }
 
 export const NO_FILTERS: GridFilters = {
   species: [], status: '', annotator: '', model: '', annotationType: '', sex: '', lifeStage: '', dateFrom: '', dateTo: '',
+  timeOfDay: '',
 }
 
 /** One filter call on the media query, as data so it can be tested without a client. */
 export type FilterOp =
   | { op: 'in'; column: string; values: string[] }
   | { op: 'eq'; column: string; value: string }
+  | { op: 'gte'; column: string; value: number }
+  | { op: 'lt'; column: string; value: number }
   | { op: 'notNull'; column: string }
   | { op: 'isNull'; column: string }
   | { op: 'or'; filters: string; referencedTable?: string }
@@ -114,6 +118,14 @@ export function gridFilterPlan(f: GridFilters): FilterPlan {
   if (from && to) ops.push({ op: 'or', filters: `timestamp.is.null,and(${from},${to})` })
   else if (from || to) ops.push({ op: 'or', filters: `timestamp.is.null,${from ?? to}` })
 
+  // media.local_hour is the capture hour in the deployment's zone, kept by the database
+  // (ww-backend #335); null without a capture time, which matches neither.
+  if (f.timeOfDay === 'day') {
+    ops.push({ op: 'gte', column: 'local_hour', value: DAY_START_HOUR }, { op: 'lt', column: 'local_hour', value: NIGHT_START_HOUR })
+  } else if (f.timeOfDay === 'night') {
+    ops.push({ op: 'or', filters: `local_hour.gte.${NIGHT_START_HOUR},local_hour.lt.${DAY_START_HOUR}` })
+  }
+
   return { embeds, ops }
 }
 
@@ -121,6 +133,8 @@ export function gridFilterPlan(f: GridFilters): FilterPlan {
 export interface FilterableQuery<Q> {
   in(column: string, values: readonly string[]): Q
   eq(column: string, value: string): Q
+  gte(column: string, value: number): Q
+  lt(column: string, value: number): Q
   not(column: string, operator: string, value: null): Q
   is(column: string, value: null): Q
   or(filters: string, options?: { referencedTable?: string }): Q
@@ -131,6 +145,8 @@ export function applyFilterOps<Q extends FilterableQuery<Q>>(query: Q, ops: read
   for (const o of ops) {
     if (o.op === 'in') q = q.in(o.column, o.values)
     else if (o.op === 'eq') q = q.eq(o.column, o.value)
+    else if (o.op === 'gte') q = q.gte(o.column, o.value)
+    else if (o.op === 'lt') q = q.lt(o.column, o.value)
     else if (o.op === 'notNull') q = q.not(o.column, 'is', null)
     else if (o.op === 'isNull') q = q.is(o.column, null)
     else q = o.referencedTable ? q.or(o.filters, { referencedTable: o.referencedTable }) : q.or(o.filters)
@@ -183,7 +199,7 @@ export function applyOrder<Q extends { order(column: string, options: Omit<Order
 
 /** The filters set in the Advanced filters dialog (everything but deployment and species). */
 export function hasAdvancedFilters(f: GridFilters): boolean {
-  return !!(f.status || f.annotator || f.model || f.annotationType || f.sex || f.lifeStage || f.dateFrom || f.dateTo)
+  return !!(f.status || f.annotator || f.model || f.annotationType || f.sex || f.lifeStage || f.dateFrom || f.dateTo || f.timeOfDay)
 }
 
 /** Any filter beyond the deployment choice. */
