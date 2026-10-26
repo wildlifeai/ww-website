@@ -169,7 +169,9 @@ modal opened from the header and the older `AnalyseImages` page behind `/upload-
 drifted, and the modal was too small for the triage step, so both were folded into the page.)
 **Images always sync to Google Drive**, the old "Sync to Google Drive" toggle was removed; Drive is
 the default long-term store. AI analysis runs after upload by default and can be switched off per
-upload (`run_ai`); for CamtrapDP imports it is opt-in.
+upload (`run_ai`); for CamtrapDP imports it is opt-in. Thumbnails are the AI pipeline's first step,
+so an upload whose AI does not run (switched off, or no AI configured) starts the thumbnails job
+itself, one per deployment, which the upload's chunks share (`start_thumbnail_backfill`).
 
 > [!IMPORTANT]
 > Media rows are created **inside the Drive job, only for files bound to a deployment**. Two
