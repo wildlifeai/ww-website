@@ -75,9 +75,10 @@ selects the range from the last selected card; the arrow keys move between cards
 *Select* takes the whole group (`lib/cardSelection.ts`, #283). A selection belongs to its page: a
 new page or filter starts with none. Once something is selected the sub-bar shows the count, Clear
 and the **Actions** menu (`components/data/MediaBulkActions.tsx`): *Label as…*, *Find similar
-photos* (single selection, Wildlife Brain), *Upload to iNaturalist* (or a link to connect it on
-Toolkit), *Remove photos* (soft delete with Undo), *Run AI again* and, for organisation managers,
-*Create species ID model…*. *Label as…* gives each photo one human row, updating the one it has,
+photos* (single selection, Wildlife Brain), *Publish to iNaturalist* (or a link to connect it on
+Toolkit; the route and notices are Cluster Review's, `lib/inatPublish.ts`), *Remove photos* (soft
+delete with Undo), *Run AI again* and, for organisation managers, *Create species ID model…*.
+*Label as…* gives each photo one human row, updating the one it has,
 and leaves AI rows as the model wrote them (`lib/humanVerdict.ts`, decision 2 of the
 [UI audit](../development%20reports/2026-10_ui-audit/README.md)); its toast offers Undo, and a
 refused write shows there too. *Create species ID model…* trains a Camera AI model (a Species Brain) from the selected labelled images through

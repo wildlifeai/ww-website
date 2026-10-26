@@ -9,6 +9,7 @@ import { survivingPending } from '../../lib/pendingCards'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
 import { useINat } from '../../hooks/useINat'
+import { inatBlocker, inatErrorNotice, inatPublishNotice, type CardNotice, type NoticeLink } from '../../lib/inatPublish'
 import { useProjectRoles } from '../../hooks/useProjectRoles'
 import { INatBadge, type INatState } from './INatBadge'
 import { MediaDetail } from './MediaDetail'
@@ -163,6 +164,15 @@ const TIME_OF_DAY_OPTIONS = [
   { value: 'night', label: `Night (${clock(NIGHT_START_HOUR)} to ${clock(DAY_START_HOUR)})` },
 ]
 
+const NOTICE_LINK: React.CSSProperties = { fontSize: '0.8125rem', color: 'var(--primary)', whiteSpace: 'nowrap' }
+
+/** A notice's link: a route of this site, or an iNaturalist page in a new tab. */
+function NoticeLinkTo({ link }: { link: NoticeLink }) {
+  return link.external
+    ? <a href={link.to} target="_blank" rel="noreferrer" style={NOTICE_LINK}>{link.label}</a>
+    : <Link to={link.to} style={NOTICE_LINK}>{link.label}</Link>
+}
+
 /** Labels view: at most this many cards per photo; the viewer shows the rest. */
 const MAX_LABEL_CARDS = 4
 
@@ -307,12 +317,14 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   const [similarLoading, setSimilarLoading] = useState(false)
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
-  // One notice at a time (a result, a failure, the iNaturalist upload), shown as a Banner.
-  const [notice, setNotice]       = useState<{ tone: BannerTone; text: string } | null>(null)
+  // One notice at a time (a result, a failure, an iNaturalist publish), shown as a Banner.
+  const [notice, setNotice]       = useState<{ tone: BannerTone; text: string; link?: NoticeLink } | null>(null)
   const flash = useCallback((tone: BannerTone, text: string, autoHide = tone === 'success') => {
     setNotice({ tone, text })
     if (autoHide) window.setTimeout(() => setNotice(n => (n?.text === text ? null : n)), 4000)
   }, [])
+  // An iNaturalist notice stays until the next one, as in Cluster Review, so its link can be used.
+  const showCardNotice = (n: CardNotice) => setNotice({ tone: n.ok ? 'success' : 'error', text: n.text, link: n.link })
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null)
   // The observation a crop card was opened from, pre-selected in the detail.
   const [focusObsId, setFocusObsId] = useState<string | null>(null)
@@ -392,10 +404,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   }
   const isSelectable = (m: MediaRecord) => !m._pending && canWriteDeployment(m.deployment_id)
 
-  // ── Phase 3: iNaturalist publish + tracking ───────────────────────────────
+  // ── iNaturalist publish + badges ──────────────────────────────────────────
   const inat = useINat()
-  const [, setInatMode]         = useState(false)            // iNat selection mode
-  const [inatSelected, setInatSelected] = useState<Set<string>>(new Set())
   const [inatStates, setInatStates]     = useState<Map<string, { state: INatState; uri: string | null }>>(new Map())
   const [inatBusy, setInatBusy]         = useState(false)
 
@@ -438,14 +448,9 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
       setShowTrainModal(true)
     } else if (action === 'inat') {
       // Not connected, the menu links to the Toolkit page instead of offering this.
-      // Upload the unified selection. Pass the ids directly: setInatSelected is
-      // async, so uploadToInat() reading inatSelected here would see the stale
-      // (empty) set and silently no-op.
-      setInatSelected(new Set(selectedIds))
-      setInatMode(true)
-      uploadToInat(new Set(selectedIds))
+      publishToInat([...selectedIds])
     }
-    // syncFromInat/uploadToInat are plain (unmemoised) functions declared below;
+    // publishToInat is a plain (unmemoised) function declared below;
     // including them would just defeat the memo without changing behaviour.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIds, clearSelection])
@@ -589,27 +594,20 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   // Refresh iNaturalist badges whenever the loaded media set changes.
   useEffect(() => { loadInatStates(media.map(m => m.id)) }, [media, loadInatStates])
 
-  // Upload the iNat-selected media to iNaturalist (burst-consolidated).
-  // Accepts an explicit id set so callers can avoid the async-state trap;
-  // falls back to inatSelected when called without args.
-  const uploadToInat = async (ids?: Set<string>) => {
-    const toPublish = ids ?? inatSelected
-    if (toPublish.size === 0 || inatBusy) return
+  // Publish the selection to iNaturalist as Cluster Review does: POST /api/inat/publish
+  // (burst-consolidated), with its blocker and notices (lib/inatPublish).
+  const publishToInat = async (ids: string[]) => {
+    if (ids.length === 0 || inatBusy) return
+    const blocker = inatBlocker({ connected: inat.connected, selected: ids.length })
+    if (blocker) { showCardNotice(blocker); return }
     setInatBusy(true)
-    flash('info', 'Uploading to iNaturalist…', false)
+    flash('info', 'Publishing to iNaturalist…', false)
     try {
-      const r = await inat.publish([...toPublish])
-      flash('success',
-        `${r.observations_created} observation(s), ${r.photos_uploaded} photo(s) on iNaturalist` +
-        (r.skipped_bycatch ? ` · ${r.skipped_bycatch} by-catch skipped` : '') +
-        (r.skipped_already_published ? ` · ${r.skipped_already_published} already on iNat` : '') +
-        (r.errors ? ` · ${r.errors} error(s)` : ''),
-        false,
-      )
-      setInatSelected(new Set())
+      showCardNotice(inatPublishNotice(await inat.publish(ids)))
+      clearSelection()
       await loadInatStates(media.map(m => m.id))
     } catch (e) {
-      flash('error', (e as Error)?.message ?? 'Upload failed')
+      showCardNotice(inatErrorNotice(e))
     } finally {
       setInatBusy(false)
     }
@@ -1265,7 +1263,9 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
       />
 
       {notice && (
-        <Banner tone={notice.tone} onClose={() => setNotice(null)}>{notice.text}</Banner>
+        <Banner tone={notice.tone} onClose={() => setNotice(null)} action={notice.link && <NoticeLinkTo link={notice.link} />}>
+          {notice.text}
+        </Banner>
       )}
       {loading && <p style={{ color: 'var(--text-muted)' }}>Loading media…</p>}
       {error && <Banner tone="error">{error}</Banner>}
