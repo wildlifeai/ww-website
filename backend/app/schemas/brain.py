@@ -6,7 +6,10 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# Photos per POST /api/brain/review/batch request.
+REVIEW_BATCH_MAX = 500
 
 
 class EmbedRequest(BaseModel):
@@ -51,6 +54,22 @@ class ReviewDecisionRequest(BaseModel):
     scientific_name: Optional[str] = Field(None, description="Confirmed species (AI label for approve; new name for reassign)")
     vernacular_name: Optional[str] = None
     taxon_id: Optional[str] = None
+
+
+class ReviewBatchRequest(BaseModel):
+    """One reviewer decision on many photos (Cluster Review's Reassign and Flag for expert)."""
+
+    media_ids: list[str] = Field(..., min_length=1, max_length=REVIEW_BATCH_MAX, description="Photos to review, at most 500 a request")
+    decision: Literal["reassign", "expert"]
+    taxon_id: Optional[str] = Field(None, description="Taxon UUID (preferred)")
+    scientific_name: Optional[str] = Field(None, description="The species; reassign needs it or taxon_id")
+    vernacular_name: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _reassign_names_a_species(self):
+        if self.decision == "reassign" and not (self.taxon_id or self.scientific_name):
+            raise ValueError("reassign needs a taxon_id or a scientific_name")
+        return self
 
 
 class MultiClusterRequest(BaseModel):

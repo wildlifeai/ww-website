@@ -83,7 +83,7 @@ password) or uses Forgot password.
 | `/upload-data` | `UploadDataPage` (→ `UploadFlow`) | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
 | `/upload-model` | `UploadModelPage` | Edge Impulse → Vela model upload (org managers) |
-| `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters, unconfirmed and biggest first, ten per page |
+| `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters, unconfirmed and biggest first, ten per page; a confirm offers Undo |
 | `/review/:id` | `ReviewQueuePage` | Retired Review Queue: redirects to `/annotations?deployment=:id` |
 | `/umap/:id` | `UmapExplorerPage` | Embedding-space map of a deployment; a click opens that photo in the grid |
 | `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project), behind `FF_INTELLIGENCE_ENABLED`. Links to a flagged page show only when `useFeatureEnabled` says the feature answers |
@@ -131,6 +131,7 @@ device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `exports`, 
 
 **Key domain modules**: `exif`, `photo_preprocessing`, `pipeline` (SpeciesNet steps), `events`,
 `clustering`, `wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
+`human_verdicts` (cluster confirm and undo, batch review: one human row per photo),
 `intelligence`, `media_registry` / `media_resolver`, `model`, `manifest`, `camtrapdp`, `camtrapdp_export`, `inaturalist`,
 `public_api`.
 

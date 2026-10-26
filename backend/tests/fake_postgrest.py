@@ -7,11 +7,14 @@ an embed (``projects.organisation_id``), ``or_`` on the table, ``order`` (also
 ``foreign_table``), ``range``, ``limit`` and ``count="exact"``, as PostgREST does for these
 cases: a filter on an embed trims that embed, and drops the parent row only when the embed is
 ``!inner``. Two timestamps with a zone compare as instants, as ``timestamptz`` does. ``update``
-and ``upsert`` are enough for the API key and job stores.
+and ``upsert`` are enough for the API key and job stores; ``insert`` and ``delete`` return the
+rows they wrote, as supabase-py asks for by default. Like PostgREST, a read returns at most
+``max_rows`` (1,000) rows, so a read that does not page stops there in a test too.
 
 A column the table does not have fails the test, so a query naming a column that is not in
 ww-backend's schema is caught here and not in production. ``COLUMNS`` lists the columns of
-each table the API reads, from ww-backend dev's supabase/schema.sql (10 Oct 2026).
+each table the API reads, from ww-backend dev's supabase/schema.sql (10 Oct 2026; the cluster
+and observation provenance columns 25 Oct 2026).
 """
 
 from __future__ import annotations
@@ -57,6 +60,29 @@ COLUMNS = {
         "source_type",
         "ai_origin",
         "deleted_at",
+        "created_at",
+        "observation_level",
+        "classified_by",
+        "classification_timestamp",
+        "annotator_id",
+        "reviewer_id",
+        "confidence",
+        "embedding_run_id",
+        "cluster_id",
+    },
+    "media_embeddings": {"media_id", "deployment_id", "embedding_run_id", "cluster_id", "cluster_confidence", "is_outlier", "created_at"},
+    "cluster_assignments": {
+        "id",
+        "deployment_id",
+        "embedding_run_id",
+        "cluster_id",
+        "taxon_id",
+        "scientific_name",
+        "is_outlier_cluster",
+        "image_count",
+        "review_state",
+        "confirmed_by",
+        "confirmed_at",
         "created_at",
     },
     "lorawan_messages": {"id", "device_eui", "device_id", "deployment_id", "raw_payload", "received_at"},
@@ -140,6 +166,14 @@ class Query:
 
     def upsert(self, payload: dict):
         self.mode, self.payload = "upsert", payload
+        return self
+
+    def insert(self, payload):
+        self.mode, self.payload = "insert", payload if isinstance(payload, list) else [payload]
+        return self
+
+    def delete(self):
+        self.mode = "delete"
         return self
 
     def _filter(self, path: str, op: str, value: Any):
@@ -236,10 +270,30 @@ class Query:
                 rows.append(copy.deepcopy(self.payload))
             return SimpleNamespace(data=[self.payload], count=None)
         if self.mode == "update":
+            for column in self.payload:
+                _check_column(self.table, column)
             hit = [r for r in self.db.rows(self.table) if all(_test(r, self.table, c, op, v) for c, op, v in self._filters_at(""))]
             for r in hit:
                 r.update(self.payload)
+            self.db.writes.append(SimpleNamespace(table=self.table, mode="update", rows=len(hit)))
             return SimpleNamespace(data=copy.deepcopy(hit), count=None)
+        if self.mode == "insert":
+            stored = []
+            for row in self.payload:
+                for column in row:
+                    _check_column(self.table, column)
+                self.db.next_id += 1
+                stored.append({"id": f"new-{self.db.next_id}", **copy.deepcopy(row)})
+            self.db.rows(self.table).extend(stored)
+            self.db.writes.append(SimpleNamespace(table=self.table, mode="insert", rows=len(stored)))
+            return SimpleNamespace(data=copy.deepcopy(stored), count=None)
+        if self.mode == "delete":
+            keep, gone = [], []
+            for r in self.db.rows(self.table):
+                (gone if all(_test(r, self.table, c, op, v) for c, op, v in self._filters_at("")) else keep).append(r)
+            self.db.tables[self.table] = keep
+            self.db.writes.append(SimpleNamespace(table=self.table, mode="delete", rows=len(gone)))
+            return SimpleNamespace(data=copy.deepcopy(gone), count=None)
 
         tree = self.tree or _parse(self.table, "*")
         for path, _, _ in self.filters:
@@ -268,7 +322,7 @@ class Query:
         rows = [k["__built"] for k in keyed]
         total = len(rows)
         end = None if self.limit_n is None else self.offset + self.limit_n
-        page = rows[self.offset : end]
+        page = rows[self.offset : end][: self.db.max_rows]
         self.db.requests.append(SimpleNamespace(table=self.table, filters=list(self.filters), returned=len(page)))
         for r in page:
             r.pop("__row", None)
@@ -323,9 +377,12 @@ def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
 class FakeDB:
     """``create_service_client()`` for tests: ``FakeDB(tables).client``."""
 
-    def __init__(self, tables: dict[str, list[dict]]):
+    def __init__(self, tables: dict[str, list[dict]], max_rows: int = 1000):
         self.tables = {name: [dict(r) for r in rows] for name, rows in tables.items()}
         self.requests: list[SimpleNamespace] = []
+        self.writes: list[SimpleNamespace] = []
+        self.max_rows = max_rows
+        self.next_id = 0
 
     def rows(self, table: str) -> list[dict]:
         return self.tables.setdefault(table, [])

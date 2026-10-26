@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Upload } from 'lucide-react'
-import { useClusters, useUmapCoords, useConfirmCluster, useEmbedDeployment, useBulkReview } from '../hooks/useBrain'
+import { useClusters, useUmapCoords, useConfirmCluster, useUnconfirmCluster, useEmbedDeployment, useBulkReview } from '../hooks/useBrain'
 import type { ClusterAssignment } from '../hooks/useBrain'
 import { useMediaThumbs } from '../hooks/useMediaThumbs'
 import { useDeploymentProject } from '../hooks/useDeploymentProject'
@@ -9,8 +9,9 @@ import { useProjectRoles } from '../hooks/useProjectRoles'
 import { useINat } from '../hooks/useINat'
 import { SpeciesPicker, type SpeciesSelection } from '../components/data/SpeciesPicker'
 import { FeatureOff } from '../components/common/FeatureOff'
+import { showUndoToast } from '../components/common/undoToastBus'
 import { isFeatureDisabled } from '../lib/featureFlags'
-import { CLUSTERS_PER_PAGE, MEMBERS_PER_STEP, orderClusters, pageOf } from '../lib/clusterReview'
+import { CLUSTERS_PER_PAGE, MEMBERS_PER_STEP, confirmedText, orderClusters, pageOf } from '../lib/clusterReview'
 import { inatBlocker, inatErrorNotice, inatPublishNotice, type CardNotice } from '../lib/inatPublish'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,6 +160,7 @@ function ClusterPanel({
   const [notice, setNotice] = useState<Notice>(null)
 
   const confirm = useConfirmCluster(deploymentId)
+  const unconfirm = useUnconfirmCluster(deploymentId)
   const review = useBulkReview(deploymentId)
   // No query cache holds iNaturalist state, so publishing is a plain call, not a mutation.
   const [publishing, setPublishing] = useState(false)
@@ -193,7 +195,11 @@ function ClusterPanel({
       {
         onSuccess: (r) => {
           onConfirmed(c.id)
-          setNotice({ ok: true, text: `Confirmed ${photos(r?.observations_created ?? c.image_count)} as ${speciesName(pick)}.` })
+          setConfirmPick(null)
+          showUndoToast({
+            message: confirmedText(r.observations_created, r.skipped, speciesName(pick)),
+            onUndo: async () => { await unconfirm.mutateAsync(c.id) },
+          })
         },
         onError: (err) => setNotice({ ok: false, text: `Not confirmed: ${errorText(err)}` }),
       },
@@ -207,11 +213,11 @@ function ClusterPanel({
     review.mutate(
       { mediaIds: [...selected], decision, taxon: decision === 'reassign' && pick ? pick : undefined },
       {
-        onSuccess: ({ ok, failed }) => {
+        onSuccess: ({ saved, skipped }) => {
           const done = decision === 'reassign' && pick
-            ? `Reassigned ${photos(ok)} to ${speciesName(pick)}`
-            : `Flagged ${photos(ok)} for an expert`
-          setNotice({ ok: failed === 0, text: failed > 0 ? `${done}; ${failed} failed.` : `${done}.` })
+            ? `Reassigned ${photos(saved)} to ${speciesName(pick)}`
+            : `Flagged ${photos(saved)} for an expert`
+          setNotice({ ok: skipped === 0, text: skipped > 0 ? `${done}; ${skipped} skipped.` : `${done}.` })
           setMode('idle')
           setSelected(new Set())
         },

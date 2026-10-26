@@ -84,6 +84,8 @@ than 1,000 photos labelled only 1,000 (2026-10-21). Any backend read over a whol
 project goes through `services/db_utils.read_all`, a query ordered on a unique key and paged with
 `.range()` until a short page. A check for known keys looks up only those keys with
 `.in_()` in chunks, as the upload dedup in `jobs.definitions.existing_media_keys` does (#317).
+The test stand-in `tests/fake_postgrest.FakeDB` returns at most 1,000 rows a read too, so a test
+with more rows than that catches a read that does not page (25 Oct 2026).
 
 ---
 

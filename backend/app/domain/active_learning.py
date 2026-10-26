@@ -26,7 +26,7 @@ from typing import Optional
 import structlog
 
 from app.registries.embedding_registry import ACTIVE_LEARNING_WEIGHTS
-from app.services.db_utils import rows_of
+from app.services.db_utils import read_all, rows_of
 
 logger = structlog.get_logger()
 
@@ -101,20 +101,18 @@ def _ai_human_labels(observations: list[dict]) -> dict[str, dict]:
     return by_media
 
 
+_LABEL_COLUMNS = "media_id, source_type, review_status, confidence, scientific_name, vernacular_name"
+
+
 async def _fetch_observations(deployment_id: str) -> list[dict]:
     from app.services.supabase_client import create_service_client
 
     svc = create_service_client()
 
     def _fetch():
-        resp = (
-            svc.table("observations")
-            .select("media_id, source_type, review_status, confidence, scientific_name, vernacular_name")
-            .eq("deployment_id", deployment_id)
-            .is_("deleted_at", "null")
-            .execute()
+        return read_all(
+            lambda: svc.table("observations").select(_LABEL_COLUMNS).eq("deployment_id", deployment_id).is_("deleted_at", "null").order("id")
         )
-        return rows_of(resp)
 
     return await asyncio.to_thread(_fetch)
 
@@ -126,8 +124,11 @@ async def recompute_scores(deployment_id: str, progress=None) -> int:
     svc = create_service_client()
 
     def _fetch_embeddings():
-        resp = svc.table("media_embeddings").select("media_id, cluster_confidence, is_outlier").eq("deployment_id", deployment_id).execute()
-        return rows_of(resp)
+        return read_all(
+            lambda: (
+                svc.table("media_embeddings").select("media_id, cluster_confidence, is_outlier").eq("deployment_id", deployment_id).order("media_id")
+            )
+        )
 
     embeddings = await asyncio.to_thread(_fetch_embeddings)
     if not embeddings:
@@ -193,9 +194,66 @@ async def get_review_queue(deployment_id: str, limit: int = 50) -> list[dict]:
     return rows
 
 
+def _agreement(observations: list[dict]) -> dict:
+    labels = _ai_human_labels(observations)
+    return compute_qa_metrics([(v.get("ai_label"), v.get("human_label")) for v in labels.values()])
+
+
 async def qa_report(deployment_id: str) -> dict:
     """AI-vs-human agreement report for a deployment (precision proxy)."""
-    labels = _ai_human_labels(await _fetch_observations(deployment_id))
-    pairs = [(v.get("ai_label"), v.get("human_label")) for v in labels.values()]
-    metrics = compute_qa_metrics(pairs)
+    metrics = _agreement(await _fetch_observations(deployment_id))
     return {"deployment_id": deployment_id, **metrics, "method": "ai_human_agreement"}
+
+
+# Deployment ids per in.(...) read of a project's observations.
+_DEPLOYMENT_CHUNK = 50
+
+
+async def qa_project_report(project_id: str) -> dict:
+    """``qa_report`` for a project's live deployments in one answer (UI audit 03 #19).
+
+    The totals add up every deployment; ``per_deployment`` lists those with at least one photo
+    compared, most compared first. Every read pages past PostgREST's 1,000 rows.
+    """
+    from app.services.supabase_client import create_service_client
+
+    svc = create_service_client()
+
+    def _fetch():
+        deployments = read_all(
+            lambda: svc.table("deployments").select("id, location_name").eq("project_id", project_id).is_("deleted_at", "null").order("id")
+        )
+        observations: dict[str, list[dict]] = {d["id"]: [] for d in deployments}
+        ids = list(observations)
+        for start in range(0, len(ids), _DEPLOYMENT_CHUNK):
+            part = ids[start : start + _DEPLOYMENT_CHUNK]
+            rows = read_all(
+                lambda part=part: (
+                    svc.table("observations")
+                    .select(f"deployment_id, {_LABEL_COLUMNS}")
+                    .in_("deployment_id", part)
+                    .is_("deleted_at", "null")
+                    .order("id")
+                )
+            )
+            for o in rows:
+                observations[o["deployment_id"]].append(o)
+        return deployments, observations
+
+    deployments, observations = await asyncio.to_thread(_fetch)
+    per_deployment = []
+    for d in deployments:
+        metrics = _agreement(observations[d["id"]])
+        if metrics["n_compared"]:
+            per_deployment.append({"deployment_id": d["id"], "location_name": d.get("location_name"), **metrics})
+    per_deployment.sort(key=lambda p: -p["n_compared"])
+    n = sum(p["n_compared"] for p in per_deployment)
+    matches = sum(p["matches"] for p in per_deployment)
+    return {
+        "project_id": project_id,
+        "n_compared": n,
+        "matches": matches,
+        "precision": round(matches / n, 4) if n else None,
+        "per_deployment": per_deployment,
+        "method": "ai_human_agreement",
+    }
