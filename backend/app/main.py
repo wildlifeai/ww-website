@@ -63,6 +63,13 @@ async def lifespan(app: FastAPI):
         except ImportError:
             logger.warning("sentry_sdk_not_installed")
 
+    # iNaturalist switched on with settings it cannot work with: say so once at startup.
+    if settings.FF_INAT_ENABLED:
+        from app.services.inat_oauth import inat_settings_problems
+
+        for problem in inat_settings_problems():
+            logger.error("inat_settings_problem", problem=problem)
+
     # Stale-job reaper: age-based, so it only fails jobs with no progress for an hour.
     # (The old recover_stuck_jobs failed EVERY 'processing' job at startup — wrong now
     # that AI jobs legitimately run on the separate worker process across API restarts.)

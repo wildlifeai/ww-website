@@ -55,6 +55,7 @@ from app.services.inat_oauth import (
     get_user_token,
     revoke_user_token,
     store_user_token,
+    token_key_problem,
     validate_api_token,
 )
 from app.services.supabase_client import create_service_client
@@ -74,9 +75,17 @@ def _check_feature():
         raise HTTPException(404, detail="iNaturalist integration is not enabled")
 
 
-def _check_enabled():
-    """Guard for the OAuth (Pathway-1) endpoints: feature flag + a registered app."""
+def _check_tokens():
+    """Guard for the routes that store or read a user's token: the flag and a sound key."""
     _check_feature()
+    problem = token_key_problem()
+    if problem:
+        raise HTTPException(503, detail=problem)
+
+
+def _check_enabled():
+    """Guard for the OAuth (Pathway-1) endpoints: feature flag, a sound key, a registered app."""
+    _check_tokens()
     if not settings.INAT_CLIENT_ID:
         raise HTTPException(500, detail="INAT_CLIENT_ID not configured")
 
@@ -162,7 +171,7 @@ async def inat_set_token(
     bundle so publish/sync work unchanged. The JWT is ~24h-lived, so reconnecting is
     just re-pasting a fresh one.
     """
-    _check_feature()
+    _check_tokens()
 
     jwt = (api_token or "").strip()
     try:
@@ -193,7 +202,7 @@ async def inat_status(
     user=Depends(get_current_user),
 ):
     """Check if the current user is connected to iNaturalist."""
-    _check_feature()
+    _check_tokens()
 
     token = await get_user_token(user.id)
     if not token:
@@ -251,7 +260,7 @@ async def create_inat_observation(
     Uses the Wildlife Watcher AI model's prediction as the species_guess.
     Default geoprivacy is 'obscured' to protect sensitive locations.
     """
-    _check_feature()
+    _check_tokens()
 
     try:
         result = await create_observation(
@@ -288,7 +297,7 @@ async def publish_to_inat(
     Only photos in projects the caller can change (project_member or above) are published: the
     others are left out, and ``403`` when that is all of them.
     """
-    _check_feature()
+    _check_tokens()
 
     media_ids = await writable_media_ids(user.id, body.media_ids)
     if not media_ids:

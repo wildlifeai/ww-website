@@ -53,7 +53,8 @@ Already implemented before this work; surfaced in Phase 3.
 
 - `services/inat_oauth.py`: `generate_pkce_pair` (S256), `build_authorization_url`,
   `exchange_code_for_token`, `refresh_access_token`, `get_api_jwt`, and **encrypted** token
-  storage in `inat_tokens` (`encrypt_token`/`decrypt_token`, Fernet key derived from the app secret).
+  storage in `inat_tokens` (`encrypt_token`/`decrypt_token`, Fernet key derived from
+  `INAT_CLIENT_SECRET`; refused, with the reason, when it is missing or shorter than 32 characters).
 - Routes: `GET /api/inat/auth | /callback | /status`, `POST /api/inat/disconnect | /token`.
 - UI: `INaturalistPanel.tsx` (connect/disconnect), surfaced on the **Toolkit** tab (the old *Other*
   tab was retired — `/other` now redirects to `/toolkit`, and the OAuth callback returns to

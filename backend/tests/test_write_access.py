@@ -146,6 +146,7 @@ async def test_inat_publish_refuses_when_no_photo_is_writable(monkeypatch):
         return {}
 
     monkeypatch.setattr(inaturalist.settings, "FF_INAT_ENABLED", True)
+    monkeypatch.setattr(inaturalist.settings, "INAT_CLIENT_SECRET", "x" * 43)
     monkeypatch.setattr(inaturalist, "writable_media_ids", none_writable)
     monkeypatch.setattr(inaturalist, "publish_media_to_inat", publish)
     with pytest.raises(HTTPException) as exc:
@@ -168,6 +169,7 @@ async def test_inat_publish_sends_only_the_writable_photos(monkeypatch):
         return {}
 
     monkeypatch.setattr(inaturalist.settings, "FF_INAT_ENABLED", True)
+    monkeypatch.setattr(inaturalist.settings, "INAT_CLIENT_SECRET", "x" * 43)
     monkeypatch.setattr(inaturalist, "writable_media_ids", first_only)
     monkeypatch.setattr(inaturalist, "publish_media_to_inat", publish)
     await inaturalist.publish_to_inat(INatPublishRequest(media_ids=["m1", "m2"]), SimpleNamespace(state=SimpleNamespace()), SimpleNamespace(id="u1"))

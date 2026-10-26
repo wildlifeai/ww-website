@@ -5,6 +5,10 @@
 import base64
 import hashlib
 import os
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
 
 # Ensure iNat config vars exist for import
 os.environ.setdefault("INAT_CLIENT_ID", "test_client_id")
@@ -18,14 +22,21 @@ from app.schemas.inaturalist import (
     INatConnectionStatus,
     INatCreateObservation,
 )
+from app.services import inat_oauth
 from app.services.inat_oauth import (
     INAT_AUTH_URL,
+    INatKeyError,
     build_authorization_url,
     decrypt_token,
     encrypt_token,
     generate_pkce_pair,
+    inat_settings_problems,
     is_token_expired,
+    token_key_problem,
 )
+
+# A stand-in for a registered app's secret: as long as the ones iNaturalist issues.
+SOUND_SECRET = "x" * 43
 
 
 class TestPKCE:
@@ -77,6 +88,11 @@ class TestAuthorizationURL:
 
 
 class TestTokenEncryption:
+    @pytest.fixture(autouse=True)
+    def _sound_secret(self, monkeypatch):
+        # settings may be built before this module's setdefault runs, so set the secret here.
+        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", SOUND_SECRET)
+
     def test_encrypt_decrypt_roundtrip(self):
         token = {
             "access_token": "at_12345",
@@ -97,6 +113,82 @@ class TestTokenEncryption:
         t1 = {"access_token": "token_1"}
         t2 = {"access_token": "token_2"}
         assert encrypt_token(t1) != encrypt_token(t2)
+
+
+def _no_service_client():
+    raise AssertionError("no token is read or written without a sound key")
+
+
+class TestTokenKey:
+    """An empty or short INAT_CLIENT_SECRET gives a key anyone can derive (#123)."""
+
+    @pytest.mark.parametrize("secret", ["", "   ", "changeme"])
+    def test_a_missing_or_short_secret_is_refused(self, monkeypatch, secret):
+        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", secret)
+        problem = token_key_problem()
+        assert problem and "INAT_CLIENT_SECRET" in problem
+        with pytest.raises(INatKeyError, match="INAT_CLIENT_SECRET"):
+            encrypt_token({"access_token": "at"})
+
+    def test_a_registered_secret_is_sound(self, monkeypatch):
+        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", SOUND_SECRET)
+        assert token_key_problem() is None
+        assert decrypt_token(encrypt_token({"access_token": "at"})) == {"access_token": "at"}
+
+    async def test_no_token_is_stored_or_read_without_a_sound_key(self, monkeypatch):
+        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", "")
+        monkeypatch.setattr(inat_oauth, "create_service_client", _no_service_client)
+        with pytest.raises(INatKeyError):
+            await inat_oauth.store_user_token("u1", {"api_token": "jwt"})
+        assert await inat_oauth.get_user_token("u1") is None
+
+    def test_settings_check_names_each_problem(self, monkeypatch):
+        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", "")
+        monkeypatch.setattr(settings, "INAT_CLIENT_ID", "")
+        problems = inat_settings_problems()
+        assert any("INAT_CLIENT_SECRET" in p for p in problems)
+        assert any("INAT_CLIENT_ID" in p for p in problems)
+
+        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", SOUND_SECRET)
+        monkeypatch.setattr(settings, "INAT_CLIENT_ID", "app-id")
+        # The site, not the API: nothing there handles the callback.
+        monkeypatch.setattr(settings, "INAT_REDIRECT_URI", "https://wildlifewatcher.ai/inat/callback")
+        assert [p for p in inat_settings_problems() if "INAT_REDIRECT_URI" in p]
+        monkeypatch.setattr(settings, "INAT_REDIRECT_URI", "https://api.example.org/api/inat/callback")
+        assert inat_settings_problems() == []
+
+
+@pytest.fixture
+def api(monkeypatch):
+    from app.dependencies import get_current_user
+    from app.main import app
+
+    monkeypatch.setattr(settings, "FF_INAT_ENABLED", True)
+    monkeypatch.setattr(settings, "INAT_CLIENT_ID", "app-id")
+    monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", "")
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="u1")
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("post", "/api/inat/token", {"api_token": "jwt"}),
+        ("get", "/api/inat/auth", None),
+        ("get", "/api/inat/status", None),
+        ("post", "/api/inat/publish", {"media_ids": ["m1"]}),
+    ],
+)
+def test_routes_refuse_to_connect_or_publish_without_a_sound_key(api, monkeypatch, method, path, body):
+    async def never(*_args, **_kwargs):
+        raise AssertionError("a refused call must not reach iNaturalist or the database")
+
+    monkeypatch.setattr("app.routers.inaturalist.validate_api_token", never)
+    monkeypatch.setattr("app.routers.inaturalist.writable_media_ids", never)
+    resp = api.request(method, path, json=body)
+    assert resp.status_code == 503
+    assert "INAT_CLIENT_SECRET is not set" in resp.json()["detail"]
 
 
 class TestTokenExpiry:

@@ -206,6 +206,9 @@ and `temperature_c`/`battery_pct` (parsed from `UserComment` telemetry). The ful
 ## iNaturalist Integration
 
 OAuth connect + observation publish/poll. Gated by `FF_INAT_ENABLED` (404 when off). JWT unless noted.
+The routes that store or use a person's token (`/auth`, `/callback`, `/token`, `/status`,
+`/observations`, `/publish`) answer `503` with the reason when `INAT_CLIENT_SECRET`, which keys the
+token encryption, is missing or shorter than 32 characters (`services/inat_oauth.py::token_key_problem`).
 Prefix `/api/inat`. The Annotations bulk "Upload to iNaturalist" / "Sync IDs" flows build on these —
 see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 
@@ -213,7 +216,7 @@ see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 |---|---|---|
 | `GET /api/inat/auth` | JWT | Start OAuth → `{ authorization_url, state }` |
 | `GET /api/inat/callback` | None (state) | OAuth redirect handler → stores tokens, 302 to `/toolkit?inat=connected` |
-| `POST /api/inat/token` | JWT | Exchange an authorization code for tokens (the non-redirect path) |
+| `POST /api/inat/token` | JWT | Connect with a personal API token pasted from iNaturalist (no OAuth app), body `{ api_token }`; checked against iNaturalist, then stored encrypted. It lasts about 24 h |
 | `GET /api/inat/status` | JWT | Connection status (`connected`, `inat_username`, …) |
 | `POST /api/inat/disconnect` | JWT | Revoke stored tokens |
 | `POST /api/inat/observations` | JWT | Create an observation — body `{ species_guess, latitude, longitude, observed_on, geoprivacy?, … }` |
