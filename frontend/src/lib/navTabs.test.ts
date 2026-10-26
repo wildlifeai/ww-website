@@ -11,6 +11,7 @@ describe('activeNavTab', () => {
 
   it('maps deep routes to their parent tab', () => {
     expect(activeNavTab('/manifest')).toBe('toolkit')
+    expect(activeNavTab('/live-view')).toBe('toolkit')
     expect(activeNavTab('/upload-model')).toBe('toolkit')
     expect(activeNavTab('/clusters/d1')).toBe('annotations')
     expect(activeNavTab('/review/d1')).toBe('annotations')

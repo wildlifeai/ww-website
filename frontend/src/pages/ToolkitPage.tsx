@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // ToolkitPage: /toolkit
-// Occasional, task-flavoured tools in lifecycle order: prepare a camera, AI models, iNaturalist,
-// exports. Each card shows only to a role that can use it (UI audit decision 1): Prepare SD card
-// needs write access to a project, the model and GBIF cards are for organisation managers, and
-// the export needs read access only (ww-backend #331), so viewers and the demo export too.
+// Occasional, task-flavoured tools: the live view, AI models, iNaturalist, exports, the GBF
+// report, and Prepare SD card last. Each card shows only to a role that can use it (UI audit
+// decision 1): Prepare SD card needs write access to a project, the model and GBIF cards are for
+// organisation managers, and the export needs read access only (ww-backend #331), so viewers and
+// the demo export too.
 // (Monitoring lives in Realtime; configuration in Settings.)
 import { lazy, Suspense } from 'react'
-import { Bot, Download, Globe, MemoryStick, Package, Wrench } from 'lucide-react'
+import { Bot, Download, Globe, MemoryStick, Package, ScanEye, Wrench } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { useProjectRoles } from '../hooks/useProjectRoles'
@@ -43,15 +44,13 @@ export function ToolkitPage() {
       </p>
 
       <div style={{ maxWidth: '720px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {canWriteAny && (
-          <ToolCard
-            icon={MemoryStick}
-            title="Prepare SD card"
-            description="Build a MANIFEST.zip with the camera software and your project's AI model, to copy to an SD card."
-          >
-            <Link to="/manifest" className="btn" style={LINK_BUTTON}>Prepare an SD card</Link>
-          </ToolCard>
-        )}
+        <ToolCard
+          icon={ScanEye}
+          title="Motion live view"
+          description="See a camera's live picture over its USB cable, where it detects motion and whether that would wake it, and tune its motion settings."
+        >
+          <Link to="/live-view" className="btn" style={LINK_BUTTON}>Open live view</Link>
+        </ToolCard>
 
         {isOrgManager && (
           <ToolCard
@@ -102,6 +101,16 @@ export function ToolkitPage() {
             description="Publish a project's observations to the Global Biodiversity Information Facility as a Darwin Core Archive."
             comingSoon
           />
+        )}
+
+        {canWriteAny && (
+          <ToolCard
+            icon={MemoryStick}
+            title="Prepare SD card"
+            description="Build a MANIFEST.zip with the camera software and your project's AI model, to copy to an SD card."
+          >
+            <Link to="/manifest" className="btn" style={LINK_BUTTON}>Prepare an SD card</Link>
+          </ToolCard>
         )}
       </div>
     </div>
