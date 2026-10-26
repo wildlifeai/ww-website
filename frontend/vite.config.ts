@@ -30,6 +30,52 @@ function sitemap(): Plugin {
   }
 }
 
+/**
+ * Preloads the Inter files main.tsx imports, so they arrive with the JS and the
+ * first paint already uses them. Left to the CSS, the browser asks for them only
+ * once React has rendered text, and the swap from the fallback shifted the page (#228).
+ */
+function preloadFonts(): Plugin {
+  return {
+    name: 'ww-preload-fonts',
+    apply: 'build',
+    transformIndexHtml: {
+      // 'post': only then does the bundle, with the hashed file names, exist.
+      order: 'post',
+      handler: (_html, ctx) => Object.keys(ctx.bundle ?? {})
+        .filter(f => /\/inter-latin-\d+-normal-[\w-]+\.woff2$/.test(f))
+        .map(f => ({
+          tag: 'link',
+          attrs: { rel: 'preload', href: `/${f}`, as: 'font', type: 'font/woff2', crossorigin: true },
+          injectTo: 'head' as const,
+        })),
+    },
+  }
+}
+
+/**
+ * `?meta` on a guide's markdown imports only its frontmatter, as an object. The guides index is in
+ * the main chunk, so it carries each guide's title and description but none of its text; the text
+ * is a chunk of its own that the guide's page loads (lib/guides.ts).
+ */
+function guideMeta(): Plugin {
+  return {
+    name: 'ww-guide-meta',
+    enforce: 'pre',
+    load(id) {
+      const [file, query] = id.split('?')
+      if (query !== 'meta' || !file.endsWith('.md')) return null
+      const block = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? ''
+      const meta: Record<string, string> = {}
+      for (const line of block.split(/\r?\n/)) {
+        const idx = line.indexOf(':')
+        if (idx > 0) meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+      }
+      return `export default ${JSON.stringify(meta)}`
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // Load from parent .env files (local dev)
@@ -46,7 +92,7 @@ export default defineConfig(({ mode }) => {
   const googleClientId = env.VITE_GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || ''
 
   return {
-    plugins: [react(), sitemap()],
+    plugins: [react(), sitemap(), preloadFonts(), guideMeta()],
     envDir: '../',
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),

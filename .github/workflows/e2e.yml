@@ -282,8 +282,8 @@ jobs:
   # Lighthouse on the public pages: performance (largest contentful paint, total
   # blocking time, the size of the main chunk), best practices and SEO, with its
   # accessibility audits as a second opinion to axe. Budgets in e2e/lighthouserc.json.
-  # Advisory while the pages are brought up to them (#228): the step fails, the
-  # job stays green with a warning annotation, the reports are an artifact.
+  # Blocking since every page met them on dev (#228): a page under budget fails
+  # the job, and the HTML reports are in the lighthouse-<sha> artifact.
   lighthouse:
     name: Lighthouse of public pages
     if: github.event_name != 'schedule' && github.event_name != 'workflow_run'
@@ -293,8 +293,6 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Lighthouse CI
-        id: lhci
-        continue-on-error: true
         uses: treosh/lighthouse-ci-action@v12
         with:
           urls: |
@@ -307,7 +305,3 @@ jobs:
           uploadArtifacts: true
           artifactName: lighthouse-${{ github.sha }}
           temporaryPublicStorage: false
-
-      - name: Warn when a page misses its budget
-        if: steps.lhci.outcome == 'failure'
-        run: echo "::warning::Lighthouse found a public page under its budget (advisory, issue 228). The lighthouse artifact has the reports, e2e/lighthouserc.json the budgets."
