@@ -7,15 +7,19 @@
 // needs write access to a project, the model and GBIF cards are for organisation managers, and
 // the export needs read access only (ww-backend #331), so viewers and the demo export too.
 // (Monitoring lives in Realtime; configuration in Settings.)
+import { lazy, Suspense } from 'react'
 import { Bot, Download, Globe, MemoryStick, Package, Wrench } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { useProjectRoles } from '../hooks/useProjectRoles'
 import { useWritableProjects } from '../hooks/useWritableProjects'
 import { useCamtrapExport } from '../hooks/useCamtrapExport'
+import { useFeatureEnabled } from '../hooks/useFeatureEnabled'
 import { CamtrapExportStatus } from '../components/data/CamtrapExportStatus'
 import { INaturalistPanel } from '../components/toolkit/INaturalistPanel'
 import { ToolCard } from '../components/toolkit/ToolCard'
+
+const GbfReportCard = lazy(() => import('../components/toolkit/GbfReportCard').then(m => ({ default: m.GbfReportCard })))
 
 const LINK_BUTTON: React.CSSProperties = { textDecoration: 'none', width: 'fit-content', display: 'inline-block' }
 
@@ -29,6 +33,7 @@ export function ToolkitPage() {
   const oneSelected = selectedProjectIds.length === 1
   const canViewAny = !roles.loading && projects.some(p => roles.canView(p.id))
   const canExport = !roles.loading && oneSelected && roles.canView(selectedProjectIds[0])
+  const gbfReportOn = useFeatureEnabled('gbfReport', canViewAny ? selectedProjectIds[0] : null)
 
   return (
     <div>
@@ -87,6 +92,8 @@ export function ToolkitPage() {
             </div>
           </ToolCard>
         )}
+
+        {gbfReportOn && <Suspense fallback={null}><GbfReportCard /></Suspense>}
 
         {isOrgManager && (
           <ToolCard
