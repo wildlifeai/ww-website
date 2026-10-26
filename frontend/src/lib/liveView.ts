@@ -3,7 +3,8 @@
  * lines, the HM0360 motion grid and the wake rule.
  *
  * The contract is the firmware's `_Documentation/live_preview.md` (Seeed_Grove_Vision_AI_Module_V2
- * e3c4d18a), which Charles's `_Tools/live_view.py` also follows. Change it there first, then here.
+ * dev f3ae0faf, unchanged since e3c4d18a), which Charles's `_Tools/live_view.py` also follows.
+ * Change it there first, then here.
  * The console runs at 921600 baud, keeps one received character at a time (so commands are typed
  * one character every 30 ms) and runs a command on "\n". Each preview frame is one JSON line:
  * `{"type": 1, "name": "INVOKE", ..., "data": {"count", "resolution", "md", "mdstat", "image"}}`.
@@ -194,13 +195,52 @@ export function wouldWake(cells: number, threshold: number): boolean {
  * The capture interval for the stream. The HM0360 spaces its frames by the motion interval
  * (op 11), so motion is compared across frames as far apart as in the field, capped at what its
  * sleep register holds, or 1000 ms when op 11 is 0 or not known yet. The RP3 (and RP2) take
- * 100 ms. Never 0: FreeRTOS asserts on a zero timer period.
+ * 100 ms. With motion detection off it is plain live video: 20 ms on the HM0360, 100 ms on the
+ * RP3 (live_view.py). Never 0: FreeRTOS asserts on a zero timer period.
  */
-export function captureIntervalMs(camera: string | null, op11: number | null): number {
-  if (camera === 'HM0360') return op11 ? Math.min(HM0360_MAX_INTERVAL_MS, Math.max(20, op11)) : 1000
+export function captureIntervalMs(camera: string | null, op11: number | null, motionDetection = true): number {
+  if (camera === 'HM0360') {
+    if (!motionDetection) return MIN_FRAME_INTERVAL_MS
+    return op11 ? Math.min(HM0360_MAX_INTERVAL_MS, Math.max(MIN_FRAME_INTERVAL_MS, op11)) : 1000
+  }
   if (camera === 'RP3' || camera === 'RP2') return 100
   return 500
 }
+
+/** The frame interval box's range: 20 ms is live_view.py's minimum. */
+export const MIN_FRAME_INTERVAL_MS = 20
+export const MAX_FRAME_INTERVAL_MS = 60000
+
+export function validFrameInterval(ms: number): boolean {
+  return Number.isInteger(ms) && ms >= MIN_FRAME_INTERVAL_MS && ms <= MAX_FRAME_INTERVAL_MS
+}
+
+/** Grid rows: 16 is what the bench shows; 15 is what the datasheet gives for VGA (live_preview.md). */
+export type GridRows = 15 | 16
+
+/**
+ * The cells to draw for a grid of `rows` rows, from the 16-row cells motionCells() returns, and
+ * how many set bits fall beyond the last row. With 15 rows the console's row 15 is left out and
+ * the 180 degree turn is within 15 rows, as live_view.py's md_cells() does.
+ */
+export function gridCells(cells16: readonly number[], rows: GridRows): { cells: { row: number; col: number }[]; outside: number } {
+  const last = MD_COLS * MD_ROWS - 1
+  const cells: { row: number; col: number }[] = []
+  let outside = 0
+  for (const cell of cells16) {
+    const bit = last - cell
+    const consoleRow = bit >> 4
+    if (consoleRow >= rows) {
+      outside++
+      continue
+    }
+    cells.push({ row: rows - 1 - consoleRow, col: MD_COLS - 1 - (bit & 15) })
+  }
+  return { cells, outside }
+}
+
+/** live_view.py's quick command buttons, in its order. */
+export const QUICK_COMMANDS = ['getop 27', 'setop 27 286', 'setop 28 326', 'vcm 512', 'status', 'setop 8 1000'] as const
 
 /** The reply lines that answer a status query or an op write (live_view.py reply_expected()). */
 export function replyExpected(cmd: string): string[] {
@@ -226,4 +266,26 @@ export const LINES = {
   burstEnd: /Current captures completed:|Capture failed after/,
   /** captureRefused(): between a cold boot and the first sleep. */
   refused: /no captures until after the first sleep/,
+  previewOn: /Preview mode 1/,
+  previewOff: /Preview off/,
+  enteringDpd: />>> Entering DPD/,
+  /** A capture the camera saved to its card, which preview prevents. */
+  sdWrite: /Wrote \d+ byte image to SD: (\S+)/,
+}
+
+/** Boot banner and console lines the Device tab reads, as the firmware prints them on dev f3ae0faf. */
+export const DEVICE_LINES = {
+  /** `**** WW500 MD. (WW500_C02) Built: 01:06:33 Oct 26 2026 ****` */
+  build: /\*{4} WW500 \S+ \(([^)]+)\) Built: (.+?) \*{4}/,
+  /** `Git branch: 'dev' f3ae0faf` */
+  branch: /Git branch: '([^']+)' (\S+)/,
+  camera: /^Camera: (\S+)/,
+  /** `Wakeup_event = 0x0002, WakeupEvt1 = 0x0000 RTC Timer` */
+  wakeReason: /Wakeup_event = 0x[0-9a-fA-F]+, WakeupEvt1 = 0x[0-9a-fA-F]+ (.+)$/,
+  /** The second-stage bootloader names the slot it starts from by its flash offset. */
+  flashOffset: /slot flash_offset (0x[0-9a-fA-F]+)/,
+  sdReady: /SD card initialised/,
+  sdFailed: /SD card initialisation failed/,
+  nextImage: /'CONFIG\.TXT' found\. \(Next image #(\d+)\)/,
+  imagesDir: /images directory .*'([^']+)'/,
 }

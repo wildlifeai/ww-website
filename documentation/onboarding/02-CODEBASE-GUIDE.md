@@ -82,7 +82,7 @@ password) or uses Forgot password.
 | `/field` | `FieldPage` | Realtime: active deployments with their newest LoRaWAN check-in from the `deployment_latest_lorawan` view, read-only (`lib/realtimeReads.ts`) |
 | `/upload-data` | `UploadDataPage` (→ `UploadFlow`) | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
-| `/live-view` | `LiveViewPage` | A WW500's live picture, motion grid and motion ops over its USB cable through Web Serial (Chrome or Edge on a computer), no backend. The console protocol is `lib/liveView.ts` and `lib/liveViewSession.ts`, ported from the firmware's `live_preview.md` (#400) |
+| `/live-view` | `LiveViewPage` | A bench tool for a WW500 on its USB cable through Web Serial (Chrome or Edge on a computer), no backend: the live picture with the motion grid and wake status, and Controls (run modes, Save frame, frame interval, motion ops, Keep awake), Console (commands, session log) and Device tabs. The console protocol is `lib/liveView.ts` and `lib/liveViewSession.ts`, ported from the firmware's `live_view.py` and `live_preview.md` (#400) |
 | `/upload-model` | `UploadModelPage` | Edge Impulse → Vela model upload (org managers) |
 | `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters, unconfirmed and biggest first, ten per page |
 | `/review/:id` | `ReviewQueuePage` | Retired Review Queue: redirects to `/annotations?deployment=:id` |

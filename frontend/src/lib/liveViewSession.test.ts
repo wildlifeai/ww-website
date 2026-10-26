@@ -208,10 +208,10 @@ describe('LiveViewSession, settings', () => {
 describe('LiveViewSession, stopping', () => {
   it('waits for the burst, then turns preview off, puts op 8 back and sends it to sleep', () => {
     const b = streaming()
-    b.s.stop(b.now())
+    b.s.disconnect(b.now())
     b.run(2000)
     expect(b.take()).toEqual([])
-    expect(liveViewStatus(b.s.snapshot())).toMatch(/Stopping/)
+    expect(liveViewStatus(b.s.snapshot())).toMatch(/Disconnecting/)
     b.feed('Current captures completed: 10')
     b.run(2000)
     expect(b.take()).toEqual(['preview 0', 'setop 8 1000', 'dpd'])
@@ -229,7 +229,7 @@ describe('LiveViewSession, stopping', () => {
     b.s.start(b.now())
     b.run(10000)
     expect(b.take().at(-1)).toBe('capture 10 500')
-    b.s.stop(b.now())
+    b.s.disconnect(b.now())
     b.run(500)
     expect(b.take()).toEqual([])
     b.feed(AWAKE['capture 10 500'], 'Images to capture: 10', frameLine())
@@ -246,7 +246,7 @@ describe('LiveViewSession, stopping', () => {
     b.s.start(b.now())
     b.run(10000)
     b.take()
-    b.s.stop(b.now())
+    b.s.disconnect(b.now())
     b.run(6000)
     expect(b.take()).toEqual(['preview 0', 'setop 8 1000', 'dpd'])
   })
@@ -256,7 +256,7 @@ describe('LiveViewSession, stopping', () => {
     b.s.start(b.now())
     b.feed('### Cold Boot ###', 'Starting CLI Task')
     b.run(2000)
-    b.s.stop(b.now())
+    b.s.disconnect(b.now())
     b.run(3000)
     expect(b.take()).toEqual(['getop 7', 'getop 8', 'setop 7 10', 'preview 0', 'setop 7 0', 'dpd'])
   })
@@ -266,7 +266,7 @@ describe('LiveViewSession, stopping', () => {
     b.s.start(b.now())
     b.run(10000)
     b.take()
-    b.s.stop(b.now())
+    b.s.disconnect(b.now())
     b.feed('Current captures completed: 10')
     b.run(3000)
     expect(b.take()).toEqual(['preview 0', 'setop 7 0', 'setop 8 1000', 'dpd'])
@@ -276,7 +276,7 @@ describe('LiveViewSession, stopping', () => {
     const b = bench({})
     b.s.start(b.now())
     b.run(1000)
-    b.s.stop(b.now())
+    b.s.disconnect(b.now())
     b.run(31000)
     const view = b.s.snapshot()
     // Only ver was typed before Stop, so op 8 was never written and is not put back.
@@ -289,6 +289,145 @@ describe('LiveViewSession, stopping', () => {
     const b = streaming()
     b.s.disconnected(b.now())
     expect(liveViewStatus(b.s.snapshot())).toMatch(/connection closed/)
+  })
+})
+
+describe('LiveViewSession, run modes', () => {
+  it('Stop lets the burst finish and arms no more, with preview still on', () => {
+    const b = streaming()
+    b.s.pause(b.now())
+    b.feed('Current captures completed: 10')
+    b.run(2000)
+    expect(b.take()).toEqual([])
+    expect(b.s.snapshot()).toMatchObject({ phase: 'paused', runMode: 'paused' })
+    expect(liveViewStatus(b.s.snapshot())).toMatch(/Free run or One image/)
+  })
+
+  it('Free run after Stop starts a burst without typing preview again', () => {
+    const b = streaming()
+    b.s.pause(b.now())
+    b.feed('Current captures completed: 10')
+    b.run(500)
+    b.take()
+    b.s.freeRun(b.now())
+    b.run(1000)
+    expect(b.take()).toEqual(['capture 10 500'])
+  })
+
+  it('One image takes a single frame after the current burst, then stops', () => {
+    const b = streaming()
+    b.s.oneImage(b.now())
+    b.run(500)
+    expect(b.take()).toEqual([])
+    b.feed('Current captures completed: 10')
+    b.run(1000)
+    expect(b.take()).toEqual(['capture 1 500'])
+    b.feed("About to capture 1 images with an interval of '500' milliseconds", frameLine(), 'Current captures completed: 1')
+    b.run(2000)
+    expect(b.take()).toEqual([])
+    expect(b.s.snapshot().phase).toBe('paused')
+  })
+
+  it('types a command from the box once, without holding up the next', () => {
+    const b = bench(AWAKE, { replyFirst: true })
+    b.s.start(b.now())
+    b.run(5000)
+    b.take()
+    b.s.pause(b.now())
+    b.feed('Current captures completed: 10')
+    b.s.sendCommand('status', b.now())
+    b.s.sendCommand('getop 27', b.now())
+    b.run(1000)
+    expect(b.take()).toEqual(['status', 'getop 27'])
+  })
+
+  it('changes the frame interval from the box, from the next frame and for the next burst', () => {
+    const b = streaming()
+    b.s.setFrameInterval(200, b.now())
+    b.feed(frameLine())
+    b.run(500)
+    expect(b.take()).toEqual(['interval 200'])
+    expect(b.s.snapshot()).toMatchObject({ intervalMs: 200, intervalSet: true })
+    b.feed('Current captures completed: 10')
+    b.run(1000)
+    expect(b.take()).toEqual(['capture 10 200'])
+  })
+
+  it('with motion detection off streams plain video at 20 ms and counts no wakes', () => {
+    const b = streaming()
+    b.feed(frameLine([0, 1, 2, 3, 4]))
+    expect(b.s.snapshot().md).toEqual({ frames: 2, wakes: 1 })
+    b.s.setMotionDetection(false, b.now())
+    b.feed(frameLine([0, 1, 2, 3, 4]))
+    b.run(500)
+    expect(b.take()).toEqual(['interval 20'])
+    expect(b.s.snapshot()).toMatchObject({ motionDetection: false, intervalMs: 20, intervalSet: false, md: { frames: 0, wakes: 0 } })
+  })
+
+  it('with Keep awake off sends no CR, so the camera can sleep', () => {
+    const b = bench()
+    b.s.start(b.now())
+    b.s.setKeepAwake(false, b.now())
+    b.run(25000)
+    expect(b.take().filter(c => c === 'CR')).toHaveLength(0)
+  })
+
+  it('after sleeping on its own and waking, starts Free run again', () => {
+    const b = streaming()
+    b.s.pause(b.now())
+    b.feed('Current captures completed: 10', '>>> Entering DPD at 2024:01:01 00:00:12')
+    expect(b.s.snapshot()).toMatchObject({ phase: 'sleeping', sleepReason: 'idle' })
+    expect(liveViewStatus(b.s.snapshot())).toMatch(/Motion or its timer wakes it/)
+    b.run(11000)
+    expect(b.take()).toEqual([]) // nothing typed while it sleeps
+    b.feed('### Warm Boot ###', 'Starting CLI Task')
+    b.run(3000)
+    expect(b.take()).toEqual(['preview 1', 'setop 8 60000', 'camera', 'getop 10', 'getop 11', 'getop 17', 'getop 33'])
+    b.feed('Image sensor and data path initialised for camera HM0360')
+    b.run(5000)
+    expect(b.take()).toEqual(['preview 1', 'capture 10 500'])
+    expect(b.s.snapshot().runMode).toBe('free')
+  })
+})
+
+describe('LiveViewSession, device and log', () => {
+  it('reads the device from the boot banner and the SD card lines', () => {
+    const b = bench()
+    b.s.start(b.now())
+    b.feed(
+      'slot flash_offset 0x00100000',
+      '**** WW500 MD. (WW500_C02) Built: 01:06:33 Oct 26 2026 ****',
+      "\x1b[mGit branch: 'dev' f3ae0faf",
+      '\x1b[0;36mWakeup_event = 0x0002, WakeupEvt1 = 0x0000 RTC Timer',
+      'Camera: HM0360',
+      '### Warm Boot ###',
+      "SD card initialised. CWD is '0:/'",
+      "'CONFIG.TXT' found. (Next image #97), camera enabled. Flash brightness 5",
+      "Retaining existing images directory (19 <= 100) '/MEDIA/00000000/IMAGES.000'",
+      'Wrote 16338 byte image to SD: 59200870.JPG at 0:0:7 1/1/2024',
+    )
+    const view = b.s.snapshot()
+    expect(view.device).toEqual({
+      board: 'WW500_C02', built: '01:06:33 Oct 26 2026', branch: 'dev f3ae0faf',
+      version: 'WW500 MD. (WW500_C02) Built: 01:06:33 Oct 26 2026', camera: 'HM0360', boot: 'warm',
+      wakeReason: 'RTC Timer', flashOffset: '0x00100000', sd: 'ready', nextImage: 98, imagesDir: '/MEDIA/00000000/IMAGES.000',
+    })
+    expect(view.log.some(l => /saved 59200870\.JPG to its SD card/.test(l.text))).toBe(true)
+  })
+
+  it('logs each frame as one short line', () => {
+    const b = streaming()
+    b.feed(frameLine([0, 1]))
+    expect(b.s.snapshot().log.at(-1)?.text).toBe('frame 3, 640x480, 0.0 KB, motion 2, threshold 4 (B 4), no wake')
+  })
+
+  it('keeps the whole session for a saved log, and the latest lines for the pane', () => {
+    const b = streaming()
+    for (let i = 0; i < 400; i++) b.feed(`line ${i}`)
+    const view = b.s.snapshot()
+    expect(view.log).toHaveLength(300)
+    expect(view.logLines).toBe(b.s.fullLog().length)
+    expect(b.s.fullLog().some(l => l.text === 'line 0')).toBe(true)
   })
 })
 

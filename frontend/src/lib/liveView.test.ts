@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CHAR_DELAY_MS, HM0360_MAX_INTERVAL_MS, LineSplitter, captureIntervalMs, cleanLine, motionCells,
-  parseFrameLine, replyExpected, typeSlowly, validOpValue, wouldWake,
+  CHAR_DELAY_MS, HM0360_MAX_INTERVAL_MS, LineSplitter, captureIntervalMs, cleanLine, gridCells, motionCells,
+  parseFrameLine, replyExpected, typeSlowly, validFrameInterval, validOpValue, wouldWake,
 } from './liveView'
 
 // A tiny base64 JPEG header: valid base64, a multiple of 4 characters.
@@ -126,6 +126,29 @@ describe('captureIntervalMs', () => {
   it('uses 100 ms on the RP3 and 500 ms until the camera is known', () => {
     expect(captureIntervalMs('RP3', 500)).toBe(100)
     expect(captureIntervalMs(null, null)).toBe(500)
+  })
+})
+
+describe('captureIntervalMs with motion detection off', () => {
+  it('is plain live video: 20 ms on the HM0360, 100 ms on the RP3', () => {
+    expect(captureIntervalMs('HM0360', 500, false)).toBe(20)
+    expect(captureIntervalMs('RP3', 500, false)).toBe(100)
+  })
+
+  it('takes a frame interval from 20 ms to 60 s, whole milliseconds only', () => {
+    expect([19, 20, 60000, 60001, 20.5].map(validFrameInterval)).toEqual([false, true, true, false, false])
+  })
+})
+
+describe('gridCells', () => {
+  it('keeps 16 rows as motionCells gives them', () => {
+    // Console bit 0 (row 0, column 0) is the picture's bottom-right cell.
+    expect(gridCells([255], 16)).toEqual({ cells: [{ row: 15, col: 15 }], outside: 0 })
+  })
+
+  it('with 15 rows turns within 15 rows and counts the console row 15 as outside', () => {
+    // Console bit 0 is picture cell 255; console bit 240 (row 15, column 0) is picture cell 15.
+    expect(gridCells([255, 15], 15)).toEqual({ cells: [{ row: 14, col: 15 }], outside: 1 })
   })
 })
 
