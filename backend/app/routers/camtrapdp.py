@@ -40,8 +40,8 @@ async def import_camtrapdp(
     and inserts all deployments, media, and observations from the package.
 
     The authenticated user becomes project admin of the new project.
-    Placeholder devices are named '[imported] <cameraID>' and are linked
-    to the user's primary organisation.
+    Placeholder devices are named '[imported] <cameraID>'; a re-import by
+    the same organisation reuses them.
     """
     # ── Validate upload ────────────────────────────────────────────────
     if not file.filename or not file.filename.endswith(".zip"):
