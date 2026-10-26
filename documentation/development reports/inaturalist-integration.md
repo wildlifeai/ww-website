@@ -2,7 +2,8 @@
 
 > **Status:** Phases 1–4 implemented (2026-06-08), behind `FF_INAT_ENABLED`. Schema in `ww-backend`;
 > the tables exist on dev (checked 25 Oct 2026). The sync-back updates the badge only and writes no
-> identifications ([§6](#what-happens-today-checked-25-oct-2026-123)).
+> identifications ([§6](#what-happens-today-checked-25-oct-2026-123)). Setup:
+> [deployment guide](../resources/deployment-guide.md#inaturalist).
 > **Owners:** web platform.
 
 Lets a Wildlife Watcher user link their **personal iNaturalist account**, publish reviewed
@@ -190,11 +191,11 @@ no person labelled the photo, and later pipeline runs would skip those photos.
 
 1. **Apply schema:** in `ww-backend`, `DB_AGENT_MODE=1 npm run db:change inat_observations`; review
    the generated migration; commit schema + generated artifacts; notify mobile via the type-sync guide.
-2. **Configure:** `FF_INAT_ENABLED=true`, `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI`
-   in the website backend env.
-3. **Register** the OAuth application on iNaturalist with the matching redirect URI.
-4. **(Optional) automate sync:** schedule `sync_inat_identifications()` (no user filter) on the
-   ARQ/job runner (e.g. hourly). Until then the **↻ Sync IDs** button covers it.
+   The tables exist on dev (25 Oct 2026).
+2. **Register and configure:** the steps are in the
+   [deployment guide](../resources/deployment-guide.md#inaturalist).
+3. **(Optional) automate sync:** schedule `sync_inat_identifications()` (no user filter) on the
+   ARQ/job runner (e.g. hourly). Until then the sign-in sync and Settings, *Sync now* cover it.
 
 ---
 
