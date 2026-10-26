@@ -82,7 +82,7 @@ and in `processing_log` when index 1 is not a target class. The right fix stays 
 | Versioning and artefact storage shared with uploads | `backend/app/domain/model.py` (`next_model_version`, `store_model_artifacts`) |
 | Worker job | `backend/app/jobs/definitions.py::train_species_brain_job` (registered in `JOBS`) |
 | Endpoints | `backend/app/routers/models.py`: `GET /api/models/train/status`, `POST /api/models/train` |
-| Action + modal | `frontend/src/components/data/MediaBulkActions.tsx`, `TrainModelModal.tsx`, wired in `MediaBrowser.tsx` |
+| Action + modal | `frontend/src/components/data/MediaBulkActions.tsx`, `TrainModelModal.tsx`, wired in `hooks/useGridBulkActions.ts` and `GridBulkDialogs.tsx` |
 | Selection preview | `frontend/src/lib/trainingDataset.ts` (+ vitest) |
 | Types | `frontend/src/types/training.ts` |
 | Compose | `docker-compose.yml` forwards the flag and credentials to **both** `api` and `embedding-worker` |

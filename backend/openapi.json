@@ -761,6 +761,80 @@
         "title": "DeploymentLocationRequest",
         "type": "object"
       },
+      "DeviceOut": {
+        "description": "A camera with a deployment, open or ended, in one of the organisation's projects.\n\nCameras belong to no organisation, so a camera lent to another organisation's project is\nin both organisations' lists.",
+        "properties": {
+          "bluetooth_id": {
+            "title": "Bluetooth Id",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the camera was registered",
+            "title": "Created At"
+          },
+          "device_eui": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The camera's LoRaWAN EUI, which the telemetry endpoint takes",
+            "title": "Device Eui"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "bluetooth_id"
+        ],
+        "title": "DeviceOut",
+        "type": "object"
+      },
+      "DevicesResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceOut"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ApiError"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ApiMeta"
+          }
+        },
+        "title": "DevicesResponse",
+        "type": "object"
+      },
       "EmbedRequest": {
         "description": "Request to embed + cluster a deployment.\n\n``mode='server'`` enqueues a GPU embedding job. ``mode='client_vectors'``\naccepts vectors computed in-browser (WebGPU); HDBSCAN/UMAP still run server-side.",
         "properties": {
@@ -838,6 +912,24 @@
           "deployment_ids"
         ],
         "title": "FillTimezonesRequest",
+        "type": "object"
+      },
+      "GbifDatasetRequest": {
+        "properties": {
+          "dataset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The GBIF dataset key or its gbif.org link; empty or null clears it",
+            "title": "Dataset"
+          }
+        },
+        "title": "GbifDatasetRequest",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1536,6 +1628,70 @@
         "title": "RestoreProjectRequest",
         "type": "object"
       },
+      "ReviewBatchRequest": {
+        "description": "One reviewer decision on many photos (Cluster Review's Reassign and Flag for expert).",
+        "properties": {
+          "decision": {
+            "enum": [
+              "reassign",
+              "expert"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "media_ids": {
+            "description": "Photos to review, at most 500 a request",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Media Ids",
+            "type": "array"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The species; reassign needs it or taxon_id",
+            "title": "Scientific Name"
+          },
+          "taxon_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Taxon UUID (preferred)",
+            "title": "Taxon Id"
+          },
+          "vernacular_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vernacular Name"
+          }
+        },
+        "required": [
+          "media_ids",
+          "decision"
+        ],
+        "title": "ReviewBatchRequest",
+        "type": "object"
+      },
       "ReviewDecisionRequest": {
         "description": "A reviewer's decision on a single media item (Review Queue).",
         "properties": {
@@ -1929,7 +2085,7 @@
   "paths": {
     "/api/admin/devices": {
       "get": {
-        "description": "Every live device with its organisation and latest live deployment (read-only, #343).\n\nSystem admins only (``403`` otherwise): devices stay organisation-scoped under RLS\n(ww-backend#313), so this is the one place a ``ww_admin`` sees them all.",
+        "description": "Every live device with its latest live deployment and that project's organisation (read-only, #343).\n\nSystem admins only (``403`` otherwise). Reads as the caller: under RLS a ``ww_admin`` sees\nevery camera (ww-backend#346), deployment, project and organisation.",
         "operationId": "admin_list_devices_api_admin_devices_get",
         "parameters": [
           {
@@ -2086,7 +2242,7 @@
     },
     "/api/brain/clusters/{cluster_assignment_id}/confirm": {
       "post": {
-        "description": "Confirm a cluster as a taxon \u2014 bulk-creates human observations for members.",
+        "description": "Confirm a cluster as a taxon: a human row for each member nobody has labelled yet.",
         "operationId": "confirm_cluster_api_brain_clusters__cluster_assignment_id__confirm_post",
         "parameters": [
           {
@@ -2139,6 +2295,56 @@
           }
         },
         "summary": "Confirm Cluster",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/clusters/{cluster_assignment_id}/unconfirm": {
+      "post": {
+        "description": "Undo a cluster confirm: delete the human rows it wrote and reopen the cluster.",
+        "operationId": "unconfirm_cluster_api_brain_clusters__cluster_assignment_id__unconfirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster_assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Cluster Assignment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unconfirm Cluster",
         "tags": [
           "brain"
         ]
@@ -2724,9 +2930,60 @@
         ]
       }
     },
+    "/api/brain/review/batch": {
+      "post": {
+        "description": "One reviewer decision on up to 500 photos, one human row each. Photos the caller may not\nchange are skipped; none at all is a 403.",
+        "operationId": "review_media_batch_api_brain_review_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Media Batch",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
     "/api/brain/review/{media_id}": {
       "post": {
-        "description": "Record a reviewer decision on one media item (creates a human observation).",
+        "description": "Record a reviewer decision on one photo: its human row, added or updated.",
         "operationId": "review_media_api_brain_review__media_id__post",
         "parameters": [
           {
@@ -2898,7 +3155,7 @@
     },
     "/api/camtrapdp/import": {
       "post": {
-        "description": "Import a CamtrapDP v1.0 ZIP package.\n\nCreates a new project, placeholder devices for each unique cameraID,\nand inserts all deployments, media, and observations from the package.\n\nThe authenticated user becomes project admin of the new project.\nPlaceholder devices are named '[imported] <cameraID>' and are linked\nto the user's primary organisation.",
+        "description": "Import a CamtrapDP v1.0 ZIP package.\n\nCreates a new project, placeholder devices for each unique cameraID,\nand inserts all deployments, media, and observations from the package.\n\nThe authenticated user becomes project admin of the new project.\nPlaceholder devices are named '[imported] <cameraID>'; a re-import by\nthe same organisation reuses them.",
         "operationId": "import_camtrapdp_api_camtrapdp_import_post",
         "parameters": [
           {
@@ -3031,7 +3288,7 @@
     },
     "/api/deployments": {
       "post": {
-        "description": "Create a deployment in a project the caller can change (manual upload assignment).\n\nThe rule of ww-backend's deployments INSERT policy, project_member or above (``assert_write``):\na caller with no role on the project gets 404 (so other tenants' project IDs can't be\nprobed), a project_viewer 403. Auto-creates a placeholder device because deployments require a\nnon-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the\n``(deployment_start, device_id)`` unique index.",
+        "description": "Create a deployment in a project the caller can change (manual upload assignment).\n\nThe rule of ww-backend's deployments INSERT policy, project_member or above (``assert_write``):\na caller with no role on the project gets 404 (so other tenants' project IDs can't be\nprobed), a project_viewer 403. Auto-creates a placeholder device because deployments require a\nnon-null ``device_id`` (mirrors the CamtrapDP import); a fresh device id also satisfies the\n``(deployment_start, device_id)`` unique index. Like every camera it belongs to no\norganisation (ww-backend#346).",
         "operationId": "create_deployment_api_deployments_post",
         "parameters": [
           {
@@ -3784,7 +4041,7 @@
     },
     "/api/inat/publish": {
       "post": {
-        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (human/vehicle/blank), uploads\neach photo through the backend proxy (bypassing browser CORS), and records\nthe mapping in inat_observations / inat_observation_media for status tracking.\n\nOnly photos in projects the caller can change (project_member or above) are published: the\nothers are left out, and ``403`` when that is all of them.",
+        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (a photo whose label is not an\nanimal, or that shows a person), uploads each photo through the backend proxy\n(bypassing browser CORS), and records the mapping in inat_observations /\ninat_observation_media for status tracking.\n\nStarts no photo after about two minutes, inside the ingress timeout, and returns the photos\nit did not reach as ``remaining_media_ids``: send those again to carry on, the rest of a\nburst joining the observation it started (``useINat().publish`` does this).\n\nOnly photos in projects the caller can change (project_member or above) are published: the\nothers are left out, and ``403`` when that is all of them.",
         "operationId": "publish_to_inat_api_inat_publish_post",
         "parameters": [
           {
@@ -4071,7 +4328,7 @@
     },
     "/api/jobs": {
       "get": {
-        "description": "List the authenticated user's recent processing jobs (newest first).\n\nPowers the avatar-menu \"Processing history\" view so a user can see whether a\npast upload / AI run finished or failed after the live dock has gone away.\nScoped to the caller \u2014 only jobs stamped with their ``user_id`` are returned.",
+        "description": "List the authenticated user's processing jobs, newest first, a page at a time.\n\nPowers the avatar-menu \"Processing history\" view so a user can see whether a\npast upload / AI run finished or failed after the live dock has gone away.\nScoped to the caller: only jobs stamped with their ``user_id`` are returned.\n``next_before`` reads the next page and is null on the last one.",
         "operationId": "list_user_jobs_api_jobs_get",
         "parameters": [
           {
@@ -4084,6 +4341,65 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only jobs in these statuses; repeat the parameter for several",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/JobStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only jobs in these statuses; repeat the parameter for several",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only jobs of this kind, such as upload or ai_pipeline",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-z_]{1,40}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only jobs of this kind, such as upload or ai_pipeline",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "The previous page's next_before",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z\\|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The previous page's next_before",
+              "title": "Before"
             }
           },
           {
@@ -5201,6 +5517,66 @@
         ]
       }
     },
+    "/api/projects/{project_id}/gbif-dataset": {
+      "put": {
+        "description": "Link the project to the GBIF dataset it publishes to, or clear the link (#373).\n\nThe key is checked with GBIF before it is saved. The save runs as the caller, so\n``projects_update_policy`` decides: a ``project_admin`` of the project or ``ww_admin``. Anyone\nelse who can see the project gets ``403``, a project they cannot see ``404``. Behind\n``FF_GBF_REPORT_ENABLED``, with the report it feeds.",
+        "operationId": "set_gbif_dataset_api_projects__project_id__gbif_dataset_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GbifDatasetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Gbif Dataset",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/projects/{project_id}/restore": {
       "post": {
         "description": "Undo a project delete: clears ``deleted_at`` (equal to the given timestamp) on the project\nand the deployments, media and observations deleted with it.\n\nThe database decides: ``restore_project`` runs as the caller under the delete rule, a\n``project_admin`` or ``ww_admin``. ``403`` for anyone else, ``404`` for an unknown project.\n``restored`` is false when nothing was deleted at that timestamp. ``409``, with nothing\nrestored, when an open deployment's camera has got another open deployment since the delete\n(one per camera, ww-backend #320).",
@@ -5262,6 +5638,82 @@
         "summary": "Restore Project Endpoint",
         "tags": [
           "projects"
+        ]
+      }
+    },
+    "/api/reports/gbf": {
+      "get": {
+        "description": "The GBF contribution report for the projects over the period. It only reads, so the demo\naccount may call it; the caller needs read access to every project (``404`` otherwise).",
+        "operationId": "get_gbf_report_api_reports_gbf_get",
+        "parameters": [
+          {
+            "description": "Comma-separated project ids",
+            "in": "query",
+            "name": "project_ids",
+            "required": true,
+            "schema": {
+              "description": "Comma-separated project ids",
+              "title": "Project Ids",
+              "type": "string"
+            }
+          },
+          {
+            "description": "First day of the period (UTC)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "First day of the period (UTC)",
+              "format": "date",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period (UTC), included",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "Last day of the period (UTC), included",
+              "format": "date",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Gbf Report",
+        "tags": [
+          "reports"
         ]
       }
     },
@@ -5574,7 +6026,7 @@
     },
     "/api/v1/devices": {
       "get": {
-        "description": "List the organisation's own cameras.",
+        "description": "The cameras deployed in the organisation's projects, newest registered first.\n\nA camera is listed when it has a deployment, open or ended, in one of the organisation's\nprojects. Cameras belong to no organisation, so a camera lent to another organisation's\nproject is in both lists. A page is at most 1,000 cameras; page with ``offset``.",
         "operationId": "api_list_devices_api_v1_devices_get",
         "parameters": [
           {
@@ -5605,7 +6057,9 @@
           "200": {
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DevicesResponse"
+                }
               }
             },
             "description": "Successful Response"
@@ -5730,7 +6184,7 @@
     },
     "/api/v1/export/camtrapdp": {
       "post": {
-        "description": "Start a CamtrapDP export of one project with its original photos, as the Download button does.\n\nReturns ``{job_id}``; poll ``GET /api/v1/jobs/{job_id}`` for the signed link. Behind\n``FF_CAMTRAPDP_EXPORT_ENABLED``, like the Download button's export.",
+        "description": "Start a CamtrapDP export of one project with its original photos, as the Download button does.\n\nReturns ``{job_id}``; poll ``GET /api/v1/jobs/{job_id}`` for the signed link. Behind\n``FF_CAMTRAPDP_EXPORT_ENABLED`` and the export storage, like the Download button's export.",
         "operationId": "api_export_camtrapdp_api_v1_export_camtrapdp_post",
         "requestBody": {
           "content": {

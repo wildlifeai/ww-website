@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { orderClusters, pageOf } from './clusterReview'
+import { describe, expect, it, vi } from 'vitest'
+import { REVIEW_BATCH_MAX, confirmedText, orderClusters, pageOf, reviewInBatches, type ReviewBatchResult } from './clusterReview'
 
 const c = (id: string, image_count: number, review_state = 'open', is_outlier_cluster = false, cluster_id = 0) =>
   ({ id, image_count, review_state, is_outlier_cluster, cluster_id })
@@ -50,5 +50,42 @@ describe('pageOf', () => {
 
   it('has one empty page for an empty list', () => {
     expect(pageOf([], 0, 10)).toEqual({ items: [], page: 0, pages: 1, first: 0, last: 0 })
+  })
+})
+
+describe('reviewInBatches', () => {
+  const answer = (ids: string[], skip = 0): ReviewBatchResult => ({
+    created: ids.length - skip, updated: 0, observation_ids: [], skipped: ids.slice(0, skip).map(media_id => ({ media_id, reason: 'not_writable' })),
+  })
+
+  it('sends a selection of up to 500 photos in one request', async () => {
+    const send = vi.fn(async (ids: string[]) => answer(ids))
+    const ids = Array.from({ length: REVIEW_BATCH_MAX }, (_, i) => `m${i}`)
+    expect(await reviewInBatches(ids, send)).toEqual({ saved: 500, skipped: 0 })
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('splits a bigger selection at the cap and adds up the answers', async () => {
+    const send = vi.fn(async (ids: string[]) => ({ ...answer(ids, 1), updated: 2, created: ids.length - 3 }))
+    const ids = Array.from({ length: 1201 }, (_, i) => `m${i}`)
+    expect(await reviewInBatches(ids, send)).toEqual({ saved: 1201 - 3, skipped: 3 })
+    expect(send.mock.calls.map(([part]) => part.length)).toEqual([500, 500, 201])
+  })
+
+  it('rejects when a request is refused', async () => {
+    const send = vi.fn(async () => { throw new Error('You need the Project Member role to change this project.') })
+    await expect(reviewInBatches(['m1'], send)).rejects.toThrow('Project Member')
+  })
+})
+
+describe('confirmedText', () => {
+  it('names the species and the photos labelled', () => {
+    expect(confirmedText(1, 0, 'Ship rat')).toBe('Confirmed 1 photo as Ship rat')
+    expect(confirmedText(40, 0, 'Ship rat')).toBe('Confirmed 40 photos as Ship rat')
+  })
+
+  it('says how many photos it skipped because a person had labelled them', () => {
+    expect(confirmedText(38, 2, 'Ship rat')).toBe('Confirmed 38 photos as Ship rat; skipped 2 photos a person had labelled')
+    expect(confirmedText(0, 1, 'Ship rat')).toBe('Confirmed 0 photos as Ship rat; skipped 1 photo a person had labelled')
   })
 })

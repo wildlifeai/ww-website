@@ -47,6 +47,7 @@ const ProgressDock = lazyPage(() => import('./components/upload/ProgressDock'), 
 const AdminUsagePage = lazyPage(() => import('./pages/AdminUsagePage'), 'AdminUsagePage')
 const AdminDevicesPage = lazyPage(() => import('./pages/AdminDevicesPage'), 'AdminDevicesPage')
 const ManifestPage = lazyPage(() => import('./pages/ManifestPage'), 'ManifestPage')
+const LiveViewPage = lazyPage(() => import('./pages/LiveViewPage'), 'LiveViewPage')
 const UploadModelPage = lazyPage(() => import('./pages/UploadModelPage'), 'UploadModelPage')
 const UploadDataPage = lazyPage(() => import('./pages/UploadDataPage'), 'UploadDataPage')
 const ClusterReviewPage = lazyPage(() => import('./pages/ClusterReviewPage'), 'ClusterReviewPage')
@@ -491,6 +492,7 @@ export default function App() {
 
               {/* Toolkit */}
               <Route path="/manifest"     element={<RequireAuth><ManifestPage /></RequireAuth>} />
+              <Route path="/live-view"    element={<RequireAuth><LiveViewPage /></RequireAuth>} />
               <Route path="/upload-model" element={<RequireAuth><RequireNotDemo feature="Uploading models"><UploadModelPage /></RequireNotDemo></RequireAuth>} />
 
               {/* Annotation workflow deep-links (preserved) */}

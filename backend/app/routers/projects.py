@@ -6,13 +6,16 @@ import asyncio
 import uuid
 from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import AfterValidator, BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import AfterValidator, BaseModel, Field
 
 from app.authz import project_creator_org_id
+from app.config import settings
 from app.dependencies import get_user_client, get_verified_user, require_not_demo
+from app.domain.gbif_dataset import GbifNotFound, GbifUnavailable, dataset_summary, parse_dataset_key, save_dataset_key_as_user
 from app.domain.open_deployments import OpenDeploymentConflict
 from app.domain.soft_delete import check_deleted_at, now_iso, restore_project_as_user, soft_delete_project_as_user
+from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.services.supabase_client import create_service_client
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -125,3 +128,48 @@ async def restore_project_endpoint(
     if outcome == "refused":
         raise HTTPException(status_code=403, detail=f"Not restored: {_DELETE_RULE}.")
     return {"id": pid, "restored": outcome == "restored"}
+
+
+class GbifDatasetRequest(BaseModel):
+    dataset: Optional[str] = Field(None, description="The GBIF dataset key or its gbif.org link; empty or null clears it")
+
+
+@router.put("/{project_id}/gbif-dataset", dependencies=[Depends(require_not_demo)])
+async def set_gbif_dataset(
+    request: Request,
+    project_id: str,
+    body: GbifDatasetRequest,
+    user: Any = Depends(get_verified_user),
+    user_client: Any = Depends(get_user_client),
+):
+    """Link the project to the GBIF dataset it publishes to, or clear the link (#373).
+
+    The key is checked with GBIF before it is saved. The save runs as the caller, so
+    ``projects_update_policy`` decides: a ``project_admin`` of the project or ``ww_admin``. Anyone
+    else who can see the project gets ``403``, a project they cannot see ``404``. Behind
+    ``FF_GBF_REPORT_ENABLED``, with the report it feeds.
+    """
+    meta = ApiMeta(request_id=getattr(request.state, "request_id", None))
+    if not settings.FF_GBF_REPORT_ENABLED:
+        return ApiResponse(error=ApiError(code="FEATURE_DISABLED", message="The GBF report is disabled (FF_GBF_REPORT_ENABLED)."), meta=meta)
+
+    pid = _project_uuid(project_id)
+    text = (body.dataset or "").strip()
+    key, dataset = None, None
+    if text:
+        key = parse_dataset_key(text)
+        if key is None:
+            raise HTTPException(status_code=422, detail="Not saved: that is not a GBIF dataset key or a gbif.org dataset link.")
+        try:
+            dataset = await dataset_summary(key)
+        except GbifNotFound:
+            raise HTTPException(status_code=422, detail="Not saved: GBIF has no dataset with that key.")
+        except GbifUnavailable:
+            raise HTTPException(status_code=503, detail="Not saved: GBIF did not answer. Try again later.")
+
+    outcome = await asyncio.to_thread(save_dataset_key_as_user, user_client, pid, key)
+    if outcome == "not_found":
+        raise HTTPException(status_code=404, detail="Project not found")
+    if outcome == "refused":
+        raise HTTPException(status_code=403, detail="Not saved: only a project admin can change the GBIF dataset.")
+    return ApiResponse(data={"id": pid, "gbif_dataset_key": key, "dataset": dataset}, meta=meta)

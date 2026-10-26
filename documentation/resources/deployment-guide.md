@@ -27,6 +27,7 @@ How to deploy the Wildlife Watcher V2 platform (backend + frontend) to productio
 | **Supabase** | `qegeovogqxiouqbrxmnh` (Dev_Wildlife_Watcher) | `nuhwmubvygxyddkycmpa` (Stag_Wildlife_Watcher) |
 | **Azure Container App** | `ww-backend-dev` (WW-AE RG) | `ww-backend` (WW-AE RG) |
 | **Azure Blob Container** | `wildlife-watcher-uploads-dev` | `wildlife-watcher-uploads` (storage account `wwuploadsae`) |
+| **CamtrapDP export ZIPs** | `camtrapdp-exports`, shared with staging | `camtrapdp-exports` (same account) |
 | **Frontend** | Cloudflare Pages preview deploys (per branch) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
 | **Google Drive** | `Data/dev` — `1-F6cQc5lpYOJNSPKRs7i79Gh539N5hUT` | `Data/Production` — `1apf13KX075Fv4K0A2nbaTqOmCwZ9vJzr` |
 
@@ -54,16 +55,16 @@ GitHub Actions (CI/CD)
         │
         ▼
 Azure Container App ("ww-backend" / "ww-backend-dev")  ──REDIS_URL set──▶  ARQ GPU worker
-  ├── FastAPI API Server (port 8000)                                       ("ww-embedding-worker-dev",
+  ├── FastAPI API Server (port 8000)                                       ("ww-embedding-worker[-dev]",
   ├── Job dispatch: ARQ when REDIS_URL is set, else in-process asyncio       --target worker, serverless T4)
   └── Supabase sync for job persistence (api_jobs table)
 ```
 
 > **Note**: heavy ML work (SpeciesNet, BioCLIP, DINOv3) runs in a **separate ARQ GPU worker**, not in
-> the API container — the lean `--target api` image carries no ML deps. The worker is **live on dev**
-> (serverless T4, scale-to-zero, since 2026-07-03); **production is API-only** until the prod worker is
-> provisioned. With `REDIS_URL` unset, `dispatch.py` falls back to running jobs in-process.
-> Live state: [cloud-infrastructure.md](cloud-infrastructure.md) · stand up the prod worker:
+> the API container, because the lean `--target api` image carries no ML deps. Each environment has its
+> own worker (serverless T4, scale-to-zero): **dev since 2026-07-03, production since 2026-07-26**.
+> With `REDIS_URL` unset, `dispatch.py` falls back to running jobs in-process.
+> Live state: [cloud-infrastructure.md](cloud-infrastructure.md) · how the prod worker was built:
 > [prod-worker-provisioning-runbook.md](prod-worker-provisioning-runbook.md).
 
 ### Manual Deployment
@@ -131,7 +132,22 @@ The frontend is a static React+Vite app deployed to **Cloudflare Pages** with au
 
 ### Preview Deployments
 
-Every push to a non-production branch creates a preview deployment at `https://<branch>.<project>.pages.dev`. This is automatic — no configuration needed.
+Which branches Cloudflare builds is the project's branch control, under **Settings → Builds &
+deployments** ([Cloudflare's docs](https://developers.cloudflare.com/pages/configuration/branch-build-controls/)).
+On 26 Oct 2026 it built `main` (production) and `dev` (preview,
+`https://dev.ww-website.pages.dev`) and nothing else: none of the 32 feature and Dependabot pull
+request heads checked, back to June 2026, has a Cloudflare build. Each build reports as a
+`Cloudflare Pages` check run on its commit, with the build's own URL
+(`https://<id>.ww-website.pages.dev`) and the branch alias in its summary, and creates no GitHub
+deployment. Cloudflare never builds a pull request from a fork.
+
+To build every other branch of this repo, and so give each pull request a preview and an E2E run
+([`e2e/README.md`](../../e2e/README.md#in-ci)): **Preview branch: Custom branches**, **Include
+Preview branches** `*`, **Exclude Preview branches** `dependabot/*`. The cost is builds: dev and
+main had 144 pushes, each one built, in the 30 days to 26 Oct 2026, and pull requests outside
+Dependabot had 204 `ci.yml` runs in the same days, each one a push Cloudflare would build. The
+Free plan allows 500 builds a month, one at a time, so a pull request's build can hold up a dev
+build ([limits](https://developers.cloudflare.com/pages/platform/limits/)).
 
 ---
 
@@ -146,7 +162,7 @@ See [00-GETTING-STARTED.md](../onboarding/00-GETTING-STARTED.md#environment-vari
 - [ ] `SENTRY_DSN` is set for error tracking
 - [ ] `LOG_LEVEL` is `info` (not `debug`)
 - [ ] `RATE_LIMIT_PER_MINUTE` is appropriate for your traffic
-- [ ] `AZURE_STORAGE_CONNECTION_STRING` is set for image buffering
+- [ ] `AZURE_STORAGE_CONNECTION_STRING` is set for image buffering and the CamtrapDP export ZIPs
 - [ ] `GOOGLE_DRIVE_ENABLED` is set to `true` if Drive uploads are needed
 
 ### Azure Container App Environment Variables
@@ -184,7 +200,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 
 | Var | Enables |
 |-----|---------|
-| `AZURE_STORAGE_CONNECTION_STRING` (+ `AZURE_STORAGE_CONTAINER_NAME`) | Blob buffering of originals — **this is the one that bites.** The container *name* alone does nothing; without the **connection string** every upload logs `azure_storage_not_configured_for_store` and no media rows are created. |
+| `AZURE_STORAGE_CONNECTION_STRING` (+ `AZURE_STORAGE_CONTAINER_NAME`) | Blob buffering of originals. **This is the one that bites.** The container *name* alone does nothing; without the **connection string** every upload logs `azure_storage_not_configured_for_store` and no media rows are created. It also stores the CamtrapDP export ZIPs (`CAMTRAPDP_EXPORT_CONTAINER`); without it the export answers `FEATURE_DISABLED`. |
 | `SUPABASE_MEDIA_BUCKET` | Supabase Storage bucket for media. |
 | `GOOGLE_DRIVE_ENABLED=true` + `GOOGLE_SERVICE_ACCOUNT_JSON` + `GOOGLE_DRIVE_FOLDER_ID` | Drive archival. **Folder ID alone does nothing** — without `ENABLED` + the service account, queued uploads stay `pending_drive_uploads` and the images never become servable. |
 
@@ -209,7 +225,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 
 | Var | Enables |
 |-----|---------|
-| `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI` + `FF_INAT_ENABLED` | iNaturalist sync/publish. |
+| `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI` + `FF_INAT_ENABLED` | iNaturalist publish and sync, on the API only. Steps: [iNaturalist](#inaturalist). |
 | `EMAIL_PROVIDER`, `EMAIL_FROM`, `RESEND_API_KEY` / `SENDGRID_API_KEY` / `ACS_CONNECTION_STRING` | Notification email. |
 | `SENTRY_DSN`, `LOG_LEVEL` | Error tracking / log verbosity. |
 
@@ -219,6 +235,75 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 >   --query "properties.template.containers[0].env[].name" -o tsv | sort
 > ```
 > If `GOOGLE_DRIVE_ENABLED`, `FF_PIPELINE_ENABLED`, `FF_SPECIESNET_ENABLED`, or `FF_MEDIA_REGISTRY_ENABLED` are absent, that subsystem is off regardless of what the UI seems to show.
+
+### iNaturalist
+
+Publishing photos to a person's own iNaturalist account, and the badge sync (#123). Off everywhere
+until `FF_INAT_ENABLED` is set; switch it on in dev first. What publish and sync do:
+[inaturalist-integration](../development%20reports/inaturalist-integration.md).
+
+**1. Register one OAuth app per environment** at <https://www.inaturalist.org/oauth/applications/new>,
+signed in as the iNaturalist account that will own it, confidential if the form asks (the API holds
+the secret). Its redirect URI is the API's `/api/inat/callback`, not the site, and
+`INAT_REDIRECT_URI` must be the same string:
+
+| Environment | Redirect URI and `INAT_REDIRECT_URI` |
+|---|---|
+| dev (`ww-backend-dev`) | `https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
+| production (`ww-backend`, wildlifewatcher.ai) | `https://ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
+| local | `http://localhost:8000/api/inat/callback` |
+
+The code default, `https://wildlifewatcher.ai/inat/callback`, is the site, where no page handles the
+callback, so set the variable everywhere. After the callback the API sends the browser to the first
+`ALLOWED_ORIGINS` entry plus `/toolkit?inat=connected`, so on dev that entry must be the dev site.
+
+**2. Set the variables on the API container only.** The worker needs none: publish and sync run in
+API requests, publish in rounds that each end inside the ingress timeout.
+
+| Var | Value |
+|---|---|
+| `FF_INAT_ENABLED` | `true` |
+| `INAT_CLIENT_ID` | the app's ID |
+| `INAT_CLIENT_SECRET` | the app's secret, as a `secretref:`. It also keys the encryption of every stored token: missing or shorter than 32 characters, the routes that connect or use an account answer `503` with the reason, and changing it disconnects everyone |
+| `INAT_REDIRECT_URI` | from the table above |
+
+```bash
+az containerapp secret set --name ww-backend-dev --resource-group WW-AE \
+  --secrets inat-client-secret=<the app's secret>
+az containerapp update --name ww-backend-dev --resource-group WW-AE \
+  --set-env-vars FF_INAT_ENABLED=true INAT_CLIENT_ID=<the app's ID> \
+    INAT_CLIENT_SECRET=secretref:inat-client-secret \
+    INAT_REDIRECT_URI=https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback
+```
+
+The deploy workflow merges its own variables, so these survive the next deploy. The new revision's
+log has an `inat_settings_problem` line for anything still wrong (`services/inat_oauth.py`). The
+frontend needs nothing: it asks `/api/inat/status`.
+
+**3. Test on dev**, as a project member, on a deployment with a location and labelled photos:
+
+1. Settings, Integrations, *Connect iNaturalist*: iNaturalist asks to authorise, then Toolkit shows
+   *Connected as* your login. Disconnect, then connect again from Toolkit with a token pasted from
+   <https://www.inaturalist.org/users/api_token>.
+2. Cluster Review, select a few photos labelled as an animal plus one marked Empty and one with a
+   person, *Publish to iNaturalist*: one observation per encounter, location obscured, the two
+   skipped, and the grid's dove badge on the published ones.
+3. Publish 100 or more photos of one deployment: the network tab shows several
+   `POST /api/inat/publish`, each under 4 minutes, then one notice; no encounter is split into two
+   observations on iNaturalist.
+4. Publish the same selection again: every photo is skipped as already on iNaturalist.
+5. Settings, *Sync now*: the badge follows the quality grade. No identification comes back
+   ([what happens today](../development%20reports/inaturalist-integration.md#what-happens-today-checked-25-oct-2026-123)).
+6. Delete the test observations on iNaturalist.
+
+Before production, check the three tables exist there (read-only):
+`select to_regclass('public.inat_observations'), to_regclass('public.inat_observation_media'), to_regclass('public.inat_tokens');`
+They exist on dev (checked 25 Oct 2026).
+
+> **Known limit:** the OAuth state lives in the memory of the API replica that started the sign-in
+> (`routers/inaturalist.py::_pending_oauth`). A callback that reaches another replica, or one that
+> restarted, answers `400 Invalid or expired OAuth state`. Dev runs one replica; production can run
+> three. Connecting with a pasted token does not use it.
 
 ---
 
@@ -302,9 +387,9 @@ vector database.
    incompatible vector dims. DR is automatic — the vectors are a Postgres table under Supabase PITR, so
    the `/api/brain/backup` job is now a **no-op**.
 
-> The heavy ML inference (DINOv3/SpeciesNet on GPU) is a separate concern — see the `gpu` profile +
-> `embedding-worker` in `docker-compose.yml`, which also needs Redis + ARQ before it can run as a
-> cloud worker (the API currently runs jobs in-process; see [Scaling](#scaling)).
+> The heavy ML inference (DINOv3/SpeciesNet on GPU) is a separate concern. In both cloud environments
+> it runs on the ARQ GPU worker (see [Scaling](#scaling)); locally it is the `gpu` profile's
+> `embedding-worker` in `docker-compose.yml`, which gets jobs only when the API has `REDIS_URL` set.
 
 ---
 

@@ -45,9 +45,7 @@ SERVICE_KEY_SECRET = "supabase-service-key"
 # Intentional differences, with the reason they are fine. Anything NOT in
 # this list is reported as an unexplained gap. Keep reasons honest — an
 # entry here is a documented decision, not a way to silence the report.
-EXPECTED_ENV_DIFFS: dict[str, str] = {
-    "REDIS_URL": "dev offloads jobs to the GPU worker; prod runs in-process",
-}
+EXPECTED_ENV_DIFFS: dict[str, str] = {}
 
 # Vars that must exist on BOTH sides with DIFFERENT values. These never
 # belong in EXPECTED_ENV_DIFFS (that list excuses absence, and losing one
@@ -58,9 +56,10 @@ MUST_DIFFER: dict[str, str] = {
     "ALLOWED_ORIGINS": "each API must allow only its own frontend origins",
     "GOOGLE_DRIVE_FOLDER_ID": "each env archives into its own Drive root",
     "AZURE_STORAGE_CONTAINER_NAME": "each env buffers uploads in its own container",
+    "REDIS_URL": "identical broker = prod jobs run on the dev worker against the dev database",
 }
 EXPECTED_SECRET_DIFFS: dict[str, str] = {
-    "pg-conn": "KEDA scaler pooler creds live on the worker app (dev-only)",
+    "pg-conn": "KEDA scaler pooler creds live on each worker app, not the API",
     "hf-token": "gated DINOv3 weights only needed where the worker runs",
 }
 EXPECTED_BUCKET_DIFFS: dict[str, str] = {

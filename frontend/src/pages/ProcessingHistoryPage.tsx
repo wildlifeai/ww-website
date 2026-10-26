@@ -7,16 +7,16 @@
 // after the live upload dock has gone away. Each row expands to its archived log;
 // `?job=<id>` opens that row (the dock links a failed upload here).
 //
-// The list grows a page at a time up to the API's 200. GET /api/jobs takes no status
-// filter, so the status select narrows the loaded jobs and says so (UI audit 01 E1).
+// The status filter runs in the read, and "Load more" reads the next page (UI audit 01 E1).
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Bot, Brain, Check, ChevronDown, ChevronRight, Circle, Clock, Cpu, Dna, Image, LoaderCircle,
   Package, RefreshCw, Target, TriangleAlert, Upload, Wrench, X, type LucideIcon,
 } from 'lucide-react'
-import { JOBS_API_MAX, JOBS_PAGE, useJobsList } from '../hooks/useJobs'
+import { useJobHistory } from '../hooks/useJobs'
 import { useJob } from '../hooks/useJob'
+import { JOB_STATUS_FILTERS } from '../lib/jobsList'
 import type { JobSummary, JobStatusValue } from '../types/job'
 
 const STATUS_META: Record<JobStatusValue, { icon: LucideIcon; label: string; color: string }> = {
@@ -32,15 +32,6 @@ const KIND_ICON: Record<string, LucideIcon> = {
   active_learning: Target, export: Package, maintenance: Wrench, model_train: Dna, model_upload: Cpu,
   media_prep: Image,
 }
-
-/** The status filter's choices; "running" covers queued and processing. */
-const STATUS_FILTERS: { value: string; label: string; match: (s: JobStatusValue) => boolean }[] = [
-  { value: '', label: 'All statuses', match: () => true },
-  { value: 'running', label: 'Running', match: s => s === 'queued' || s === 'processing' },
-  { value: 'completed', label: 'Completed', match: s => s === 'completed' },
-  { value: 'completed_with_errors', label: 'With errors', match: s => s === 'completed_with_errors' },
-  { value: 'failed', label: 'Failed', match: s => s === 'failed' },
-]
 
 const CONTROL_STYLE: React.CSSProperties = {
   padding: '0.35rem 0.5rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
@@ -144,16 +135,12 @@ function JobRow({ job, defaultOpen }: { job: JobSummary; defaultOpen: boolean })
 }
 
 export function ProcessingHistoryPage() {
-  const [limit, setLimit] = useState(JOBS_PAGE)
   const [status, setStatus] = useState('')
-  const { data: jobs, isLoading, isError, isPlaceholderData } = useJobsList(limit)
+  const filter = JOB_STATUS_FILTERS.find(f => f.value === status) ?? JOB_STATUS_FILTERS[0]
+  const { data, isLoading, isError, isPlaceholderData, hasNextPage, fetchNextPage, isFetchingNextPage } = useJobHistory(filter.statuses)
+  const jobs = data?.pages.flatMap(p => p.jobs)
   const [params] = useSearchParams()
   const openJob = params.get('job')
-
-  const filter = STATUS_FILTERS.find(f => f.value === status) ?? STATUS_FILTERS[0]
-  const shown = jobs?.filter(j => filter.match(j.status)) ?? []
-  // A full page means there may be more, up to what the API returns.
-  const canLoadMore = !!jobs && jobs.length === limit && limit < JOBS_API_MAX
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto' }}>
@@ -164,38 +151,29 @@ export function ProcessingHistoryPage() {
 
       {isLoading && <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>Loading…</div>}
       {isError && <div style={{ fontSize: '0.875rem', color: '#ef4444' }}>Couldn’t load your jobs. Please try again.</div>}
-      {jobs && jobs.length === 0 && (
+      {jobs && jobs.length === 0 && !status && (
         <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', padding: '2rem 0', textAlign: 'center' }}>
           No processing jobs yet. Uploads and AI runs you start will appear here.
         </div>
       )}
-      {jobs && jobs.length > 0 && (
+      {jobs && (jobs.length > 0 || status !== '') && (
         <>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', margin: '0 0 0.75rem' }}>
-            <select value={status} onChange={e => setStatus(e.target.value)} aria-label="Job status" style={CONTROL_STYLE}>
-              {STATUS_FILTERS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-            </select>
-            {status && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                {shown.length} of your latest {jobs.length} jobs
-              </span>
-            )}
-          </div>
-          {shown.map(job => <JobRow key={job.job_id} job={job} defaultOpen={job.job_id === openJob} />)}
-          {canLoadMore && (
+          <select value={status} onChange={e => setStatus(e.target.value)} aria-label="Job status" style={{ ...CONTROL_STYLE, marginBottom: '0.75rem' }}>
+            {JOB_STATUS_FILTERS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+          </select>
+          {jobs.length === 0 && (
+            <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)', padding: '1rem 0' }}>No jobs with this status.</div>
+          )}
+          {jobs.map(job => <JobRow key={job.job_id} job={job} defaultOpen={job.job_id === openJob} />)}
+          {hasNextPage && (
             <button
               type="button"
-              disabled={isPlaceholderData}
-              onClick={() => setLimit(l => Math.min(l + JOBS_PAGE, JOBS_API_MAX))}
+              disabled={isFetchingNextPage || isPlaceholderData}
+              onClick={() => fetchNextPage()}
               style={{ ...CONTROL_STYLE, display: 'block', margin: '0.5rem auto 0', cursor: 'pointer' }}
             >
-              {isPlaceholderData ? 'Loading…' : 'Load more'}
+              {isFetchingNextPage ? 'Loading…' : 'Load more'}
             </button>
-          )}
-          {!canLoadMore && jobs.length >= JOBS_API_MAX && (
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center' }}>
-              Showing your latest {JOBS_API_MAX} jobs.
-            </p>
           )}
         </>
       )}

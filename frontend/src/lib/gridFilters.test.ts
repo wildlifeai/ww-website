@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
-  applyFilterOps, applyOrder, gridFilterPlan, gridQueryKey, gridSortPlan, hasAdvancedFilters, hasAnyFilter, NO_FILTERS,
+  advancedFilterCount, applyFilterOps, applyOrder, clearedAdvanced, gridFilterPlan, gridQueryKey, gridScopePlan, gridSortPlan,
+  hasAdvancedFilters, hasAnyFilter, NO_FILTERS,
   type FilterableQuery,
 } from './gridFilters'
+import { DAY_START_HOUR, NIGHT_START_HOUR } from './time'
 
 const f = (over: Partial<typeof NO_FILTERS>) => ({ ...NO_FILTERS, ...over })
 
@@ -69,6 +71,41 @@ describe('gridFilterPlan', () => {
   it('ignores a date that is not a plain day, so nothing odd reaches the or= filter', () => {
     expect(gridFilterPlan(f({ dateFrom: '2026-01-01,x' })).ops).toEqual([])
   })
+
+  it('splits day from night on the local hour, 06:00 to 18:00, so a null hour matches neither', () => {
+    expect([DAY_START_HOUR, NIGHT_START_HOUR]).toEqual([6, 18])
+    expect(gridFilterPlan(f({ timeOfDay: 'day' }))).toEqual({
+      embeds: [],
+      ops: [{ op: 'gte', column: 'local_hour', value: 6 }, { op: 'lt', column: 'local_hour', value: 18 }],
+    })
+    expect(gridFilterPlan(f({ timeOfDay: 'night' }))).toEqual({
+      embeds: [],
+      ops: [{ op: 'or', filters: 'local_hour.gte.18,local_hour.lt.6' }],
+    })
+  })
+
+  it('keeps the night filter beside a date range as its own or=, which PostgREST ANDs', () => {
+    expect(gridFilterPlan(f({ dateFrom: '2026-01-01', timeOfDay: 'night' })).ops).toEqual([
+      { op: 'or', filters: 'timestamp.is.null,timestamp.gte.2026-01-01' },
+      { op: 'or', filters: 'local_hour.gte.18,local_hour.lt.6' },
+    ])
+  })
+})
+
+describe('gridScopePlan', () => {
+  it('reads the picked deployments by id', () => {
+    expect(gridScopePlan(['d1', 'd2'], ['p1'])).toEqual({
+      embeds: [],
+      ops: [{ op: 'in', column: 'deployment_id', values: ['d1', 'd2'] }],
+    })
+  })
+
+  it("reads every deployment of the selected projects through the photo's deployment", () => {
+    expect(gridScopePlan([], ['p1', 'p2'])).toEqual({
+      embeds: ['f_project:deployments!inner()'],
+      ops: [{ op: 'in', column: 'f_project.project_id', values: ['p1', 'p2'] }],
+    })
+  })
 })
 
 describe('applyFilterOps', () => {
@@ -78,6 +115,8 @@ describe('applyFilterOps', () => {
     const q: Recorder = {
       in: (...a) => { calls.push(['in', ...a]); return q },
       eq: (...a) => { calls.push(['eq', ...a]); return q },
+      gte: (...a) => { calls.push(['gte', ...a]); return q },
+      lt: (...a) => { calls.push(['lt', ...a]); return q },
       not: (...a) => { calls.push(['not', ...a]); return q },
       is: (...a) => { calls.push(['is', ...a]); return q },
       or: (...a) => { calls.push(['or', ...a]); return q },
@@ -85,13 +124,15 @@ describe('applyFilterOps', () => {
     applyFilterOps(q, [
       { op: 'in', column: 'a.x', values: ['1'] },
       { op: 'eq', column: 'a.y', value: '2' },
+      { op: 'gte', column: 'h', value: 6 },
+      { op: 'lt', column: 'h', value: 18 },
       { op: 'notNull', column: 'a.z' },
       { op: 'isNull', column: 'a' },
       { op: 'or', filters: 'p.eq.1', referencedTable: 'a' },
       { op: 'or', filters: 'p.eq.2' },
     ])
     expect(calls).toEqual([
-      ['in', 'a.x', ['1']], ['eq', 'a.y', '2'], ['not', 'a.z', 'is', null], ['is', 'a', null],
+      ['in', 'a.x', ['1']], ['eq', 'a.y', '2'], ['gte', 'h', 6], ['lt', 'h', 18], ['not', 'a.z', 'is', null], ['is', 'a', null],
       ['or', 'p.eq.1', { referencedTable: 'a' }], ['or', 'p.eq.2'],
     ])
   })
@@ -132,7 +173,15 @@ describe('filter summaries', () => {
     expect(hasAdvancedFilters(f({ species: ['x'] }))).toBe(false)
     expect(hasAnyFilter(f({ species: ['x'] }))).toBe(true)
     expect(hasAdvancedFilters(f({ dateTo: '2026-01-01' }))).toBe(true)
+    expect(hasAdvancedFilters(f({ timeOfDay: 'night' }))).toBe(true)
     expect(hasAnyFilter(NO_FILTERS)).toBe(false)
+  })
+
+  it('counts the advanced filters, a date range once, and clears them keeping the species', () => {
+    const set = f({ species: ['x'], status: 'ai', dateFrom: '2026-01-01', dateTo: '2026-02-01', timeOfDay: 'day' })
+    expect(advancedFilterCount(NO_FILTERS)).toBe(0)
+    expect(advancedFilterCount(set)).toBe(3)
+    expect(clearedAdvanced(set)).toEqual(f({ species: ['x'] }))
   })
 
   it('keys a query by its deployments and filters, ignoring species order', () => {

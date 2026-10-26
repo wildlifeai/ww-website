@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { PAGE_SIZE, pageWindow } from './gridPage'
+import { PAGE_SIZE, pagerText, pageWindow } from './gridPage'
 
 describe('pageWindow', () => {
   it('describes a middle page', () => {
@@ -22,5 +22,17 @@ describe('pageWindow', () => {
 
   it('handles an empty page', () => {
     expect(pageWindow(0, 0, 0)).toEqual({ from: 0, to: 0, total: 0, hasPrev: false, hasNext: false })
+  })
+})
+
+describe('pagerText', () => {
+  it('gives the range across pages and the count on one page', () => {
+    expect(pagerText(pageWindow(1, PAGE_SIZE, 350))).toBe('101–200 of 350')
+    expect(pagerText(pageWindow(0, 37, 37))).toBe('37 photos')
+    expect(pagerText(pageWindow(0, 1, 1))).toBe('1 photo')
+  })
+
+  it('says nothing before the first count', () => {
+    expect(pagerText(pageWindow(0, 20, null))).toBeNull()
   })
 })

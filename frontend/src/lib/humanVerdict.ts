@@ -8,10 +8,12 @@
 // said Y" survives, and the QA agreement can be measured. Confirming the AI's species is a human
 // row that copies the verdict's species.
 //
-// Every surface that labels photos writes through here: the viewer, the grid's bulk label, and the
-// cluster and queue reviews. Each write returns the photo's rows as the database now holds them and
-// an `undo` that puts them back. Updates go through `updateObservations`, so an update RLS refuses
-// (0 rows) throws NOT_SAVED instead of reading as saved; a refused insert throws the same message.
+// The viewer and the grid's bulk label write through here. Cluster Review writes through the
+// backend (`backend/app/domain/human_verdicts.py`) under the same rule, except that a cluster
+// confirm skips a photo a person already labelled. Each write here returns the photo's rows as the
+// database now holds them and an `undo` that puts them back. Updates go through
+// `updateObservations`, so an update RLS refuses (0 rows) throws NOT_SAVED instead of reading as
+// saved; a refused insert throws the same message.
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   humanCreateFields, humanReviewFields, isHumanReviewed, isHumanRow, photoVerdict, type Actor, type PresenceFields,

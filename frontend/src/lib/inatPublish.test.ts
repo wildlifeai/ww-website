@@ -56,7 +56,7 @@ describe('inatPublishNotice', () => {
   it('never shows success when nothing was published, and says why', () => {
     const n = inatPublishNotice(answer({ skipped_already_published: 2, skipped_bycatch: 1 }))
     expect(n.ok).toBe(false)
-    expect(n.text).toBe('Nothing published. Skipped 3: 2 already on iNaturalist, 1 not labelled as an animal.')
+    expect(n.text).toBe('Nothing published. Skipped 3: 2 already on iNaturalist, 1 not an animal or showing a person.')
     expect(n.link).toBeUndefined()
     expect(inatPublishNotice(answer()).text).toBe('Nothing published. None of these photos were found.')
   })
@@ -71,6 +71,16 @@ describe('inatPublishNotice', () => {
     expect(n.ok).toBe(false)
     expect(n.text).toBe('Published 1 observation with 2 photos to iNaturalist. 1 encounter failed. 1 photo did not upload.')
     expect(inatPublishNotice(answer({ errors: 2 })).text).toBe('Nothing published. 2 encounters failed.')
+  })
+
+  it('reports photos added to observations already on iNaturalist, and photos not reached', () => {
+    const added = inatPublishNotice(answer({ photos_uploaded: 2, observations: [{ uri: 'https://www.inaturalist.org/observations/7' }] }))
+    expect(added.ok).toBe(true)
+    expect(added.text).toBe('Added 2 photos to observations already on iNaturalist.')
+
+    const left = inatPublishNotice(answer({ observations_created: 1, photos_uploaded: 1, remaining_media_ids: ['a2', 'a3'] }))
+    expect(left.ok).toBe(false)
+    expect(left.text).toBe('Published 1 observation with 1 photo to iNaturalist. 2 photos not reached: publish again to carry on.')
   })
 })
 

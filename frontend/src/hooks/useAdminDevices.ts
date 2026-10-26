@@ -11,6 +11,7 @@ export interface AdminDevice {
   name: string
   bluetooth_id: string
   device_eui: string | null
+  // The latest deployment's project's: cameras belong to no organisation (ww-backend#346).
   organisation: { id: string; name: string } | null
   latest_deployment: {
     id: string
