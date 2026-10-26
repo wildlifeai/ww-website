@@ -57,6 +57,10 @@ Rules:
 * A route that raises `HTTPException` (every `/api/inat` route) reaches `apiClient` as code
   `UNKNOWN` with the `detail` as its message, and the status is lost, so match the message
   (`lib/inatOff.ts`, `inatErrorNotice` in `lib/inatPublish.ts`).
+* A guide's text is a chunk of its own: the public guides index in the first-load chunk imports
+  only each guide's frontmatter (the `ww-guide-meta` plugin in `vite.config.ts`, `?meta`), and
+  `GuideDetailPage` loads the text. Don't import a guide's markdown anywhere eager, or every
+  guide lands in the 190 kB first-load budget again (about 1.3 kB brotlied for a 4 KB guide).
 * React Doctor fails a PR that introduces any warning (`react-doctor.yml`, `blocking: warning`,
   scope `changed`). Check before pushing, from `frontend/`:
   `npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes`. Rules

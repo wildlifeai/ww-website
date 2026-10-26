@@ -47,30 +47,8 @@ export function formatCaptureTime(iso: string | null, tz: DeploymentTimezone): s
 }
 
 /**
- * The hour-of-day (0–23) of a UTC instant *as seen in* the deployment's zone.
- * Used for day/night classification and activity-by-hour analyses so they reflect
- * the animal's local time, not the viewer's.
+ * Day is 06:00 to 18:00 in the deployment's local time, night the rest. The review grid filters
+ * on these hours (`media.local_hour`, lib/gridFilters).
  */
-export function hourInTimezone(iso: string | null, tz: DeploymentTimezone): number | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return null
-  if (!isValidTz(tz)) return d.getHours()
-  try {
-    const h = new Intl.DateTimeFormat('en-US', {
-      hour: 'numeric', hour12: false, timeZone: tz,
-    }).format(d)
-    // "24" can appear for midnight in some runtimes → normalise to 0.
-    const n = parseInt(h, 10)
-    return Number.isNaN(n) ? d.getHours() : n % 24
-  } catch {
-    return d.getHours()
-  }
-}
-
-/** Hour-based day/night split in the deployment's local time: day = 06:00–18:00. */
-export function getTimeOfDay(iso: string | null, tz: DeploymentTimezone): 'day' | 'night' {
-  const h = hourInTimezone(iso, tz)
-  if (h === null) return 'day'   // unknown → treat as day (no false exclusions)
-  return h >= 6 && h < 18 ? 'day' : 'night'
-}
+export const DAY_START_HOUR = 6
+export const NIGHT_START_HOUR = 18

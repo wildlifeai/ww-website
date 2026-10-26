@@ -278,21 +278,21 @@ def _insert_observations(svc, batch: list[dict], warnings: list[str], what: str 
 
 
 def _import_device(svc, org_id: str, user_id: str, name: str) -> str:
-    """The id of the organisation's placeholder device called ``name``, created if it has none.
+    """The id of the importing organisation's placeholder device called ``name``, created if it has none.
 
     Its ``bluetooth_id`` is a uuid5 of the organisation and the name, so a re-import reuses the
     device and another organisation's camera with the same name gets a device of its own.
-    A device made before the organisation was in the seed (name only) is still reused, but only
-    by its own organisation.
+    Cameras belong to no organisation (ww-backend#346): that id is the only scope, and the row
+    carries no ``organisation_id``. A device from before the organisation was in the seed (name
+    only) is not reused; a re-import makes a scoped one.
     """
-    scoped = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{org_id}-{name}"))
-    legacy = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{name}"))
-    existing = svc.table("devices").select("id").in_("bluetooth_id", [scoped, legacy]).eq("organisation_id", org_id).limit(1).execute()
+    bluetooth_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"imported-{org_id}-{name}"))
+    existing = svc.table("devices").select("id").eq("bluetooth_id", bluetooth_id).limit(1).execute()
     if existing.data:
         logger.info("camtrapdp_import_device_reused", name=name, device_id=existing.data[0]["id"])
         return existing.data[0]["id"]
     device_id = str(uuid.uuid4())
-    svc.table("devices").insert({"id": device_id, "name": name, "organisation_id": org_id, "modified_by": user_id, "bluetooth_id": scoped}).execute()
+    svc.table("devices").insert({"id": device_id, "name": name, "modified_by": user_id, "bluetooth_id": bluetooth_id}).execute()
     return device_id
 
 
@@ -311,7 +311,7 @@ def import_package(
     Strategy:
     1. Create a new project from the package title.
     2. For each unique cameraID, create a placeholder device named
-       "[imported] <cameraID>" linked to the user's organisation.
+       "[imported] <cameraID>", scoped to the organisation by its Bluetooth id.
     3. Insert deployments, media, and observations.
 
     All operations use the service-role client (RLS bypassed).

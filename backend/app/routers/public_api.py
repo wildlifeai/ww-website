@@ -41,6 +41,8 @@ from app.schemas.public_api import (
     ApiKeyCreate,
     ApiKeyInfo,
     ApiKeyResponse,
+    DeviceOut,
+    DevicesResponse,
     ObservationOut,
     ObservationsResponse,
     TelemetryPoint,
@@ -247,16 +249,21 @@ async def api_get_deployment(
     return ApiResponse(data=record, meta=_meta(request))
 
 
-@router.get("/devices")
+@router.get("/devices", response_model=DevicesResponse)
 async def api_list_devices(
     request: Request,
     limit: int = Query(50, ge=1, le=MAX_PAGE),
     offset: int = Query(0, ge=0),
     key: dict = Depends(require_api_key("devices:read")),
 ):
-    """List the organisation's own cameras."""
+    """The cameras deployed in the organisation's projects, newest registered first.
+
+    A camera is listed when it has a deployment, open or ended, in one of the organisation's
+    projects. Cameras belong to no organisation, so a camera lent to another organisation's
+    project is in both lists. A page is at most 1,000 cameras; page with ``offset``.
+    """
     records, total = await list_devices(key["organisation_id"], limit, offset)
-    return ApiResponse(data=records, meta=_meta(request, total=total, page=_page(offset, limit)))
+    return DevicesResponse(data=[DeviceOut(**r) for r in records], meta=_meta(request, total=total, page=_page(offset, limit)))
 
 
 @router.get("/devices/{device_eui}/telemetry", response_model=TelemetryResponse)
@@ -306,9 +313,9 @@ async def api_export_camtrapdp(
     """Start a CamtrapDP export of one project with its original photos, as the Download button does.
 
     Returns ``{job_id}``; poll ``GET /api/v1/jobs/{job_id}`` for the signed link. Behind
-    ``FF_CAMTRAPDP_EXPORT_ENABLED``, like the Download button's export.
+    ``FF_CAMTRAPDP_EXPORT_ENABLED`` and the export storage, like the Download button's export.
     """
-    if not settings.FF_CAMTRAPDP_EXPORT_ENABLED:
+    if not settings.camtrapdp_export_enabled:
         raise HTTPException(404, detail="CamtrapDP export is not enabled")
     org_id = key["organisation_id"]
     project_id = str(body.project_id)

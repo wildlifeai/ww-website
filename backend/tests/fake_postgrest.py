@@ -3,25 +3,30 @@
 """An in-memory stand-in for the PostgREST calls the public API makes, for scoping tests.
 
 It evaluates ``select`` with embeds (``name!inner(...)``, nested), filters on the table or on
-an embed (``projects.organisation_id``), ``order`` (also ``foreign_table``), ``range``,
-``limit`` and ``count="exact"``, as PostgREST does for these cases: a filter on an embed trims
-that embed, and drops the parent row only when the embed is ``!inner``. ``update`` and
-``upsert`` are enough for the API key and job stores.
+an embed (``projects.organisation_id``), ``or_`` on the table, ``order`` (also
+``foreign_table``), ``range``, ``limit`` and ``count="exact"``, as PostgREST does for these
+cases: a filter on an embed trims that embed, and drops the parent row only when the embed is
+``!inner``. Two timestamps with a zone compare as instants, as ``timestamptz`` does. ``update``
+and ``upsert`` are enough for the API key and job stores; ``insert`` and ``delete`` return the
+rows they wrote, as supabase-py asks for by default. Like PostgREST, a read returns at most
+``max_rows`` (1,000) rows, so a read that does not page stops there in a test too.
 
 A column the table does not have fails the test, so a query naming a column that is not in
 ww-backend's schema is caught here and not in production. ``COLUMNS`` lists the columns of
-each table the API reads, from ww-backend dev's supabase/schema.sql (10 Oct 2026).
+each table the API reads, from ww-backend dev's supabase/schema.sql (10 Oct 2026; the cluster
+and observation provenance columns 25 Oct 2026).
 """
 
 from __future__ import annotations
 
 import copy
 import re
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Optional
 
 COLUMNS = {
-    "projects": {"id", "name", "organisation_id", "deleted_at", "created_at"},
+    "projects": {"id", "name", "organisation_id", "gbif_dataset_key", "deleted_at", "created_at"},
     "deployments": {
         "id",
         "name",
@@ -31,6 +36,7 @@ COLUMNS = {
         "deployment_status_id",
         "location_name",
         "deployment_start",
+        "deployment_end",
         "deleted_at",
         "created_at",
     },
@@ -54,9 +60,35 @@ COLUMNS = {
         "review_status",
         "source_type",
         "ai_origin",
+        "reviewer_id",
+        "annotator_id",
         "deleted_at",
         "created_at",
+        "observation_level",
+        "classified_by",
+        "classification_timestamp",
+        "annotator_id",
+        "reviewer_id",
+        "confidence",
+        "embedding_run_id",
+        "cluster_id",
     },
+    "media_embeddings": {"media_id", "deployment_id", "embedding_run_id", "cluster_id", "cluster_confidence", "is_outlier", "created_at"},
+    "cluster_assignments": {
+        "id",
+        "deployment_id",
+        "embedding_run_id",
+        "cluster_id",
+        "taxon_id",
+        "scientific_name",
+        "is_outlier_cluster",
+        "image_count",
+        "review_state",
+        "confirmed_by",
+        "confirmed_at",
+        "created_at",
+    },
+    "taxa": {"id", "scientific_name", "common_name", "conservation_status", "invasive_status", "created_at"},
     "lorawan_messages": {"id", "device_eui", "device_id", "deployment_id", "raw_payload", "received_at"},
     "lorawan_parsed_messages": {"id", "lorawan_message_id", "device_id", "battery_level", "sd_card_used_capacity", "model_output"},
     "api_keys": {"id", "organisation_id", "name", "key_hash", "key_prefix", "scopes", "expires_at", "last_used_at", "revoked_at", "created_at"},
@@ -69,6 +101,7 @@ RELATIONS = {
     ("deployments", "projects"): ("projects", "project_id", "id", True),
     ("deployments", "devices"): ("devices", "device_id", "id", True),
     ("deployments", "deployment_statuses"): ("deployment_statuses", "deployment_status_id", "id", True),
+    ("devices", "deployments"): ("deployments", "id", "device_id", False),
     ("media", "deployments"): ("deployments", "deployment_id", "id", True),
     ("media", "observations"): ("observations", "id", "media_id", False),
     ("lorawan_messages", "deployments"): ("deployments", "deployment_id", "id", True),
@@ -120,6 +153,7 @@ class Query:
         self.tree: Optional[dict] = None
         self.count = False
         self.filters: list[tuple[str, str, Any]] = []
+        self.logic: list[Any] = []
         self.orders: dict[str, list[tuple[str, bool, Optional[bool]]]] = {}
         self.offset, self.limit_n = 0, None
         self.mode, self.payload = "select", None
@@ -136,6 +170,14 @@ class Query:
 
     def upsert(self, payload: dict):
         self.mode, self.payload = "upsert", payload
+        return self
+
+    def insert(self, payload):
+        self.mode, self.payload = "insert", payload if isinstance(payload, list) else [payload]
+        return self
+
+    def delete(self):
+        self.mode = "delete"
         return self
 
     def _filter(self, path: str, op: str, value: Any):
@@ -160,6 +202,14 @@ class Query:
 
     def gt(self, path, value):
         return self._filter(path, "gt", value)
+
+    def lt(self, path, value):
+        return self._filter(path, "lt", value)
+
+    def or_(self, filters: str):
+        """``a.lt.1,and(b.eq.2,c.lt.3)``: PostgREST's logic tree, on the table's own columns."""
+        self.logic.append(_logic(self.table, "or", filters))
+        return self
 
     def order(self, column, *, desc=False, nullsfirst=None, foreign_table=None):
         self.orders.setdefault(foreign_table or "", []).append((column, desc, nullsfirst))
@@ -224,10 +274,30 @@ class Query:
                 rows.append(copy.deepcopy(self.payload))
             return SimpleNamespace(data=[self.payload], count=None)
         if self.mode == "update":
+            for column in self.payload:
+                _check_column(self.table, column)
             hit = [r for r in self.db.rows(self.table) if all(_test(r, self.table, c, op, v) for c, op, v in self._filters_at(""))]
             for r in hit:
                 r.update(self.payload)
+            self.db.writes.append(SimpleNamespace(table=self.table, mode="update", rows=len(hit)))
             return SimpleNamespace(data=copy.deepcopy(hit), count=None)
+        if self.mode == "insert":
+            stored = []
+            for row in self.payload:
+                for column in row:
+                    _check_column(self.table, column)
+                self.db.next_id += 1
+                stored.append({"id": f"new-{self.db.next_id}", **copy.deepcopy(row)})
+            self.db.rows(self.table).extend(stored)
+            self.db.writes.append(SimpleNamespace(table=self.table, mode="insert", rows=len(stored)))
+            return SimpleNamespace(data=copy.deepcopy(stored), count=None)
+        if self.mode == "delete":
+            keep, gone = [], []
+            for r in self.db.rows(self.table):
+                (gone if all(_test(r, self.table, c, op, v) for c, op, v in self._filters_at("")) else keep).append(r)
+            self.db.tables[self.table] = keep
+            self.db.writes.append(SimpleNamespace(table=self.table, mode="delete", rows=len(gone)))
+            return SimpleNamespace(data=copy.deepcopy(gone), count=None)
 
         tree = self.tree or _parse(self.table, "*")
         for path, _, _ in self.filters:
@@ -242,6 +312,8 @@ class Query:
         for row in self.db.rows(self.table):
             if not all(_test(row, self.table, c, op, v) for c, op, v in self._filters_at("")):
                 continue
+            if not all(matches(row) for matches in self.logic):
+                continue
             built = self._materialize(self.table, row, tree, "")
             if built is None:
                 continue
@@ -254,11 +326,37 @@ class Query:
         rows = [k["__built"] for k in keyed]
         total = len(rows)
         end = None if self.limit_n is None else self.offset + self.limit_n
-        page = rows[self.offset : end]
+        page = rows[self.offset : end][: self.db.max_rows]
         self.db.requests.append(SimpleNamespace(table=self.table, filters=list(self.filters), returned=len(page)))
         for r in page:
             r.pop("__row", None)
         return SimpleNamespace(data=copy.deepcopy(page), count=total if self.count else None)
+
+
+def _logic(table: str, op: str, body: str):
+    """A row predicate for one ``or(...)`` or ``and(...)`` body."""
+    tests = []
+    for part in _split(body):
+        nested = re.match(r"^(and|or)\((.*)\)$", part, re.S)
+        if nested:
+            tests.append(_logic(table, nested[1], nested[2]))
+        else:
+            column, fop, value = part.split(".", 2)
+            tests.append(lambda row, c=column, o=fop, v=value: _test(row, table, c, o, v))
+    combine = all if op == "and" else any
+    return lambda row: combine(t(row) for t in tests)
+
+
+def _instants(actual: Any, value: Any) -> tuple[Any, Any]:
+    """Two ISO timestamps with a zone compare as instants, as timestamptz does; anything else as given."""
+    if isinstance(actual, str) and isinstance(value, str) and "T" in actual and "T" in value:
+        try:
+            a, b = datetime.fromisoformat(actual), datetime.fromisoformat(value)
+        except ValueError:
+            return actual, value
+        if a.tzinfo and b.tzinfo:
+            return a, b
+    return actual, value
 
 
 def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
@@ -268,23 +366,27 @@ def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
     else:
         _check_column(table, column)
         actual = row.get(column)
-    if op == "eq":
-        return actual is not None and str(actual) == str(value)
     if op == "is":
         return actual is None
     if op == "in":
         return actual in value
     if actual is None:
         return False
-    return {"gte": actual >= value, "lte": actual <= value, "gt": actual > value}[op]
+    actual, value = _instants(actual, value)
+    if op == "eq":
+        return actual == value if isinstance(actual, datetime) else str(actual) == str(value)
+    return {"gte": actual >= value, "lte": actual <= value, "gt": actual > value, "lt": actual < value}[op]
 
 
 class FakeDB:
     """``create_service_client()`` for tests: ``FakeDB(tables).client``."""
 
-    def __init__(self, tables: dict[str, list[dict]]):
+    def __init__(self, tables: dict[str, list[dict]], max_rows: int = 1000):
         self.tables = {name: [dict(r) for r in rows] for name, rows in tables.items()}
         self.requests: list[SimpleNamespace] = []
+        self.writes: list[SimpleNamespace] = []
+        self.max_rows = max_rows
+        self.next_id = 0
 
     def rows(self, table: str) -> list[dict]:
         return self.tables.setdefault(table, [])

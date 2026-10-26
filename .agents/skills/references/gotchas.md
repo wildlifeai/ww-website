@@ -84,6 +84,8 @@ than 1,000 photos labelled only 1,000 (2026-10-21). Any backend read over a whol
 project goes through `services/db_utils.read_all`, a query ordered on a unique key and paged with
 `.range()` until a short page. A check for known keys looks up only those keys with
 `.in_()` in chunks, as the upload dedup in `jobs.definitions.existing_media_keys` does (#317).
+The test stand-in `tests/fake_postgrest.FakeDB` returns at most 1,000 rows a read too, so a test
+with more rows than that catches a read that does not page (25 Oct 2026).
 
 ---
 
@@ -148,6 +150,15 @@ let a transport error surface as a silent success.
 
 ---
 
+## Supabase Storage refuses any file over 50 MB
+
+Both Supabase projects are on the Free plan, whose upload limit is 50 MB for every bucket,
+whatever the bucket's own limit says. The CamtrapDP export stored its ZIPs there and failed
+past about 50 photos (#387). A file that can grow, like an export, goes to Azure Blob instead:
+`services/azure_storage.upload_file` streams it in blocks and `read_link` signs a read-only link.
+
+---
+
 ## Object URLs and React StrictMode
 
 Create and revoke an object URL (`URL.createObjectURL`) inside the **same** effect. StrictMode,
@@ -163,6 +174,18 @@ image for that reason until #142.
 GitHub auto-closes only on merge to the default branch. PRs here target `dev`, so the issue
 stays open until `dev` reaches `main`. Close it by hand when the PR merges, or expect it on the
 open list for a while (#140 after #141).
+
+---
+
+## Cloudflare Pages builds are check runs, not GitHub deployments
+
+Cloudflare reports a build as a `Cloudflare Pages` check run and creates no deployment, and it
+builds only `dev` and `main`. Every GitHub deployment here comes from an Actions job with
+`environment:`, so a `deployment_status` trigger fires on backend deploys: `e2e.yml` tested the
+dev preview after them for a month while its header promised every pull request's preview
+(found 26 Oct 2026). A workflow that needs a build's URL reads the check run, as
+`e2e-preview.yml` does; the detail is in the deployment guide's
+[Preview Deployments](../../../documentation/resources/deployment-guide.md#preview-deployments).
 
 ---
 

@@ -149,7 +149,6 @@ def export_devices(client, today: str):
     """Export devices to CSV."""
     columns = [
         "id", "name", "bluetooth_id", "device_eui",
-        "organisation_id",
         "created_at", "updated_at",
     ]
 

@@ -17,6 +17,7 @@
  *   updated: 2026-06-12
  *   ---
  */
+import { stripFrontmatter } from './guideText'
 
 export interface Guide {
   slug: string
@@ -25,47 +26,34 @@ export interface Guide {
   category: string
   order: number
   updated: string
-  body: string
 }
 
-// Eagerly import every guide as raw text. Guides are KB-scale markdown, so
-// this stays cheap; revisit with lazy globs if the folder grows past dozens.
-// The folder README documents authoring conventions and is excluded from the
-// glob so its text never ships in the bundle.
-const modules = import.meta.glob(['../content/guides/*.md', '!**/README.md'], {
-  query: '?raw',
+// The guides index is in the main chunk (GuidesPage renders without a loading step, #228), so it
+// imports only each guide's frontmatter, through the ww-guide-meta plugin in vite.config.ts. A
+// guide's text is a chunk of its own, loaded by guideBody when its page opens. The folder README
+// documents authoring conventions and is left out of both globs.
+const metas = import.meta.glob(['../content/guides/*.md', '!**/README.md'], {
+  query: '?meta',
   import: 'default',
   eager: true,
-}) as Record<string, string>
+}) as Record<string, Record<string, string>>
 
-function parseFrontmatter(raw: string): { meta: Record<string, string>; body: string } {
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/)
-  if (!match) return { meta: {}, body: raw }
+const texts = import.meta.glob(['../content/guides/*.md', '!**/README.md'], {
+  query: '?raw',
+  import: 'default',
+}) as Record<string, () => Promise<string>>
 
-  const meta: Record<string, string> = {}
-  for (const line of match[1].split(/\r?\n/)) {
-    const idx = line.indexOf(':')
-    if (idx > 0) meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
-  }
-  return { meta, body: raw.slice(match[0].length) }
-}
+const slugOf = (path: string) => (path.split('/').pop() ?? '').replace(/\.md$/, '')
 
 function buildGuides(): Guide[] {
-  const guides: Guide[] = []
-  for (const [path, raw] of Object.entries(modules)) {
-    const filename = path.split('/').pop() ?? ''
-    const slug = filename.replace(/\.md$/, '')
-    const { meta, body } = parseFrontmatter(raw)
-    guides.push({
-      slug,
-      title: meta.title || slug,
-      description: meta.description || '',
-      category: meta.category || 'General',
-      order: Number(meta.order) || 999,
-      updated: meta.updated || '',
-      body,
-    })
-  }
+  const guides: Guide[] = Object.entries(metas).map(([path, meta]) => ({
+    slug: slugOf(path),
+    title: meta.title || slugOf(path),
+    description: meta.description || '',
+    category: meta.category || 'General',
+    order: Number(meta.order) || 999,
+    updated: meta.updated || '',
+  }))
   guides.sort((a, b) => a.category.localeCompare(b.category) || a.order - b.order || a.title.localeCompare(b.title))
   return guides
 }
@@ -74,6 +62,20 @@ export const guides: Guide[] = buildGuides()
 
 export function getGuide(slug: string): Guide | undefined {
   return guides.find(g => g.slug === slug)
+}
+
+const bodies = new Map<string, Promise<string>>()
+
+/** The guide's markdown without its frontmatter, loaded once; undefined for an unknown slug. */
+export function guideBody(slug: string): Promise<string> | undefined {
+  const load = Object.entries(texts).find(([path]) => slugOf(path) === slug)?.[1]
+  if (!load) return undefined
+  let body = bodies.get(slug)
+  if (!body) {
+    body = load().then(stripFrontmatter)
+    bodies.set(slug, body)
+  }
+  return body
 }
 
 /** Guides grouped by category, preserving the sorted order. */

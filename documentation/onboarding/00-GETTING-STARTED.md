@@ -62,7 +62,7 @@ Missing **required** values make the backend refuse to start.
 | `ALLOWED_ORIGINS` | `…,http://localhost:5173` | CORS origins (comma-separated) |
 | `RATE_LIMIT_PER_MINUTE` | `60` | Per-IP API rate limit |
 | `GOOGLE_DRIVE_ENABLED` | `false` | Async upload of analysed images to Drive |
-| `AZURE_STORAGE_CONNECTION_STRING` | _(empty)_ | Required when Drive upload is enabled |
+| `AZURE_STORAGE_CONNECTION_STRING` | _(empty)_ | Required when Drive upload is enabled, and for the CamtrapDP export with the original photos |
 | `SENTRY_DSN` / `LOG_LEVEL` | _/ `info`_ | Error tracking / logging level |
 
 Vite maps root vars into the frontend (`SUPABASE_URL` → `VITE_SUPABASE_URL`, etc.) — you do **not**

@@ -38,6 +38,7 @@ from app.routers import (
     projects,
     public_api,
     qa,
+    reports,
 )
 
 logger = structlog.get_logger()
@@ -62,6 +63,13 @@ async def lifespan(app: FastAPI):
             logger.info("sentry_initialized")
         except ImportError:
             logger.warning("sentry_sdk_not_installed")
+
+    # iNaturalist switched on with settings it cannot work with: say so once at startup.
+    if settings.FF_INAT_ENABLED:
+        from app.services.inat_oauth import inat_settings_problems
+
+        for problem in inat_settings_problems():
+            logger.error("inat_settings_problem", problem=problem)
 
     # Stale-job reaper: age-based, so it only fails jobs with no progress for an hour.
     # (The old recover_stuck_jobs failed EVERY 'processing' job at startup — wrong now
@@ -157,6 +165,7 @@ app.include_router(projects.router)
 app.include_router(exif.router)
 app.include_router(manifest.router)
 app.include_router(exports.router)
+app.include_router(reports.router)
 app.include_router(models.router)
 app.include_router(media.router)
 app.include_router(public_api.router)

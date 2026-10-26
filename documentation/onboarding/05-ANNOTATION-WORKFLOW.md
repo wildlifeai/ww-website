@@ -6,7 +6,9 @@ spend their time in.
 ## Entry point: the Media tab (`/annotations`)
 
 `/annotations` → `AnnotationsPage` → `MediaBrowser`. The page has **no title text** — the
-highlighted nav tab already signals where you are.
+highlighted nav tab already signals where you are. `MediaBrowser` holds the grid's choices and wires
+its parts: the hooks `hooks/useGrid*.ts` (the page query, thumbnails, selection, Actions,
+iNaturalist, groups, viewer) and the components `components/data/Grid*.tsx`.
 
 ### The Ribbon (Microsoft-Word-style command bar)
 
@@ -18,8 +20,8 @@ highlighted nav tab already signals where you are.
 - **Dialog launcher** — the ⤢ corner arrow opens advanced settings (Word's group launcher).
 
 Annotations ribbon: a **Filter** tab (Deployment, Species, and an *Advanced filters* dialog for
-status, type, annotator, AI model, sex, life stage and date range, applied on *Apply*; with the
-active-learning flag on, an *Order* choice, *Needs review first*) and a
+status, type, annotator, AI model, sex, life stage, date range and time of day, applied on
+*Apply*; with the active-learning flag on, an *Order* choice, *Needs review first*) and a
 **Group** tab (Group by, Collapse all). The menu bar's status slot holds the pager ("1–100 of N"
 with Prev and Next), the Photo / Labels toggle, the thumbnail size and *All on page*. Insights uses its four sub-tabs (Projects · Deployments · Map · Reports) as the menu bar.
 
@@ -27,11 +29,14 @@ with Prev and Next), the Photo / Labels toggle, the thumbnail size and *All on p
 
 A paginated thumbnail grid, 100 photos a page. Every filter runs in the media query
 (`lib/gridFilters.ts`), so the pager's total is the filtered total, counted once per filter set and
-again after a write (`lib/gridPage.ts`); the species, model and annotator lists cover the whole
-selection, read from ww-backend's `grid_facets` in one call per 150 deployments
-(`lib/gridFacets.ts`, #336). *Needs review first* orders the same query by the photo's
-active-learning score on `media_embeddings`, highest first, photos with no score last, then newest
-first (`gridSortPlan`, #337). The day/night filter is off until the database can answer it.
+again after a write (`lib/gridPage.ts`). With no deployment picked, the query names the selected
+projects through the photo's deployment rather than every deployment id (`gridScopePlan`). The
+species, model and annotator lists cover the whole selection, read from ww-backend's `grid_facets`
+in one call per 150 deployments (`lib/gridFacets.ts`, #336). *Needs review first* orders the same
+query by the photo's active-learning score on `media_embeddings`, highest first, photos with no
+score last, then newest first (`gridSortPlan`, #337). *Time of day* reads `media.local_hour`, the
+capture hour in the deployment's zone (UTC when it has none) that ww-backend keeps (#335): day is
+06:00 to 18:00 (`DAY_START_HOUR` in `lib/time.ts`), and a photo with no capture time is neither.
 Groups split the page: grouping by deployment is offered for 2 to 12 deployments, by cluster for
 one (`lib/gridGrouping.ts`), and grouping is not remembered between visits. Each card shows the
 photo's verdict (`photoVerdict`, common name first) with one confidence and a **StatusBadge**
@@ -50,7 +55,8 @@ one notice above the grid offers **Retry**, which runs the thumbnail backfill fo
 with such cards (#208). The grid also
 starts that backfill by itself, once per deployment per browser session, the first time it shows a
 deployment's **No thumbnail** card, so a deployment whose thumbnails cannot be made does not loop
-(`hooks/useAutoRetryThumbnails.ts`, #175). A photo with no rendition and a Google Drive original
+(`hooks/useAutoRetryThumbnails.ts`, #175). Either way at most two backfills start at a time, the
+rest queued (`THUMBNAIL_RETRY_CONCURRENCY`). A photo with no rendition and a Google Drive original
 has nothing an `<img>` can load, since `/api/media/{id}/image` needs a Bearer header, so the grid
 and the viewer never request it (`lib/mediaImageUrl.ts`, #300). The viewer shows the same states
 as the card, **Processing…** or **No preview yet** with Retry, and its filmstrip a plain tile. Both
@@ -71,9 +77,10 @@ selects the range from the last selected card; the arrow keys move between cards
 *Select* takes the whole group (`lib/cardSelection.ts`, #283). A selection belongs to its page: a
 new page or filter starts with none. Once something is selected the sub-bar shows the count, Clear
 and the **Actions** menu (`components/data/MediaBulkActions.tsx`): *Label as…*, *Find similar
-photos* (single selection, Wildlife Brain), *Upload to iNaturalist* (or a link to connect it on
-Toolkit), *Remove photos* (soft delete with Undo), *Run AI again* and, for organisation managers,
-*Create species ID model…*. *Label as…* gives each photo one human row, updating the one it has,
+photos* (single selection, Wildlife Brain), *Publish to iNaturalist* (or a link to connect it on
+Toolkit; the route and notices are Cluster Review's, `lib/inatPublish.ts`), *Remove photos* (soft
+delete with Undo), *Run AI again* and, for organisation managers, *Create species ID model…*.
+*Label as…* gives each photo one human row, updating the one it has,
 and leaves AI rows as the model wrote them (`lib/humanVerdict.ts`, decision 2 of the
 [UI audit](../development%20reports/2026-10_ui-audit/README.md)); its toast offers Undo, and a
 refused write shows there too. *Create species ID model…* trains a Camera AI model (a Species Brain) from the selected labelled images through
@@ -140,7 +147,14 @@ confirm fails with `permission denied for table observations`, that's the missin
 | Surface | Route | Purpose |
 |---------|-------|---------|
 | Cluster review | `/clusters/:id` | Bulk-confirm an HDBSCAN cluster to one species; reassign, flag for an expert or publish to iNaturalist the photos selected in a cluster |
-| Dataset health | `/intelligence/:id` | Review funnel + AI-vs-human agreement |
+| Dataset health | `/intelligence/:id` | Review funnel + AI-vs-human agreement, one `GET /api/qa/report/project/{id}` for the project |
+
+Cluster review writes the same one human row per photo through the backend
+(`domain/human_verdicts.py`). *Confirm* labels only the members nobody has labelled, and the toast
+says how many it skipped and offers Undo, which deletes the rows that confirm wrote (not a row
+relabelled since) and reopens the cluster. *Reassign* and *Flag for expert* send the selection in
+one request (`POST /api/brain/review/batch`, up to 500 photos), adding a photo's human row or
+updating the one it has.
 
 Cluster review's *Publish to iNaturalist* calls `POST /api/inat/publish`, so it needs the account
 connected in Toolkit and a deployment with a location, and names each encounter by its photos'

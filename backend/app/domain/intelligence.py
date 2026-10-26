@@ -117,14 +117,16 @@ async def detect_distribution_shift(deployment_id: str, period_a: tuple[str, str
     svc = create_service_client()
 
     def _fetch():
-        resp = (
-            svc.table("media")
-            .select("id, timestamp, media_embeddings(cluster_id, is_outlier)")
-            .eq("deployment_id", deployment_id)
-            .is_("deleted_at", "null")
-            .execute()
+        # Every page: a read without .range() stops at 1,000 rows without an error.
+        return read_all(
+            lambda: (
+                svc.table("media")
+                .select("id, timestamp, media_embeddings(cluster_id, is_outlier)")
+                .eq("deployment_id", deployment_id)
+                .is_("deleted_at", "null")
+                .order("id")
+            )
         )
-        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch)
     hist_a: dict[int, int] = {}
@@ -279,15 +281,16 @@ async def occupancy(project_id: str) -> dict:
     deployment_ids = await _project_deployment_ids(project_id)
 
     def _fetch():
-        resp = (
-            svc.table("observations")
-            .select("deployment_id, scientific_name")
-            .in_("deployment_id", deployment_ids)
-            .eq("source_type", "human")
-            .is_("deleted_at", "null")
-            .execute()
+        return read_all(
+            lambda: (
+                svc.table("observations")
+                .select("deployment_id, scientific_name")
+                .in_("deployment_id", deployment_ids)
+                .eq("source_type", "human")
+                .is_("deleted_at", "null")
+                .order("id")
+            )
         )
-        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch) if deployment_ids else []
     taxa_by_dep: dict[str, set] = {}
@@ -310,15 +313,16 @@ async def accumulation(deployment_id: str) -> dict:
     svc = create_service_client()
 
     def _fetch():
-        resp = (
-            svc.table("observations")
-            .select("scientific_name, classification_timestamp, created_at")
-            .eq("deployment_id", deployment_id)
-            .eq("observation_type", "animal")
-            .is_("deleted_at", "null")
-            .execute()
+        return read_all(
+            lambda: (
+                svc.table("observations")
+                .select("scientific_name, classification_timestamp, created_at")
+                .eq("deployment_id", deployment_id)
+                .eq("observation_type", "animal")
+                .is_("deleted_at", "null")
+                .order("id")
+            )
         )
-        return rows_of(resp)
 
     rows = await asyncio.to_thread(_fetch)
     rows.sort(key=lambda o: o.get("classification_timestamp") or o.get("created_at") or "")
