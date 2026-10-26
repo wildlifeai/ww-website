@@ -87,11 +87,11 @@ password) or uses Forgot password.
 | `/review/:id` | `ReviewQueuePage` | Retired Review Queue: redirects to `/annotations?deployment=:id` |
 | `/umap/:id` | `UmapExplorerPage` | Embedding-space map of a deployment; a click opens that photo in the grid |
 | `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project), behind `FF_INTELLIGENCE_ENABLED`. Links to a flagged page show only when `useFeatureEnabled` says the feature answers |
-| `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history, 50 at a time up to the API's 200; `?job=<id>` opens that job's row |
+| `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history, filtered by status in the read, 50 at a time ("Load more"); `?job=<id>` opens that job's row |
 | `/notifications` | `NotificationsPage` | Notification inbox, read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router), filtered in the query and paged with "Load more"; the unread count (a server-side count) drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
 | `/settings` | `SettingsPage` | Projects (a row opens its settings in a slide-over), the account (change password) and integrations (iNaturalist, organisation API keys) |
 | `/admin/usage` | `AdminUsagePage` | Per-user usage limits (platform admin) |
-| `/admin/devices` | `AdminDevicesPage` | Every device with its organisation and latest deployment, read-only (platform admin) |
+| `/admin/devices` | `AdminDevicesPage` | Every device with its latest deployment and that project's organisation, read-only (platform admin) |
 
 **Redirects / legacy**: `/results` → `/insights`, `/other` → `/toolkit`, `/my-data` → `/insights`,
 `/analyse-images` → `/upload-data` (query strings preserved), `/explore/:id` →

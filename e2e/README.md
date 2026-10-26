@@ -35,10 +35,28 @@ retained on failure — `npm run report`).
 
 ## In CI
 
-`.github/workflows/e2e.yml` runs on every successful Cloudflare Pages deployment except
-production (Cloudflare posts a GitHub deployment per branch build, and the workflow takes the
-preview URL from it), on a pull request that changes `e2e/` or the workflow (against the dev
-preview, since the specs are what changed), and by hand with a base URL and a suite.
+`.github/workflows/e2e.yml` runs on each Cloudflare Pages build of `dev`, on a pull request that
+changes `e2e/` or the workflow, and by hand with a base URL and a suite. Checked on 26 Oct 2026:
+
+- **Cloudflare builds.** Cloudflare reports a build as a `Cloudflare Pages` check run on the
+  commit, whose summary holds the build's URL (`https://<id>.ww-website.pages.dev`). It creates
+  no GitHub deployment: all 449 deployments in this repo came from Actions jobs with
+  `environment:` (`deploy-backend.yml`, this workflow's smoke job, `update-demo.yml`), so the
+  `deployment_status` trigger this workflow had until then fired on backend deploys and tested
+  the dev preview. `e2e-preview.yml` now runs when Cloudflare's check suite completes and
+  dispatches `e2e.yml` on the branch that was built, with that URL, so the jobs test that build
+  with the same commit's specs and report on that commit. It skips `main` (production),
+  `dependabot/*` branches (see the seed password below) and a build its branch has moved past,
+  and it only fires from its copy on `main`.
+- **Pull requests.** Cloudflare builds `dev` and `main` and no other branch, so no pull request
+  has a preview: the a11y and Lighthouse jobs never see a pull request's frontend, and the smoke
+  sees it only in E2E Full Stack, below, which builds it on the runner. A pull request that
+  changes `e2e/` or the workflow runs all three jobs against the dev preview, since the specs
+  are what changed. Turning on previews for other branches is a setting of the Pages project
+  ([deployment guide](../documentation/resources/deployment-guide.md#preview-deployments)); once
+  it is on, `e2e-preview.yml` starts a run for each push to a pull request's branch.
+
+The jobs:
 
 - **E2E Smoke** runs `01-smoke` and `02-demo` against the preview, signed in as
   `E2E_EMAIL` (a repository variable, `tui@ww.org` by default) with the `dev` environment's
@@ -83,11 +101,17 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   violation. It was advisory until #213 cleared the colour-contrast findings (#212).
 - **Lighthouse of public pages** audits `/`, `/login`, `/guides`, `/faq` and `/resources` three
   times each on the desktop preset, against the budgets in `lighthouserc.json`: performance 90,
-  accessibility 95, best practices 95, SEO 90. The SEO score leaves out `is-crawlable`:
-  Cloudflare preview deployments send `X-Robots-Tag: noindex`, which fails it whatever the page
-  does, so a `noindex` in production is not caught here. Advisory for now (#228): a page under
-  budget is a warning annotation on the run and the HTML reports are in the `lighthouse-<sha>`
-  artifact. Blocking once a dev run meets the budgets, the way the a11y job went.
+  accessibility 95, best practices 95, SEO 90. A page meets a budget when its best run does
+  (LHCI's default), so a slow first run, common on `/`, does not fail it. A page under budget
+  fails the job, and the HTML reports are in the `lighthouse-<sha>` artifact. It was advisory
+  until the pages met the budgets (#228), the way the a11y job went.
+
+  The SEO score leaves out `is-crawlable`: Cloudflare preview deployments send
+  `X-Robots-Tag: noindex`, which fails it whatever the page does. Production serves the same
+  build, so the other SEO audits hold there too. Whether production can be indexed rests on
+  `frontend/public/robots.txt` (`Allow: /`) and on production sending no `X-Robots-Tag`, which
+  no job checks: after a change to the Cloudflare project,
+  `curl -sI https://wildlifewatcher.ai/ | grep -i x-robots-tag` should print nothing.
 
 The two Playwright jobs fail when the junit report holds nothing but skipped tests: the specs skip themselves
 when their env is missing, so a missing secret would otherwise read as a pass. The dev API

@@ -299,26 +299,53 @@ async def set_job_deployments(job_id: str, deployment_ids: List[str]) -> None:
     await _sync_to_supabase(job_id)
 
 
-async def list_jobs(user_id: str, limit: int = 50) -> List[dict]:
-    """Return summaries of a user's recent jobs (newest first), from Supabase.
+# A page cursor: the created time of the page's last job in UTC to the microsecond, and its id.
+# The pattern also keeps the value safe to put in the PostgREST ``or`` filter.
+JOB_CURSOR_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z\|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
+
+def job_cursor(row: dict) -> Optional[str]:
+    """The ``before`` that reads the jobs after ``row`` (an ``api_jobs`` row), None without a created time."""
+    created = row.get("created_at")
+    if not created:
+        return None
+    at = datetime.fromisoformat(created).astimezone(timezone.utc)
+    return f"{at.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z|{row['id']}"
+
+
+async def list_jobs(
+    user_id: str,
+    limit: int = 50,
+    *,
+    statuses: Optional[List[str]] = None,
+    kind: Optional[str] = None,
+    before: Optional[str] = None,
+) -> tuple[List[dict], Optional[str]]:
+    """Return summaries of a user's jobs (newest first) and the cursor of the next page, from Supabase.
 
     Scoped by ``job_data->>user_id`` because ``api_jobs`` has no owner column.
     Returns light summaries (no event lists) for the processing-history view;
-    callers fetch full events per job via :func:`get_job`.
+    callers fetch full events per job via :func:`get_job`. ``statuses`` and ``kind``
+    narrow the read; ``before`` (a :func:`job_cursor`, matching ``JOB_CURSOR_PATTERN``)
+    starts after that job, by created time with ties broken on id. The cursor is None on
+    the last page.
     """
 
-    def _run() -> List[dict]:
+    def _run() -> tuple[List[dict], Optional[str]]:
         client = create_service_client()
-        resp = (
-            client.table("api_jobs")
-            .select("id, status, job_data, created_at, updated_at")
-            .eq("job_data->>user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
+        q = client.table("api_jobs").select("id, status, job_data, created_at, updated_at").eq("job_data->>user_id", user_id)
+        if statuses:
+            q = q.in_("status", statuses)
+        if kind:
+            q = q.eq("job_data->>kind", kind)
+        if before:
+            at, job_id = before.split("|")
+            q = q.or_(f"created_at.lt.{at},and(created_at.eq.{at},id.lt.{job_id})")
+        # One row past the page says whether there is another.
+        rows = rows_of(q.order("created_at", desc=True).order("id", desc=True).limit(limit + 1).execute())
+        next_before = job_cursor(rows[limit - 1]) if len(rows) > limit else None
         out: List[dict] = []
-        for row in rows_of(resp):
+        for row in rows[:limit]:
             jd = row.get("job_data") or {}
             out.append(
                 {
@@ -335,13 +362,13 @@ async def list_jobs(user_id: str, limit: int = 50) -> List[dict]:
                     "event_count": len(jd.get("events") or []),
                 }
             )
-        return out
+        return out, next_before
 
     try:
         return await asyncio.to_thread(_run)
     except Exception as e:
         logger.warning("list_jobs_failed", user_id=user_id, error=str(e))
-        return []
+        return [], None
 
 
 async def find_active_ai_jobs() -> List[dict]:
