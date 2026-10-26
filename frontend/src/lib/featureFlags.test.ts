@@ -33,5 +33,6 @@ describe('FEATURE_PROBES', () => {
     expect(FEATURE_PROBES.intelligence('p1')).toBe('/api/intelligence/alerts/p1')
     expect(FEATURE_PROBES.brain('d1')).toBe('/api/brain/embedding-runs/d1')
     expect(FEATURE_PROBES.activeLearning('d1')).toBe('/api/brain/review-queue/d1?limit=1')
+    expect(FEATURE_PROBES.gbfReport('p1')).toBe('/api/reports/gbf?project_ids=p1&from=2000-01-01&to=2000-01-01')
   })
 })

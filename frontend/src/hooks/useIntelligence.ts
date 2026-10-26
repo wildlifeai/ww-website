@@ -1,7 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
-import { supabase } from '../config/supabase'
-import { settleWithLimit } from '../lib/settleWithLimit'
 
 export interface SpeciesCoverage {
   scientific_name: string
@@ -61,61 +59,28 @@ export interface QaDeploymentResult {
 }
 
 export interface ProjectQa {
-  /** False when the active-learning/QA feature flag is off (every call 404/disabled). */
+  /** False when the call failed: the active-learning/QA feature flag is off (the router is not mounted). */
   enabled: boolean
   n_compared: number
   matches: number
   precision: number | null
+  /** Deployments with at least one photo compared, most compared first. */
   perDeployment: QaDeploymentResult[]
 }
 
-/** QA report calls in flight at once until a project-level route exists (UI audit 03 #19). */
-const QA_CONCURRENCY = 4
+const QA_OFF: ProjectQa = { enabled: false, n_compared: 0, matches: 0, precision: null, perDeployment: [] }
 
-/**
- * Fan out the per-deployment QA report (`/api/qa/report/{id}`) across the
- * project's deployments, four at a time, and aggregate into a single precision
- * proxy. Individual disabled/failed calls are skipped; if none succeed,
- * `enabled` is false.
- */
+/** The project's AI-vs-human agreement in one call, `/api/qa/report/project/{id}` (UI audit 03 #19). */
 export function useProjectQa(projectId?: string, enabled = true) {
   return useQuery({
     queryKey: ['qa', 'project', projectId],
     queryFn: async (): Promise<ProjectQa> => {
-      const { data: deps } = await supabase
-        .from('deployments')
-        .select('id, location_name')
-        .eq('project_id', projectId!)
-        .is('deleted_at', null)
-
-      const list = (deps ?? []) as { id: string; location_name: string | null }[]
-      let anyEnabled = false
-      const perDeployment: QaDeploymentResult[] = []
-
-      // A disabled or failed call is skipped (the settled result is ignored).
-      await settleWithLimit(list, QA_CONCURRENCY, async d => {
-        const r = (await apiClient.get(`/api/qa/report/${d.id}`)) as any
-        anyEnabled = true
-        const m = r.data
-        perDeployment.push({
-          deployment_id: d.id,
-          location_name: d.location_name,
-          n_compared: m.n_compared ?? 0,
-          matches: m.matches ?? 0,
-          precision: m.precision ?? null,
-        })
-      })
-
-      const n = perDeployment.reduce((a, p) => a + p.n_compared, 0)
-      const matches = perDeployment.reduce((a, p) => a + p.matches, 0)
-      return {
-        enabled: anyEnabled,
-        n_compared: n,
-        matches,
-        precision: n > 0 ? matches / n : null,
-        perDeployment: perDeployment
-          .filter(p => p.n_compared > 0)
-          .sort((a, b) => b.n_compared - a.n_compared),
+      try {
+        const r = (await apiClient.get(`/api/qa/report/project/${projectId}`)) as any
+        const m = r.data as { n_compared: number; matches: number; precision: number | null; per_deployment: QaDeploymentResult[] }
+        return { enabled: true, n_compared: m.n_compared, matches: m.matches, precision: m.precision, perDeployment: m.per_deployment }
+      } catch {
+        return QA_OFF
       }
     },
     enabled: !!projectId && enabled,

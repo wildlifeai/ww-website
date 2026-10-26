@@ -7,8 +7,8 @@ import { FEATURE_PROBES, probeFeature, type Feature } from '../lib/featureFlags'
 /**
  * Whether a feature-flagged feature answers on this site: true once its probe route answered,
  * false while unknown, on FEATURE_DISABLED, or when the probe failed for another reason. Hide an
- * entry point unless it is true. `scopeId` is a project id for 'intelligence' and a deployment
- * id for 'brain' and 'activeLearning' (see FEATURE_PROBES).
+ * entry point unless it is true. `scopeId` is a project id for 'intelligence' and 'gbfReport' and a
+ * deployment id for 'brain' and 'activeLearning' (see FEATURE_PROBES).
  *
  * The flags are global, so the answer is cached once per feature, not per id: a page that shows
  * a link on every row makes one request, not one per row.

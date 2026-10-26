@@ -57,7 +57,8 @@ class _Result:
 
 
 async def test_recompute_scores_bulk_upserts_in_chunks(monkeypatch):
-    """Scores are persisted via chunked bulk upserts, not one update per row."""
+    """Scores are persisted via chunked bulk upserts, not one update per row, for every embedding:
+    1,200 of them, so the read has to page past PostgREST's 1,000."""
     from unittest.mock import MagicMock
 
     from app.domain.active_learning import recompute_scores
@@ -69,7 +70,9 @@ async def test_recompute_scores_bulk_upserts_in_chunks(monkeypatch):
     me_table.select.return_value = me_table
     me_table.eq.return_value = me_table
     me_table.is_.return_value = me_table
-    me_table.execute.return_value = _Result(embeddings)
+    me_table.order.return_value = me_table
+    # Like PostgREST, one page of the range asked for (the read stops after a short page).
+    me_table.range.side_effect = lambda start, end: MagicMock(execute=lambda: _Result(embeddings[start : end + 1]))
 
     def _upsert(payload):
         upsert_payloads.append(payload)
@@ -83,6 +86,8 @@ async def test_recompute_scores_bulk_upserts_in_chunks(monkeypatch):
     obs_table.select.return_value = obs_table
     obs_table.eq.return_value = obs_table
     obs_table.is_.return_value = obs_table
+    obs_table.order.return_value = obs_table
+    obs_table.range.return_value = obs_table
     obs_table.execute.return_value = _Result([])
 
     client = MagicMock()
@@ -95,3 +100,81 @@ async def test_recompute_scores_bulk_upserts_in_chunks(monkeypatch):
     assert [len(p) for p in upsert_payloads] == [500, 500, 200]
     # Only the score columns are supplied — never enough to insert a new row.
     assert set(upsert_payloads[0][0]) == {"media_id", "active_learning_score", "al_score_updated_at"}
+
+
+# ── QA reports read every page ───────────────────────────────────────
+
+
+def _photo_rows(deployment_id: str, n: int, agree: int, prefix: str) -> list[dict]:
+    """``n`` photos, each with an AI row and a human row; the first ``agree`` humans agree."""
+    rows = []
+    for i in range(n):
+        media_id = f"{prefix}{i:05d}"
+        base = {"deployment_id": deployment_id, "media_id": media_id, "vernacular_name": None}
+        rows.append(
+            {
+                **base,
+                "id": f"{media_id}-ai",
+                "source_type": "ai",
+                "review_status": "unreviewed",
+                "confidence": 0.9,
+                "scientific_name": "Rattus rattus",
+            }
+        )
+        human = "Rattus rattus" if i < agree else "Mus musculus"
+        rows.append({**base, "id": f"{media_id}-h", "source_type": "human", "review_status": "human_reviewed", "scientific_name": human})
+    return rows
+
+
+def _qa_db():
+    from tests.fake_postgrest import FakeDB
+
+    ai_only = [{"id": "x-ai", "deployment_id": "d3", "media_id": "x", "source_type": "ai", "confidence": 0.5, "scientific_name": "Felis catus"}]
+    return FakeDB(
+        {
+            "deployments": [
+                {"id": "d1", "project_id": "p1", "location_name": "Ridge"},
+                {"id": "d2", "project_id": "p1", "location_name": "Creek"},
+                {"id": "d3", "project_id": "p1", "location_name": "Hut"},
+                {"id": "d4", "project_id": "p1", "location_name": "Gone", "deleted_at": "2026-10-01"},
+                {"id": "d5", "project_id": "p2", "location_name": "Elsewhere"},
+            ],
+            "observations": _photo_rows("d1", 1200, 1000, "a")
+            + _photo_rows("d2", 3, 3, "b")
+            + ai_only
+            + _photo_rows("d4", 5, 5, "c")
+            + _photo_rows("d5", 5, 0, "e"),
+        }
+    )
+
+
+async def test_qa_report_reads_every_observation_past_1000(monkeypatch):
+    from app.domain.active_learning import qa_report
+
+    monkeypatch.setattr("app.services.supabase_client.create_service_client", _qa_db().client)
+    report = await qa_report("d1")
+    assert (report["n_compared"], report["matches"]) == (1200, 1000)
+
+
+async def test_project_qa_report_adds_up_the_live_deployments(monkeypatch):
+    from app.domain.active_learning import qa_project_report
+
+    monkeypatch.setattr("app.services.supabase_client.create_service_client", _qa_db().client)
+    report = await qa_project_report("p1")
+
+    assert (report["n_compared"], report["matches"]) == (1203, 1003)
+    assert report["precision"] == pytest.approx(1003 / 1203, abs=1e-4)
+    # Only deployments with a photo compared, most compared first; the deleted one is left out.
+    assert [(p["deployment_id"], p["location_name"], p["n_compared"], p["matches"]) for p in report["per_deployment"]] == [
+        ("d1", "Ridge", 1200, 1000),
+        ("d2", "Creek", 3, 3),
+    ]
+
+
+async def test_project_qa_report_without_comparisons_has_no_precision(monkeypatch):
+    from app.domain.active_learning import qa_project_report
+    from tests.fake_postgrest import FakeDB
+
+    monkeypatch.setattr("app.services.supabase_client.create_service_client", FakeDB({"deployments": [], "observations": []}).client)
+    report = await qa_project_report("p1")
+    assert (report["n_compared"], report["precision"], report["per_deployment"]) == (0, None, [])
