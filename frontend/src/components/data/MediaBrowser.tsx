@@ -38,7 +38,8 @@ import { useDeploymentFilterOptions } from '../../hooks/useDeploymentFilterOptio
 import { useGridFilterOptions, modelOptionLabel } from '../../hooks/useGridFilterOptions'
 import { useAutoRetryThumbnails } from '../../hooks/useAutoRetryThumbnails'
 import { useRefreshWhileBusy } from '../../hooks/useRefreshWhileBusy'
-import { isThumbnailStuck } from '../../lib/thumbnailRetry'
+import { THUMBNAIL_RETRY_CONCURRENCY, isThumbnailStuck } from '../../lib/thumbnailRetry'
+import { createLimiter } from '../../lib/limiter'
 import { displayImageUrl } from '../../lib/mediaImageUrl'
 import { applySelectIntent, arrowTarget, cardClickIntent, cardKeyIntent, circleClickIntent, type CardIntent } from '../../lib/cardSelection'
 import { writeVerdicts, type VerdictLabel } from '../../lib/humanVerdict'
@@ -166,6 +167,9 @@ const TIME_OF_DAY_OPTIONS = [
 const MAX_LABEL_CARDS = 4
 
 const EMPTY_IDS: ReadonlySet<string> = new Set()
+
+// Backfills run two at a time, the rest queued, whichever Retry or the automatic retry asked (02 #23).
+const backfills = createLimiter(THUMBNAIL_RETRY_CONCURRENCY)
 
 /** The advanced filters cleared, keeping the species choice. */
 const clearedAdvanced = (f: GridFilters): GridFilters => ({ ...NO_FILTERS, species: f.species })
@@ -560,15 +564,18 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
     reload(true)
   })
 
-  const retryThumbnails = useCallback(async (deploymentId: string) => {
+  // The deployment's cards stop reading "No thumbnail" at once; its backfill waits its turn.
+  const retryThumbnails = useCallback((deploymentId: string) => {
     setRetryRequested(s => new Set(s).add(deploymentId))
-    try {
-      await apiClient.post(`/api/media/thumbnails/${deploymentId}`, {})
-      await qc.invalidateQueries({ queryKey: ['jobs'] })
-    } catch (e) {
-      setRetryRequested(s => { const n = new Set(s); n.delete(deploymentId); return n })
-      flash('error', `Couldn't start the thumbnails: ${e instanceof Error ? e.message : String(e)}`)
-    }
+    void backfills(async () => {
+      try {
+        await apiClient.post(`/api/media/thumbnails/${deploymentId}`, {})
+        await qc.invalidateQueries({ queryKey: ['jobs'] })
+      } catch (e) {
+        setRetryRequested(s => { const n = new Set(s); n.delete(deploymentId); return n })
+        flash('error', `Couldn't start the thumbnails: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    })
   }, [qc, flash])
 
   // Cards with no image to show: still processing, or stuck past the grace period (#208).

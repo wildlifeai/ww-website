@@ -53,7 +53,8 @@ one notice above the grid offers **Retry**, which runs the thumbnail backfill fo
 with such cards (#208). The grid also
 starts that backfill by itself, once per deployment per browser session, the first time it shows a
 deployment's **No thumbnail** card, so a deployment whose thumbnails cannot be made does not loop
-(`hooks/useAutoRetryThumbnails.ts`, #175). A photo with no rendition and a Google Drive original
+(`hooks/useAutoRetryThumbnails.ts`, #175). Either way at most two backfills start at a time, the
+rest queued (`THUMBNAIL_RETRY_CONCURRENCY`). A photo with no rendition and a Google Drive original
 has nothing an `<img>` can load, since `/api/media/{id}/image` needs a Bearer header, so the grid
 and the viewer never request it (`lib/mediaImageUrl.ts`, #300). The viewer shows the same states
 as the card, **Processing…** or **No preview yet** with Retry, and its filmstrip a plain tile. Both
