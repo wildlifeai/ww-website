@@ -53,6 +53,29 @@ function preloadFonts(): Plugin {
   }
 }
 
+/**
+ * `?meta` on a guide's markdown imports only its frontmatter, as an object. The guides index is in
+ * the main chunk, so it carries each guide's title and description but none of its text; the text
+ * is a chunk of its own that the guide's page loads (lib/guides.ts).
+ */
+function guideMeta(): Plugin {
+  return {
+    name: 'ww-guide-meta',
+    enforce: 'pre',
+    load(id) {
+      const [file, query] = id.split('?')
+      if (query !== 'meta' || !file.endsWith('.md')) return null
+      const block = readFileSync(file, 'utf8').match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1] ?? ''
+      const meta: Record<string, string> = {}
+      for (const line of block.split(/\r?\n/)) {
+        const idx = line.indexOf(':')
+        if (idx > 0) meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim()
+      }
+      return `export default ${JSON.stringify(meta)}`
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // Load from parent .env files (local dev)
@@ -69,7 +92,7 @@ export default defineConfig(({ mode }) => {
   const googleClientId = env.VITE_GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID || ''
 
   return {
-    plugins: [react(), sitemap(), preloadFonts()],
+    plugins: [react(), sitemap(), preloadFonts(), guideMeta()],
     envDir: '../',
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
