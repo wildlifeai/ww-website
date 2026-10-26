@@ -2,6 +2,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { apiClient } from '../lib/apiClient'
 import { isInatOff } from '../lib/inatOff'
+import { publishInRounds, type INatPublishResult } from '../lib/inatPublishRounds'
+
+export type { INatPublishResult }
 
 /**
  * useINat — iNaturalist connection status + publish action for the web app.
@@ -9,17 +12,9 @@ import { isInatOff } from '../lib/inatOff'
  * - `connected` / `username`: from GET /api/inat/status
  * - `enabled`: false when FF_INAT_ENABLED is off (the status route answers 404 "not enabled")
  * - `connect()`: starts the OAuth flow (redirects to iNaturalist)
- * - `publish(mediaIds, opts)`: POST /api/inat/publish (burst-consolidated upload)
+ * - `publish(mediaIds, opts)`: POST /api/inat/publish (burst-consolidated upload), in rounds
+ *   until every photo is reached (lib/inatPublishRounds.ts), answering once for them all
  */
-
-export interface INatPublishResult {
-  observations_created: number
-  photos_uploaded: number
-  skipped_bycatch: number
-  skipped_already_published: number
-  errors: number
-  observations: { inat_observation_id: number | null; uri: string | null; species_guess: string | null; media_count: number }[]
-}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function unwrap(r: any) { return r?.data ?? r }
@@ -65,11 +60,11 @@ export function useINat() {
     mediaIds: string[],
     opts?: { gap_seconds?: number; geoprivacy?: string },
   ): Promise<INatPublishResult> => {
-    return unwrap(await apiClient.post('/api/inat/publish', {
-      media_ids: mediaIds,
+    return publishInRounds(async ids => unwrap(await apiClient.post('/api/inat/publish', {
+      media_ids: ids,
       gap_seconds: opts?.gap_seconds ?? 60,
       geoprivacy: opts?.geoprivacy ?? 'obscured',
-    }))
+    })), mediaIds)
   }, [])
 
   // Pull community identifications from iNat back into WW (updates badges).

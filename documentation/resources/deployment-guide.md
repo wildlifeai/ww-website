@@ -225,7 +225,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 
 | Var | Enables |
 |-----|---------|
-| `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI` + `FF_INAT_ENABLED` | iNaturalist sync/publish. |
+| `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI` + `FF_INAT_ENABLED` | iNaturalist publish and sync, on the API only. Steps: [iNaturalist](#inaturalist). |
 | `EMAIL_PROVIDER`, `EMAIL_FROM`, `RESEND_API_KEY` / `SENDGRID_API_KEY` / `ACS_CONNECTION_STRING` | Notification email. |
 | `SENTRY_DSN`, `LOG_LEVEL` | Error tracking / log verbosity. |
 
@@ -235,6 +235,75 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 >   --query "properties.template.containers[0].env[].name" -o tsv | sort
 > ```
 > If `GOOGLE_DRIVE_ENABLED`, `FF_PIPELINE_ENABLED`, `FF_SPECIESNET_ENABLED`, or `FF_MEDIA_REGISTRY_ENABLED` are absent, that subsystem is off regardless of what the UI seems to show.
+
+### iNaturalist
+
+Publishing photos to a person's own iNaturalist account, and the badge sync (#123). Off everywhere
+until `FF_INAT_ENABLED` is set; switch it on in dev first. What publish and sync do:
+[inaturalist-integration](../development%20reports/inaturalist-integration.md).
+
+**1. Register one OAuth app per environment** at <https://www.inaturalist.org/oauth/applications/new>,
+signed in as the iNaturalist account that will own it, confidential if the form asks (the API holds
+the secret). Its redirect URI is the API's `/api/inat/callback`, not the site, and
+`INAT_REDIRECT_URI` must be the same string:
+
+| Environment | Redirect URI and `INAT_REDIRECT_URI` |
+|---|---|
+| dev (`ww-backend-dev`) | `https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
+| production (`ww-backend`, wildlifewatcher.ai) | `https://ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
+| local | `http://localhost:8000/api/inat/callback` |
+
+The code default, `https://wildlifewatcher.ai/inat/callback`, is the site, where no page handles the
+callback, so set the variable everywhere. After the callback the API sends the browser to the first
+`ALLOWED_ORIGINS` entry plus `/toolkit?inat=connected`, so on dev that entry must be the dev site.
+
+**2. Set the variables on the API container only.** The worker needs none: publish and sync run in
+API requests, publish in rounds that each end inside the ingress timeout.
+
+| Var | Value |
+|---|---|
+| `FF_INAT_ENABLED` | `true` |
+| `INAT_CLIENT_ID` | the app's ID |
+| `INAT_CLIENT_SECRET` | the app's secret, as a `secretref:`. It also keys the encryption of every stored token: missing or shorter than 32 characters, the routes that connect or use an account answer `503` with the reason, and changing it disconnects everyone |
+| `INAT_REDIRECT_URI` | from the table above |
+
+```bash
+az containerapp secret set --name ww-backend-dev --resource-group WW-AE \
+  --secrets inat-client-secret=<the app's secret>
+az containerapp update --name ww-backend-dev --resource-group WW-AE \
+  --set-env-vars FF_INAT_ENABLED=true INAT_CLIENT_ID=<the app's ID> \
+    INAT_CLIENT_SECRET=secretref:inat-client-secret \
+    INAT_REDIRECT_URI=https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback
+```
+
+The deploy workflow merges its own variables, so these survive the next deploy. The new revision's
+log has an `inat_settings_problem` line for anything still wrong (`services/inat_oauth.py`). The
+frontend needs nothing: it asks `/api/inat/status`.
+
+**3. Test on dev**, as a project member, on a deployment with a location and labelled photos:
+
+1. Settings, Integrations, *Connect iNaturalist*: iNaturalist asks to authorise, then Toolkit shows
+   *Connected as* your login. Disconnect, then connect again from Toolkit with a token pasted from
+   <https://www.inaturalist.org/users/api_token>.
+2. Cluster Review, select a few photos labelled as an animal plus one marked Empty and one with a
+   person, *Publish to iNaturalist*: one observation per encounter, location obscured, the two
+   skipped, and the grid's dove badge on the published ones.
+3. Publish 100 or more photos of one deployment: the network tab shows several
+   `POST /api/inat/publish`, each under 4 minutes, then one notice; no encounter is split into two
+   observations on iNaturalist.
+4. Publish the same selection again: every photo is skipped as already on iNaturalist.
+5. Settings, *Sync now*: the badge follows the quality grade. No identification comes back
+   ([what happens today](../development%20reports/inaturalist-integration.md#what-happens-today-checked-25-oct-2026-123)).
+6. Delete the test observations on iNaturalist.
+
+Before production, check the three tables exist there (read-only):
+`select to_regclass('public.inat_observations'), to_regclass('public.inat_observation_media'), to_regclass('public.inat_tokens');`
+They exist on dev (checked 25 Oct 2026).
+
+> **Known limit:** the OAuth state lives in the memory of the API replica that started the sign-in
+> (`routers/inaturalist.py::_pending_oauth`). A callback that reaches another replica, or one that
+> restarted, answers `400 Invalid or expired OAuth state`. Dev runs one replica; production can run
+> three. Connecting with a pasted token does not use it.
 
 ---
 

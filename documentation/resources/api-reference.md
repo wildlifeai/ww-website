@@ -210,6 +210,9 @@ and `temperature_c`/`battery_pct` (parsed from `UserComment` telemetry). The ful
 ## iNaturalist Integration
 
 OAuth connect + observation publish/poll. Gated by `FF_INAT_ENABLED` (404 when off). JWT unless noted.
+The routes that store or use a person's token (`/auth`, `/callback`, `/token`, `/status`,
+`/observations`, `/publish`) answer `503` with the reason when `INAT_CLIENT_SECRET`, which keys the
+token encryption, is missing or shorter than 32 characters (`services/inat_oauth.py::token_key_problem`).
 Prefix `/api/inat`. The Annotations bulk "Upload to iNaturalist" / "Sync IDs" flows build on these —
 see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 
@@ -217,14 +220,14 @@ see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 |---|---|---|
 | `GET /api/inat/auth` | JWT | Start OAuth → `{ authorization_url, state }` |
 | `GET /api/inat/callback` | None (state) | OAuth redirect handler → stores tokens, 302 to `/toolkit?inat=connected` |
-| `POST /api/inat/token` | JWT | Exchange an authorization code for tokens (the non-redirect path) |
+| `POST /api/inat/token` | JWT | Connect with a personal API token pasted from iNaturalist (no OAuth app), body `{ api_token }`; checked against iNaturalist, then stored encrypted. It lasts about 24 h |
 | `GET /api/inat/status` | JWT | Connection status (`connected`, `inat_username`, …) |
 | `POST /api/inat/disconnect` | JWT | Revoke stored tokens |
 | `POST /api/inat/observations` | JWT | Create an observation — body `{ species_guess, latitude, longitude, observed_on, geoprivacy?, … }` |
 | `GET /api/inat/observations/{observation_id}/status` | None | Identification status for one observation |
 | `POST /api/inat/observations/poll` | JWT | Batch status for ≤200 observation ids (`{ observation_ids: [...] }`) |
-| `POST /api/inat/publish` | JWT · write | Only photos in projects the caller can **write** to are published, `403` when that is none of them. **Publish WW media to iNat**: consolidates bursts by temporal gap, drops human/vehicle/blank by-catch, proxy-uploads photos. Body `{ media_ids, gap_seconds?, geoprivacy? }` (default `obscured`) → `observations_created`, `photos_uploaded`, `skipped_*`, `errors` |
-| `POST /api/inat/sync` | JWT | **Pull community IDs back** — batch-polls `quality_grade` + `community_taxon`, updates `sync_status`, writes `source_type='consensus'` observations into WW. Idempotent → `checked`, `updated`, `research`, `disagreement`, `observations_written` |
+| `POST /api/inat/publish` | JWT · write | Only photos in projects the caller can **write** to are published, `403` when that is none of them. **Publish WW media to iNat**: consolidates bursts by temporal gap, leaves out a photo whose card label is not an animal or that any row says shows a person, proxy-uploads photos. Body `{ media_ids, gap_seconds?, geoprivacy? }` (default `obscured`) → `observations_created`, `photos_uploaded`, `skipped_*`, `errors`, `remaining_media_ids`. It starts no photo after about two minutes, inside the ingress timeout, and hands back the photos it did not reach: send them again (`useINat().publish` does) and a burst carries on in the observation it started. A burst holding a photo the caller already published joins that photo's observation |
+| `POST /api/inat/sync` | JWT | **Pull community IDs back**: polls `quality_grade` and the community taxon of the caller's published observations, updates `sync_status` (the badge), and is meant to write the community taxon into WW as `source_type='consensus'` observations. Today the community taxon is never read, so only `sync_status` changes and nothing is written ([what happens today](../development%20reports/inaturalist-integration.md#what-happens-today-checked-25-oct-2026-123)) → `checked`, `updated`, `research`, `disagreement`, `observations_written` |
 | `GET /api/inat/taxa/search` | JWT | iNat taxa autocomplete — backs the `SpeciesPicker` alongside the local `taxa` table |
 | `POST /api/inat/taxa` | JWT | Register an iNat taxon + its lineage locally, returning a real `taxon_id` |
 

@@ -28,7 +28,7 @@ services:
       # iNaturalist OAuth
       - INAT_CLIENT_ID=${INAT_CLIENT_ID:-}
       - INAT_CLIENT_SECRET=${INAT_CLIENT_SECRET:-}
-      - INAT_REDIRECT_URI=${INAT_REDIRECT_URI:-https://wildlifewatcher.ai/inat/callback}
+      - INAT_REDIRECT_URI=${INAT_REDIRECT_URI:-http://localhost:8000/api/inat/callback}
       # Feature Flags
       - FF_INAT_ENABLED=${FF_INAT_ENABLED:-false}
       - FF_ML_ENABLED=${FF_ML_ENABLED:-false}

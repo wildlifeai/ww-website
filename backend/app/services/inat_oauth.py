@@ -47,16 +47,52 @@ class INatOAuthError(Exception):
     pass
 
 
+class INatKeyError(INatOAuthError):
+    """Raised when this server has no sound key to encrypt iNaturalist tokens with."""
+
+
 # ── Encryption helpers ───────────────────────────────────────────────
+
+# iNaturalist issues long random client secrets. An empty or short one gives a key anyone can
+# derive, so tokens are neither stored nor read with it (#123).
+MIN_CLIENT_SECRET_CHARS = 32
+CALLBACK_PATH = "/api/inat/callback"
+
+
+def token_key_problem() -> Optional[str]:
+    """Why this server cannot encrypt iNaturalist tokens, or None when it can."""
+    secret = settings.INAT_CLIENT_SECRET.strip()
+    if not secret:
+        return "iNaturalist accounts can't be connected on this server: INAT_CLIENT_SECRET is not set"
+    if len(secret) < MIN_CLIENT_SECRET_CHARS:
+        return (
+            "iNaturalist accounts can't be connected on this server: INAT_CLIENT_SECRET is shorter "
+            f"than {MIN_CLIENT_SECRET_CHARS} characters, so it is not the registered app's secret"
+        )
+    return None
+
+
+def inat_settings_problems() -> list[str]:
+    """What stops iNaturalist working with this server's settings, for the startup log."""
+    problems = [p for p in [token_key_problem()] if p]
+    if not settings.INAT_CLIENT_ID:
+        problems.append("INAT_CLIENT_ID is not set, so Connect iNaturalist (OAuth) is refused")
+    elif not settings.INAT_REDIRECT_URI.rstrip("/").endswith(CALLBACK_PATH):
+        problems.append(f"INAT_REDIRECT_URI must be this API's {CALLBACK_PATH}: iNaturalist sends people back there")
+    return problems
 
 
 def _get_fernet() -> Fernet:
     """Derive a Fernet key from INAT_CLIENT_SECRET.
 
     We use the client secret as a deterministic seed for the encryption key.
-    This means tokens are tied to the application registration — if you
-    rotate the secret, existing stored tokens become unreadable.
+    This means tokens are tied to the application registration: if you
+    rotate the secret, existing stored tokens become unreadable. Refuses
+    (INatKeyError) when the secret is missing or too short to be one.
     """
+    problem = token_key_problem()
+    if problem:
+        raise INatKeyError(problem)
     # Derive a 32-byte key from the client secret via SHA-256
     key_material = hashlib.sha256(settings.INAT_CLIENT_SECRET.encode()).digest()
     fernet_key = base64.urlsafe_b64encode(key_material)
@@ -212,7 +248,8 @@ def is_token_expired(token_data: Dict[str, Any], buffer_seconds: int = 300) -> b
 async def store_user_token(user_id: str, token_data: Dict[str, Any]) -> None:
     """Store encrypted iNat token in Supabase for a user.
 
-    Uses upsert so reconnecting overwrites the old token.
+    Uses upsert so reconnecting overwrites the old token. Raises INatKeyError, before any
+    write, when the server has no sound key.
     """
     encrypted = encrypt_token(token_data)
     client = create_service_client()
@@ -235,8 +272,11 @@ async def get_user_token(user_id: str) -> Optional[Dict[str, Any]]:
     Automatically refreshes if expired.
 
     Returns:
-        Token dict, or None if not connected.
+        Token dict, or None if not connected. None too without a sound key (token_key_problem):
+        the routes that connect an account say why.
     """
+    if token_key_problem():
+        return None
     client = create_service_client()
 
     response = client.table("inat_tokens").select("encrypted_token").eq("user_id", user_id).execute()
