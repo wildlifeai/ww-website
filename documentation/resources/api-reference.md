@@ -343,7 +343,8 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 | `GET /api/brain/umap/{deployment_id}` | Persisted 2-D UMAP scatter coordinates |
 | `GET /api/brain/outliers/{deployment_id}` | HDBSCAN-rejected images (expert-review candidates) |
 | `GET /api/brain/similar/{media_id}` | Nearest neighbours (`?n=20`, 1 to 100) among the photos of the anchor's organisation, in deployments the caller can read. `NOT_FOUND` envelope when the photo has no embedding |
-| `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | **Write** (see [Access](#access)). Confirm a cluster as a taxon → bulk-creates human observations for its members |
+| `POST /api/brain/clusters/{cluster_assignment_id}/confirm` | **Write** (see [Access](#access)), demo refused. Confirm a cluster as a taxon: body `{ taxon_id?, scientific_name?, vernacular_name? }`. Adds a human row (carrying the run and cluster id) for each member with no human verdict yet; a member a person already labelled is skipped, so a cluster never overwrites a person's label (UI audit decision 2). → `{ cluster_assignment_id, observations_created, observation_ids, skipped }`. `ALREADY_CONFIRMED` envelope for a confirmed cluster |
+| `POST /api/brain/clusters/{cluster_assignment_id}/unconfirm` | **Write**, demo refused. Undo a confirm: deletes the human rows with the cluster's deployment, run and cluster id that still carry its label (a row a person has relabelled since stays), and sets the cluster back to `open` with no taxon, `confirmed_by` or `confirmed_at`. → `{ cluster_assignment_id, observations_deleted, kept }`. `NOT_CONFIRMED` envelope for a cluster that is not confirmed |
 | `GET /api/brain/embedding-runs/{deployment_id}` | List embedding runs (model version, status, image count) |
 | `POST /api/brain/reprocess/deployment/{deployment_id}` | **Write** (see [Access](#access)). Supersede current runs and re-embed a deployment. The worker checks it can embed first, so a failed check leaves the current clusters in place |
 | `POST /api/brain/reprocess/project/{project_id}` | **Write** (see [Access](#access)). Reprocess every deployment in a project |
@@ -359,7 +360,8 @@ Same prefix; the queue/score endpoints are additionally gated by **`FF_ACTIVE_LE
 |---|---|
 | `POST /api/brain/recalculate-al-scores/{deployment_id}` | **Write** (see [Access](#access)). Recompute active-learning scores for a deployment |
 | `GET /api/brain/review-queue/{deployment_id}` | Media ranked by `active_learning_score` DESC with AI label + score reasons (`?limit=50`) |
-| `POST /api/brain/review/{media_id}` | **Write** (see [Access](#access)). Record a reviewer decision (`approve` / `reassign` / `expert`) → human observation |
+| `POST /api/brain/review/{media_id}` | **Write** (see [Access](#access)), demo refused, `FF_WILDLIFE_BRAIN_ENABLED` only. Record a reviewer decision (`approve` / `reassign` → `human_reviewed`, `expert` → `expert_reviewed`) as the photo's human row: added when it has none, updated when it has one |
+| `POST /api/brain/review/batch` | **Write** per photo, demo refused, `FF_WILDLIFE_BRAIN_ENABLED` only. One decision on up to 500 photos: body `{ media_ids, decision: 'reassign' \| 'expert', taxon_id?, scientific_name?, vernacular_name? }` (`reassign` needs `taxon_id` or `scientific_name`; more than 500 is `422`). The same meaning as the per-photo route, written in chunks of 50. Without a species, `expert` keeps a photo's own label and changes its status. Photos the caller may not change are skipped, `403` when that is all of them. → `{ created, updated, observation_ids, skipped: [{ media_id, reason: 'not_writable' \| 'not_found' }] }` |
 
 ---
 
@@ -386,6 +388,7 @@ Prefix `/api/qa`. JWT required; gated by **`FF_ACTIVE_LEARNING_ENABLED`** (the r
 | Method · Path | Description |
 |---|---|
 | `GET /api/qa/report/{deployment_id}` | **Read** (see [Access](#access)), `404` otherwise. AI-vs-human agreement (a precision proxy over images carrying both an AI and a human label) |
+| `GET /api/qa/report/project/{project_id}` | **Read**, `404` otherwise. The same for the project's live deployments in one answer (Dataset Health): `{ project_id, n_compared, matches, precision, per_deployment: [{ deployment_id, location_name, n_compared, matches, precision }] }`, `per_deployment` holding the deployments with a photo compared, most first |
 
 ---
 

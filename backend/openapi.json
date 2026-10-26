@@ -1536,6 +1536,70 @@
         "title": "RestoreProjectRequest",
         "type": "object"
       },
+      "ReviewBatchRequest": {
+        "description": "One reviewer decision on many photos (Cluster Review's Reassign and Flag for expert).",
+        "properties": {
+          "decision": {
+            "enum": [
+              "reassign",
+              "expert"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "media_ids": {
+            "description": "Photos to review, at most 500 a request",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Media Ids",
+            "type": "array"
+          },
+          "scientific_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The species; reassign needs it or taxon_id",
+            "title": "Scientific Name"
+          },
+          "taxon_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Taxon UUID (preferred)",
+            "title": "Taxon Id"
+          },
+          "vernacular_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vernacular Name"
+          }
+        },
+        "required": [
+          "media_ids",
+          "decision"
+        ],
+        "title": "ReviewBatchRequest",
+        "type": "object"
+      },
       "ReviewDecisionRequest": {
         "description": "A reviewer's decision on a single media item (Review Queue).",
         "properties": {
@@ -2086,7 +2150,7 @@
     },
     "/api/brain/clusters/{cluster_assignment_id}/confirm": {
       "post": {
-        "description": "Confirm a cluster as a taxon \u2014 bulk-creates human observations for members.",
+        "description": "Confirm a cluster as a taxon: a human row for each member nobody has labelled yet.",
         "operationId": "confirm_cluster_api_brain_clusters__cluster_assignment_id__confirm_post",
         "parameters": [
           {
@@ -2139,6 +2203,56 @@
           }
         },
         "summary": "Confirm Cluster",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
+    "/api/brain/clusters/{cluster_assignment_id}/unconfirm": {
+      "post": {
+        "description": "Undo a cluster confirm: delete the human rows it wrote and reopen the cluster.",
+        "operationId": "unconfirm_cluster_api_brain_clusters__cluster_assignment_id__unconfirm_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster_assignment_id",
+            "required": true,
+            "schema": {
+              "title": "Cluster Assignment Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unconfirm Cluster",
         "tags": [
           "brain"
         ]
@@ -2724,9 +2838,60 @@
         ]
       }
     },
+    "/api/brain/review/batch": {
+      "post": {
+        "description": "One reviewer decision on up to 500 photos, one human row each. Photos the caller may not\nchange are skipped; none at all is a 403.",
+        "operationId": "review_media_batch_api_brain_review_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Review Media Batch",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
     "/api/brain/review/{media_id}": {
       "post": {
-        "description": "Record a reviewer decision on one media item (creates a human observation).",
+        "description": "Record a reviewer decision on one photo: its human row, added or updated.",
         "operationId": "review_media_api_brain_review__media_id__post",
         "parameters": [
           {
