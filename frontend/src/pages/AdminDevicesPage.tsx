@@ -3,8 +3,8 @@
 /**
  * AdminDevicesPage — /admin/devices
  *
- * Read-only list of every device for a ww_admin, with its organisation and latest
- * deployment (#343). Device edits stay with organisation managers, through RLS.
+ * Read-only list of every device for a ww_admin, with its latest deployment and that
+ * project's organisation (#343): cameras belong to no organisation (ww-backend#346).
  */
 import { useMemo, useState } from 'react'
 import { Navigate } from 'react-router-dom'

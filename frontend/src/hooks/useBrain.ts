@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
-import { settleWithLimit } from '../lib/settleWithLimit'
+import { reviewInBatches, type ReviewBatchResult } from '../lib/clusterReview'
 
 // ── Types (mirror backend brain router responses) ──────────────────────────
 
@@ -88,7 +88,27 @@ export function useConfirmCluster(deploymentId?: string) {
       taxon: { taxon_id?: string; scientific_name?: string; vernacular_name?: string }
     }) => {
       const r = (await apiClient.post(`/api/brain/clusters/${args.id}/confirm`, args.taxon)) as any
-      return r.data as { cluster_assignment_id: string; observations_created: number }
+      return r.data as {
+        cluster_assignment_id: string
+        observations_created: number
+        observation_ids: string[]
+        /** Members a person had already labelled, left as they were. */
+        skipped: number
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['brain', 'clusters', deploymentId] })
+    },
+  })
+}
+
+/** Undo a cluster confirm: its human rows go and the cluster reopens. */
+export function useUnconfirmCluster(deploymentId?: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const r = await apiClient.post(`/api/brain/clusters/${id}/unconfirm`)
+      return r.data as { cluster_assignment_id: string; observations_deleted: number; kept: number }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['brain', 'clusters', deploymentId] })
@@ -127,12 +147,10 @@ export function useEmbedDeployment() {
   })
 }
 
-/** Review calls in flight at once while reassign still posts one call per photo (03 #18). */
-const REVIEW_CONCURRENCY = 4
-
 /**
- * Reassign photos to a species, or flag them for an expert: one `/api/brain/review` call per
- * photo, each adding a human row, at most four at a time. A batch route would make it one call.
+ * Reassign photos to a species, or flag them for an expert, through `/api/brain/review/batch`:
+ * one request per 500 photos, each photo keeping one human row (03 #18). `skipped` counts the
+ * photos the backend left alone (no write access, or gone).
  */
 export function useBulkReview(deploymentId?: string) {
   const qc = useQueryClient()
@@ -143,10 +161,8 @@ export function useBulkReview(deploymentId?: string) {
       taxon?: { taxon_id: string | null; scientific_name: string; vernacular_name: string | null }
     }) => {
       const body = args.decision === 'reassign' ? { decision: args.decision, ...args.taxon } : { decision: args.decision }
-      const results = await settleWithLimit(args.mediaIds, REVIEW_CONCURRENCY, mid =>
-        apiClient.post(`/api/brain/review/${mid}`, body))
-      const ok = results.filter(r => r.status === 'fulfilled').length
-      return { ok, failed: results.length - ok }
+      return reviewInBatches(args.mediaIds, async ids =>
+        (await apiClient.post('/api/brain/review/batch', { ...body, media_ids: ids })).data as ReviewBatchResult)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['brain', 'clusters', deploymentId] })

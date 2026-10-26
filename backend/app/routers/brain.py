@@ -2,19 +2,20 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Wildlife Brain router — DINOv3 embeddings, clusters, similarity.
 
-Thin HTTP layer (envelope responses); all logic in domain/wildlife_brain.py and
-the pgvector vector store. Gated behind ``FF_WILDLIFE_BRAIN_ENABLED``.
+Thin HTTP layer (envelope responses); the logic is in domain/wildlife_brain.py, the pgvector
+vector store, and domain/human_verdicts.py for the label writes (cluster confirm and undo,
+review). Gated behind ``FF_WILDLIFE_BRAIN_ENABLED``.
 """
 
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.authz import (
+    WRITE_REFUSED,
     accessible_deployment_ids,
     assert_access,
     media_org_deployment_ids,
@@ -25,11 +26,21 @@ from app.authz import (
     require_media_write,
     require_project_write,
     require_system_admin,
+    writable_media_ids,
 )
 from app.config import settings
 from app.dependencies import get_current_user, get_verified_user, require_not_demo
+from app.domain import human_verdicts
 from app.middleware.rate_limit import limiter
-from app.schemas.brain import ConfirmClusterRequest, EmbedRequest, MultiClusterRequest, ReprocessAllRequest, ReprocessRequest, ReviewDecisionRequest
+from app.schemas.brain import (
+    ConfirmClusterRequest,
+    EmbedRequest,
+    MultiClusterRequest,
+    ReprocessAllRequest,
+    ReprocessRequest,
+    ReviewBatchRequest,
+    ReviewDecisionRequest,
+)
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.services.db_utils import read_all, row_of, rows_of
 from app.services.supabase_client import create_service_client
@@ -287,68 +298,54 @@ async def similar(request: Request, media_id: str, n: int = Query(20, ge=1, le=1
     return ApiResponse(data={"media_id": media_id, "results": hits}, meta=ApiMeta(request_id=req_id))
 
 
+def _reviewer(user) -> human_verdicts.Reviewer:
+    return human_verdicts.Reviewer(id=user.id, email=getattr(user, "email", None))
+
+
+def _cluster_not_found(req_id):
+    return ApiResponse(error=ApiError(code="NOT_FOUND", message="Cluster assignment not found"), meta=ApiMeta(request_id=req_id))
+
+
 @router.post("/clusters/{cluster_assignment_id}/confirm", dependencies=[Depends(require_cluster_write), Depends(require_not_demo)])
 async def confirm_cluster(request: Request, cluster_assignment_id: str, body: ConfirmClusterRequest, user=Depends(get_current_user)):
-    """Confirm a cluster as a taxon — bulk-creates human observations for members."""
+    """Confirm a cluster as a taxon: a human row for each member nobody has labelled yet."""
     req_id = getattr(request.state, "request_id", None)
     if not settings.FF_WILDLIFE_BRAIN_ENABLED:
         return _disabled(req_id)
 
-    svc = create_service_client()
-    now = datetime.now(timezone.utc).isoformat()
-
-    def _confirm():
-        assignment = row_of(svc.table("cluster_assignments").select("*").eq("id", cluster_assignment_id).maybe_single().execute())
-        if not assignment:
-            return None, 0
-        # Every member: a read without .range() stops at 1,000, which labelled only 1,000.
-        members = read_all(
-            lambda: (
-                svc.table("media_embeddings")
-                .select("media_id")
-                .eq("deployment_id", assignment["deployment_id"])
-                .eq("embedding_run_id", assignment["embedding_run_id"])
-                .eq("cluster_id", assignment["cluster_id"])
-                .order("media_id")
-            )
-        )
-        obs_rows = [
-            {
-                "deployment_id": assignment["deployment_id"],
-                "media_id": m["media_id"],
-                "observation_level": "media",
-                "observation_type": "animal",
-                "taxon_id": body.taxon_id,
-                "scientific_name": body.scientific_name,
-                "vernacular_name": body.vernacular_name,
-                "source_type": "human",
-                "review_status": "human_reviewed",
-                "classification_method": "human",
-                "reviewer_id": user.id,
-                "embedding_run_id": assignment["embedding_run_id"],
-                "cluster_id": assignment["cluster_id"],
-            }
-            for m in members
-        ]
-        for i in range(0, len(obs_rows), 50):
-            svc.table("observations").insert(obs_rows[i : i + 50]).execute()
-
-        svc.table("cluster_assignments").update(
-            {
-                "taxon_id": body.taxon_id,
-                "scientific_name": body.scientific_name,
-                "review_state": "confirmed",
-                "confirmed_by": user.id,
-                "confirmed_at": now,
-            }
-        ).eq("id", cluster_assignment_id).execute()
-        return assignment, len(obs_rows)
-
-    assignment, created = await asyncio.to_thread(_confirm)
-    if assignment is None:
-        return ApiResponse(error=ApiError(code="NOT_FOUND", message="Cluster assignment not found"), meta=ApiMeta(request_id=req_id))
+    label = human_verdicts.Label(taxon_id=body.taxon_id, scientific_name=body.scientific_name, vernacular_name=body.vernacular_name)
+    try:
+        result = await asyncio.to_thread(human_verdicts.confirm_cluster, create_service_client(), cluster_assignment_id, label, _reviewer(user))
+    except human_verdicts.ClusterStateError as e:
+        return ApiResponse(error=ApiError(code=e.code, message=str(e)), meta=ApiMeta(request_id=req_id))
+    if result is None:
+        return _cluster_not_found(req_id)
     return ApiResponse(
-        data={"cluster_assignment_id": cluster_assignment_id, "observations_created": created},
+        data={
+            "cluster_assignment_id": cluster_assignment_id,
+            "observations_created": len(result.observation_ids),
+            "observation_ids": result.observation_ids,
+            "skipped": result.skipped,
+        },
+        meta=ApiMeta(request_id=req_id),
+    )
+
+
+@router.post("/clusters/{cluster_assignment_id}/unconfirm", dependencies=[Depends(require_cluster_write), Depends(require_not_demo)])
+async def unconfirm_cluster(request: Request, cluster_assignment_id: str, user=Depends(get_current_user)):
+    """Undo a cluster confirm: delete the human rows it wrote and reopen the cluster."""
+    req_id = getattr(request.state, "request_id", None)
+    if not settings.FF_WILDLIFE_BRAIN_ENABLED:
+        return _disabled(req_id)
+
+    try:
+        result = await asyncio.to_thread(human_verdicts.unconfirm_cluster, create_service_client(), cluster_assignment_id)
+    except human_verdicts.ClusterStateError as e:
+        return ApiResponse(error=ApiError(code=e.code, message=str(e)), meta=ApiMeta(request_id=req_id))
+    if result is None:
+        return _cluster_not_found(req_id)
+    return ApiResponse(
+        data={"cluster_assignment_id": cluster_assignment_id, "observations_deleted": result.deleted, "kept": result.kept},
         meta=ApiMeta(request_id=req_id),
     )
 
@@ -483,40 +480,42 @@ async def review_queue(request: Request, deployment_id: str, limit: int = Query(
     return ApiResponse(data={"queue": rows, "count": len(rows)}, meta=ApiMeta(request_id=req_id))
 
 
-@router.post("/review/{media_id}", dependencies=[Depends(require_media_write), Depends(require_not_demo)])
-async def review_media(request: Request, media_id: str, body: ReviewDecisionRequest, user=Depends(get_current_user)):
-    """Record a reviewer decision on one media item (creates a human observation)."""
+# Registered before /review/{media_id}, which would otherwise take "batch" for a photo id.
+@router.post("/review/batch", dependencies=[Depends(require_not_demo)])
+async def review_media_batch(request: Request, body: ReviewBatchRequest, user=Depends(get_current_user)):
+    """One reviewer decision on up to 500 photos, one human row each. Photos the caller may not
+    change are skipped; none at all is a 403."""
     req_id = getattr(request.state, "request_id", None)
     if not settings.FF_WILDLIFE_BRAIN_ENABLED:
         return _disabled(req_id)
 
-    svc = create_service_client()
-    review_status = "expert_reviewed" if body.decision == "expert" else "human_reviewed"
+    writable = await writable_media_ids(user.id, body.media_ids)
+    if not writable:
+        raise HTTPException(status_code=403, detail=WRITE_REFUSED)
+    label = human_verdicts.Label(taxon_id=body.taxon_id, scientific_name=body.scientific_name, vernacular_name=body.vernacular_name)
+    result = await asyncio.to_thread(
+        human_verdicts.review_photos, create_service_client(), body.media_ids, writable, body.decision, label, _reviewer(user)
+    )
+    return ApiResponse(
+        data={"created": result.created, "updated": result.updated, "observation_ids": result.observation_ids, "skipped": result.skipped},
+        meta=ApiMeta(request_id=req_id),
+    )
 
-    def _write():
-        media = row_of(svc.table("media").select("deployment_id").eq("id", media_id).maybe_single().execute())
-        if not media:
-            return False
-        svc.table("observations").insert(
-            {
-                "deployment_id": media["deployment_id"],
-                "media_id": media_id,
-                "observation_level": "media",
-                "observation_type": "animal",
-                "taxon_id": body.taxon_id,
-                "scientific_name": body.scientific_name,
-                "vernacular_name": body.vernacular_name,
-                "source_type": "human",
-                "review_status": review_status,
-                "classification_method": "human",
-                "reviewer_id": user.id,
-            }
-        ).execute()
-        return True
 
-    ok = await asyncio.to_thread(_write)
-    if not ok:
+@router.post("/review/{media_id}", dependencies=[Depends(require_media_write), Depends(require_not_demo)])
+async def review_media(request: Request, media_id: str, body: ReviewDecisionRequest, user=Depends(get_current_user)):
+    """Record a reviewer decision on one photo: its human row, added or updated."""
+    req_id = getattr(request.state, "request_id", None)
+    if not settings.FF_WILDLIFE_BRAIN_ENABLED:
+        return _disabled(req_id)
+
+    label = human_verdicts.Label(taxon_id=body.taxon_id, scientific_name=body.scientific_name, vernacular_name=body.vernacular_name)
+    result = await asyncio.to_thread(
+        human_verdicts.review_photos, create_service_client(), [media_id], [media_id], body.decision, label, _reviewer(user)
+    )
+    if result.skipped:
         return ApiResponse(error=ApiError(code="NOT_FOUND", message="Media not found"), meta=ApiMeta(request_id=req_id))
+    review_status = "expert_reviewed" if body.decision == "expert" else "human_reviewed"
     return ApiResponse(data={"media_id": media_id, "decision": body.decision, "review_status": review_status}, meta=ApiMeta(request_id=req_id))
 
 

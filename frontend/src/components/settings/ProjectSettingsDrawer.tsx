@@ -14,6 +14,7 @@ import type { ProjectDetails } from '../../lib/projectDetails'
 import { ProjectMembersPanel } from '../data/ProjectMembersPanel'
 import { NotificationRulesPanel } from './NotificationRulesPanel'
 import { ProjectDefaultsPanel } from './ProjectDefaultsPanel'
+import { GbifDatasetField } from './GbifDatasetField'
 import { ProjectDetailsPanel } from './ProjectDetailsPanel'
 import { SaveStatus } from './SaveStatus'
 
@@ -112,6 +113,7 @@ export function ProjectSettingsDrawer({ project, onClose, onDetailsSaved, onDele
           {tab === 'details' && (
             <>
               <ProjectDetailsPanel projectId={project.id} onSaved={onDetailsSaved} />
+              <GbifDatasetField projectId={project.id} />
               <div style={{ borderTop: '1px solid var(--border)', marginTop: '1.5rem', paddingTop: '1rem' }}>
                 <button
                   onClick={onDelete}

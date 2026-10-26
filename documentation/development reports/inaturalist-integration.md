@@ -1,7 +1,9 @@
 # iNaturalist Integration — Design & Implementation
 
-> **Status:** Phases 1–4 implemented (2026-06-08). Schema authored in `ww-backend`
-> (pending `npm run db:change`); backend + frontend code in `ww-website`.
+> **Status:** Phases 1–4 implemented (2026-06-08), behind `FF_INAT_ENABLED`. Schema in `ww-backend`;
+> the tables exist on dev (checked 25 Oct 2026). The sync-back updates the badge only and writes no
+> identifications ([§6](#what-happens-today-checked-25-oct-2026-123)). Setup:
+> [deployment guide](../resources/deployment-guide.md#inaturalist).
 > **Owners:** web platform.
 
 Lets a Wildlife Watcher user link their **personal iNaturalist account**, publish reviewed
@@ -53,7 +55,8 @@ Already implemented before this work; surfaced in Phase 3.
 
 - `services/inat_oauth.py`: `generate_pkce_pair` (S256), `build_authorization_url`,
   `exchange_code_for_token`, `refresh_access_token`, `get_api_jwt`, and **encrypted** token
-  storage in `inat_tokens` (`encrypt_token`/`decrypt_token`, Fernet key derived from the app secret).
+  storage in `inat_tokens` (`encrypt_token`/`decrypt_token`, Fernet key derived from
+  `INAT_CLIENT_SECRET`; refused, with the reason, when it is missing or shorter than 32 characters).
 - Routes: `GET /api/inat/auth | /callback | /status`, `POST /api/inat/disconnect | /token`.
 - UI: `INaturalistPanel.tsx` (connect/disconnect), surfaced on the **Toolkit** tab (the old *Other*
   tab was retired — `/other` now redirects to `/toolkit`, and the OAuth callback returns to
@@ -66,12 +69,14 @@ Already implemented before this work; surfaced in Phase 3.
 `domain/inaturalist_publish.py → publish_media_to_inat(user_id, media_ids, gap_seconds, geoprivacy)`
 exposed at **`POST /api/inat/publish`**.
 
-1. **By-catch filter**: a photo speaks through its newest human review, else its AI rows
-   (`_photo_labels`); keep it only when that label is an `animal`, so a reviewer's `blank` or `human`
-   outvotes the AI. Unprocessed media are dropped too.
+1. **By-catch filter**: a photo goes up under the label its card shows
+   (`public_api.photo_verdict`, the grid's `photoVerdict`), so a reviewer's Empty or person outvotes
+   the AI. It stays off unless that label is an `animal`, and whenever any row, a model's or a
+   person's, says `human` (`_photo_label`). Unprocessed media are dropped too.
 2. **Idempotency** — skip media already in `inat_observation_media`.
 3. **Burst consolidation** — cluster per deployment by temporal gap (`Δt < gap_seconds`, default 60 s);
-   each burst → **one iNat observation with all its photos**. Untimed images each stand alone.
+   each burst → **one iNat observation with all its photos**. Untimed images each stand alone. A
+   burst holding a photo the caller already published joins that photo's observation.
 4. **species_guess**: the most common scientific name across the burst's photos, each photo by its
    label from step 1, so a cluster confirmed as one species and then reassigned goes up as the new one.
 5. **Transactional upload** — `create_observation` (deployment lat/lon, earliest timestamp,
@@ -81,9 +86,19 @@ exposed at **`POST /api/inat/publish`**.
    Photo failures flip the row to `failed` with an `error_message`.
 
 Returns a summary: `observations_created`, `photos_uploaded`, `skipped_bycatch`,
-`skipped_already_published`, `errors`, and a per-observation list.
+`skipped_already_published`, `errors`, a per-observation list, and `remaining_media_ids`.
 
-> **Privacy / by-catch:** human/vehicle/blank are never uploaded; default geoprivacy is `obscured`.
+6. **Rounds** (#123): a request starts no photo after `PUBLISH_BUDGET_SECONDS` (120 s; the Container
+   Apps ingress ends a request at about 240 s and one upload can take a minute) and hands back the
+   photos it did not reach, with the published photos of a burst it stopped in, so step 3 puts the
+   rest into the same observation. `useINat().publish` sends them again until none are left and
+   answers once (`lib/inatPublishRounds.ts`). Chosen over a job (`enqueue_job`): with `REDIS_URL`
+   set a job runs on the GPU worker, which would cold-start a T4 for uploads and need the
+   iNaturalist secrets there, and the jobs dock is built for uploads. A tab closed between rounds
+   leaves the rest unpublished; publishing the same selection again carries on.
+
+> **Privacy / by-catch:** a photo showing a person, or labelled anything but an animal, is never
+> uploaded; default geoprivacy is `obscured`.
 
 ---
 
@@ -99,9 +114,9 @@ annotation `StatusBadge` stays top-left). Colour by `inat_observations.sync_stat
 | `disagreement` | amber | community taxon differs from your label |
 | `failed` | red | upload failed |
 
-`MediaBrowser` loads badge state with a **graceful** `inat_observation_media → inat_observations`
-lookup (if the Phase-1 tables aren't migrated yet, it shows no badges rather than breaking). Clicking
-the badge opens the iNat observation.
+The review grid (`hooks/useGridInat.ts`) loads badge state with a **graceful**
+`inat_observation_media → inat_observations` lookup (if the Phase-1 tables aren't migrated yet, it
+shows no badges rather than breaking). Clicking the badge opens the iNat observation.
 
 Selection + publish live in a new **"iNaturalist" ribbon tab**: Account (connect / ✓ username),
 Selection (toggle + count), Publish (⬆ Upload N), Community IDs (↻ Sync). In select mode, clicking a
@@ -127,6 +142,32 @@ job calls for everyone.
 
 Returns `checked`, `updated`, `research`, `disagreement`, `observations_written`.
 
+### What happens today (checked 25 Oct 2026, #123)
+
+The round trip stops at the badge: no identification from iNaturalist reaches `observations`.
+
+- **When it runs.** `InatAutoSync` (mounted in `App.tsx`) calls `POST /api/inat/sync` once per
+  browser session for a signed-in user whose `/api/inat/status` says connected; Settings,
+  Integrations, *Sync now* calls it on demand. Nothing is scheduled: no worker cron, nothing at API
+  startup. Each call covers the caller's own observations only.
+- **What it reads.** Up to 200 of the caller's rows in `uploaded`, `needs_id`, `research` or
+  `disagreement`, in no order, so past 200 which ones are polled is arbitrary. A row marked `failed`
+  (any of its photos failed to upload) is never polled again.
+- **The community taxon is never read.** `batch_poll_observations` (and `get_observation_status`)
+  read `community_taxon.name`, but `GET /v1/observations` has no `community_taxon` object, only
+  `community_taxon_id` and `taxon` (checked against two public observations on the live API). So
+  `community_taxon` is always null: `sync_status` follows `quality_grade` alone (`research`,
+  `needs_id`, or `uploaded` for casual), which recolours the dove badge; `disagreement` never
+  happens; `_write_consensus` never runs, and *Sync now* always reports 0 community IDs written.
+- **Nothing goes the other way.** A label changed in Wildlife Watcher after publishing is not sent to
+  iNaturalist; `species_guess` stays what it was at publish.
+
+Fixing the read (`taxon.name` when `taxon.id == community_taxon_id`, else the taxon of
+`community_taxon_id`) would switch on step 3 as written. Decide first what the rows should mean: at
+research grade the row is `consensus_approved`, which `photo_verdict` and the pipeline's
+`without_human_verdicts` count as a human verdict, so the card would show iNaturalist's taxon where
+no person labelled the photo, and later pipeline runs would skip those photos.
+
 ---
 
 ## 7. File map
@@ -141,7 +182,7 @@ Returns `checked`, `updated`, `research`, `disagreement`, `observations_written`
 | API | `…/routers/inaturalist.py` | `/publish`, `/sync` (+ existing auth/observation routes) |
 | Frontend | `…/hooks/useINat.ts` | status / connect / publish / sync |
 | Frontend | `…/components/data/INatBadge.tsx` | dove badge |
-| Frontend | `…/components/data/MediaBrowser.tsx` | selection, badges, ribbon tab |
+| Frontend | `…/hooks/useGridInat.ts` | the review grid's badges and publish |
 | Frontend | `…/pages/ToolkitPage.tsx` | Connect iNaturalist card |
 
 ---
@@ -150,11 +191,11 @@ Returns `checked`, `updated`, `research`, `disagreement`, `observations_written`
 
 1. **Apply schema:** in `ww-backend`, `DB_AGENT_MODE=1 npm run db:change inat_observations`; review
    the generated migration; commit schema + generated artifacts; notify mobile via the type-sync guide.
-2. **Configure:** `FF_INAT_ENABLED=true`, `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI`
-   in the website backend env.
-3. **Register** the OAuth application on iNaturalist with the matching redirect URI.
-4. **(Optional) automate sync:** schedule `sync_inat_identifications()` (no user filter) on the
-   ARQ/job runner (e.g. hourly). Until then the **↻ Sync IDs** button covers it.
+   The tables exist on dev (25 Oct 2026).
+2. **Register and configure:** the steps are in the
+   [deployment guide](../resources/deployment-guide.md#inaturalist).
+3. **(Optional) automate sync:** schedule `sync_inat_identifications()` (no user filter) on the
+   ARQ/job runner (e.g. hourly). Until then the sign-in sync and Settings, *Sync now* cover it.
 
 ---
 
@@ -162,8 +203,6 @@ Returns `checked`, `updated`, `research`, `disagreement`, `observations_written`
 
 - **Scheduled sync job** — currently manual (button) + endpoint; wire onto the job runner with an
   `updated_since` watermark for bandwidth efficiency.
-- **Async publish** — `/api/inat/publish` runs synchronously; for very large selections, move onto the
-  job runner with progress (like the upload dock).
 - **Taxon registration on sync** — `_write_consensus` resolves `taxon_id` from local `taxa` only; if
   absent it stores `scientific_name` with a null `taxon_id`. Could auto-register via
   `search_and_fetch_inat_taxon` (already exists) when the community taxon isn't in `taxa`.

@@ -104,7 +104,7 @@ def test_create_deployment_succeeds_for_member(verified_client, monkeypatch):
         t = MagicMock()
         for m in ("select", "eq", "limit"):
             getattr(t, m).return_value = t
-        t.execute.return_value = _Result([{"id": "proj-1", "organisation_id": "org-1"}] if name == "projects" else [])
+        t.execute.return_value = _Result([])
         ins = MagicMock()
         ins.execute.return_value = _Result([])
         t.insert.return_value = ins
@@ -137,9 +137,9 @@ def _tables_with_existing_deployments(existing: list[dict]):
 
     def make_table(name):
         t = MagicMock()
-        for m in ("select", "eq", "limit"):
+        for m in ("select", "eq", "in_", "limit"):
             getattr(t, m).return_value = t
-        rows = {"projects": [{"id": "proj-1", "organisation_id": "org-1"}], "deployments": existing}.get(name, [])
+        rows = {"deployments": existing}.get(name, [])
         t.execute.return_value = _Result(rows)
         ins = MagicMock()
         ins.execute.return_value = _Result([])
@@ -161,6 +161,34 @@ def test_create_deployment_uses_the_supplied_id(verified_client, monkeypatch):
     assert resp.json()["id"] == STAMPED_ID  # normalised to canonical lower-case
     dep_rows = [row for name, row in inserted if name == "deployments"]
     assert dep_rows and dep_rows[0]["id"] == STAMPED_ID
+
+
+def test_create_deployment_registers_a_camera_of_no_organisation(verified_client, monkeypatch):
+    """Cameras belong to no organisation (ww-backend#346): the placeholder device carries none,
+    and the project is not read for one."""
+    monkeypatch.setattr("app.routers.deployments.assert_write", AsyncMock(return_value=None))
+    client, inserted = _tables_with_existing_deployments(existing=[])
+    monkeypatch.setattr("app.routers.deployments.create_service_client", lambda: client)
+
+    assert verified_client.post("/api/deployments", json={"project_id": "proj-1", "name": "Bench"}).status_code == 200
+    (device,) = [row for name, row in inserted if name == "devices"]
+    assert "organisation_id" not in device and device["name"] == "[manual] Bench"
+    assert "projects" not in [c.args[0] for c in client.table.call_args_list]
+
+
+def test_sd_card_deployments_register_cameras_of_no_organisation(monkeypatch):
+    import asyncio
+
+    from app.routers.exif import _auto_create_deployments
+
+    monkeypatch.setattr("app.routers.exif.assert_write", AsyncMock(return_value=None))
+    client, inserted = _tables_with_existing_deployments(existing=[{"id": "dep-old"}])
+    monkeypatch.setattr("app.routers.exif.create_service_client", lambda: client)
+
+    assert asyncio.run(_auto_create_deployments(["dep-old", "dep-new1"], "proj-1", "user-1")) == ["dep-new1"]
+    (device,) = [row for name, row in inserted if name == "devices"]
+    assert "organisation_id" not in device and device["name"] == "[SD card] dep-new1"
+    assert "projects" not in [c.args[0] for c in client.table.call_args_list]
 
 
 def test_create_deployment_refuses_an_existing_id(verified_client, monkeypatch):

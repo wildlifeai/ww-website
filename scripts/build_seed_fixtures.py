@@ -139,9 +139,9 @@ def build_fixture_sql(records: list[dict]) -> str:
             f"{sql_str(SEED_ADMIN)}, {sql_str(SEED_ADMIN)}, true);",
             "  END IF;",
             "",
-            "  INSERT INTO devices (id, name, organisation_id, modified_by, bluetooth_id, "
-            "device_eui) VALUES",
-            f"    ({sql_str(dev_id)}, {sql_str(dev_name)}, {sql_str(SEED_ORG_ID)}, "
+            # A camera belongs to no organisation (ww-backend#346).
+            "  INSERT INTO devices (id, name, modified_by, bluetooth_id, device_eui) VALUES",
+            f"    ({sql_str(dev_id)}, {sql_str(dev_name)}, "
             f"{sql_str(SEED_ADMIN)}, {sql_str('BT_FIX_' + short)}, {sql_str('EUI_FIX_' + short)})",
             "  ON CONFLICT (id) DO NOTHING;",
             "",

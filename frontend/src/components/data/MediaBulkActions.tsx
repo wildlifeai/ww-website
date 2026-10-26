@@ -5,7 +5,7 @@
 // sub-bar once at least one photo is selected (UI audit 02 #14). The grid only lets people
 // select photos in projects they can write to, so everything here is theirs to do.
 //  - Label as, Find similar (one photo)
-//  - Upload to iNaturalist, or a link to connect it on the Toolkit page
+//  - Publish to iNaturalist, or a link to connect it on the Toolkit page
 //  - Remove (with confirmation and Undo)
 //  - Run AI, and Create species ID model for organisation managers
 
@@ -13,6 +13,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { Bird, ChevronDown, Cpu, Search, Sparkles, Tags, Trash2, type LucideIcon } from 'lucide-react'
+import { INAT_CONNECT_PATH } from '../../lib/inatPublish'
 
 export type BulkAction = 'inat' | 'delete' | 'ai' | 'similar' | 'label' | 'train'
 
@@ -142,10 +143,10 @@ export function MediaBulkActions({
             {divider}
 
             {inatEnabled && (inatConnected
-              ? entry('inat', Bird, 'Upload to iNaturalist')
+              ? entry('inat', Bird, 'Publish to iNaturalist')
               : (
-                <Link to="/toolkit" style={item} {...hover} onClick={() => setOpen(false)}
-                  title="Connect your iNaturalist account on the Toolkit page, then upload from here">
+                <Link to={INAT_CONNECT_PATH} style={item} {...hover} onClick={() => setOpen(false)}
+                  title="Connect your iNaturalist account on the Toolkit page, then publish from here">
                   <Bird size={15} aria-hidden style={{ color: 'var(--text-muted)' }} />
                   <span>Connect iNaturalist…</span>
                 </Link>
