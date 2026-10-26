@@ -4,7 +4,9 @@
 
 POST /api/exports/camtrapdp → starts the CamtrapDP export job (#328), returns {job_id}.
 Poll it with GET /api/jobs/{id}; its result_url is the signed download link.
-Gated by ``FF_CAMTRAPDP_EXPORT_ENABLED``: off, the endpoint answers FEATURE_DISABLED.
+Gated by ``FF_CAMTRAPDP_EXPORT_ENABLED``, and needs ``AZURE_STORAGE_CONNECTION_STRING`` for the
+ZIPs: without either, the endpoint answers FEATURE_DISABLED and the website falls back to the
+metadata-only package.
 """
 
 from dataclasses import asdict
@@ -39,8 +41,9 @@ async def start_camtrapdp_export(
     check decides. The 404 here only saves a job for a project in another organisation.
     """
     meta = ApiMeta(request_id=getattr(request.state, "request_id", None))
-    if not settings.FF_CAMTRAPDP_EXPORT_ENABLED:
-        return ApiResponse(error=ApiError(code="FEATURE_DISABLED", message="CamtrapDP export is disabled (FF_CAMTRAPDP_EXPORT_ENABLED)."), meta=meta)
+    if not settings.camtrapdp_export_enabled:
+        message = "CamtrapDP export is disabled (FF_CAMTRAPDP_EXPORT_ENABLED, or no AZURE_STORAGE_CONNECTION_STRING for its ZIPs)."
+        return ApiResponse(error=ApiError(code="FEATURE_DISABLED", message=message), meta=meta)
 
     project_id = str(body.project_id)
     await assert_access(user.id, project_id=project_id)

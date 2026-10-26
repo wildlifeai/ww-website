@@ -3,7 +3,7 @@
 > **Status:** 🟢 Living — the authoritative map of every cloud resource the platform uses, what it's
 > for, and how to keep it from drifting into sprawl. Pairs with [deployment-guide](deployment-guide.md)
 > (*how to deploy*); this doc is *what exists and how to maintain it*. **Re-audit quarterly** (see the
-> [review checklist](#periodic-review-checklist)). Last updated: **2026-07-09**.
+> [review checklist](#periodic-review-checklist)). Last updated: **2026-10-26**.
 
 > ### ✅ Single-RG AU East (migration complete — 2026-06-30)
 > The org runs **only the `WW-AE` resource group** (`australiaeast`). The old `WW-Website` RG and the three
@@ -17,7 +17,7 @@ or orphaned, and both are bugs.
 
 | Provider | What it hosts |
 |----------|---------------|
-| **Azure** | Backend API + ARQ worker (Container Apps), container registry, upload blob buffer, Redis broker, logs |
+| **Azure** | Backend API + ARQ worker (Container Apps), container registry, upload blob buffer, CamtrapDP export ZIPs, Redis broker, logs |
 | **Supabase** | Postgres + RLS, Auth, Storage (renditions), the system of record — **two projects** (dev / prod) |
 | **Cloudflare** | Frontend (Pages + per-branch previews), DNS for `wildlifewatcher.ai`, CDN |
 | **Google Drive** | Permanent original-image archive (`gdrive://`) |
@@ -44,13 +44,15 @@ extra Log Analytics workspaces — that is the main source of sprawl and cost co
 
 | Resource | Type | Purpose | Status | Maintenance |
 |----------|------|---------|--------|-------------|
-| `ww-env` | Container Apps **environment** | Hosts all container apps; workload profiles **`Consumption`** (CPU apps) + **`gpu-t4`** (`Consumption-GPU-NC8as-T4`, serverless T4 for the worker); KEDA. | ✅ | Region-locked — recreating it means recreating its apps. GPU profile: `az containerapp env workload-profile list -g WW-AE -n ww-env`. |
+| `ww-env` | Container Apps **environment** | Hosts all container apps; workload profiles **`Consumption`** (CPU apps) + **`gpu-t4`** (`Consumption-GPU-NC8as-T4`, serverless T4 for both workers); KEDA. | ✅ | Region-locked, so recreating it means recreating its apps. GPU profile: `az containerapp env workload-profile list -g WW-AE -n ww-env`. |
 | `wwregistry` | Container Registry (ACR) | Image repos `ww-backend` (api, `--target api`) + `ww-backend-worker` (worker). | ✅ | Standard SKU, admin-enabled; `az acr build` builds in-cloud (no local Docker). Login server `wwregistry.azurecr.io`. **`weekly-purge` task** keeps sha tags to the 5 newest per repo (SHA-only filter; `stable`/`latest`/`dev-latest` immune) — see the cost-review action. |
-| `wwuploadsae` | Storage account | **Azure Blob** temporary upload buffer (deleted after Drive archival). | ✅ | Connection string is an ACA secret on the apps. |
+| `wwuploadsae` | Storage account | **Azure Blob** temporary upload buffer (deleted after Drive archival), one container per environment. Also `camtrapdp-exports`, the private container for the CamtrapDP export ZIPs (#387), shared by dev and prod: job ids never collide and nothing lists it. | ✅ | Connection string is an ACA secret on the apps. Public blob access is off for the account, so export links are read-only SAS links. The exports' lifecycle rule is [below](#wwuploadsae-lifecycle-rule). |
 | `ww-redis-dev` | Container App | **ARQ broker** (internal `redis:7-alpine`, TCP, `exposedPort=6379`). 0.25 vCPU / 0.5 Gi (right-sized 2026-08-03). | ✅ | Reach app-to-app via the **short name** `redis://ww-redis-dev:6379` (the `.internal.*` FQDN times out for TCP). **Not KEDA-reachable** — see the worker row. |
 | `ww-backend-dev` | Container App | **Dev API** (`--target api`), **min-0** (scale-to-zero), external ingress. `REDIS_URL` → offloads jobs to the worker. FQDN `ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io`. | ✅ | Dev Supabase project; secrets as **ACA secrets**. **`min-replicas` is set by CI, not by hand** — see the note below. |
 | `ww-embedding-worker-dev` | Container App | **Dev ML worker** (`--target worker`) on the **`gpu-t4` serverless T4 GPU** profile. SpeciesNet detect + per-crop BioCLIP + DINOv3 (Wildlife Brain, live). ~1–2 s/image vs ~30–50 s on CPU. | ✅ | `EMBEDDING_DEVICE=cuda` / `BIOCLIP_DEVICE=cuda` (SpeciesNet auto-detects CUDA). Gated DINOv3 weights need the **`HF_TOKEN`** ACA secret (else `image_count=0`). Scales **0↔1** via **KEDA Postgres scaler on `api_jobs`** (see below). Secrets as ACA secrets. |
-| `ww-backend` | Container App | **Prod API** (`--target api`), serving the production website. FQDN `ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io`. | ✅ | Prod Supabase project. Google Drive archival configured **2026-07-26**: `GOOGLE_DRIVE_ENABLED`, `GOOGLE_DRIVE_FOLDER_ID`, secret `google-sa-json` (⚠️ currently the **same service account as dev**, `ww-drive-uploader@…` — split before it matters for rotation/audit). Before that date all three were unset, so prod stored no images at all. Console logs can lag ~1 day — don't use them to prove live traffic. |
+| `ww-backend` | Container App | **Prod API** (`--target api`), serving the production website, min 1 / max 2. `REDIS_URL` → `ww-redis` (since 2026-07-26), so it offloads jobs to `ww-embedding-worker`. FQDN `ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io`. | ✅ | Prod Supabase project. Google Drive archival configured **2026-07-26**: `GOOGLE_DRIVE_ENABLED`, `GOOGLE_DRIVE_FOLDER_ID`, secret `google-sa-json` (⚠️ currently the **same service account as dev**, `ww-drive-uploader@…`; split it before it matters for rotation or audit). Before that date all three were unset, so prod stored no images at all. Console logs can lag ~1 day, so don't use them to prove live traffic. |
+| `ww-redis` | Container App | **Prod ARQ broker**, the same internal `redis:7-alpine` TCP app as `ww-redis-dev` (`exposedPort=6379`, no volume). 0.5 vCPU / 1 Gi, min 1 / max 1, created 2026-07-26. | ✅ | Reach it as `redis://ww-redis:6379` (short name). Still at the runbook's size; dev was right-sized to 0.25 / 0.5 Gi on 2026-08-03. |
+| `ww-embedding-worker` | Container App | **Prod ML worker** (`--target worker`) on the **`gpu-t4`** profile, 4 vCPU / 16 Gi, created 2026-07-26 from the [runbook](prod-worker-provisioning-runbook.md). Same pipeline as the dev worker, against the prod Supabase project; `REDIS_URL` → `ww-redis`. | ✅ | Scales **0↔1** on its own KEDA rule over **prod** `api_jobs`, 1-hour window (see below). `deploy-backend.yml` rolls it with `revision copy` on each push to `main`. Secrets as ACA secrets, including its own `pg-conn` and `hf-token`. |
 | `ww-kv-dev-ae` | Key Vault | **Shared dev `.env`** — one secret, `ww-website-dotenv`, holding the whole file; fetched by `scripts/fetch-env.sh`. | ✅ | Uses **legacy access policies, not RBAC** (`enableRbacAuthorization: false`), so portal/CLI access needs an explicit policy entry — an ungranted developer sees *"The operation 'List' is not enabled in this key vault's access policy"*. Grant by **object id** (most of the team are tenant **guests**, so `--upn <dev>@wildlife.ai` fails): `az ad user list --filter "mail eq '<dev>@wildlife.ai'" --query "[0].id" -o tsv` → `az keyvault set-policy -n ww-kv-dev-ae --object-id <id> --secret-permissions get list`. Maintainers push updates with `az keyvault secret set … --file .env`. |
 | Log Analytics workspace | Log Analytics | Container Apps logs (auto-created with the env). | ✅ | Keep exactly one. |
 
@@ -63,37 +65,48 @@ extra Log Analytics workspaces — that is the main source of sprawl and cost co
 > ✅ **Live since 2026-08-03** (applied via `az` after the workflow change, so CI and reality agree).
 > `az containerapp show -n ww-backend-dev -g WW-AE --query properties.template.scale` → `minReplicas: 0`.
 
-**Worker scaling (the one subtlety).** The ARQ broker is an internal Redis container — fine for
+**Worker scaling (the one subtlety).** The ARQ broker is an internal Redis container, fine for
 **app-to-app** (worker/API reach it by short name) but **the ACA KEDA operator cannot reach it**
-(`connection refused` to the pod). So the worker does **not** scale on Redis. Instead a **KEDA
-PostgreSQL scaler** queries the dev Supabase `api_jobs` table (reachable over IPv4 via the shared pooler):
+(`connection refused` to the pod). So the workers do **not** scale on Redis. Instead each worker has a
+**KEDA PostgreSQL scaler**, rule `pg-pending`, that queries the `api_jobs` table of its own Supabase
+project (reachable over IPv4 via the shared pooler):
 
 ```
 SELECT count(*) FROM api_jobs WHERE status IN ('queued','processing')
-  AND updated_at > now() - interval '15 minutes'  -- targetQueryValue=1 (dev; see window caveat)
+  AND updated_at > now() - interval '<window>'  -- targetQueryValue=1
 ```
 
+| Worker | Project | Window | Replicas | Stuck-GPU alert |
+|---|---|---|---|---|
+| `ww-embedding-worker-dev` | dev | `15 minutes` | 0 to 1 | `ww-gpu-worker-stuck-dev` (2026-07-09) |
+| `ww-embedding-worker` | prod | `1 hour` | 0 to 1 | `ww-gpu-worker-stuck` (2026-07-26) |
+
+Both rules poll every 30 s with a 300 s cooldown (checked with `az` on 2026-10-26).
+
 A pending job → `count ≥ 1` → KEDA scales the worker **0→1** (on the GPU node); queue drains → back to
-**0**. The pooler connection string lives in the ACA secret **`pg-conn`** (must point at the **dev**
-project's *shared Session pooler* — `postgres.<ref>@aws-…pooler.supabase.com:5432`, using the
-**database password**, not the service-role key). Use **Session mode (:5432)**, not Transaction (:6543):
-the KEDA Postgres scaler reuses prepared statements, which Transaction pooling rejects with `42P05`
-(*prepared statement already exists*) — that broke the scaler until we moved to :5432. Both ports are on
-the same shared pooler host (IPv4). **Verified: scales to 0 when idle** (GPU T4, so idle cost ≈ $0). If
-`pg-conn` is wrong/unset the scaler errors and KEDA holds the worker at its current replica count
-(functional, just not scaling down).
+**0**. The pooler connection string lives in each worker's ACA secret **`pg-conn`**, which must point at
+**that worker's own** project's *shared Session pooler* (`postgres.<ref>@aws-…pooler.supabase.com:5432`,
+using the **database password**, not the service-role key). Use **Session mode (:5432)**, not
+Transaction (:6543): the KEDA Postgres scaler reuses prepared statements, which Transaction pooling
+rejects with `42P05` (*prepared statement already exists*), and that broke the dev scaler until we moved
+to :5432. Both ports are on the same shared pooler host (IPv4). **Verified: scales to 0 when idle** (GPU
+T4, so idle cost ≈ $0). If `pg-conn` is wrong or unset the scaler errors and KEDA holds the worker at its
+current replica count (functional, just not scaling down).
 
-> ⏱ **Window caveat (`15 minutes` on dev).** The annotate job only refreshes `updated_at` at the *start
-> of each pipeline step* (`_on_step`), not within a step, so a single long step (SpeciesNet over thousands
-> of images) could exceed the window with no heartbeat and let KEDA scale the worker to **0 mid-inference,
-> killing the job**. Dev's small test deployments stay well under 15 min. **Prod must keep a generous
-> window (≥ the reaper's 60 min) or add an intra-step heartbeat first** — see
-> [prod-worker-provisioning-runbook](prod-worker-provisioning-runbook.md).
+> ⏱ **Window and heartbeat.** Since 2026-07-10 the annotate job runs inside `job_heartbeat`
+> ([`jobs/store.py`](../../backend/app/jobs/store.py)), which refreshes `api_jobs.updated_at` every
+> 60 s. Before that a single long step (SpeciesNet over thousands of images) wrote nothing until it
+> ended, so a step longer than the window let KEDA scale the worker to **0 mid-inference, killing the
+> job**. The heartbeat needs the heavy step to run in `asyncio.to_thread`, as SpeciesNet and BioCLIP do;
+> a step that blocks the event loop silences it. The window is also how long a job row left at
+> `processing` after its worker stops keeps the T4 up. Prod keeps the
+> [runbook's](prod-worker-provisioning-runbook.md) 1 hour, the same as the 60-min stale-job reaper.
 
-> 🚨 **Stuck-GPU guard (added 2026-07-09).** An Azure Monitor alert **`ww-gpu-worker-stuck-dev`** fires
-> when the worker sits at **≥ 1 replica > 30 min** (action group **`ww-gpu-alerts`** → email). This is the
-> primary defence against an idle T4 burning money if the scaler or a job status ever wedges — it never
-> risks killing live work, so it's the guard to add *first* in any new environment.
+> 🚨 **Stuck-GPU guard.** One Azure Monitor metric alert per worker (named in the table above) fires
+> when `Replicas` averages **≥ 1 over 30 min**, checked every 5 min, severity 2, to action group
+> **`ww-gpu-alerts`** (email). This is the primary defence against an idle T4 burning money if the
+> scaler or a job status ever wedges. It never risks killing live work, so it's the guard to add
+> *first* in any new environment.
 
 > ⚠️ **Gotcha — never set the scale rule via `az containerapp update --scale-rule-metadata`.** The CLI
 > silently drops metadata values containing spaces/quotes (i.e. the SQL), leaving `query`/`targetQueryValue`
@@ -107,6 +120,36 @@ the same shared pooler host (IPv4). **Verified: scales to 0 when idle** (GPU T4,
 (→ `True`). Pipeline code is GPU-ready: BioCLIP/DINOv3 read `BIOCLIP_DEVICE`/`EMBEDDING_DEVICE`
 (`services/bioclip_service.py`, `services/dinov3.py`); SpeciesNet passes no device and auto-detects CUDA.
 The `ww-backend-worker:dev-latest` image already ships CUDA-enabled torch.
+
+### `wwuploadsae` lifecycle rule
+
+The export job writes each ZIP once and hands out a read-only link valid for 24 hours. A lifecycle
+rule deletes the ZIP 7 days after it is written. Azure runs the rule about once a day, so a ZIP can
+outlive 7 days by up to a day. Nothing in the code sweeps old exports.
+
+```json
+{
+  "rules": [
+    {
+      "enabled": true,
+      "name": "deleteCamtrapdpExports",
+      "type": "Lifecycle",
+      "definition": {
+        "filters": { "blobTypes": ["blockBlob"], "prefixMatch": ["camtrapdp-exports/"] },
+        "actions": { "baseBlob": { "delete": { "daysAfterModificationGreaterThan": 7 } } }
+      }
+    }
+  ]
+}
+```
+
+`management-policy create` replaces the account's whole policy. The account had none on
+2026-10-26; if `az storage account management-policy show --account-name wwuploadsae -g WW-AE`
+returns one, add this rule to its `rules` instead. With the JSON above saved as `lifecycle.json`:
+
+```bash
+az storage account management-policy create --account-name wwuploadsae -g WW-AE --policy @lifecycle.json
+```
 
 ### Cost review — 2026-07-28 (30 days, Jun 30 – Jul 29: **NZ$212.84**)
 
@@ -149,23 +192,23 @@ but it's a product call: it's what keeps the public demo button fast.
 ### How to keep Azure clean
 - **Audit:** `az resource list -o table` — every resource should be in `WW-AE` and map to a row above.
   Anything in another RG/region is sprawl.
-- **Cost:** check **Cost Management → Cost analysis** monthly. The **GPU worker** is now the main variable
-  cost — a T4 billed per-second **while running**. Keep it near $0 by confirming KEDA returns it to
-  **0 replicas when idle** (`az containerapp replica list -n ww-embedding-worker-dev -g WW-AE -o table`
-  → empty). A worker stuck at ≥1 replica is an idle T4 burning money — investigate the scaler.
+- **Cost:** check **Cost Management → Cost analysis** monthly. The **GPU workers** are now the main
+  variable cost, a T4 each, billed per second **while running**. Keep them near $0 by confirming KEDA
+  returns both to **0 replicas when idle** (`az containerapp replica list -n <worker> -g WW-AE -o table`
+  → empty). A worker stuck at ≥1 replica is an idle T4 burning money: investigate the scaler.
 - **Don't** create resources outside `WW-AE` / AU East without adding them here.
 
 ---
 
 ## Supabase
 
-**Two projects** (do not cross the wires — the dev backend, worker, and KEDA scaler must all point at the
-*same* project):
+**Two projects** (do not cross the wires: each environment's API, worker and KEDA scaler must all point
+at the *same* project):
 
 | Project ref | Environment | Used by |
 |-------------|-------------|---------|
-| `qegeovogqxiouqbrxmnh` | **dev** | `ww-backend-dev`, `ww-embedding-worker-dev`, the KEDA `pg-conn` scaler |
-| `nuhwmubvygxyddkycmpa` | **prod / staging** | `ww-backend` |
+| `qegeovogqxiouqbrxmnh` | **dev** | `ww-backend-dev`, `ww-embedding-worker-dev`, its KEDA `pg-conn` scaler |
+| `nuhwmubvygxyddkycmpa` | **prod / staging** | `ww-backend`, `ww-embedding-worker`, its KEDA `pg-conn` scaler |
 
 Each holds Postgres (+ RLS, the access model), Auth (GoTrue), and Storage (public `media-renditions`
 bucket). Schema is owned by [`ww-backend`](https://github.com/wildlifeai/wildlife-watcher-backend)
@@ -238,9 +281,10 @@ Run quarterly (or before a cost review):
 - [ ] `az resource list -o table` — **every** resource is in `WW-AE`; no other RGs/regions exist.
 - [ ] No new `DefaultResourceGroup-*` appeared.
 - [ ] Exactly one Log Analytics workspace.
-- [ ] Worker (`ww-embedding-worker-dev`) returns to **0 replicas when idle** (KEDA `pg-conn` working) —
-      else it's silently billing always-on.
-- [ ] Container Apps `min/max-replicas` match intent (API min-1; worker min-0 + KEDA).
+- [ ] Both workers (`ww-embedding-worker-dev`, `ww-embedding-worker`) return to **0 replicas when idle**
+      (KEDA `pg-conn` working), or they are silently billing always-on.
+- [ ] Container Apps `min/max-replicas` match intent (prod API min 1, dev API min 0, both set by
+      `deploy-backend.yml`; workers min 0 + KEDA).
 - [ ] ACR repo tags aren't accumulating unbounded (`az acr repository show-tags`).
 - [ ] Secrets are ACA secrets, not plaintext env (the legacy dev app stored Supabase/Azure/Google
       secrets as plaintext — the rebuilt apps use ACA secrets; rotate any exposed keys).
@@ -257,20 +301,21 @@ predicate, missing `GOOGLE_DRIVE_*` config, and missing `FF_MEDIA_REGISTRY_ENABL
 on: container-app **env vars** (names; values for `FF_*`/`*_ENABLED`), **secret names** (never
 values), **storage buckets**, **auth providers**, and — via a printed SQL query whose JSON outputs
 you feed back with `--sql-dev`/`--sql-prod` — **RLS policies, grants, function bodies (md5), and
-the realtime publication**. Requires a logged-in `az` CLI; exit code 1 on unexplained gaps.
+the realtime publication**. Requires a logged-in `az` CLI; exit code 1 on unexplained gaps. It
+compares the two APIs only, so worker env vars (where the AI flags must also be set) are not diffed.
 
 Rules of use:
 
 - **Run it before testing any feature on production**, after prod config changes, and as part of
   this checklist.
 - Intentional differences go in the `EXPECTED_*` allowlists **in the script, with the reason**
-  (e.g. `REDIS_URL` — prod runs jobs in-process). An allowlist entry is a documented decision,
-  not a mute button.
+  (e.g. the `analysis-images` bucket, legacy and prod-only). An allowlist entry is a documented
+  decision, not a mute button.
 - A gap means one of two actions: apply the config to prod, or add it to the allowlist with a
   reason. Leaving it in the report is the only wrong option.
 
 ## Naming conventions
 
-- Container apps: `ww-<role>[-dev]` (`ww-backend`, `ww-backend-dev`, `ww-embedding-worker-dev`, `ww-redis-dev`).
+- Container apps: `ww-<role>[-dev]` (`ww-backend`, `ww-backend-dev`, `ww-embedding-worker`, `ww-embedding-worker-dev`, `ww-redis`, `ww-redis-dev`).
 - ACR: `wwregistry` (`wwregistry.azurecr.io`); repos `ww-backend` (api) + `ww-backend-worker` (worker); tags `dev-latest` / `latest` / `<sha>` / `stable` (pinned rollback anchor — never purged; re-point on each blessed build).
 - Storage: `wwuploadsae`. One resource group (`WW-AE`), one region (**Australia East**) for everything.
