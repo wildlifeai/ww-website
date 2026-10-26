@@ -73,7 +73,8 @@ exposed at **`POST /api/inat/publish`**.
    person's, says `human` (`_photo_label`). Unprocessed media are dropped too.
 2. **Idempotency** — skip media already in `inat_observation_media`.
 3. **Burst consolidation** — cluster per deployment by temporal gap (`Δt < gap_seconds`, default 60 s);
-   each burst → **one iNat observation with all its photos**. Untimed images each stand alone.
+   each burst → **one iNat observation with all its photos**. Untimed images each stand alone. A
+   burst holding a photo the caller already published joins that photo's observation.
 4. **species_guess**: the most common scientific name across the burst's photos, each photo by its
    label from step 1, so a cluster confirmed as one species and then reassigned goes up as the new one.
 5. **Transactional upload** — `create_observation` (deployment lat/lon, earliest timestamp,
@@ -83,7 +84,16 @@ exposed at **`POST /api/inat/publish`**.
    Photo failures flip the row to `failed` with an `error_message`.
 
 Returns a summary: `observations_created`, `photos_uploaded`, `skipped_bycatch`,
-`skipped_already_published`, `errors`, and a per-observation list.
+`skipped_already_published`, `errors`, a per-observation list, and `remaining_media_ids`.
+
+6. **Rounds** (#123): a request starts no photo after `PUBLISH_BUDGET_SECONDS` (120 s; the Container
+   Apps ingress ends a request at about 240 s and one upload can take a minute) and hands back the
+   photos it did not reach, with the published photos of a burst it stopped in, so step 3 puts the
+   rest into the same observation. `useINat().publish` sends them again until none are left and
+   answers once (`lib/inatPublishRounds.ts`). Chosen over a job (`enqueue_job`): with `REDIS_URL`
+   set a job runs on the GPU worker, which would cold-start a T4 for uploads and need the
+   iNaturalist secrets there, and the jobs dock is built for uploads. A tab closed between rounds
+   leaves the rest unpublished; publishing the same selection again carries on.
 
 > **Privacy / by-catch:** a photo showing a person, or labelled anything but an animal, is never
 > uploaded; default geoprivacy is `obscured`.
@@ -165,8 +175,6 @@ Returns `checked`, `updated`, `research`, `disagreement`, `observations_written`
 
 - **Scheduled sync job** — currently manual (button) + endpoint; wire onto the job runner with an
   `updated_since` watermark for bandwidth efficiency.
-- **Async publish** — `/api/inat/publish` runs synchronously; for very large selections, move onto the
-  job runner with progress (like the upload dock).
 - **Taxon registration on sync** — `_write_consensus` resolves `taxon_id` from local `taxa` only; if
   absent it stores `scientific_name` with a null `taxon_id`. Could auto-register via
   `search_and_fetch_inat_taxon` (already exists) when the community taxon isn't in `taxa`.

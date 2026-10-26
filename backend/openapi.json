@@ -3784,7 +3784,7 @@
     },
     "/api/inat/publish": {
       "post": {
-        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (human/vehicle/blank), uploads\neach photo through the backend proxy (bypassing browser CORS), and records\nthe mapping in inat_observations / inat_observation_media for status tracking.\n\nOnly photos in projects the caller can change (project_member or above) are published: the\nothers are left out, and ``403`` when that is all of them.",
+        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (a photo whose label is not an\nanimal, or that shows a person), uploads each photo through the backend proxy\n(bypassing browser CORS), and records the mapping in inat_observations /\ninat_observation_media for status tracking.\n\nStarts no photo after about two minutes, inside the ingress timeout, and returns the photos\nit did not reach as ``remaining_media_ids``: send those again to carry on, the rest of a\nburst joining the observation it started (``useINat().publish`` does this).\n\nOnly photos in projects the caller can change (project_member or above) are published: the\nothers are left out, and ``403`` when that is all of them.",
         "operationId": "publish_to_inat_api_inat_publish_post",
         "parameters": [
           {

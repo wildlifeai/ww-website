@@ -39,6 +39,8 @@ export interface InatPublishAnswer {
   /** Encounters (or deployments without a location) that did not become an observation. */
   errors: number
   observations?: { uri: string | null; photo_errors?: number }[]
+  /** Photos the rounds did not reach (lib/inatPublishRounds.ts). */
+  remaining_media_ids?: string[]
 }
 
 const CONNECT_LINK: NoticeLink = { to: INAT_CONNECT_PATH, label: 'Connect it in Toolkit' }
@@ -63,15 +65,19 @@ export function inatBlocker(s: { connected: boolean | null; hasLocation?: boolea
   return null
 }
 
-/** The notice for the route's answer: ok only when observations were made and nothing failed. */
+/** The notice for the route's answer: ok only when photos went up and nothing failed or was left. */
 export function inatPublishNotice(r: InatPublishAnswer): CardNotice {
   const photoErrors = (r.observations ?? []).reduce((n, o) => n + (o.photo_errors ?? 0), 0)
-  const published = r.observations_created > 0
+  const left = r.remaining_media_ids?.length ?? 0
+  // A photo whose encounter is already on iNaturalist joins that observation instead of a new one.
+  const published = r.observations_created > 0 || r.photos_uploaded > 0
   const skipped = r.skipped_already_published + r.skipped_bycatch
   const lines = [
-    published
+    r.observations_created > 0
       ? `Published ${count(r.observations_created, 'observation')} with ${count(r.photos_uploaded, 'photo')} to iNaturalist.`
-      : 'Nothing published.',
+      : published
+        ? `Added ${count(r.photos_uploaded, 'photo')} to observations already on iNaturalist.`
+        : 'Nothing published.',
   ]
   if (skipped > 0) {
     const why = [
@@ -82,11 +88,12 @@ export function inatPublishNotice(r: InatPublishAnswer): CardNotice {
   }
   if (r.errors > 0) lines.push(`${count(r.errors, 'encounter')} failed.`)
   if (photoErrors > 0) lines.push(`${count(photoErrors, 'photo')} did not upload.`)
-  if (!published && skipped === 0 && r.errors === 0) lines.push('None of these photos were found.')
+  if (left > 0) lines.push(`${count(left, 'photo')} not reached: publish again to carry on.`)
+  if (!published && skipped === 0 && r.errors === 0 && left === 0) lines.push('None of these photos were found.')
 
   const uri = r.observations?.find(o => o.uri)?.uri
   return {
-    ok: published && r.errors === 0 && photoErrors === 0,
+    ok: published && r.errors === 0 && photoErrors === 0 && left === 0,
     text: lines.join(' '),
     link: published && uri ? { to: uri, label: 'View on iNaturalist', external: true } : undefined,
   }

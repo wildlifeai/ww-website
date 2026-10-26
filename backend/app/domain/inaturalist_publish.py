@@ -13,9 +13,10 @@ Pure orchestration over the lower-level helpers in ``domain/inaturalist.py``.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import Counter
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import structlog
 
@@ -98,25 +99,44 @@ def _best_species(burst: List[dict]) -> Optional[str]:
 
 # ── Orchestrator ─────────────────────────────────────────────────────
 
+# A request stops starting photos after this many seconds and hands the rest back
+# (``remaining_media_ids``) for the caller to send again. Container Apps ends a request at
+# about 240 s and one photo upload can take a minute, so this leaves room for the last one.
+PUBLISH_BUDGET_SECONDS = 120.0
+
+
+def _one(embed: Any) -> Optional[dict]:
+    """A to-one embed, which PostgREST may return as a one-row list."""
+    if isinstance(embed, list):
+        return embed[0] if embed else None
+    return embed if isinstance(embed, dict) else None
+
 
 async def publish_media_to_inat(
     user_id: str,
     media_ids: List[str],
     gap_seconds: int = 60,
     geoprivacy: str = "obscured",
+    budget_seconds: float = PUBLISH_BUDGET_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
 ) -> Dict[str, Any]:
     """Consolidate selected WW media into iNaturalist observations and upload them.
 
     - Filters out by-catch: a photo whose label is not an animal, or that shows a person.
     - Skips media already published (idempotent via inat_observation_media).
     - Clusters the rest per deployment into temporal bursts; each burst becomes
-      one iNat observation carrying all its photos.
+      one iNat observation carrying all its photos. A burst that holds a photo this
+      user already published joins that photo's observation instead of starting one.
     - Records the mapping in inat_observations + inat_observation_media.
+    - Starts no photo once ``budget_seconds`` have passed (after the first) and returns
+      the photos it did not reach as ``remaining_media_ids``, with the published photos
+      of a burst it stopped part way through, so that sending them again carries on.
     """
     token = await get_user_token(user_id)
     if not token:
         raise INatDomainError("Not connected to iNaturalist")
 
+    deadline = clock() + budget_seconds
     svc = create_service_client()
 
     def _load():
@@ -133,11 +153,23 @@ async def publish_media_to_inat(
         deps = (
             rows_of(svc.table("deployments").select("id, name, location_name, latitude, longitude").in_("id", dep_ids).execute()) if dep_ids else []
         )
-        published = rows_of(svc.table("inat_observation_media").select("media_id").in_("media_id", media_ids).execute())
-        return media, obs, deps, {p["media_id"] for p in published}
+        links = rows_of(
+            svc.table("inat_observation_media")
+            .select("media_id, inat_observation_id, inat_observations(user_id, inat_observation_id, inat_uri, species_guess)")
+            .in_("media_id", media_ids)
+            .execute()
+        )
+        return media, obs, deps, links
 
-    media, observations, deployments, already = await asyncio.to_thread(_load)
+    media, observations, deployments, links = await asyncio.to_thread(_load)
     dep_by_id = {d["id"]: d for d in deployments}
+    already = {link["media_id"] for link in links}
+    # This user's published photos: the iNat observation each one's burst-mates join.
+    anchor_of: Dict[str, dict] = {}
+    for link in links:
+        io = _one(link.get("inat_observations"))
+        if io and io.get("user_id") == user_id and io.get("inat_observation_id") is not None:
+            anchor_of.setdefault(link["media_id"], {**io, "row_id": link["inat_observation_id"]})
 
     obs_by_media: Dict[str, List[dict]] = {}
     for o in observations:
@@ -150,13 +182,18 @@ async def publish_media_to_inat(
         "skipped_already_published": 0,
         "errors": 0,
         "observations": [],
+        "remaining_media_ids": [],
     }
 
     # By-catch filter: keep only media whose label (see _photo_label) is an animal.
     keep: List[dict] = []
+    anchors: List[dict] = []
     for m in media:
         if m["id"] in already:
             result["skipped_already_published"] += 1
+            if m["id"] in anchor_of:
+                m["_anchor"] = anchor_of[m["id"]]
+                anchors.append(m)
             continue
         label = _photo_label(obs_by_media.get(m["id"], []))
         if label is None:
@@ -168,28 +205,44 @@ async def publish_media_to_inat(
     by_dep: Dict[str, List[dict]] = {}
     for m in keep:
         by_dep.setdefault(m["deployment_id"], []).append(m)
+    for m in anchors:
+        if m["deployment_id"] in by_dep:
+            by_dep[m["deployment_id"]].append(m)
 
+    work: List[tuple] = []
     for dep_id, dep_media in by_dep.items():
         dep = dep_by_id.get(dep_id, {})
         if dep.get("latitude") is None or dep.get("longitude") is None:
             logger.warning("inat_publish_no_coords", deployment=dep_id)
             result["errors"] += 1
             continue
-        for burst in _cluster_bursts(dep_media, gap_seconds):
-            await _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result)
+        work.extend((dep, burst) for burst in _cluster_bursts(dep_media, gap_seconds) if any("_label" in m for m in burst))
+
+    def time_up() -> bool:
+        return clock() >= deadline
+
+    for i, (dep, burst) in enumerate(work):
+        if i > 0 and time_up():
+            result["remaining_media_ids"] = [m["id"] for _, b in work[i:] for m in b]
+            break
+        handed_back = await _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result, time_up)
+        if handed_back:
+            result["remaining_media_ids"] = handed_back + [m["id"] for _, b in work[i + 1 :] for m in b]
+            break
 
     logger.info(
         "inat_publish_complete",
         user_id=user_id,
-        **{k: v for k, v in result.items() if k != "observations"},
+        remaining=len(result["remaining_media_ids"]),
+        **{k: v for k, v in result.items() if k not in ("observations", "remaining_media_ids")},
     )
     return result
 
 
-async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> None:
-    """Create one iNat observation for a burst and upload its photos."""
-    species = _best_species(burst)
-    times = [t for m in burst if (t := _parse_ts(m.get("timestamp"))) is not None]
+async def _create_inat_observation(svc, user_id, dep, photos, geoprivacy, result) -> Optional[Dict[str, Any]]:
+    """Create the iNat observation for a burst and record it; None (an error counted) on failure."""
+    species = _best_species(photos)
+    times = [t for m in photos if (t := _parse_ts(m.get("timestamp"))) is not None]
     observed_on = min(times).date().isoformat() if times else ""
     site = dep.get("location_name") or dep.get("name") or "a Wildlife Watcher deployment"
 
@@ -206,16 +259,16 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> No
     except INatDomainError as exc:
         logger.error("inat_publish_create_failed", deployment=dep.get("id"), error=str(exc))
         result["errors"] += 1
-        return
+        return None
 
     inat_id = obs.get("id")
     if inat_id is None:
         # Without an id there is nothing to attach photos to or to sync later.
         logger.error("inat_publish_create_no_id", deployment=dep.get("id"))
         result["errors"] += 1
-        return
+        return None
     inat_uuid = obs.get("uuid")
-    inat_uri = obs.get("uri") or (f"https://www.inaturalist.org/observations/{inat_id}" if inat_id else None)
+    inat_uri = obs.get("uri") or f"https://www.inaturalist.org/observations/{inat_id}"
 
     def _insert_obs():
         resp = (
@@ -244,15 +297,38 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> No
     except Exception as exc:  # noqa: BLE001 — per-burst isolation
         logger.error("inat_publish_db_insert_failed", deployment=dep.get("id"), inat_observation_id=inat_id, error=str(exc))
         result["errors"] += 1
-        return
+        return None
     if not row:
         logger.error("inat_publish_db_insert_empty", deployment=dep.get("id"), inat_observation_id=inat_id)
         result["errors"] += 1
-        return
+        return None
     result["observations_created"] += 1
+    return {"row_id": row["id"], "inat_observation_id": inat_id, "inat_uri": inat_uri, "species_guess": species}
 
+
+async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result, time_up: Callable[[], bool] = lambda: False) -> List[str]:
+    """Upload a burst's photos to one iNat observation: the one a published photo of the burst
+    is in (``_anchor``), else a new one.
+
+    Stops before a photo once ``time_up()`` (never before the first) and returns the burst's
+    photos to send again: the ones on iNaturalist, so the rest join their observation, and the
+    ones not tried. A failed photo is not sent again. Returns [] when it got through.
+    """
+    photos = [m for m in burst if "_label" in m]
+    target = next((m["_anchor"] for m in burst if "_anchor" in m), None)
+    if target is None:
+        target = await _create_inat_observation(svc, user_id, dep, photos, geoprivacy, result)
+        if target is None:
+            return []
+    row_id, inat_id = target["row_id"], target["inat_observation_id"]
+
+    on_inat = [m["id"] for m in burst if "_anchor" in m]
     photo_errors = 0
-    for m in burst:
+    tried = 0
+    for m in photos:
+        if tried and time_up():
+            break
+        tried += 1
         try:
             resolved = await resolve_media(m["file_path"], size="full")
             if not resolved:
@@ -269,7 +345,7 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> No
             def _link(photo=photo, m=m):
                 svc.table("inat_observation_media").insert(
                     {
-                        "inat_observation_id": row["id"],
+                        "inat_observation_id": row_id,
                         "media_id": m["id"],
                         "inat_photo_id": photo.get("id") if isinstance(photo, dict) else None,
                         "original_filename": m["id"],
@@ -277,6 +353,7 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> No
                 ).execute()
 
             await asyncio.to_thread(_link)
+            on_inat.append(m["id"])
             result["photos_uploaded"] += 1
         except Exception as exc:  # noqa: BLE001 — per-photo isolation
             logger.warning("inat_publish_photo_failed", media_id=m.get("id"), error=str(exc))
@@ -290,16 +367,17 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result) -> No
                     "sync_status": "failed",
                     "error_message": f"{photo_errors} photo upload(s) failed",
                 }
-            ).eq("id", row["id"]).execute()
+            ).eq("id", row_id).execute()
 
         await asyncio.to_thread(_mark)
 
     result["observations"].append(
         {
             "inat_observation_id": inat_id,
-            "uri": inat_uri,
-            "species_guess": species,
-            "media_count": len(burst),
+            "uri": target.get("inat_uri"),
+            "species_guess": target.get("species_guess"),
+            "media_count": tried,
             "photo_errors": photo_errors,
         }
     )
+    return on_inat + [m["id"] for m in photos[tried:]] if tried < len(photos) else []

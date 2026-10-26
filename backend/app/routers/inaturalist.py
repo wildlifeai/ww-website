@@ -290,9 +290,14 @@ async def publish_to_inat(
     """Publish selected Wildlife Watcher media to the user's iNaturalist account.
 
     Consolidates the selection into temporal-burst observations (one iNat
-    observation per encounter), drops by-catch (human/vehicle/blank), uploads
-    each photo through the backend proxy (bypassing browser CORS), and records
-    the mapping in inat_observations / inat_observation_media for status tracking.
+    observation per encounter), drops by-catch (a photo whose label is not an
+    animal, or that shows a person), uploads each photo through the backend proxy
+    (bypassing browser CORS), and records the mapping in inat_observations /
+    inat_observation_media for status tracking.
+
+    Starts no photo after about two minutes, inside the ingress timeout, and returns the photos
+    it did not reach as ``remaining_media_ids``: send those again to carry on, the rest of a
+    burst joining the observation it started (``useINat().publish`` does this).
 
     Only photos in projects the caller can change (project_member or above) are published: the
     others are left out, and ``403`` when that is all of them.
