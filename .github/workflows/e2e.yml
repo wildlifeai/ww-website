@@ -1,19 +1,23 @@
 name: E2E (Playwright)
 
-# Browser checks against a deployed frontend, from e2e/ (see e2e/README.md).
+# Browser checks against a deployed frontend, from e2e/ (see e2e/README.md,
+# "In CI", for what starts it and why).
 #
-# Trigger: Cloudflare Pages posts a GitHub deployment for every branch it
-# builds ("Preview" for a branch, "Production" for main). When that deployment
-# succeeds, this runs the smoke and demo specs against its URL, so a pull
-# request gets its own preview exercised with the dev API behind it. Nothing
-# in this workflow builds the frontend: the Pages build is the one users get.
-# Production deployments are skipped: the seeded account lives on dev only.
+# Cloudflare Pages builds: e2e-preview.yml starts this workflow by hand on the
+# branch Cloudflare built, with the URL of that build, so the smoke, a11y and
+# Lighthouse jobs test it with the same commit's specs and report on that
+# commit. Cloudflare builds dev and main only (main is production and is not
+# started), so today that means each push to dev. Cloudflare creates no GitHub
+# deployment, so there is no deployment_status trigger here. Nothing in this
+# workflow builds the frontend: the Pages build is the one users get.
 #
-# A pull request that changes e2e/ or this file runs the smoke against the
-# dev preview (the merged frontend), since the specs themselves are what
-# changed. By hand: `workflow_dispatch` with a base URL (default: the dev
-# preview) and a suite. `full` adds the upload and LoRaWAN specs, which write
-# to the dev database and storage: never point it at production.
+# A pull request that changes e2e/ or this file runs the smoke, a11y and
+# Lighthouse jobs against the dev preview (the merged frontend), since the
+# specs themselves are what changed. No other pull request runs this workflow;
+# E2E Full Stack builds a pull request's frontend on the runner instead.
+# By hand: `workflow_dispatch` with a base URL (default: the dev preview) and a
+# suite. `full` adds the upload and LoRaWAN specs, which write to the dev
+# database and storage: never point it at production.
 #
 # The full suite also runs on its own (#217) against the dev preview and the
 # dev API: after each successful push deploy of the dev backend
@@ -30,7 +34,6 @@ name: E2E (Playwright)
 # e2e-full-stack.yml runs the same two specs with that backend on the runner.
 
 on:
-  deployment_status:
   workflow_run:
     workflows: ['Deploy Backend to Azure Container App']
     types: [completed]
@@ -61,19 +64,19 @@ on:
 # A full run gets a group of its own here, so a later smoke on the same ref
 # cannot cancel it half-way; the smoke job's `e2e-full` group queues it instead.
 concurrency:
-  group: e2e-${{ github.event.deployment.sha || ((inputs.suite == 'full' || github.event_name == 'schedule' || github.event_name == 'workflow_run') && format('full-{0}', github.run_id)) || github.ref }}
+  group: e2e-${{ ((inputs.suite == 'full' || github.event_name == 'schedule' || github.event_name == 'workflow_run') && format('full-{0}', github.run_id)) || github.ref }}
   cancel-in-progress: true
 
 env:
-  E2E_BASE_URL: ${{ inputs.base_url || github.event.deployment_status.environment_url || 'https://dev.ww-website.pages.dev' }}
+  E2E_BASE_URL: ${{ inputs.base_url || 'https://dev.ww-website.pages.dev' }}
   E2E_API_URL: ${{ inputs.api_url || vars.E2E_API_URL || 'https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io' }}
 
 jobs:
   smoke:
     name: ${{ (inputs.suite == 'full' || github.event_name == 'schedule' || github.event_name == 'workflow_run') && 'E2E Full' || 'E2E Smoke' }}
     if: >-
-      (github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production'))
-      && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'))
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     # The seeded account's password and the dev service-role key live here
     environment: dev
@@ -90,7 +93,7 @@ jobs:
       # a post-deploy run checks out the commit that was deployed.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.deployment.sha || github.event.workflow_run.head_sha || (github.event_name == 'schedule' && 'dev') || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha || (github.event_name == 'schedule' && 'dev') || github.sha }}
 
       - uses: actions/setup-node@v7
         with:
@@ -122,7 +125,7 @@ jobs:
         run: |
           echo "frontend: $E2E_BASE_URL"
           echo "api:      $E2E_API_URL"
-          test -n "$E2E_BASE_URL" || { echo "::error::no frontend URL: the deployment carried no environment_url"; exit 1; }
+          test -n "$E2E_BASE_URL" || { echo "::error::no frontend URL"; exit 1; }
 
       # What the cleanup keys on: the tag the LoRaWAN rows carry, and the time
       # after which the upload's media rows count as this run's.
@@ -188,8 +191,8 @@ jobs:
       # Except on a Dependabot pull request. Its run sees only Dependabot
       # secrets, and handing it the seed password would hand it to the very
       # package versions the PR is bumping. The sign-in check is skipped there
-      # on purpose, and still runs on dev: the preview deployment that follows
-      # the merge triggers this workflow as Cloudflare, with the secret.
+      # on purpose, and still runs on dev: Cloudflare's build of the merge
+      # starts this workflow through e2e-preview.yml, with the secret.
       - name: Fail if the account is not configured
         if: always()
         env:
@@ -221,7 +224,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-smoke-${{ github.event.deployment.sha || github.sha }}
+          name: e2e-smoke-${{ github.sha }}
           path: |
             e2e/results.xml
             e2e/test-results/
@@ -231,15 +234,11 @@ jobs:
 
   a11y:
     name: A11y of public pages
-    if: >-
-      github.event_name != 'schedule' && github.event_name != 'workflow_run'
-      && (github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production'))
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.deployment.sha || github.sha }}
 
       - uses: actions/setup-node@v7
         with:
@@ -273,7 +272,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: e2e-a11y-${{ github.event.deployment.sha || github.sha }}
+          name: e2e-a11y-${{ github.sha }}
           path: |
             e2e/results.xml
             e2e/playwright-report/
@@ -287,15 +286,11 @@ jobs:
   # the job, and the HTML reports are in the lighthouse-<sha> artifact.
   lighthouse:
     name: Lighthouse of public pages
-    if: >-
-      github.event_name != 'schedule' && github.event_name != 'workflow_run'
-      && (github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment != 'Production'))
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_run'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.deployment.sha || github.sha }}
 
       - name: Lighthouse CI
         uses: treosh/lighthouse-ci-action@v12
@@ -308,5 +303,5 @@ jobs:
             ${{ env.E2E_BASE_URL }}/resources
           configPath: e2e/lighthouserc.json
           uploadArtifacts: true
-          artifactName: lighthouse-${{ github.event.deployment.sha || github.sha }}
+          artifactName: lighthouse-${{ github.sha }}
           temporaryPublicStorage: false
