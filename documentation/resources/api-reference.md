@@ -76,6 +76,7 @@ On error:
 - [Deployments](#deployments)
 - [CamtrapDP Import](#camtrapdp-import)
 - [CamtrapDP Export](#camtrapdp-export)
+- [Reports](#reports)
 - [Wildlife Brain — Embeddings & Clustering](#wildlife-brain--embeddings--clustering)
 - [Conservation Intelligence](#conservation-intelligence)
 - [QA](#qa)
@@ -126,12 +127,13 @@ project and organisation.
 
 Prefix `/api/projects`. JWT required. **Reads go direct to Supabase** under RLS
 (`supabase.from('projects')`) — there is no `GET /api/projects`; this router covers creation and
-the soft delete and its Undo.
+the soft delete and its Undo, and the link to a GBIF dataset.
 
 | Method · Path | Auth | Description |
 |---|---|---|
 | `POST /api/projects` | JWT · active `organisation_member` or `organisation_manager` | Create a project in the caller's organisation: body `{ name, description? }`. `403` without such a role |
 | `DELETE /api/projects/{project_id}` | JWT · `project_admin` or `ww_admin` | Soft-delete, cascading to deployments → media → observations under one `deleted_at`. The database decides and cascades in one transaction: `soft_delete_project` runs as the caller and allows a `project_admin` of the project or `ww_admin`. Anyone else who can see the project, an organisation manager included, gets `403`; a project the caller cannot see is `404`. Returns the shared `deleted_at` so the client can offer Undo |
+| `PUT /api/projects/{project_id}/gbif-dataset` | JWT · `project_admin` or `ww_admin` | Link the project to its GBIF dataset (#373), body `{ dataset }`: the dataset key or its gbif.org link, `null` or blank to clear. The key is checked with GBIF first: `422` when it is not a key or GBIF has no such dataset, `503` when GBIF does not answer. The update runs as the caller under `projects_update_policy`: `403` for anyone else who can see the project, `404` for one they cannot. Not the demo. Returns `{ id, gbif_dataset_key, dataset: { title, doi, ... } }`. Behind `FF_GBF_REPORT_ENABLED` (`FEATURE_DISABLED`) |
 | `POST /api/projects/{project_id}/restore` | JWT · `project_admin` or `ww_admin` | Undo that delete, body `{ deleted_at }` (with a time zone offset, `422` otherwise). `restore_project` runs as the caller under the same rule and clears exactly that `deleted_at` on the project and the rows deleted with it. Returns `{ id, restored }`, `restored` false when nothing was deleted at that time; `403` for anyone else, `404` for an unknown project, `409` with nothing restored when a camera in it has since got another open deployment (one per camera, ww-backend #320), naming the camera |
 
 ---
@@ -316,6 +318,17 @@ and the Download CamtrapDP buttons then fall back to the Edge Function's metadat
 | Method · Path | Description |
 |---|---|
 | `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_viewer` check decides (viewers and organisation managers export too, ww-backend #331); `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from Drive with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`) as `<job_id>.zip`, `result_url` is a read-only link valid for 24 hours that needs no sign-in, and the storage account's lifecycle rule deletes the ZIP 7 days after it is written. Without `AZURE_STORAGE_CONNECTION_STRING` the route answers `FEATURE_DISABLED`, as with the flag off, and the website falls back to the metadata-only package. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
+
+---
+
+## Reports
+
+Prefix `/api/reports`. JWT required, the demo account included: it only reads. Gated by
+`FF_GBF_REPORT_ENABLED`, off by default (`FEATURE_DISABLED`).
+
+| Method · Path | Description |
+|---|---|
+| `GET /api/reports/gbf?project_ids=<id>,<id>&from=<date>&to=<date>` | The GBF contribution report (#371): what the projects contribute to targets 6, 4, 20 and 22 of the Global Biodiversity Framework over UTC days `from` to `to`, both included. Needs read access to every project, `404` otherwise and for a deleted one; `422` for a malformed id or `from` after `to`. Returns `{ method_version, period: { from, to }, projects: [{ id, name }], camera_nights_by_month: [{ month, camera_nights }], target_6, target_4, target_20, target_21, target_22 }`. `target_6` (invasive species) and `target_4` (IUCN Vulnerable or worse) are each `{ sites_monitored, species_recorded, species }`, every species `{ taxon_id, scientific_name, common_name, conservation_status, invasive, detections, rate, sites_with, monthly: [{ month, detections, rate }], first_detections: [{ deployment_id, deployment_name, date }] }`, highest rate first; a species can be in both. `target_20` is `{ cameras, sites, camera_nights, photos, photos_with_ai, photos_reviewed }` and `target_22` is `{ reviewers }`, a count. `target_21` is `{ reviewed_detections, datasets }`, a dataset per project `{ project_id, project_name, dataset_key, status, title, doi, published_records, last_published, reviewed_detections }` with `status` `published`, `not_published` (no key), `not_found` or `unavailable`: GBIF's answers are cached for a day and a GBIF failure never fails the report (#373). The definitions (photo verdict, detections by the 30-minute rule, camera-nights, rate per 100 camera-nights, sites) are in `domain/gbf_report.py`. Rate limit 10/minute |
 
 ---
 

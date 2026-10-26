@@ -914,6 +914,24 @@
         "title": "FillTimezonesRequest",
         "type": "object"
       },
+      "GbifDatasetRequest": {
+        "properties": {
+          "dataset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The GBIF dataset key or its gbif.org link; empty or null clears it",
+            "title": "Dataset"
+          }
+        },
+        "title": "GbifDatasetRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -5499,6 +5517,66 @@
         ]
       }
     },
+    "/api/projects/{project_id}/gbif-dataset": {
+      "put": {
+        "description": "Link the project to the GBIF dataset it publishes to, or clear the link (#373).\n\nThe key is checked with GBIF before it is saved. The save runs as the caller, so\n``projects_update_policy`` decides: a ``project_admin`` of the project or ``ww_admin``. Anyone\nelse who can see the project gets ``403``, a project they cannot see ``404``. Behind\n``FF_GBF_REPORT_ENABLED``, with the report it feeds.",
+        "operationId": "set_gbif_dataset_api_projects__project_id__gbif_dataset_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GbifDatasetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Gbif Dataset",
+        "tags": [
+          "projects"
+        ]
+      }
+    },
     "/api/projects/{project_id}/restore": {
       "post": {
         "description": "Undo a project delete: clears ``deleted_at`` (equal to the given timestamp) on the project\nand the deployments, media and observations deleted with it.\n\nThe database decides: ``restore_project`` runs as the caller under the delete rule, a\n``project_admin`` or ``ww_admin``. ``403`` for anyone else, ``404`` for an unknown project.\n``restored`` is false when nothing was deleted at that timestamp. ``409``, with nothing\nrestored, when an open deployment's camera has got another open deployment since the delete\n(one per camera, ww-backend #320).",
@@ -5560,6 +5638,82 @@
         "summary": "Restore Project Endpoint",
         "tags": [
           "projects"
+        ]
+      }
+    },
+    "/api/reports/gbf": {
+      "get": {
+        "description": "The GBF contribution report for the projects over the period. It only reads, so the demo\naccount may call it; the caller needs read access to every project (``404`` otherwise).",
+        "operationId": "get_gbf_report_api_reports_gbf_get",
+        "parameters": [
+          {
+            "description": "Comma-separated project ids",
+            "in": "query",
+            "name": "project_ids",
+            "required": true,
+            "schema": {
+              "description": "Comma-separated project ids",
+              "title": "Project Ids",
+              "type": "string"
+            }
+          },
+          {
+            "description": "First day of the period (UTC)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "First day of the period (UTC)",
+              "format": "date",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period (UTC), included",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "Last day of the period (UTC), included",
+              "format": "date",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Gbf Report",
+        "tags": [
+          "reports"
         ]
       }
     },

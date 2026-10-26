@@ -26,7 +26,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 COLUMNS = {
-    "projects": {"id", "name", "organisation_id", "deleted_at", "created_at"},
+    "projects": {"id", "name", "organisation_id", "gbif_dataset_key", "deleted_at", "created_at"},
     "deployments": {
         "id",
         "name",
@@ -36,6 +36,7 @@ COLUMNS = {
         "deployment_status_id",
         "location_name",
         "deployment_start",
+        "deployment_end",
         "deleted_at",
         "created_at",
     },
@@ -59,6 +60,8 @@ COLUMNS = {
         "review_status",
         "source_type",
         "ai_origin",
+        "reviewer_id",
+        "annotator_id",
         "deleted_at",
         "created_at",
         "observation_level",
@@ -85,6 +88,7 @@ COLUMNS = {
         "confirmed_at",
         "created_at",
     },
+    "taxa": {"id", "scientific_name", "common_name", "conservation_status", "invasive_status", "created_at"},
     "lorawan_messages": {"id", "device_eui", "device_id", "deployment_id", "raw_payload", "received_at"},
     "lorawan_parsed_messages": {"id", "lorawan_message_id", "device_id", "battery_level", "sd_card_used_capacity", "model_output"},
     "api_keys": {"id", "organisation_id", "name", "key_hash", "key_prefix", "scopes", "expires_at", "last_used_at", "revoked_at", "created_at"},
