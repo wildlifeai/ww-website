@@ -51,7 +51,7 @@ SD card) hide for a user who can write to no project (`hooks/useWritableProjects
 
 | Tab | Route | Page |
 |-----|-------|------|
-| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (SD-card prep, motion live view, model upload, iNaturalist, CamtrapDP export; each card by role) |
+| 🧰 Toolkit | `/toolkit` | `ToolkitPage` (motion live view, model upload, iNaturalist, CamtrapDP export, SD-card prep; each card by role) |
 | 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with LoRaWAN data) |
 | 🏷️ Annotations | `/annotations` | `AnnotationsPage` → `MediaBrowser` (+ full-screen modal) |
 | 📈 Insights | `/insights` | `InsightsPage` (projects, deployments, charts, maps) |
@@ -76,7 +76,7 @@ password) or uses Forgot password.
 
 | Route | Page | Purpose |
 |-------|------|---------|
-| `/toolkit` | `ToolkitPage` | SD-card prep, motion live view, privileged model upload, iNaturalist, CamtrapDP export |
+| `/toolkit` | `ToolkitPage` | Motion live view, privileged model upload, iNaturalist, CamtrapDP export, SD-card prep |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
 | `/field` | `FieldPage` | Realtime: active deployments with their newest LoRaWAN check-in from the `deployment_latest_lorawan` view, read-only (`lib/realtimeReads.ts`) |
