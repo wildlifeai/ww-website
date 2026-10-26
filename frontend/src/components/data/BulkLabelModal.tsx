@@ -2,8 +2,9 @@
  * BulkLabelModal: give every selected photo one label.
  *
  * Pick a species (search; Enter takes the first suggestion) or "Nothing (blank)". The write lives
- * in MediaBrowser, which has the media and deployment context; this component only collects the
- * choice. AI labels stay as they are (UI audit decision 2, lib/humanVerdict.ts).
+ * in the review grid (hooks/useGridBulkActions), which has the media and deployment context; this
+ * component only collects the choice. AI labels stay as they are (UI audit decision 2,
+ * lib/humanVerdict.ts).
  */
 import { Ban } from 'lucide-react'
 import { Modal } from '../ui/Modal'

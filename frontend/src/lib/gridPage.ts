@@ -30,3 +30,10 @@ export function pageWindow(page: number, shown: number, total: number | null, pa
     hasNext: known === null ? shown >= pageSize : to < known,
   }
 }
+
+/** The pager's words: "1–100 of 1,000" across pages, "N photos" on a single page, null before the count. */
+export function pagerText(win: PageWindow): string | null {
+  if (win.total === null) return null
+  if (win.hasPrev || win.hasNext) return `${win.from.toLocaleString()}–${win.to.toLocaleString()} of ${win.total.toLocaleString()}`
+  return `${win.total.toLocaleString()} photo${win.total !== 1 ? 's' : ''}`
+}

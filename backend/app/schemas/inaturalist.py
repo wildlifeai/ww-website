@@ -81,3 +81,5 @@ class INatPublishResult(BaseModel):
     skipped_already_published: int = 0
     errors: int = 0
     observations: List[Dict[str, Any]] = Field(default_factory=list)
+    # The photos the request did not reach in its time; send them again to carry on.
+    remaining_media_ids: List[str] = Field(default_factory=list)

@@ -69,7 +69,7 @@ def stack(monkeypatch):
         project_id = svc.table("projects").insert({"name": f"Soft delete {run}", "organisation_id": org_id}).execute().data[0]["id"]
         # The second camera is for the one-open-deployment-per-camera case.
         for n, name in enumerate((f"Cam {run}", f"Gate cam {run}")):
-            row = {"name": name, "bluetooth_id": f"bt-sd-{run}-{n}", "organisation_id": org_id}
+            row = {"name": name, "bluetooth_id": f"bt-sd-{run}-{n}"}
             device_ids.append(svc.table("devices").insert(row).execute().data[0]["id"])
         for who, role in (("admin", "project_admin"), ("member", "project_member"), ("outsider", None)):
             email = f"softdelete-{who}-{run}@example.test"

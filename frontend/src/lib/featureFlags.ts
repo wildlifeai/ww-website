@@ -6,7 +6,7 @@
 // apiClient throws as an ApiError. There is no endpoint that lists the flags, so the hook asks
 // one cheap route per feature and reads the answer.
 
-export type Feature = 'intelligence' | 'brain' | 'activeLearning'
+export type Feature = 'intelligence' | 'brain' | 'activeLearning' | 'gbfReport'
 
 /**
  * The route each feature is probed with. The flags are global to the backend; the id only has
@@ -19,6 +19,8 @@ export const FEATURE_PROBES: Record<Feature, (scopeId: string) => string> = {
   brain: id => `/api/brain/embedding-runs/${id}`,
   /** FF_ACTIVE_LEARNING_ENABLED: the active-learning score and the QA agreement. Takes a deployment id. */
   activeLearning: id => `/api/brain/review-queue/${id}?limit=1`,
+  /** FF_GBF_REPORT_ENABLED: the GBF report card. Takes a project id; one day in 2000 reads next to nothing. */
+  gbfReport: id => `/api/reports/gbf?project_ids=${id}&from=2000-01-01&to=2000-01-01`,
 }
 
 /** True for the error a route answers while its feature flag is off. */

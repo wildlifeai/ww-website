@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Ordering and paging for Cluster Review (UI audit 03 #16). The API returns every cluster of the
-// latest run in one answer, so the page orders and pages them here.
+// latest run in one answer, so the page orders and pages them here. Also the review batching and
+// the confirm toast's words.
+import { chunk } from './readAllPages'
 
 export const CLUSTERS_PER_PAGE = 10
 /** Photos shown at a time in an expanded cluster; "Show more" adds the next step. */
@@ -51,4 +53,41 @@ export function pageOf<T>(items: readonly T[], page: number, size: number): Page
   const p = Math.min(Math.max(0, page), pages - 1)
   const slice = items.slice(p * size, p * size + size)
   return { items: slice, page: p, pages, first: slice.length ? p * size + 1 : 0, last: p * size + slice.length }
+}
+
+/** Photos per `POST /api/brain/review/batch` request, the route's cap. */
+export const REVIEW_BATCH_MAX = 500
+
+/** What `POST /api/brain/review/batch` answers. */
+export interface ReviewBatchResult {
+  /** Photos given a human row. */
+  created: number
+  /** Photos whose human row now carries the decision. */
+  updated: number
+  observation_ids: string[]
+  skipped: { media_id: string; reason: string }[]
+}
+
+/**
+ * Sends one review decision for `mediaIds` in requests of at most REVIEW_BATCH_MAX photos (one
+ * request for a selection that size or smaller) and adds up the answers. The requests write
+ * different photos, so they go together; a refused one rejects the whole call.
+ */
+export async function reviewInBatches(
+  mediaIds: string[],
+  send: (ids: string[]) => Promise<ReviewBatchResult>,
+): Promise<{ saved: number; skipped: number }> {
+  const answers = await Promise.all(chunk(mediaIds, REVIEW_BATCH_MAX).map(ids => send(ids)))
+  return {
+    saved: answers.reduce((n, r) => n + r.created + r.updated, 0),
+    skipped: answers.reduce((n, r) => n + r.skipped.length, 0),
+  }
+}
+
+const photoCount = (n: number) => `${n} photo${n === 1 ? '' : 's'}`
+
+/** The confirm toast: what was labelled, and how many photos a person had labelled were skipped. */
+export function confirmedText(created: number, skipped: number, species: string): string {
+  const held = skipped > 0 ? `; skipped ${photoCount(skipped)} a person had labelled` : ''
+  return `Confirmed ${photoCount(created)} as ${species}${held}`
 }

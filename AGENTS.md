@@ -64,8 +64,9 @@ because their packages peer-depend on each other's version and cannot install on
 as the `frontend/.husky/commit-msg` hook does locally; the rules and what trips them are in
 [`references/documentation.md`](.agents/skills/references/documentation.md#commit-messages).
 
-The browser flows in `e2e/` run in CI against every Cloudflare Pages preview deployment
-(`.github/workflows/e2e.yml`), the smoke and demo also run against a whole stack started on
+The browser flows in `e2e/` run in CI against each Cloudflare Pages build of `dev`
+(`.github/workflows/e2e.yml`, started by `e2e-preview.yml`; Cloudflare builds no pull request
+branch), the smoke and demo also run against a whole stack started on
 the runner from the pull request's own backend and frontend (`e2e-full-stack.yml`), and the
 full suite, which writes to dev and cleans up after itself, runs nightly and after each dev
 backend deploy; what they prove and how to read a failure is in

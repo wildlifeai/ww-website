@@ -13,6 +13,16 @@ export function InaturalistPanel({ inat }: { inat: ReturnType<typeof useINat> })
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
+  // The server refuses to connect without its iNaturalist settings; say why instead of nothing.
+  const connect = async () => {
+    setMsg(null)
+    try {
+      await inat.connect()
+    } catch (e) {
+      setMsg((e as Error)?.message ?? 'Could not start the iNaturalist sign-in.')
+    }
+  }
+
   const syncAll = async () => {
     if (busy) return
     setBusy(true)
@@ -54,7 +64,7 @@ export function InaturalistPanel({ inat }: { inat: ReturnType<typeof useINat> })
             </button>
           </>
         ) : (
-          <button className="btn" onClick={() => inat.connect()} style={{ fontSize: '0.82rem' }}>
+          <button className="btn" onClick={connect} style={{ fontSize: '0.82rem' }}>
             Connect iNaturalist
           </button>
         )}

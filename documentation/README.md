@@ -24,7 +24,7 @@ active engineering hand-offs; **archive** is frozen history. Start with onboardi
 | [demo-account](resources/demo-account.md) | Read-only "Try the demo" account: access, 3-layer read-only enforcement, API usage, per-environment seeding |
 | [deployment-guide](resources/deployment-guide.md) | Dev/prod environments, Azure + Cloudflare, CI/CD, vector store (pgvector in Supabase), security checklist |
 | [cloud-infrastructure](resources/cloud-infrastructure.md) | **Inventory + maintenance** of every Azure/Supabase/Cloudflare/Drive resource: what exists, what's essential vs sprawl, quarterly review checklist |
-| [prod-worker-provisioning-runbook](resources/prod-worker-provisioning-runbook.md) | Runbook to stand up the **production** GPU ML worker (ARQ + Redis + serverless T4) — ready to run once prod has real traffic |
+| [prod-worker-provisioning-runbook](resources/prod-worker-provisioning-runbook.md) | Runbook that stood up the **production** GPU ML worker (ARQ + Redis + serverless T4) on 2026-07-26, kept to rebuild it |
 | [ai-model-pipeline](resources/ai-model-pipeline.md) | Edge Impulse → Vela on-camera model conversion |
 | [embedded-model-lifecycle](resources/embedded-model-lifecycle.md) | End-to-end on-device model flow across website / backend / mobile / firmware |
 | [dual-ai-production-rollout](resources/dual-ai-production-rollout.md) | Runbook to promote dual-AI (Camera AI + Cloud AI / edge reflection) from dev → staging → production, incl. the firmware gating dependency and rollout checklist |
@@ -62,7 +62,7 @@ status banner. When in doubt, the living docs in `resources/` and `onboarding/` 
 | [ww-backend-schema-handoff](development%20reports/ww-backend-schema-handoff.md) | ww-backend | 📋 Open items for the schema/seed owners: the un-migrated iNat tables, the `qdrant_collection` rename, live GRANT/RLS parity, `dual_ai_v0` promotion, and the schema two website specs are waiting on |
 | [access-test-seed-spec](development%20reports/access-test-seed-spec.md) | ww-backend | ✅ Shipped as `seeds/dev/access_test_deployments.sql`. Seed rows for the access-scenario upload fixtures (valid / no-access / not-found) |
 | [storage-quota-spec](development%20reports/storage-quota-spec.md) | ww-backend + website | Per-org storage quota: `organisation_usage` schema + trigger + enforcement hook |
-| [inaturalist-integration](development%20reports/inaturalist-integration.md) | website | ✅ Phases 1–4 implemented. iNaturalist publish + community-ID sync integration |
+| [inaturalist-integration](development%20reports/inaturalist-integration.md) | website | 🔧 Built behind `FF_INAT_ENABLED`. iNaturalist publish + community-ID sync; the sync updates the badge only and writes no identifications (§6, 25 Oct 2026) |
 | [per-crop-classification-spec](development%20reports/per-crop-classification-spec.md) | website (pipeline) | Per-detection species classification (BioCLIP per crop) for mixed-species frames. **No longer blocked** — the GPU worker is live on dev; ships behind `FF_PER_CROP_CLASSIFY_ENABLED` |
 | [gpu-worker-infra-spec](development%20reports/gpu-worker-infra-spec.md) | website (infra + CI/CD) | ✅ **Shipped (dev)** — kept as design history; ⚠️ §3 and §7 were overridden during the build. ARQ GPU worker: Redis + ACA GPU + pgvector + KEDA; versioning, observability, batching, retries. **Operate from** [cloud-infrastructure](resources/cloud-infrastructure.md) + [prod-worker-provisioning-runbook](resources/prod-worker-provisioning-runbook.md) |
 

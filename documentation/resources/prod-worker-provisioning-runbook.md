@@ -1,14 +1,16 @@
 # Runbook — Provision the **production** GPU ML worker
 
-> **Status:** 📋 Ready to run *when prod has real traffic*. Dev is already GPU-live
-> ([cloud-infrastructure.md](cloud-infrastructure.md)); this duplicates that setup for prod.
-> **Don't run early** — a prod worker that never scales to zero is an idle T4 burning money.
+> **Status:** ✅ Done. Run on **2026-07-26** (see the erratum under step 3) and checked with `az` on
+> 2026-10-26: `ww-redis`, `ww-embedding-worker` on `gpu-t4` with the step 4 rule, `REDIS_URL` on
+> `ww-backend` and the `ww-gpu-worker-stuck` alert all exist. The live state is in
+> [cloud-infrastructure.md](cloud-infrastructure.md); keep this page to rebuild the prod stack.
 
 ## Why this is needed
-Production today is **API-only**: `ww-backend` (the lean `--target api` image, *no ML deps*) with **no
-worker and no Redis broker**. So prod can't run species detection at all. This runbook stands up the prod
-worker stack. The **GPU itself needs no new setup** — the `gpu-t4` serverless-T4 workload profile lives on
-the shared `ww-env` environment, so the prod worker reuses it (no extra quota, no new profile).
+Until 2026-07-26 production was **API-only**: `ww-backend` (the lean `--target api` image, *no ML deps*)
+with **no worker and no Redis broker**, so prod could not run species detection at all. This runbook
+stands up the prod worker stack. The **GPU itself needs no new setup**: the `gpu-t4` serverless-T4
+workload profile lives on the shared `ww-env` environment, so the prod worker reuses it (no extra quota,
+no new profile).
 
 ## Prerequisites
 - The dev GPU setup working (proves the profile + image). Worker image: `wwregistry.azurecr.io/ww-backend-worker` (CUDA-ready). Use a **prod tag** (e.g. `latest`), not `dev-latest`.
@@ -19,14 +21,13 @@ the shared `ww-env` environment, so the prod worker reuses it (no extra quota, n
      held the T4 up for ~1 h per 84 s job).
   2. **The Azure Monitor alert is the primary guard** (below) — it catches a stuck GPU without
      any risk of killing live work. Add it first.
-  3. Shortening the KEDA query window is secondary and has a **sharp edge**: the annotate job only
-     refreshes `updated_at` at the *start of each pipeline step* (`_on_step` in
-     `auto_annotate_deployments`), NOT within a step. A single long step on a large deployment
-     (e.g. SpeciesNet over thousands of images) can exceed the window with no heartbeat, so KEDA
-     scales the worker to zero **mid-inference and kills the job**. So:
-     - **Dev** (small test deployments) runs a **15-minute** window safely — applied 2026-07-09.
-     - **Prod** (real, potentially huge deployments) must either keep a generous window
-       (≥ the reaper's 60 min) OR add an intra-step heartbeat first; do not blanket-copy 15 min.
+  3. Shortening the KEDA query window is secondary. It used to have a **sharp edge**: the annotate
+     job refreshed `updated_at` only at the *start of each pipeline step*, so a single long step
+     (e.g. SpeciesNet over thousands of images) could outlast the window and KEDA scaled the worker
+     to zero **mid-inference, killing the job**. Since 2026-07-10 `job_heartbeat` refreshes it every
+     60 s during the run (see the window note in
+     [cloud-infrastructure.md](cloud-infrastructure.md#azure)). Dev runs **15 minutes** (applied
+     2026-07-09); prod runs **1 hour**, the reaper's 60 min.
   4. Create an **Azure Monitor alert** on the worker: `Replicas >= 1` sustained > 30 min → email
      (dev: action group `ww-gpu-alerts`, alert `ww-gpu-worker-stuck-dev`, created 2026-07-09).
   5. Keep `--max-replicas 1` unless the queue demonstrably needs more.

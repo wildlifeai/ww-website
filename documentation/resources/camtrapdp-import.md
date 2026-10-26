@@ -177,7 +177,7 @@ The CamtrapDP import domain depends on the backend database schema. Key tables a
 | Backend Table | Required Columns | Notes |
 |---------------|-----------------|-------|
 | `deployments` | `setup_by`, `project_id`, `device_id`, `name`, `deployment_start`, `location_name` | `setup_by` is set to the importing user |
-| `devices` | `bluetooth_id` (UNIQUE, NOT NULL) | Placeholder devices use `uuid5(DNS, "imported-<name>")` |
+| `devices` | `bluetooth_id` (UNIQUE, NOT NULL) | Placeholder devices use `uuid5(DNS, "imported-<organisation id>-<name>")` and no `organisation_id` (ww-backend#346) |
 | `media` | `deployment_id`, `file_name`, `file_path` | Public `http(s)` URLs are stored as-is; zip-embedded images are uploaded to Google Drive and `file_path` is patched to `gdrive://<id>` so the resolver can serve thumbnails. |
 | `observations` | `deployment_id`, `event_id`, `source_type`, `review_status` | `event_id` via `uuid5`; provenance mapped from `classificationMethod` — see **Annotation mode** below. |
 

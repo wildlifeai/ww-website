@@ -4,7 +4,7 @@
  *
  * WS5: MediaBrowser with a branded Ribbon (deployment and species filters, the
  *      pager, thumbnail size), StatusBadge overlays, an Advanced filters dialog
- *      (status, annotator, model, sex, life stage, date range), and URL-based
+ *      (status, annotator, model, sex, life stage, date range, time of day), and URL-based
  *      deployment pre-selection for the upload to annotations handoff (WS5-T6).
  */
 import { useState, useEffect } from 'react'
