@@ -131,7 +131,22 @@ The frontend is a static React+Vite app deployed to **Cloudflare Pages** with au
 
 ### Preview Deployments
 
-Every push to a non-production branch creates a preview deployment at `https://<branch>.<project>.pages.dev`. This is automatic — no configuration needed.
+Which branches Cloudflare builds is the project's branch control, under **Settings → Builds &
+deployments** ([Cloudflare's docs](https://developers.cloudflare.com/pages/configuration/branch-build-controls/)).
+On 26 Oct 2026 it built `main` (production) and `dev` (preview,
+`https://dev.ww-website.pages.dev`) and nothing else: none of the 32 feature and Dependabot pull
+request heads checked, back to June 2026, has a Cloudflare build. Each build reports as a
+`Cloudflare Pages` check run on its commit, with the build's own URL
+(`https://<id>.ww-website.pages.dev`) and the branch alias in its summary, and creates no GitHub
+deployment. Cloudflare never builds a pull request from a fork.
+
+To build every other branch of this repo, and so give each pull request a preview and an E2E run
+([`e2e/README.md`](../../e2e/README.md#in-ci)): **Preview branch: Custom branches**, **Include
+Preview branches** `*`, **Exclude Preview branches** `dependabot/*`. The cost is builds: dev and
+main had 144 pushes, each one built, in the 30 days to 26 Oct 2026, and pull requests outside
+Dependabot had 204 `ci.yml` runs in the same days, each one a push Cloudflare would build. The
+Free plan allows 500 builds a month, one at a time, so a pull request's build can hold up a dev
+build ([limits](https://developers.cloudflare.com/pages/platform/limits/)).
 
 ---
 

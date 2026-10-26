@@ -183,8 +183,10 @@ secret (ACA secret / vault, never in chat).
 
 ## Cloudflare
 
-- **Pages** project hosts the React frontend with **per-branch previews** (`*.ww-website.pages.dev`;
-  `dev.ww-website.pages.dev` is the dev preview).
+- **Pages** project hosts the React frontend: `main` is production and `dev` the only preview
+  branch (`dev.ww-website.pages.dev`; each build also gets `<id>.ww-website.pages.dev`). Branch
+  control and what a build reports to GitHub: the deployment guide's
+  [Preview Deployments](deployment-guide.md#preview-deployments).
 - **DNS** for `wildlifewatcher.ai`; CDN + anonymous web analytics.
 - Maintenance: deploys are git-driven (Pages build on push); no servers to patch. **After the AU East
   migration, the frontend's backend API URL + the API's CORS allow-list must point at the new
