@@ -48,6 +48,8 @@ Rules:
 * Read observations for a count, chart or species list through `fetchLiveObservations`
   (`lib/liveObservations.ts`), never a bare `from('observations')`: a deleted photo leaves its
   observations behind ([03-DATA-AND-SYNC](../../../documentation/onboarding/03-DATA-AND-SYNC.md), #198).
+  Where ww-backend counts them for you, call its function instead of reading every row: Insights
+  uses `insights_observation_counts` and `deployment_daily_counts` (`lib/insightsReads.ts`, #334).
 * A route whose feature flag is off answers HTTP 200 with `FEATURE_DISABLED`, which `apiClient`
   throws. Show a link to a flagged page (Dataset Health, UMAP, Cluster Review) only when
   `useFeatureEnabled(feature, id)` is true: one cached probe per feature, not one per row

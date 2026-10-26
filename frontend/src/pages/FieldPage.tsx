@@ -3,8 +3,8 @@
 //
 // Realtime: /field
 // Cameras deployed now: KPIs, a map, a "needs attention" panel and a status table, read-only for
-// every role. Telemetry (battery, SD usage, last check-in) comes from the LoRaWAN tables, recent
-// detections from observations; the reads are in lib/realtimeReads.ts.
+// every role. Telemetry (battery, SD usage, last check-in) comes from the deployment_latest_lorawan
+// view, recent detections from observations; the reads are in lib/realtimeReads.ts.
 import { useEffect, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -13,8 +13,8 @@ import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
 import { supabase } from '../config/supabase'
 import {
-  fetchActiveDeployments, fetchLatestTelemetry, fetchRecentDetections,
-  type ActiveDeployment, type RecentDetections, type Telemetry,
+  fetchActiveDeployments, fetchDeploymentUpdate, fetchLatestTelemetry, fetchRecentDetections,
+  withEntry, type ActiveDeployment, type RecentDetections, type Telemetry,
 } from '../lib/realtimeReads'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { DeploymentMap } from '../components/data/DeploymentMap'
@@ -127,25 +127,36 @@ export function FieldPage() {
   const loading = depEnabled && depQuery.isPending
   const error = (depQuery.error ?? telemetryQuery.error ?? detectionsQuery.error)?.message ?? null
 
-  // Live updates: a new LoRaWAN message for a shown deployment reads telemetry and detections
-  // again. Needs lorawan_messages in the supabase_realtime publication (ww-backend migration
-  // 20260711043000); without it the page reads on load only.
+  // Live updates: a new LoRaWAN message for a shown deployment reads that deployment's telemetry
+  // and detections again, two requests, and writes them into the cached answers. Needs
+  // lorawan_messages in the supabase_realtime publication (ww-backend migration 20260711043000);
+  // without it the page reads on load only.
   useEffect(() => {
     // No listening while nothing is selected or nothing is shown.
     if (!user || !queryProjectIds || depIds.length === 0) return
     // Realtime already enforces RLS; the filter narrows to the deployments this page shows, so
     // messages for other projects, or bench messages with no deployment yet, read nothing.
     const shown = new Set(depIds)
+    const refresh = async (id: string) => {
+      try {
+        const { telemetry, detections } = await fetchDeploymentUpdate(supabase, id)
+        queryClient.setQueryData<Record<string, Telemetry>>(['realtime', 'telemetry', depIds],
+          old => old && withEntry(old, id, telemetry))
+        queryClient.setQueryData<Record<string, RecentDetections>>(['realtime', 'detections', depIds],
+          old => old && withEntry(old, id, detections))
+      } catch {
+        // Read everything again, which shows the error if the database still refuses.
+        void queryClient.invalidateQueries({ queryKey: ['realtime', 'telemetry'] })
+        void queryClient.invalidateQueries({ queryKey: ['realtime', 'detections'] })
+      }
+    }
     const channel = supabase
       .channel('field-lorawan-live')
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'lorawan_messages' },
         (payload) => {
           const row = payload.new as { deployment_id: string | null }
-          if (row.deployment_id && shown.has(row.deployment_id)) {
-            void queryClient.invalidateQueries({ queryKey: ['realtime', 'telemetry'] })
-            void queryClient.invalidateQueries({ queryKey: ['realtime', 'detections'] })
-          }
+          if (row.deployment_id && shown.has(row.deployment_id)) void refresh(row.deployment_id)
         })
       .subscribe()
     return () => { void supabase.removeChannel(channel) }

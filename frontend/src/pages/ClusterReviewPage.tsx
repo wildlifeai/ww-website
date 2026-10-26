@@ -131,6 +131,7 @@ function ClusterPanel({
   members,
   stripThumbs,
   deploymentId,
+  projectId,
   canWrite,
   inat,
   hasLocation,
@@ -140,6 +141,8 @@ function ClusterPanel({
   members: string[]
   stripThumbs: Record<string, string | null>
   deploymentId: string
+  /** The deployment's project, whose species the pickers suggest; unset while unknown. */
+  projectId?: string | null
   /** project_member or above on the deployment's project: may confirm, reassign, flag and publish. */
   canWrite: boolean
   inat: ReturnType<typeof useINat>
@@ -299,7 +302,8 @@ function ClusterPanel({
       {canConfirm && mode === 'idle' && (
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.75rem' }}>
           <div style={{ flex: 1, minWidth: 200 }}>
-            <SpeciesPicker placeholder="Confirm the cluster as..." disabled={confirm.isPending} onSelect={setConfirmPick} />
+            <SpeciesPicker placeholder="Confirm the cluster as..." disabled={confirm.isPending} onSelect={setConfirmPick}
+              projectIds={projectId ? [projectId] : undefined} />
           </div>
           <button
             className="btn"
@@ -347,7 +351,8 @@ function ClusterPanel({
             <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', padding: '0.75rem', background: 'rgba(76,175,80,0.06)', borderRadius: 'var(--radius)', border: '1px solid rgba(76,175,80,0.2)' }}>
               <span style={MUTED}>Reassign {photos(selected.size)} to:</span>
               <div style={{ flex: 1, minWidth: 200 }}>
-                <SpeciesPicker autoFocus disabled={review.isPending} onSelect={setReassignPick} />
+                <SpeciesPicker autoFocus disabled={review.isPending} onSelect={setReassignPick}
+                  projectIds={projectId ? [projectId] : undefined} />
               </div>
               <button
                 className="btn"
@@ -531,6 +536,7 @@ export function ClusterReviewPage() {
           members={membersByCluster[c.cluster_id] || []}
           stripThumbs={stripThumbs}
           deploymentId={deployment_id!}
+          projectId={projectId}
           canWrite={canWrite}
           inat={inat}
           hasLocation={projectQ.data?.hasLocation}

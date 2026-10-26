@@ -23,8 +23,9 @@ import { useDeploymentFilterOptions } from '../hooks/useDeploymentFilterOptions'
 import { supabase } from '../config/supabase'
 import { startDateLabel } from '../lib/deploymentFilterOptions'
 import {
-  fetchInsightsDeployments, fetchInsightsObservations, type InsightsDeployment, type InsightsObservation,
+  fetchDailyCounts, fetchInsightsDeployments, fetchObservationCounts, type InsightsDeployment,
 } from '../lib/insightsReads'
+import { filterCounts, type ObservationCount } from '../lib/observationSummary'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { MultiSelect } from '../components/ui/MultiSelect'
 import { Ribbon, type RibbonGroupDef } from '../components/ui/Ribbon'
@@ -63,20 +64,20 @@ function activeDaysOf(start: string | null, end: string | null): number {
  * effort-normalised to a per-active-day rate, and present/absent flags.
  */
 function buildMapMarkers(
-  deployments: InsightsDeployment[], observations: InsightsObservation[],
+  deployments: InsightsDeployment[], observationCounts: ObservationCount[],
   speciesFilter: string[], metric: MapMetric, showAbsent: boolean,
 ) {
   const species = new Set(speciesFilter)
   const counts: Record<string, number> = {}
   // Per-deployment species tally: drives the default pie-chart markers.
   const speciesByDep: Record<string, Record<string, number>> = {}
-  for (const o of observations) {
+  for (const o of observationCounts) {
     if (species.size > 0 && !species.has(o.scientific_name ?? '')) continue
-    counts[o.deployment_id] = (counts[o.deployment_id] ?? 0) + 1
+    counts[o.deployment_id] = (counts[o.deployment_id] ?? 0) + o.n
     const sp = o.scientific_name
     if (sp && sp !== '(unidentified)') {
       const dep = (speciesByDep[o.deployment_id] ??= {})
-      dep[sp] = (dep[sp] ?? 0) + 1
+      dep[sp] = (dep[sp] ?? 0) + o.n
     }
   }
   const markers = deployments.map(d => {
@@ -135,7 +136,7 @@ function WithoutGpsList({ deployments, labels, onEdited }: {
 }
 
 const NO_DEPLOYMENTS: InsightsDeployment[] = []
-const NO_OBSERVATIONS: InsightsObservation[] = []
+const NO_COUNTS: ObservationCount[] = []
 
 const VIEW_BTN = (active: boolean): React.CSSProperties => ({
   padding: '0.3rem 0.7rem', fontSize: '0.78rem', cursor: 'pointer', whiteSpace: 'nowrap',
@@ -230,20 +231,24 @@ export function InsightsPage() {
     void queryClient.invalidateQueries({ queryKey: ['insights', 'deployments'] })
   }
 
-  // Load observations (reports and map) ────────────────────────────────────
+  // Load the observation counts (reports and map) ──────────────────────────
+  // The database counts them (ww-backend #334): one request over the deployments' projects, and
+  // over the deep-linked deployments alone when no project is selected (lib/insightsReads.ts).
   const depIds = useMemo(() => loadedDeployments.map(d => d.id), [loadedDeployments])
-  const obsEnabled = !!user && !showNothing && (tab === 'reports' || tab === 'map') && depIds.length > 0
-  const obsQuery = useQuery({
-    queryKey: ['insights', 'observations', user?.id, depIds],
-    queryFn: () => fetchInsightsObservations(supabase, depIds),
-    enabled: obsEnabled,
-    // While an upload is processing, refetch periodically so partial AI results stream into
-    // the reports/map without a manual page refresh. A refetch keeps the data on screen, so
-    // it never flashes "Loading…" over live data.
-    refetchInterval: uploadActive ? 8000 : false,
+  const narrowCounts = !queryProjectIds
+  const countsEnabled = !!user && !showNothing && (tab === 'reports' || tab === 'map') && depIds.length > 0
+  // While an upload is processing, the counts are read again periodically so partial AI results
+  // stream into the reports/map without a manual page refresh. A refetch keeps the data on
+  // screen, so it never flashes "Loading…" over live data.
+  const refetchInterval = uploadActive ? 8000 : false
+  const countsQuery = useQuery({
+    queryKey: ['insights', 'observations', 'counts', user?.id, depIds, narrowCounts],
+    queryFn: () => fetchObservationCounts(supabase, loadedDeployments, narrowCounts),
+    enabled: countsEnabled,
+    refetchInterval,
   })
-  const observations = obsQuery.data ?? NO_OBSERVATIONS
-  const obsLoading = obsEnabled && obsQuery.isPending
+  const counts = countsQuery.data ?? NO_COUNTS
+  const countsLoading = countsEnabled && countsQuery.isPending
   // Each upload phase change (notably the end of classification) reads the results once more.
   const lastUploadPhase = useRef(uploadPhase)
   useEffect(() => {
@@ -253,25 +258,23 @@ export function InsightsPage() {
   }, [uploadPhase, queryClient])
 
   const mapMarkers = useMemo(
-    () => buildMapMarkers(deployments, observations, mapFilterSpecies, mapMetric, mapShowAbsent),
-    [deployments, observations, mapFilterSpecies, mapMetric, mapShowAbsent],
+    () => buildMapMarkers(deployments, counts, mapFilterSpecies, mapMetric, mapShowAbsent),
+    [deployments, counts, mapFilterSpecies, mapMetric, mapShowAbsent],
   )
 
   const withoutGps = useMemo(() => deployments.filter(d => d.latitude == null || d.longitude == null), [deployments])
 
-  const filteredObservations = useMemo(() => {
-    const deps = new Set(reportFilterDeps)
-    const species = new Set(reportFilterSpecies)
-    if (deps.size === 0 && species.size === 0) return observations
-    return observations.filter(o =>
-      (deps.size === 0 || deps.has(o.deployment_id)) && (species.size === 0 || species.has(o.scientific_name ?? '')))
-  }, [observations, reportFilterDeps, reportFilterSpecies])
+  // The filters apply to the counted rows, so changing one reads nothing.
+  const filteredCounts = useMemo(
+    () => filterCounts(counts, reportFilterDeps, reportFilterSpecies),
+    [counts, reportFilterDeps, reportFilterSpecies],
+  )
 
   const speciesOptions = useMemo(() => {
     const names = new Set<string>()
-    observations.forEach(o => { if (o.scientific_name) names.add(o.scientific_name) })
+    counts.forEach(o => { if (o.scientific_name) names.add(o.scientific_name) })
     return Array.from(names).sort().map(n => ({ value: n, label: n }))
-  }, [observations])
+  }, [counts])
 
   // Location, start date and (across projects) project name, so re-deployed sites read apart.
   const deploymentOptions = useDeploymentFilterOptions(deployments)
@@ -285,6 +288,22 @@ export function InsightsPage() {
     const d = deployments.find(x => x.id === ids[0])
     return d ? { id: d.id, timezone: d.timezone, deployment_start: d.deployment_start, deployment_end: d.deployment_end } : null
   }, [reportFilterDeps, deployments])
+
+  // Its detections per capture day, dated by the database in the zone the page shows it in, so
+  // a zone filled on first view (#309) reads them again.
+  const singleId = singleDeployment?.id ?? null
+  const singleZone = singleDeployment?.timezone ?? null
+  const dailyEnabled = !!user && !showNothing && tab === 'reports' && !!singleId
+  const dailyQuery = useQuery({
+    queryKey: ['insights', 'observations', 'daily', user?.id, singleId, singleZone],
+    queryFn: () => fetchDailyCounts(supabase, singleId as string, singleZone),
+    enabled: dailyEnabled,
+    refetchInterval,
+  })
+  const dailyCounts = useMemo(
+    () => (dailyQuery.data ? filterCounts(dailyQuery.data, [], reportFilterSpecies) : undefined),
+    [dailyQuery.data, reportFilterSpecies],
+  )
 
   const ribbonGroupsFor = (id: InsightsTab): RibbonGroupDef[] => {
     if (id === 'reports') {
@@ -363,11 +382,13 @@ export function InsightsPage() {
             </div>
           )}
           <ReportsDashboard
-            observations={filteredObservations}
+            counts={filteredCounts}
             deploymentLabels={deploymentLabels}
             singleDeployment={singleDeployment}
+            dailyCounts={dailyCounts}
+            dailyFailed={dailyQuery.isError && !dailyQuery.data}
             speciesFiltered={reportFilterSpecies.length > 0}
-            loading={obsLoading}
+            loading={countsLoading}
           />
         </>
       )}

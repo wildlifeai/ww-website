@@ -87,10 +87,10 @@ calls come from.
 
 ## CamtrapDP export
 
-The export is the package a project member gets from the website's Download button: a Camtrap DP
-1.0 package with `datapackage.json`, `deployments.csv`, `media.csv`, `observations.csv` and every
-original photo at `media/<deploymentID>/<mediaID>.<ext>`. It covers one project, narrowed by
-deployments or by when the deployments started.
+The export is the package anyone who can view the project gets from the website's Download
+button: a Camtrap DP 1.0 package with `datapackage.json`, `deployments.csv`, `media.csv`,
+`observations.csv` and every original photo at `media/<deploymentID>/<mediaID>.<ext>`. It covers
+one project, narrowed by deployments or by when the deployments started.
 
 ```bash
 job=$(curl -s -X POST -H "X-API-Key: $WW_KEY" -H "Content-Type: application/json" \

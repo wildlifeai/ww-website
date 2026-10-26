@@ -138,7 +138,7 @@ Props: `status: AnnotationStatus`, `size: 'sm' | 'md'` (default `sm`), `label?` 
 
 Thin wrapper around `vega-embed` with the shared `VEGA_CONFIG` theme. Pass a Vega-Lite spec; the
 chart sizes to its container. Used by `ReportsDashboard` (Insights > Reports, specs from
-`components/data/chartSpec.ts` over tables counted by `lib/observationSummary.ts`).
+`components/data/chartSpec.ts` over tables `lib/observationSummary.ts` sums from the database counts).
 
 ---
 

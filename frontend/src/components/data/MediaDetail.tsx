@@ -359,7 +359,7 @@ function ViewMenu({ zoom, onZoom, onReset, brightness, onBrightness, contrast, o
 export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onUpdated, onNext, onPrev, focusObsId, previewStuck, onRetryPreview }: Props) {
   const { user } = useAuth()
   // Write controls only for project members and above on this photo's project (decision 1).
-  const { canLabel, loading: roleLoading } = useCanLabel(media.deployment_id)
+  const { canLabel, loading: roleLoading, projectId } = useCanLabel(media.deployment_id)
 
   const [saving, setSaving] = useState(false)
 
@@ -397,7 +397,8 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
   const prevMedia = idx > 0 ? mediaList?.[idx - 1] : undefined
   const prevUrl = prevMedia ? displayImageUrl(prevMedia, 'full') : null
 
-  // The picker offers the species already labelled on the photos in view before it searches.
+  // The picker offers the species of this photo's project before it searches, and the species
+  // labelled on the photos in view until those are read.
   const seeds = useMemo(() => labelledSpecies((mediaList ?? [media]).flatMap(m => m.observations)), [mediaList, media])
 
   const selectedObs = media.observations.find(o => o.id === selectedObsId) || null
@@ -582,6 +583,7 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
               <SpeciesPicker
                 autoFocus
                 seeds={seeds}
+                projectIds={projectId ? [projectId] : undefined}
                 placeholder="Search species…"
                 disabled={saving}
                 onSelect={sel => applyLabel({ observation_type: 'animal', ...sel, count: countValue })}

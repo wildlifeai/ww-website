@@ -46,9 +46,10 @@ permissions, verify against the **live** DB, not just the migrations.
 | `media` | Annotations grid + modal | RLS (read; uploads via backend) |
 | `media_assets` | embedded in `media` queries (renditions: provider, dimensions, bytes) | RLS read — a missing GRANT aborts the **whole** embedding query (prod, Jul 2026) |
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
-| `taxa` | SpeciesPicker (local search) | RLS read |
+| `taxa`, view `project_species` | SpeciesPicker (local search; the projects' species before typing, ww-backend #338) | RLS read |
 | `user_roles`, `project_invitations` | members panel, invitation banner; the user's own roles in Settings and the move picker | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below); a user reads only their own `user_roles` rows directly |
-| `media_embeddings`, `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
+| `media_embeddings` | the grid's *Needs review first* order (embedded in the `media` query, ww-backend #337); Wildlife Brain | RLS read for project viewers; writes service-role |
+| `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
 | `devices`, `lorawan_*`, `firmware`, `ai_models`, `api_jobs` | LoRaWAN, manifests, models, jobs | service-role |
 
 **Project membership goes through RPCs, never direct queries.** RLS lets a user read only their
@@ -101,9 +102,11 @@ every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./
 
 Deleting photos soft-deletes their `media` rows only; their observations stay readable, because
 the `observations` read policy checks the deployment, not the photo. Every read that counts or
-lists observations (Insights, Realtime, the upload summary) goes through
+lists observations (Realtime, the upload summary) goes through
 `frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
-with no photo unless asked not to, and pages past the 1,000-row cap (#198).
+with no photo unless asked not to, and pages past the 1,000-row cap (#198). Insights reads no
+observations: ww-backend's `insights_observation_counts` and `deployment_daily_counts` (#334)
+count them by the same rule, and `frontend/src/lib/insightsReads.ts` calls them.
 
 **A deployment changes project only through the `move_deployment` RPC** (ww-backend#272); a
 direct UPDATE of `deployments.project_id` is refused with 42501. Insights > Deployments, Move to
@@ -330,6 +333,8 @@ instant in the **deployment's** timezone at display time.
   offset**, so DST is handled automatically (NZ is +12 in winter, +13 in summer).
 - **Per-day counts**: Insights > Reports counts detections per day by `media.timestamp` in this zone,
   never by `observations.created_at` (the label time); those without one are counted under the chart.
+  The database dates them (`deployment_daily_counts`, ww-backend #334), in the browser's zone when
+  the deployment has none.
 - **Graceful fallback** — when `timezone` is `NULL` (or the column isn't deployed yet) the UI falls
   back to the **viewer's browser** zone, i.e. the previous behaviour. Deployment queries fetch the
   column defensively (retry without it) so the app keeps working during the schema rollout.

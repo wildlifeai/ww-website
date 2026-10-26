@@ -18,8 +18,8 @@ highlighted nav tab already signals where you are.
 - **Dialog launcher** — the ⤢ corner arrow opens advanced settings (Word's group launcher).
 
 Annotations ribbon: a **Filter** tab (Deployment, Species, and an *Advanced filters* dialog for
-status, type, annotator, AI model, sex, life stage and date range, applied on *Apply*; with one
-deployment and the active-learning flag on, an *Order* choice, *Needs review first*) and a
+status, type, annotator, AI model, sex, life stage and date range, applied on *Apply*; with the
+active-learning flag on, an *Order* choice, *Needs review first*) and a
 **Group** tab (Group by, Collapse all). The menu bar's status slot holds the pager ("1–100 of N"
 with Prev and Next), the Photo / Labels toggle, the thumbnail size and *All on page*. Insights uses its four sub-tabs (Projects · Deployments · Map · Reports) as the menu bar.
 
@@ -28,7 +28,10 @@ with Prev and Next), the Photo / Labels toggle, the thumbnail size and *All on p
 A paginated thumbnail grid, 100 photos a page. Every filter runs in the media query
 (`lib/gridFilters.ts`), so the pager's total is the filtered total, counted once per filter set and
 again after a write (`lib/gridPage.ts`); the species, model and annotator lists cover the whole
-selection (`lib/distinctValues.ts`). The day/night filter is off until the database can answer it.
+selection, read from ww-backend's `grid_facets` in one call per 150 deployments
+(`lib/gridFacets.ts`, #336). *Needs review first* orders the same query by the photo's
+active-learning score on `media_embeddings`, highest first, photos with no score last, then newest
+first (`gridSortPlan`, #337). The day/night filter is off until the database can answer it.
 Groups split the page: grouping by deployment is offered for 2 to 12 deployments, by cluster for
 one (`lib/gridGrouping.ts`), and grouping is not remembered between visits. Each card shows the
 photo's verdict (`photoVerdict`, common name first) with one confidence and a **StatusBadge**
@@ -108,10 +111,14 @@ reading as saved (#183). A viewer sees none of these actions.
 
 ### SpeciesPicker (taxon validation)
 
-`components/data/SpeciesPicker.tsx` debounces a search over the local `taxa` table **and** the
-iNaturalist autocomplete (`/api/inat/taxa/search`). Selecting an iNat result registers its lineage
-(`POST /api/inat/taxa`) and returns a real `taxon_id`; it falls back to local-only when iNat is
-feature-flagged off. Every selection writes a real `taxon_id`, never a free-text string.
+`components/data/SpeciesPicker.tsx` offers, before any typing, the species you picked recently and
+the species already used in the projects in view, most used first (the view `project_species`,
+ww-backend #338; the species on the photos in view stand in until it is read). Typing debounces a
+search over the local `taxa` table, and asks the iNaturalist autocomplete (`/api/inat/taxa/search`)
+only when fewer than three local suggestions match (`lib/speciesSuggestions.ts`). Selecting an iNat
+result registers its lineage (`POST /api/inat/taxa`) and returns a real `taxon_id`; it falls back to
+local-only when iNat is feature-flagged off. Every selection writes a real `taxon_id`, never a
+free-text string.
 
 ## Review provenance (the important invariant)
 

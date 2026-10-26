@@ -29,7 +29,7 @@ import { formatCaptureTime } from '../../lib/time'
 import { useQueryClient } from '@tanstack/react-query'
 import { MediaGroup } from './MediaGroup'
 import { ClusterLabelAll } from './ClusterLabelAll'
-import { useClusters, useMultiClusters, useReviewQueue, useSimilarImages } from '../../hooks/useBrain'
+import { useClusters, useMultiClusters, useSimilarImages } from '../../hooks/useBrain'
 import { useFeatureEnabled } from '../../hooks/useFeatureEnabled'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { useJobsList } from '../../hooks/useJobs'
@@ -44,7 +44,8 @@ import { applySelectIntent, arrowTarget, cardClickIntent, cardKeyIntent, circleC
 import { writeVerdicts, type VerdictLabel } from '../../lib/humanVerdict'
 import { labelledSpecies } from '../../lib/speciesSuggestions'
 import {
-  applyFilterOps, gridFilterPlan, gridQueryKey, hasAdvancedFilters, hasAnyFilter, NO_FILTERS, type GridFilters,
+  applyFilterOps, applyOrder, gridFilterPlan, gridQueryKey, gridSortPlan, hasAdvancedFilters, hasAnyFilter, NO_FILTERS,
+  type GridFilters, type GridSort,
 } from '../../lib/gridFilters'
 import {
   DEPLOYMENT_GROUP_LIMIT, GROUP_LABELS, availableGroupings, groupInOrder, observationGroupKey, type GroupBy,
@@ -294,8 +295,6 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   // "Find similar" mode: anchor media id + the resolved, similarity-ranked records.
   const [similarToId, setSimilarToId]     = useState<string | null>(null)
   const [similarRecords, setSimilarRecords] = useState<MediaRecord[]>([])
-  // "Needs review first" mode: the review-queue photos, in queue order.
-  const [reviewRecords, setReviewRecords] = useState<MediaRecord[]>([])
   const [similarLoading, setSimilarLoading] = useState(false)
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState<string | null>(null)
@@ -345,18 +344,20 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   const reviewOrderOn = useFeatureEnabled('activeLearning', activeDeploymentIds[0] ?? null)
   const groupOptions = availableGroupings(activeDeploymentIds.length).filter(g => g !== 'cluster' || brainOn)
   const groupBy: GroupBy = groupOptions.includes(groupChoice) ? groupChoice : 'none'
-  const filterOptions = useGridFilterOptions(activeDeploymentIds, { species: wantSpeciesOptions, advanced: draft !== null })
-  // "Needs review first": the retired Review Queue's order, for one deployment (decision 6).
+  const filterOptions = useGridFilterOptions(activeDeploymentIds, wantSpeciesOptions || draft !== null)
+  // "Needs review first": the retired Review Queue's order (decision 6), a sort of the media
+  // query, so every filter and the pager apply (lib/gridFilters, ww-backend #337).
   const [orderBy, setOrderBy] = useState<'' | 'review'>('')
-  const reviewMode = orderBy === 'review' && !!singleDeployment && reviewOrderOn && !similarToId
+  const sort: GridSort = orderBy === 'review' && reviewOrderOn ? 'review' : 'newest'
 
-  // Page and selection belong to one query: a new filter goes back to page 1, and a new page
-  // (or the similar or review-first list) starts with nothing selected ("All on page" means
-  // what is on screen).
+  // Page and selection belong to one query: a new filter or order goes back to page 1, and a
+  // new page (or the similar list) starts with nothing selected ("All on page" means what is
+  // on screen).
+  const listKey = `${queryKey}|${sort}`
   const [pageAt, setPageAt] = useState({ key: '', page: 0 })
-  const page = pageAt.key === queryKey ? pageAt.page : 0
+  const page = pageAt.key === listKey ? pageAt.page : 0
   const [totalCount, setTotalCount] = useState<number | null>(null)
-  const pageKey = `${queryKey}|${page}|${similarToId ?? (reviewMode ? 'review' : '')}`
+  const pageKey = `${listKey}|${page}|${similarToId ?? ''}`
   const [selection, setSelection] = useState<{ key: string; ids: ReadonlySet<string> }>({ key: '', ids: EMPTY_IDS })
   const selectedIds = selection.key === pageKey ? selection.ids : EMPTY_IDS
   const setSelectedIds = (ids: ReadonlySet<string>) => setSelection({ key: pageKey, ids })
@@ -364,7 +365,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   // The last card selected, where a Shift-click range starts.
   const selectAnchor = useRef<string | null>(null)
   const goToPage = (p: number) => {
-    setPageAt({ key: queryKey, page: Math.max(0, p) })
+    setPageAt({ key: listKey, page: Math.max(0, p) })
     window.scrollTo({ top: 0 })
   }
 
@@ -447,7 +448,6 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
     const removed = media.filter(m => gone.has(m.id))
     setMedia(prev => prev.filter(m => !gone.has(m.id)))
     setSimilarRecords(prev => prev.filter(m => !gone.has(m.id)))
-    setReviewRecords(prev => prev.filter(m => !gone.has(m.id)))
     setTotalCount(t => (t === null ? t : Math.max(0, t - deletedIds.length)))
     clearSelection()
     if (deletedAt) {
@@ -511,14 +511,14 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
     const from = page * PAGE_SIZE
     const to   = from + PAGE_SIZE - 1
     const wantCount = countedFor.current !== queryKey || recount.current
+    const order = gridSortPlan(sort)
 
     const query = supabase
       .from('media')
-      .select([MEDIA_SELECT, ...plan.embeds].join(', '), wantCount ? { count: 'exact' } : undefined)
+      .select([MEDIA_SELECT, ...plan.embeds, ...order.embeds].join(', '), wantCount ? { count: 'exact' } : undefined)
       .in('deployment_id', activeDeploymentIds)
       .is('deleted_at', null)
-    applyFilterOps(query, plan.ops)
-      .order('timestamp', { ascending: false, nullsFirst: false })
+    applyOrder(applyFilterOps(query, plan.ops), order.orders)
       .range(from, to)
       .then(({ data, error: err, count }) => {
         if (cancelled) return
@@ -535,7 +535,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
       })
 
     return () => { cancelled = true }
-  }, [user, activeDeploymentIds, queryKey, plan, page, reloadKey])
+  }, [user, activeDeploymentIds, queryKey, plan, sort, page, reloadKey])
 
   // While an upload is running, poll so newly-registered media appear in the grid
   // without a manual refresh, and do one final refresh when it finishes (cleanup
@@ -622,7 +622,6 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
       }
       setMedia(prev => prev.map(written))
       setSimilarRecords(prev => prev.map(written))
-      setReviewRecords(prev => prev.map(written))
       clearSelection()
       reload(true)
       const name = choice ? (choice.vernacular_name || choice.scientific_name) : 'empty'
@@ -661,7 +660,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   // interacts with available photos rather than "Uploading" cards.
   const filtered = useMemo(() => (pendingCards.length ? [...media, ...pendingCards] : media), [media, pendingCards])
   // The cards on screen: the page, or the similarity results.
-  const visible = similarToId ? similarRecords : reviewMode ? reviewRecords : filtered
+  const visible = similarToId ? similarRecords : filtered
   const visibleSelectable = visible.filter(isSelectable)
   const selectAllOnPage = () => setSelectedIds(new Set(visibleSelectable.map(m => m.id)))
 
@@ -730,20 +729,6 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
       .finally(() => { if (!cancelled) setSimilarLoading(false) })
     return () => { cancelled = true }
   }, [similarToId, similarQ.data])
-
-  // ── Needs review first ─────────────────────────────────────────────────────
-  // The active-learning queue (up to 200 photos of one deployment, highest score first) as
-  // grid cards; photos a person has reviewed drop out, also after a label here.
-  const reviewQ = useReviewQueue(reviewMode && singleDeployment ? singleDeployment : undefined, 200)
-  useEffect(() => {
-    const queue = reviewMode ? reviewQ.data?.queue : undefined
-    if (!queue) { setReviewRecords([]); return }
-    let cancelled = false
-    fetchMediaInOrder(queue.map(q => q.media_id))
-      .then(recs => { if (!cancelled) setReviewRecords(recs.filter(m => !m.observations.some(isHumanReviewed))) })
-      .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)) })
-    return () => { cancelled = true }
-  }, [reviewMode, reviewQ.data, reloadKey])
 
   // ── A linked photo (?media=, from the UMAP explorer) opens in the viewer ──
   const userId = user?.id
@@ -822,7 +807,6 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
     const swap = (list: MediaRecord[]) => list.map(m => m.id === updated.id ? updated : m)
     setMedia(swap)
     setSimilarRecords(swap)
-    setReviewRecords(swap)
     setLinkedMedia(m => (m?.id === updated.id ? updated : m))
   }
 
@@ -856,7 +840,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   // ── Card gestures (#283, rules in lib/cardSelection.ts) ───────────────────
   // The grid's selectable media in rendered order, for a Shift-click range.
   const gridOrder = () => {
-    if (similarToId || reviewMode) return visible.flatMap(m => (isSelectable(m) ? [m.id] : []))
+    if (similarToId) return visible.flatMap(m => (isSelectable(m) ? [m.id] : []))
     const ids: string[] = []
     for (const m of groupedMedia ? groupedMedia.flatMap(([, items]) => items) : filtered) {
       if (isSelectable(m) && (imageView !== 'crop' || m.observations.some(isLabelCard))) ids.push(m.id)
@@ -1109,7 +1093,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
         status={
           <div style={{ display: 'flex', alignItems: 'center' }}>
             {/* ── Pager: one count, the filtered total (02 #5, #24) ── */}
-            {!similarToId && !reviewMode && (
+            {!similarToId && (
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', whiteSpace: 'nowrap' }}>
                 {(win.hasPrev || win.hasNext) && (
                   <button type="button" onClick={() => goToPage(page - 1)} disabled={!win.hasPrev} aria-label="Previous page" style={pagerButton(!win.hasPrev)}>
@@ -1186,10 +1170,9 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
               { id: 'species', title: 'Species', content: (
                 <MultiSelect values={filters.species} onChange={species => setFilters(f => ({ ...f, species }))} allLabel="All species" noun="species" nounPlural="species"
                   searchable onOpen={() => setWantSpeciesOptions(true)}
-                  loading={filterOptions.species.isFetching}
-                  note={filterOptions.species.data?.incomplete ? 'Showing the first species found' : undefined}
+                  loading={filterOptions.isFetching}
                   // A chosen species stays listed while the options load, or after a deep link.
-                  options={[...new Set([...filters.species, ...(filterOptions.species.data?.values ?? [])])].map(s => ({ value: s, label: s }))} />
+                  options={[...new Set([...filters.species, ...(filterOptions.data?.species ?? []).map(o => o.value)])].map(s => ({ value: s, label: s }))} />
               ) },
               {
                 id: 'refine', title: 'More filters',
@@ -1209,7 +1192,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
                   </button>
                 ),
               },
-              ...(singleDeployment && reviewOrderOn ? [{ id: 'order', title: 'Order', content: (
+              ...(reviewOrderOn ? [{ id: 'order', title: 'Order', content: (
                 <FilterSelect value={orderBy} onChange={v => setOrderBy(v === 'review' ? 'review' : '')} placeholder="Newest first"
                   options={[{ value: 'review', label: 'Needs review first' }]} />
               ) }] : []),
@@ -1286,7 +1269,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
       )}
 
       {/* ── Stuck thumbnails: one notice, one Retry for their deployments (02 #22) ── */}
-      {stuckThumbs.length > 0 && !similarToId && !reviewMode && (
+      {stuckThumbs.length > 0 && !similarToId && (
         <Banner
           tone="warning"
           icon={ImageOff}
@@ -1330,26 +1313,6 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
                 {similarRecords.map(m => renderThumbCard(m))}
               </div>
             </>
-          ) : reviewMode ? (
-            <>
-              {/* Needs review first: the active-learning order, one deployment */}
-              <Banner
-                tone="info"
-                action={
-                  <button type="button" onClick={() => setOrderBy('')}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.8rem' }}>
-                    <X size={13} aria-hidden /> Newest first
-                  </button>
-                }
-              >
-                <strong>{reviewRecords.length}</strong> unreviewed photos the AI is least sure about, most uncertain first. Filters do not apply here.
-              </Banner>
-              {reviewQ.isLoading && <p style={{ color: 'var(--text-muted)', padding: '1rem 0' }}>Loading the review order…</p>}
-              {reviewQ.isError && <Banner tone="error">The review order is not available for this deployment yet.</Banner>}
-              <div style={gridStyle}>
-                {renderCards(reviewRecords)}
-              </div>
-            </>
           ) : (
           <>
           {!loading && filtered.length === 0 && (
@@ -1386,7 +1349,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
                     </button>
                   )}
                   {labelAll && clusterInfo && singleDeployment && (
-                    <ClusterLabelAll clusterId={clusterInfo.id} deploymentId={singleDeployment} onDone={onClusterConfirmed} />
+                    <ClusterLabelAll clusterId={clusterInfo.id} deploymentId={singleDeployment} projectId={projectByDeployment.get(singleDeployment)} onDone={onClusterConfirmed} />
                   )}
                 </>
               ) : undefined}
@@ -1475,11 +1438,11 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
                   { value: 'whole', label: 'Whole image'  },
                 ]} />
               <FilterSelect value={draft.annotator} onChange={v => editDraft({ annotator: v })}
-                placeholder={filterOptions.annotators.isFetching ? 'Loading annotators…' : 'Any annotator'}
-                options={[...new Set([draft.annotator, ...(filterOptions.annotators.data?.values ?? [])].filter(Boolean))].map(a => ({ value: a, label: a }))} />
+                placeholder={filterOptions.isFetching ? 'Loading annotators…' : 'Any annotator'}
+                options={[...new Set([draft.annotator, ...(filterOptions.data?.annotators ?? []).map(o => o.value)].filter(Boolean))].map(a => ({ value: a, label: a }))} />
               <FilterSelect value={draft.model} onChange={v => editDraft({ model: v })}
-                placeholder={filterOptions.models.isFetching ? 'Loading AI models…' : 'Any AI model'}
-                options={[...new Set([draft.model, ...(filterOptions.models.data?.values ?? [])].filter(Boolean))].map(v => ({ value: v, label: modelOptionLabel(v) }))} />
+                placeholder={filterOptions.isFetching ? 'Loading AI models…' : 'Any AI model'}
+                options={[...new Set([draft.model, ...(filterOptions.data?.models ?? []).map(o => o.value)].filter(Boolean))].map(v => ({ value: v, label: modelOptionLabel(v) }))} />
             </div>
           </section>
 
@@ -1554,6 +1517,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
           onApply={bulkLabel}
           onClose={() => setShowLabelModal(false)}
           seeds={labelledSpecies(media.flatMap(m => m.observations))}
+          projectIds={[...new Set(visible.flatMap(m => (selectedIds.has(m.id) ? projectByDeployment.get(m.deployment_id) ?? [] : [])))]}
         />
       )}
       {showTrainModal && (() => {

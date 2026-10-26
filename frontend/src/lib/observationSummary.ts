@@ -1,15 +1,16 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Insights > Reports: the observations, counted once into the small tables each counter and
-// chart draws (UI audit 04 #8). Vega gets a few rows per chart instead of every observation.
+// Insights > Reports: the database's counts (ww-backend #334), summed into the small tables each
+// counter and chart draws (UI audit 04 #8). Vega gets a few rows per chart instead of every
+// observation.
 
-export interface SummaryObservation {
+/** Live observations of one deployment with one species and type (`insights_observation_counts`). */
+export interface ObservationCount {
   deployment_id: string
   scientific_name: string | null
   observation_type: string | null
-  /** When the photo was taken (`media.timestamp`); null when there is none. */
-  captured_at: string | null
+  n: number
 }
 
 export interface CountRow {
@@ -40,30 +41,32 @@ function sortedRows(counts: Map<string, number>, labelOf: (key: string) => strin
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
 }
 
-function bump(counts: Map<string, number>, key: string) {
-  counts.set(key, (counts.get(key) ?? 0) + 1)
+function bump(counts: Map<string, number>, key: string, n = 1) {
+  counts.set(key, (counts.get(key) ?? 0) + n)
 }
 
-/** One pass over the observations. A deployment without a label keeps its id prefix. */
+/** One pass over the counted rows. A deployment without a label keeps its id prefix. */
 export function summariseObservations(
-  observations: SummaryObservation[],
+  counts: ObservationCount[],
   deploymentLabels: ReadonlyMap<string, string> = new Map(),
 ): ObservationSummary {
   const species = new Map<string, number>()
   const types = new Map<string, number>()
   const deployments = new Map<string, number>()
   const detected = new Set<string>()
+  let total = 0
   let animals = 0
-  for (const o of observations) {
-    if (o.scientific_name) bump(species, o.scientific_name)
+  for (const o of counts) {
+    total += o.n
+    if (o.scientific_name) bump(species, o.scientific_name, o.n)
     const type = o.observation_type || 'unknown'
-    bump(types, type)
-    bump(deployments, o.deployment_id)
+    bump(types, type, o.n)
+    bump(deployments, o.deployment_id, o.n)
     if (type !== 'blank') detected.add(o.deployment_id)
-    if (type === 'animal') animals++
+    if (type === 'animal') animals += o.n
   }
   return {
-    total: observations.length,
+    total,
     uniqueSpecies: [...species.keys()].filter(s => s !== UNIDENTIFIED).length,
     deploymentsWithDetections: detected.size,
     animals,
@@ -78,6 +81,17 @@ export function capRows<T>(rows: T[], max: number): { shown: T[]; more: number }
   return { shown: rows.slice(0, max), more: Math.max(0, rows.length - max) }
 }
 
+/** The rows of `deploymentIds` that name one of `species`; an empty list keeps every value. */
+export function filterCounts<T extends { deployment_id: string; scientific_name: string | null }>(
+  rows: T[], deploymentIds: readonly string[], species: readonly string[],
+): T[] {
+  if (deploymentIds.length === 0 && species.length === 0) return rows
+  const deps = new Set(deploymentIds)
+  const names = new Set(species)
+  return rows.filter(r =>
+    (deps.size === 0 || deps.has(r.deployment_id)) && (names.size === 0 || names.has(r.scientific_name ?? '')))
+}
+
 // ── Detections per day by species (one deployment) ─────────────────────────
 
 export interface DayRow {
@@ -89,29 +103,17 @@ export interface DayRow {
 
 export const OTHER_SPECIES = 'Other species'
 
-const dayFormatters = new Map<string, Intl.DateTimeFormat>()
-
-/** YYYY-MM-DD in `timeZone` (the browser's when empty or unknown). */
-export function dayKey(iso: string, timeZone?: string | null): string | null {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return null
-  const zone = timeZone || ''
-  let f = dayFormatters.get(zone)
-  if (!f) {
-    try {
-      f = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', ...(zone ? { timeZone: zone } : {}) })
-    } catch {
-      f = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit' })
-    }
-    dayFormatters.set(zone, f)
-  }
-  const parts = f.formatToParts(d)
-  const part = (type: string) => parts.find(p => p.type === type)?.value
-  return `${part('year')}-${part('month')}-${part('day')}`
+/** Named live observations of a deployment per capture day and species (`deployment_daily_counts`). */
+export interface DailyCount {
+  deployment_id: string
+  /** The photo's capture date in the deployment's zone, YYYY-MM-DD; null with no capture time. */
+  day: string | null
+  scientific_name: string | null
+  n: number
 }
 
 /**
- * Named observations counted by the day their photo was taken (`captured_at`), in the
+ * Named observations by the day their photo was taken, as the database dated them in the
  * deployment's zone, the browser's when it has none. Not `created_at`: that is when the AI or a
  * person labelled the photo, so an upload or a re-run would put every photo on one day. Those
  * without a capture time are left out and counted in `undated`, so the chart's sum plus
@@ -119,29 +121,28 @@ export function dayKey(iso: string, timeZone?: string | null): string | null {
  * the rest are summed into "Other species", so the colours stay readable.
  */
 export function detectionsPerDay(
-  observations: SummaryObservation[], timeZone?: string | null, maxSpecies = 8,
+  counts: DailyCount[], maxSpecies = 8,
 ): { rows: DayRow[]; species: string[]; undated: number } {
-  const dated: { day: string; species: string }[] = []
+  const dated: { day: string; species: string; n: number }[] = []
   let undated = 0
-  for (const o of observations) {
-    if (!o.scientific_name) continue
-    const day = o.captured_at ? dayKey(o.captured_at, timeZone) : null
-    if (day) dated.push({ day, species: o.scientific_name })
-    else undated++
+  for (const c of counts) {
+    if (!c.scientific_name) continue
+    if (c.day) dated.push({ day: c.day, species: c.scientific_name, n: c.n })
+    else undated += c.n
   }
 
   const totals = new Map<string, number>()
-  for (const d of dated) bump(totals, d.species)
+  for (const d of dated) bump(totals, d.species, d.n)
   const ranked = sortedRows(totals, k => k).map(r => r.key)
   const named = new Set(ranked.slice(0, maxSpecies))
 
   const cells = new Map<string, DayRow>()
   for (const d of dated) {
-    const species = named.has(d.species) ? d.species : OTHER_SPECIES
-    const key = `${d.day}|${species}`
+    const label = named.has(d.species) ? d.species : OTHER_SPECIES
+    const key = `${d.day}|${label}`
     const cell = cells.get(key)
-    if (cell) cell.count++
-    else cells.set(key, { day: d.day, species, count: 1 })
+    if (cell) cell.count += d.n
+    else cells.set(key, { day: d.day, species: label, count: d.n })
   }
   const species = ranked.slice(0, maxSpecies)
   if (ranked.length > maxSpecies) species.push(OTHER_SPECIES)

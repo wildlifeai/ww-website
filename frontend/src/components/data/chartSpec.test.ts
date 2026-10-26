@@ -3,12 +3,12 @@ import { compile } from 'vega-lite'
 import { parse, View } from 'vega'
 import { countBarSpec, perDaySpec, typeArcSpec } from './chartSpec'
 import { themed } from '../../lib/vegaSpec'
-import { detectionsPerDay, summariseObservations, type SummaryObservation } from '../../lib/observationSummary'
+import { detectionsPerDay, summariseObservations } from '../../lib/observationSummary'
 
-const obs = (scientific_name: string, n: number, captured_at = '2026-09-01T10:00:00Z') =>
-  Array.from({ length: n }, (): SummaryObservation => ({ deployment_id: 'd1', scientific_name, observation_type: 'animal', captured_at }))
+const obs = (scientific_name: string, n: number, day = '2026-09-01') =>
+  ({ deployment_id: 'd1', scientific_name, observation_type: 'animal', day, n })
 
-const SUMMARY = summariseObservations([...obs('Anas platyrhynchos', 22), ...obs('Rattus norvegicus', 3)])
+const SUMMARY = summariseObservations([obs('Anas platyrhynchos', 22), obs('Rattus norvegicus', 3)])
 
 async function svgOf(spec: Record<string, unknown>): Promise<string> {
   const view = new View(parse(compile(spec as never).spec), { renderer: 'none' })
@@ -47,9 +47,9 @@ describe('charts read counted rows, not observations (#8)', () => {
 
   it('draws detections per day by species', async () => {
     const { rows, species } = detectionsPerDay([
-      ...obs('Anas platyrhynchos', 4, '2026-09-01T10:00:00Z'),
-      ...obs('Rattus norvegicus', 2, '2026-09-03T10:00:00Z'),
-    ], 'UTC')
+      obs('Anas platyrhynchos', 4, '2026-09-01'),
+      obs('Rattus norvegicus', 2, '2026-09-03'),
+    ])
     const spec = perDaySpec(rows, species)
     expect(spec.data.values).toHaveLength(2)
     const svg = await svgOf({ ...spec, width: 400, config: themed(spec.config, 'rgb(0, 0, 0)') })

@@ -18,9 +18,11 @@ interface Props {
   onClose: () => void
   /** Species already labelled on the photos in view, offered before any search. */
   seeds?: SpeciesOption[]
+  /** The selected photos' projects: their species replace `seeds` once read. */
+  projectIds?: readonly string[]
 }
 
-export function BulkLabelModal({ count, busy, onApply, onClose, seeds }: Props) {
+export function BulkLabelModal({ count, busy, onApply, onClose, seeds, projectIds }: Props) {
   const photos = `${count} photo${count !== 1 ? 's' : ''}`
   return (
     <Modal open={true} onClose={onClose} title={`Label ${photos}`}>
@@ -33,6 +35,7 @@ export function BulkLabelModal({ count, busy, onApply, onClose, seeds }: Props) 
         <SpeciesPicker
           autoFocus
           seeds={seeds}
+          projectIds={projectIds}
           placeholder="Search species (e.g. Eurasian blackbird)…"
           disabled={busy}
           onSelect={(s) => onApply(s)}

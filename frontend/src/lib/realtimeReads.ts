@@ -5,12 +5,11 @@
  * - Deployments page past PostgREST's 1,000-row cap (`readAllPages`).
  * - Deployment ids go to the database in chunks of `ID_CHUNK`, so an `in.(...)` list stays well
  *   inside the URL limit however many cameras are out.
- * - Telemetry takes the newest `TELEMETRY_WINDOW` messages of a chunk in one read. A camera that
- *   reports every few minutes can fill that window, so when it comes back full, the deployments
- *   it missed get their newest message in a second read, embedded under `deployments` with a
- *   limit of one. Without that a quiet camera showed "Awaiting" instead of "Silent" (UI audit
- *   04 #10). A view or RPC returning the newest message per deployment would make this one
- *   indexed read; that is a database need, raised with the maintainer.
+ * - Telemetry is one read of the view `deployment_latest_lorawan` per chunk: one row per
+ *   deployment with its newest message's battery level and SD card use (ww-backend #333), so a
+ *   chatty camera cannot crowd a quiet one out (UI audit 04 #10). The view runs as the caller,
+ *   so `lorawan_messages`' read policy decides which deployments come back.
+ * - A new message re-reads only its own deployment (`fetchDeploymentUpdate`).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchLiveObservations } from './liveObservations'
@@ -44,8 +43,6 @@ export interface RecentDetections {
 
 /** Deployment ids per request. */
 export const ID_CHUNK = 100
-/** Newest messages read per chunk before falling back to one read per missed deployment. */
-export const TELEMETRY_WINDOW = 1000
 export const DETECTION_HOURS = 48
 
 type DeploymentRow = Omit<ActiveDeployment, 'project_name' | 'device_name'> & {
@@ -74,68 +71,29 @@ export async function fetchActiveDeployments(
   }))
 }
 
-interface ParsedMessage {
+interface LatestMessageRow {
+  deployment_id: string
+  received_at: string
   battery_level: number | null
   sd_card_used_capacity: number | null
 }
-
-export interface MessageRow {
-  deployment_id: string | null
-  received_at: string | null
-  lorawan_parsed_messages: ParsedMessage | ParsedMessage[] | null
-}
-
-function toTelemetry(m: Omit<MessageRow, 'deployment_id'>): Telemetry {
-  const p = Array.isArray(m.lorawan_parsed_messages) ? m.lorawan_parsed_messages[0] : m.lorawan_parsed_messages
-  return { battery: p?.battery_level ?? null, sdUsed: p?.sd_card_used_capacity ?? null, lastSeen: m.received_at ?? null }
-}
-
-/** The first row of each deployment wins, so pass the rows newest first. */
-export function newestPerDeployment(rows: MessageRow[]): Record<string, Telemetry> {
-  const out: Record<string, Telemetry> = {}
-  for (const m of rows) {
-    if (!m.deployment_id || out[m.deployment_id]) continue
-    out[m.deployment_id] = toTelemetry(m)
-  }
-  return out
-}
-
-const MESSAGE_COLUMNS = 'received_at, lorawan_parsed_messages(battery_level, sd_card_used_capacity)'
 
 /** The newest check-in of each deployment that has one. */
 export async function fetchLatestTelemetry(
   db: SupabaseClient, deploymentIds: string[],
 ): Promise<Record<string, Telemetry>> {
-  const parts = await Promise.all(chunk(deploymentIds, ID_CHUNK).map(ids => latestForChunk(db, ids)))
-  return Object.assign({}, ...parts)
-}
-
-async function latestForChunk(db: SupabaseClient, ids: string[]): Promise<Record<string, Telemetry>> {
-  const { data, error } = await db
-    .from('lorawan_messages')
-    .select(`deployment_id, ${MESSAGE_COLUMNS}`)
-    .in('deployment_id', ids)
-    .order('received_at', { ascending: false })
-    .limit(TELEMETRY_WINDOW)
-  if (error) throw new Error(error.message)
-  const rows = (data ?? []) as unknown as MessageRow[]
-  const latest = newestPerDeployment(rows)
-  // A short window holds every message, so a deployment missing from it has none.
-  if (rows.length < TELEMETRY_WINDOW) return latest
-  const missed = ids.filter(id => !latest[id])
-  if (missed.length === 0) return latest
-  const more = await db
-    .from('deployments')
-    .select(`id, lorawan_messages(${MESSAGE_COLUMNS})`)
-    .in('id', missed)
-    .order('received_at', { referencedTable: 'lorawan_messages', ascending: false })
-    .limit(1, { referencedTable: 'lorawan_messages' })
-  if (more.error) throw new Error(more.error.message)
-  for (const d of (more.data ?? []) as unknown as { id: string; lorawan_messages: Omit<MessageRow, 'deployment_id'>[] | null }[]) {
-    const newest = d.lorawan_messages?.[0]
-    if (newest) latest[d.id] = toTelemetry(newest)
+  const reads = await Promise.all(chunk(deploymentIds, ID_CHUNK).map(ids => db
+    .from('deployment_latest_lorawan')
+    .select('deployment_id, received_at, battery_level, sd_card_used_capacity')
+    .in('deployment_id', ids)))
+  const out: Record<string, Telemetry> = {}
+  for (const { data, error } of reads) {
+    if (error) throw new Error(error.message)
+    for (const m of (data ?? []) as LatestMessageRow[]) {
+      out[m.deployment_id] = { battery: m.battery_level, sdUsed: m.sd_card_used_capacity, lastSeen: m.received_at }
+    }
   }
-  return latest
+  return out
 }
 
 interface DetectionRow {
@@ -167,4 +125,28 @@ export async function fetchRecentDetections(
   const failed = reads.find(r => r.error)
   if (failed?.error) throw new Error(failed.error.message)
   return summariseDetections(reads.flatMap(r => r.data ?? []))
+}
+
+export interface DeploymentUpdate {
+  telemetry: Telemetry | undefined
+  detections: RecentDetections | undefined
+}
+
+/** One deployment's newest check-in and recent detections, read again after it sends a message. */
+export async function fetchDeploymentUpdate(
+  db: SupabaseClient, deploymentId: string, now = Date.now(),
+): Promise<DeploymentUpdate> {
+  const [telemetry, detections] = await Promise.all([
+    fetchLatestTelemetry(db, [deploymentId]),
+    fetchRecentDetections(db, [deploymentId], now),
+  ])
+  return { telemetry: telemetry[deploymentId], detections: detections[deploymentId] }
+}
+
+/** `map` with `id` set to `value`, or without `id` when `value` is undefined. */
+export function withEntry<T>(map: Record<string, T>, id: string, value: T | undefined): Record<string, T> {
+  const next = { ...map }
+  if (value === undefined) delete next[id]
+  else next[id] = value
+  return next
 }
