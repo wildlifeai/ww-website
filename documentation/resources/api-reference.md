@@ -144,6 +144,7 @@ are readable by any signed-in user, and an API key's jobs are read with `GET /ap
 
 | Method · Path | Description |
 |---|---|
+| `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id |
 | `GET /api/jobs/{job_id}` | Status + `progress`, `current_phase`, ordered `events[]`, `summary` |
 | `GET /api/jobs/{job_id}/result` | Result of a completed job (`result_url`); `409` if not yet complete |
 

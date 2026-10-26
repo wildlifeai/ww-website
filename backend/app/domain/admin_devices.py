@@ -14,23 +14,10 @@ a device's ``organisation`` is its latest deployment's project's, and none witho
 
 from __future__ import annotations
 
-from typing import Any, Callable
-
-# PostgREST returns at most 1,000 rows per response, so both reads page.
-_PAGE = 1000
+from app.services.db_utils import read_all
 
 _DEVICE_COLUMNS = "id, name, bluetooth_id, device_eui"
 _DEPLOYMENT_COLUMNS = "id, name, device_id, deployment_start, deployment_end, projects(id, name, deleted_at, organisations(id, name))"
-
-
-def _read_all(build_query: Callable[[], Any]) -> list[dict]:
-    """Every row of a read ordered on ``id``, so the pages neither skip nor repeat rows."""
-    rows: list[dict] = []
-    while True:
-        page = build_query().range(len(rows), len(rows) + _PAGE - 1).execute().data or []
-        rows.extend(page)
-        if len(page) < _PAGE:
-            return rows
 
 
 def _latest_deployments(deployments: list[dict]) -> dict[str, dict]:
@@ -49,11 +36,11 @@ def _latest_deployments(deployments: list[dict]) -> dict[str, dict]:
 def list_devices(client) -> list[dict]:
     """Live devices with their latest live deployment and its project's organisation, ordered by name.
 
-    Two paged reads with the project and organisation embedded, so the cost does not grow
-    with a query per device.
+    Two paged reads (PostgREST returns at most 1,000 rows per response) with the project and
+    organisation embedded, so the cost does not grow with a query per device.
     """
-    devices = _read_all(lambda: client.table("devices").select(_DEVICE_COLUMNS).is_("deleted_at", "null").order("id"))
-    deployments = _read_all(lambda: client.table("deployments").select(_DEPLOYMENT_COLUMNS).is_("deleted_at", "null").order("id"))
+    devices = read_all(lambda: client.table("devices").select(_DEVICE_COLUMNS).is_("deleted_at", "null").order("id"))
+    deployments = read_all(lambda: client.table("deployments").select(_DEPLOYMENT_COLUMNS).is_("deleted_at", "null").order("id"))
     latest = _latest_deployments(deployments)
 
     out = []

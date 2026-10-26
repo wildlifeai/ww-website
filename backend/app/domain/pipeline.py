@@ -29,7 +29,7 @@ from app.schemas.pipeline import (
     PipelineStepType,
 )
 from app.services.bioclip_service import BIOCLIP_VERSION
-from app.services.db_utils import rows_of
+from app.services.db_utils import read_all, rows_of
 from app.services.speciesnet_service import SPECIESNET_VERSION
 from app.services.supabase_client import create_service_client
 
@@ -946,23 +946,6 @@ def cloud_annotated_media_ids(ai_rows: list[dict]) -> set[str]:
 # HUMAN_REVIEWED_STATES; active_learning reads consensus_approved as human truth too).
 HUMAN_VERDICT_STATES = ("human_reviewed", "expert_reviewed", "consensus_approved")
 
-# PostgREST returns at most 1,000 rows per response, so whole-deployment reads page.
-_READ_PAGE = 1000
-
-
-def _read_all(build_query: Callable[[], Any]) -> list[dict]:
-    """Every row of a read, paged past PostgREST's 1,000-row cap.
-
-    ``build_query`` returns the query afresh, ordered on a unique key so that the
-    pages neither skip nor repeat rows (as ``media_registry.backfill_thumbnails``).
-    """
-    rows: list[dict] = []
-    while True:
-        page = build_query().range(len(rows), len(rows) + _READ_PAGE - 1).execute().data or []
-        rows.extend(page)
-        if len(page) < _READ_PAGE:
-            return rows
-
 
 def human_verdict_media_ids(svc, *, deployment_id: str | None = None, media_ids=None, model_version: str | None = None) -> set[str]:
     """Media that carry a live human verdict, by deployment or by media id.
@@ -982,11 +965,11 @@ def human_verdict_media_ids(svc, *, deployment_id: str | None = None, media_ids=
         return build
 
     if media_ids is None:
-        return {r["media_id"] for r in _read_all(_query(None))}
+        return {r["media_id"] for r in read_all(_query(None))}
     ids = list(media_ids)
     held: set[str] = set()
     for i in range(0, len(ids), 100):
-        held |= {r["media_id"] for r in _read_all(_query(ids[i : i + 100]))}
+        held |= {r["media_id"] for r in read_all(_query(ids[i : i + 100]))}
     return held
 
 
@@ -1737,13 +1720,13 @@ async def _run_pipeline_held(
                 q = q.in_("id", media_ids)
             return q.order("timestamp").order("id")
 
-        rows = _read_all(_media_query)
+        rows = read_all(_media_query)
         if force or not rows:
             return rows
 
         skip: set[str] = set()
         if run_versions:
-            done = _read_all(
+            done = read_all(
                 lambda: (
                     svc.table("observations")
                     .select("media_id")
@@ -1755,7 +1738,7 @@ async def _run_pipeline_held(
             )
             skip |= {o["media_id"] for o in done}
         if only_unannotated:
-            ai = _read_all(
+            ai = read_all(
                 lambda: (
                     svc.table("observations")
                     .select("media_id, ai_origin")

@@ -85,3 +85,9 @@ export interface JobSummary {
   updated_at: string | null
   event_count: number
 }
+
+/** One page of GET /api/jobs; `next_before` reads the next page and is null on the last. */
+export interface JobsPage {
+  jobs: JobSummary[]
+  next_before: string | null
+}
