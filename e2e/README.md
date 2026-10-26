@@ -83,11 +83,17 @@ preview, since the specs are what changed), and by hand with a base URL and a su
   violation. It was advisory until #213 cleared the colour-contrast findings (#212).
 - **Lighthouse of public pages** audits `/`, `/login`, `/guides`, `/faq` and `/resources` three
   times each on the desktop preset, against the budgets in `lighthouserc.json`: performance 90,
-  accessibility 95, best practices 95, SEO 90. The SEO score leaves out `is-crawlable`:
-  Cloudflare preview deployments send `X-Robots-Tag: noindex`, which fails it whatever the page
-  does, so a `noindex` in production is not caught here. Advisory for now (#228): a page under
-  budget is a warning annotation on the run and the HTML reports are in the `lighthouse-<sha>`
-  artifact. Blocking once a dev run meets the budgets, the way the a11y job went.
+  accessibility 95, best practices 95, SEO 90. A page meets a budget when its best run does
+  (LHCI's default), so a slow first run, common on `/`, does not fail it. A page under budget
+  fails the job, and the HTML reports are in the `lighthouse-<sha>` artifact. It was advisory
+  until the pages met the budgets (#228), the way the a11y job went.
+
+  The SEO score leaves out `is-crawlable`: Cloudflare preview deployments send
+  `X-Robots-Tag: noindex`, which fails it whatever the page does. Production serves the same
+  build, so the other SEO audits hold there too. Whether production can be indexed rests on
+  `frontend/public/robots.txt` (`Allow: /`) and on production sending no `X-Robots-Tag`, which
+  no job checks: after a change to the Cloudflare project,
+  `curl -sI https://wildlifewatcher.ai/ | grep -i x-robots-tag` should print nothing.
 
 The two Playwright jobs fail when the junit report holds nothing but skipped tests: the specs skip themselves
 when their env is missing, so a missing secret would otherwise read as a pass. The dev API
