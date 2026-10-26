@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../../lib/apiClient'
 import { useAuth } from '../../hooks/useAuth'
+import { Bird, Check } from 'lucide-react'
+import { ToolCard } from './ToolCard'
 
 interface INatStatus {
   connected: boolean
@@ -54,7 +56,7 @@ export function INaturalistPanel() {
   }, [])
 
   // Pathway 2: submit the personal API token the user pasted. No OAuth app /
-  // callback URL needed — the token is validated server-side, then stored.
+  // callback URL needed: the token is validated server-side, then stored.
   const handleSubmitToken = async () => {
     const token = tokenInput.trim()
     if (!token) { setActionError('Paste your iNaturalist API token first'); return }
@@ -67,7 +69,7 @@ export function INaturalistPanel() {
       setTokenInput('')
       setShowPaste(false)
     } catch (e: any) {
-      setActionError(e.message || 'That token was rejected — make sure you copied the full api_token')
+      setActionError(e.message || 'That token was rejected, make sure you copied the full api_token')
     } finally {
       setSubmitting(false)
     }
@@ -83,23 +85,14 @@ export function INaturalistPanel() {
     }
   }
 
-  // Don't render if feature is not enabled
-  if (error === 'not_enabled') return null
-
-  // Don't render if user is not logged in
-  if (error === 'login_required') return null
+  // No card at all when the feature is off or the user is signed out (UI audit 01 D4).
+  if (error === 'not_enabled' || error === 'login_required') return null
 
   return (
-    <div
-      className="card"
-      style={{
-        marginBottom: '1.5rem',
-        padding: '1rem 1.25rem',
-        borderLeft: status?.connected
-          ? '3px solid var(--success)'
-          : '3px solid var(--border)',
-        transition: 'border-color 0.3s',
-      }}
+    <ToolCard
+      icon={Bird}
+      title="Connect iNaturalist"
+      description="Link your iNaturalist account to publish reviewed observations and bring community identifications back."
     >
       <div
         style={{
@@ -118,7 +111,9 @@ export function INaturalistPanel() {
               borderRadius: '50%',
               background: status?.connected
                 ? 'linear-gradient(135deg, #74ac00, #4a7c00)'
-                : 'var(--surface-2)',
+                : 'var(--bg-color)',
+              border: '1px solid var(--border)',
+              color: 'var(--text-muted)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -138,7 +133,7 @@ export function INaturalistPanel() {
                 }}
               />
             ) : (
-              '🌿'
+              <Bird size={16} aria-hidden="true" />
             )}
           </div>
 
@@ -147,16 +142,16 @@ export function INaturalistPanel() {
               iNaturalist
             </div>
             {loading ? (
-              <div style={{ fontSize: '0.75rem', opacity: 0.5 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                 Checking connection…
               </div>
             ) : status?.connected ? (
-              <div style={{ fontSize: '0.75rem', color: 'var(--success)' }}>
-                ✓ Connected as{' '}
+              <div style={{ fontSize: '0.75rem', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                <Check size={13} aria-hidden="true" /> Connected as{' '}
                 <strong>{status.inat_username || 'user'}</strong>
               </div>
             ) : (
-              <div style={{ fontSize: '0.75rem', opacity: 0.5 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                 Not connected
               </div>
             )}
@@ -171,8 +166,8 @@ export function INaturalistPanel() {
               style={{
                 fontSize: '0.75rem',
                 padding: '0.375rem 0.75rem',
-                background: 'var(--surface-2)',
-                color: 'var(--text)',
+                background: 'var(--bg-color)',
+                color: 'var(--text-color)',
                 border: '1px solid var(--border)',
               }}
             >
@@ -200,10 +195,10 @@ export function INaturalistPanel() {
       {/* Pathway 2: paste a personal API token (no OAuth app required). */}
       {!status?.connected && showPaste && (
         <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <div style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
             1. Open{' '}
             <a href={INAT_TOKEN_URL} target="_blank" rel="noopener noreferrer" style={{ color: '#74ac00', fontWeight: 600 }}>
-              your iNaturalist API token ↗
+              your iNaturalist API token
             </a>{' '}
             (log in to iNaturalist if asked) and copy the long <code>api_token</code> value.
             <br />2. Paste it below and Connect. The token lasts ~24h, so you may need to re-paste a fresh one daily.
@@ -217,7 +212,7 @@ export function INaturalistPanel() {
             style={{
               width: '100%', fontFamily: 'monospace', fontSize: '0.7rem',
               padding: '0.5rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
-              background: 'var(--surface-2)', color: 'var(--text)', resize: 'vertical',
+              background: 'var(--bg-color)', color: 'var(--text-color)', resize: 'vertical',
             }}
           />
           <div>
@@ -227,8 +222,8 @@ export function INaturalistPanel() {
               disabled={submitting || !tokenInput.trim()}
               style={{
                 fontSize: '0.75rem', padding: '0.375rem 0.9rem',
-                background: submitting || !tokenInput.trim() ? 'var(--surface-2)' : 'linear-gradient(135deg, #74ac00, #4a7c00)',
-                color: submitting || !tokenInput.trim() ? 'var(--text)' : '#fff',
+                background: submitting || !tokenInput.trim() ? 'var(--bg-color)' : 'linear-gradient(135deg, #74ac00, #4a7c00)',
+                color: submitting || !tokenInput.trim() ? 'var(--text-muted)' : '#fff',
                 border: 'none', cursor: submitting || !tokenInput.trim() ? 'not-allowed' : 'pointer',
               }}
             >
@@ -249,6 +244,6 @@ export function INaturalistPanel() {
           {error}
         </div>
       )}
-    </div>
+    </ToolCard>
   )
 }

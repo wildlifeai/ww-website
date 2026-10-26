@@ -10,6 +10,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react'
 import { Navigate } from 'react-router-dom'
+import { TriangleAlert } from 'lucide-react'
 import { supabase } from '../config/supabase'
 import { useAuth } from '../hooks/useAuth'
 import { useIsAdmin } from '../hooks/useIsAdmin'
@@ -46,7 +47,20 @@ function fmtDuration(sec: number | null): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 function fmtDate(s: string | null): string { return s ? new Date(s).toLocaleDateString() : '—' }
-const limitTxt = (n: number | null, fmt: (x: number) => string) => n == null ? '∞' : fmt(n)
+/** A user's soft limits in words, or "None" when every one is unlimited. */
+function limitsText(r: UsageRow): string {
+  const parts = [
+    r.max_photos != null && `${r.max_photos.toLocaleString()} photos`,
+    r.max_storage_bytes != null && fmtBytes(r.max_storage_bytes),
+    r.max_compute_seconds != null && `${fmtDuration(r.max_compute_seconds)} AI`,
+  ].filter(Boolean)
+  return parts.length ? parts.join(' · ') : 'None'
+}
+
+const LINK_BUTTON: React.CSSProperties = {
+  border: 'none', background: 'none', padding: 0, cursor: 'pointer',
+  color: 'var(--primary)', textDecoration: 'underline', fontSize: 'inherit',
+}
 
 const INPUT: React.CSSProperties = {
   width: 110, padding: '0.35rem 0.5rem', fontSize: '0.85rem', border: '1px solid var(--border)',
@@ -90,16 +104,16 @@ function QuotaEditModal({ row, onClose, onSaved }: { row: UsageRow; onClose: () 
   )
 
   return (
-    <Modal open onClose={onClose} title={`Limits — ${row.full_name || row.email || row.user_id.slice(0, 8)}`}>
-      <p style={{ fontSize: '0.82rem', opacity: 0.7, marginTop: 0 }}>Soft limits — they warn, they don't block. Leave blank for unlimited.</p>
+    <Modal open onClose={onClose} title={`Limits for ${row.full_name || row.email || row.user_id.slice(0, 8)}`}>
+      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: 0 }}>Soft limits warn, they never block. Leave blank for no limit.</p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         {field('Photos', '(count)', photos, setPhotos)}
         {field('Storage', '(MB)', mb, setMb)}
         {field('AI compute', '(minutes)', mins, setMins)}
       </div>
-      {err && <p style={{ color: 'var(--error)', fontSize: '0.8rem' }}>⚠ {err}</p>}
+      {err && <p role="alert" style={{ color: 'var(--error)', fontSize: '0.8rem' }}>{err}</p>}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', marginTop: '1rem' }}>
-        <button onClick={onClose} disabled={busy} style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6 }}>Cancel</button>
+        <button onClick={onClose} disabled={busy} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>Cancel</button>
         <button className="btn" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save limits'}</button>
       </div>
     </Modal>
@@ -138,10 +152,9 @@ export function AdminUsagePage() {
     return () => { cancelled = true }
   }, [user, isAdmin, reloadKey])
 
-  // Redirect non-admins immediately (isAdmin resolves to false).
-  if (!authLoading && isAdmin === false) {
-    return <Navigate to="/" replace />
-  }
+  // Nothing until the role check answers, so a non-admin never sees the page; then redirect.
+  if (authLoading || isAdmin === null) return null
+  if (isAdmin === false) return <Navigate to="/" replace />
 
   const totals = rows.reduce(
     (a, r) => ({ photos: a.photos + r.photos_uploaded, bytes: a.bytes + r.storage_bytes, sec: a.sec + r.compute_seconds }),
@@ -155,52 +168,57 @@ export function AdminUsagePage() {
       render: r => (
         <div>
           <div>{r.full_name || '—'}</div>
-          <div style={{ fontSize: '0.72rem', opacity: 0.6 }}>{r.email || r.user_id.slice(0, 8)}</div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{r.email || r.user_id.slice(0, 8)}</div>
         </div>
       ),
       getValue: r => r.full_name ?? r.email ?? '',
     },
     { key: 'photos_uploaded', label: 'Photos', cellStyle: { textAlign: 'right' },
-      render: r => <span style={{ color: r.over_quota ? '#ef4444' : undefined, fontWeight: r.over_quota ? 700 : undefined }}>{r.photos_uploaded.toLocaleString()}{r.over_quota && ' ⚠'}</span>,
+      render: r => (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', color: r.over_quota ? '#ef4444' : undefined, fontWeight: r.over_quota ? 700 : undefined }}>
+          {r.photos_uploaded.toLocaleString()}
+          {r.over_quota && <TriangleAlert size={12} aria-label="Over a limit" />}
+        </span>
+      ),
       getValue: r => r.photos_uploaded },
     { key: 'storage_bytes', label: 'Storage', cellStyle: { textAlign: 'right' }, render: r => fmtBytes(r.storage_bytes), getValue: r => r.storage_bytes },
     { key: 'compute_seconds', label: 'AI compute', cellStyle: { textAlign: 'right' },
       render: r => r.compute_runs ? `${fmtDuration(r.compute_seconds)} · ${r.compute_runs} run${r.compute_runs !== 1 ? 's' : ''}` : '—',
       getValue: r => r.compute_seconds },
-    { key: '_limits', label: 'Limits (P / S / C)', sortable: false, cellStyle: { textAlign: 'right' },
+    { key: '_limits', label: 'Limits', sortable: false,
       render: r => (
-        <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', justifyContent: 'flex-end', fontSize: '0.78rem' }}>
-          <span style={{ opacity: 0.75 }}>{limitTxt(r.max_photos, n => n.toLocaleString())} / {limitTxt(r.max_storage_bytes, fmtBytes)} / {limitTxt(r.max_compute_seconds, fmtDuration)}</span>
-          <button onClick={() => setEditRow(r)} title="Edit limits" style={{ border: 'none', background: 'none', cursor: 'pointer', opacity: 0.6 }}>✏️</button>
+        <span style={{ display: 'inline-flex', gap: '0.5rem', alignItems: 'baseline', fontSize: '0.78rem' }}>
+          <span>{limitsText(r)}</span>
+          <button onClick={() => setEditRow(r)} aria-label={`Edit limits for ${r.full_name || r.email || 'this user'}`} style={LINK_BUTTON}>Edit</button>
         </span>
-      ) },
+      ),
+      getValue: r => limitsText(r) },
     { key: 'last_upload', label: 'Last upload', render: r => fmtDate(r.last_upload), getValue: r => r.last_upload ?? '' },
     { key: 'last_active', label: 'Last active', render: r => fmtDate(r.last_active), getValue: r => r.last_active ?? '' },
   ]
 
   return (
     <div style={{ maxWidth: 1160 }}>
-      <h2 style={{ margin: '0 0 0.375rem 0' }}>📊 User usage</h2>
-      <p style={{ opacity: 0.65, fontSize: '0.9rem', margin: '0 0 1rem 0' }}>
-        Per-user photos, rendition storage and AI compute (admin only). Limits are soft — they warn the
-        user and flag here, but never block. Storage is web-derived renditions; originals live in Drive.
+      <h2 style={{ margin: '0 0 0.375rem 0' }}>User usage</h2>
+      <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: '0 0 1rem 0' }}>
+        Photos, rendition storage and AI compute per user. Limits warn, they never block.
       </p>
 
-      {error && <p style={{ color: 'var(--error)', marginBottom: '1rem' }}>⚠ {error}</p>}
+      {error && <p role="alert" style={{ color: 'var(--error)', marginBottom: '1rem' }}>{error}</p>}
 
       {!loading && rows.length > 0 && (
         <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
           {([['users', rows.length], ['photos', totals.photos.toLocaleString()], ['storage', fmtBytes(totals.bytes)], ['AI compute', fmtDuration(totals.sec)], ['over limit', overCount]] as [string, string | number][]).map(([label, value]) => (
-            <div key={label} className="glass-card" style={{ padding: '0.75rem 1rem', minWidth: 110 }}>
+            <div key={label} className="card" style={{ padding: '0.75rem 1rem', minWidth: 110 }}>
               <div style={{ fontSize: '1.4rem', fontWeight: 700, color: label === 'over limit' && overCount ? '#ef4444' : undefined }}>{value}</div>
-              <div style={{ fontSize: '0.72rem', opacity: 0.7 }}>{label}</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{label}</div>
             </div>
           ))}
         </div>
       )}
 
       {loading ? (
-        <p style={{ opacity: 0.5 }}>Loading usage…</p>
+        <p style={{ color: 'var(--text-muted)' }}>Loading usage…</p>
       ) : (
         <DataTable<UsageRow>
           columns={columns} rows={rows} rowKey={r => r.user_id}

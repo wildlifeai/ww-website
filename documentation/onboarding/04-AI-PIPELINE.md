@@ -175,7 +175,10 @@ animal crop ──DINOv3──▶ media_embeddings ──HDBSCAN──▶ cluste
   dataset (`prepare_cluster_input` / `cluster_hdbscan`) so they still form real clusters instead of
   collapsing into one group.
 - **Active learning**: `get_review_queue()` ranks media by `active_learning_score` (novelty =
-  `1 − cluster_confidence`) → surfaced in `ReviewQueuePage` (`/review/:id`).
+  `1 − cluster_confidence`), served by `GET /api/brain/review-queue/{id}`. Since the Review Queue
+  was retired (October 2026) the grid's *Needs review first* order reads the score itself, from
+  `media_embeddings` in its media query (ww-backend #337); the website calls the route only to
+  learn whether the flag is on (`lib/featureFlags.ts`).
 - **QA**: `qa_report()` computes AI-vs-human agreement (a precision proxy over images carrying both
   an AI and a human label) → shown on `DatasetHealthPage` (`/intelligence/:id`) via `useProjectQa`.
 

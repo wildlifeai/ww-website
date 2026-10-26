@@ -6,7 +6,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     # Into dev like every other change, as in ww-backend and ww-mobile-app; a release
     # carries it to main. Security updates still target main, whatever this says.
     target-branch: dev
@@ -18,13 +18,14 @@ updates:
       # Paired with the CLI version pinned in react-doctor.yml (v2.2.9 + 0.9.12); bump both by hand.
       - dependency-name: millionco/react-doctor
 
-  # The site, the browser flows and the API. One grouped PR a week per
-  # ecosystem and update type, into dev like everything else; security
-  # updates ignore the grouping and open on their own.
+  # The site, the browser flows and the API. One grouped PR a month per
+  # ecosystem and update type, into dev like everything else: every merge into
+  # dev makes each open PR "behind", so fewer, larger bumps (maintainer,
+  # 23 Oct 2026). Security updates ignore the schedule and open on their own.
   - package-ecosystem: npm
     directory: /frontend
     schedule:
-      interval: weekly
+      interval: monthly
     target-branch: dev
     open-pull-requests-limit: 5
     groups:
@@ -58,7 +59,7 @@ updates:
   - package-ecosystem: npm
     directory: /e2e
     schedule:
-      interval: weekly
+      interval: monthly
     target-branch: dev
     open-pull-requests-limit: 3
     groups:
@@ -69,7 +70,7 @@ updates:
   - package-ecosystem: pip
     directory: /backend
     schedule:
-      interval: weekly
+      interval: monthly
     target-branch: dev
     open-pull-requests-limit: 5
     # The requirements are floors (>=) with no lockfile, so a PR that only

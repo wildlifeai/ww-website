@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.authz import require_deployment_access, require_media_access
+from app.authz import assert_write, require_deployment_access, require_media_access
 from app.config import settings
 from app.dependencies import get_current_user, get_user_client, require_not_demo
 from app.domain.media_registry import resolve_url, with_resolved_urls
@@ -261,7 +261,8 @@ async def run_pipeline_selected(
 
     Looks up the deployment_id from the first media record, then runs the
     pipeline with a media_ids filter. The lookup runs as the requesting user
-    so RLS limits it to media in their own projects.
+    so RLS limits it to media in their own projects; the caller must be able to change that
+    deployment's project (project_member or above, ``403`` otherwise).
     """
     req_id = getattr(request.state, "request_id", None)
     if not body.media_ids:
@@ -280,6 +281,7 @@ async def run_pipeline_selected(
             error=ApiError(code="NOT_FOUND", message="No media found for the given IDs."),
             meta=ApiMeta(request_id=req_id),
         )
+    await assert_write(user.id, deployment_id=deployment_id)
 
     # TODO: run_pipeline_job does not exist in app/jobs/definitions.py yet —
     # enqueueing it raised at runtime. Surface NOT_IMPLEMENTED honestly until

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useUmapCoords, type UmapPoint } from '../hooks/useBrain'
+import { FeatureOff } from '../components/common/FeatureOff'
+import { isFeatureDisabled } from '../lib/featureFlags'
 
 const PALETTE = ['#5cdb7a', '#3dcfb8', '#5b9cf6', '#a882f5', '#e87abd', '#e8b84b', '#e87054', '#8effa8', '#82c8f5', '#f5a3d0']
 const W = 900
@@ -16,8 +18,10 @@ function colorFor(clusterId: number): string {
 // deck.gl ScatterplotLayer (GPU) — same data shape, drop-in upgrade.
 export function UmapExplorerPage() {
   const { deployment_id } = useParams<{ deployment_id: string }>()
-  const { data, isLoading } = useUmapCoords(deployment_id)
+  const navigate = useNavigate()
+  const { data, isLoading, error } = useUmapCoords(deployment_id)
   const points = useMemo(() => data?.points || [], [data])
+  const photosUrl = `/annotations?deployment=${deployment_id}`
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const projectedRef = useRef<Array<{ sx: number; sy: number; p: UmapPoint }>>([])
@@ -62,9 +66,10 @@ export function UmapExplorerPage() {
     projectedRef.current = projected
   }, [points, bounds])
 
-  const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // The point under the pointer (within 8 px), in canvas and on-screen coordinates.
+  const pointAt = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
-    if (!canvas) return
+    if (!canvas) return null
     const rect = canvas.getBoundingClientRect()
     const mx = ((e.clientX - rect.left) / rect.width) * W
     const my = ((e.clientY - rect.top) / rect.height) * H
@@ -74,46 +79,68 @@ export function UmapExplorerPage() {
       const d = (pt.sx - mx) ** 2 + (pt.sy - my) ** 2
       if (d < bestD) { bestD = d; best = pt }
     }
-    setHover(best ? { left: (best.sx / W) * rect.width, top: (best.sy / H) * rect.height, p: best.p } : null)
+    return best ? { left: (best.sx / W) * rect.width, top: (best.sy / H) * rect.height, p: best.p } : null
+  }
+
+  const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => setHover(pointAt(e))
+
+  // A click opens the deployment's photos and names the photo in `media`, for the grid to open.
+  const openPhoto = (p: UmapPoint) => navigate(`${photosUrl}&media=${p.media_id}`)
+  const onClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const hit = pointAt(e)
+    if (hit) openPhoto(hit.p)
+  }
+  // Enter opens the point under the pointer, as a click does.
+  const onKeyDown = (e: React.KeyboardEvent<HTMLCanvasElement>) => {
+    if (e.key === 'Enter' && hover) openPhoto(hover.p)
   }
 
   const clusterCount = useMemo(() => new Set(points.filter((p) => !p.is_outlier).map((p) => p.cluster_id)).size, [points])
 
   if (isLoading) return <div style={{ padding: '2rem' }}>Loading embedding map…</div>
+  if (isFeatureDisabled(error)) return <FeatureOff backTo={photosUrl} backLabel="Back to the photos" />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', color: 'var(--text-color)' }}>
-      <div className="glass-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+      <div className="card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
         <div>
           <h3 style={{ margin: 0 }}>UMAP Explorer</h3>
-          <span style={{ fontSize: '0.8125rem', opacity: 0.7 }}>{points.length} points · {clusterCount} clusters · coloured by cluster</span>
+          <span style={{ fontSize: '0.8125rem', color: 'var(--text-muted)' }}>{points.length} points · {clusterCount} clusters · coloured by cluster</span>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <Link to={`/clusters/${deployment_id}`} className="btn btn-outline" style={{ backgroundColor: 'transparent', border: '1px solid var(--border)', textDecoration: 'none', fontSize: '0.8125rem' }}>◧ Clusters</Link>
-          <Link to={`/annotations?deployment=${deployment_id}`} className="btn btn-outline" style={{ backgroundColor: 'transparent', border: '1px solid var(--border)', textDecoration: 'none', fontSize: '0.8125rem' }}>🏷️ Annotations</Link>
+          <Link to={`/clusters/${deployment_id}`} className="btn btn-outline" style={{ backgroundColor: 'transparent', border: '1px solid var(--border)', textDecoration: 'none', fontSize: '0.8125rem' }}>Clusters</Link>
+          <Link to={photosUrl} className="btn btn-outline" style={{ backgroundColor: 'transparent', border: '1px solid var(--border)', textDecoration: 'none', fontSize: '0.8125rem' }}>Photos</Link>
         </div>
       </div>
 
-      {points.length === 0 ? (
-        <div className="glass-card" style={{ padding: '2rem', textAlign: 'center', opacity: 0.7 }}>
-          No embeddings yet — run the Wildlife Brain from the Clusters page.
+      {error ? (
+        <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--error)' }}>
+          Could not load the map: {error.message}
+        </div>
+      ) : points.length === 0 ? (
+        <div className="card" style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+          No embeddings yet. Run the Wildlife Brain from the Clusters page.
         </div>
       ) : (
-        <div className="glass-card" style={{ padding: '1rem', position: 'relative' }}>
+        <div className="card" style={{ padding: '1rem', position: 'relative' }}>
           <canvas
             ref={canvasRef}
             width={W}
             height={H}
             onMouseMove={onMove}
             onMouseLeave={() => setHover(null)}
-            style={{ width: '100%', height: 'auto', display: 'block', cursor: 'crosshair', borderRadius: 'var(--radius)' }}
+            onClick={onClick}
+            onKeyDown={onKeyDown}
+            tabIndex={0}
+            aria-label="Photos placed by how alike they look, coloured by cluster. Click a point to open its photo."
+            style={{ width: '100%', height: 'auto', display: 'block', cursor: hover ? 'pointer' : 'crosshair', borderRadius: 'var(--radius)' }}
           />
           {hover && (
             <div style={{ position: 'absolute', left: hover.left + 12, top: hover.top, pointerEvents: 'none', background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '4px 8px', borderRadius: 4, fontSize: '0.7rem', whiteSpace: 'nowrap' }}>
-              {hover.p.is_outlier ? '⚠ outlier' : `cluster ${hover.p.cluster_id}`}
+              {hover.p.is_outlier ? 'outlier' : `cluster ${hover.p.cluster_id}`}
               {hover.p.cluster_purity ? ` · ${hover.p.cluster_purity}` : ''}
               <br />
-              {hover.p.media_id.slice(0, 8)}
+              Click to open the photo
             </div>
           )}
         </div>

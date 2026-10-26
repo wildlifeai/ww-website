@@ -1,12 +1,13 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useState, useEffect, useCallback } from 'react'
 import { apiClient } from '../lib/apiClient'
+import { isInatOff } from '../lib/inatOff'
 
 /**
  * useINat — iNaturalist connection status + publish action for the web app.
  *
  * - `connected` / `username`: from GET /api/inat/status
- * - `enabled`: false when FF_INAT_ENABLED is off (endpoint 404s)
+ * - `enabled`: false when FF_INAT_ENABLED is off (the status route answers 404 "not enabled")
  * - `connect()`: starts the OAuth flow (redirects to iNaturalist)
  * - `publish(mediaIds, opts)`: POST /api/inat/publish (burst-consolidated upload)
  */
@@ -34,10 +35,7 @@ export function useINat() {
       setConnected(!!d.connected)
       setUsername(d.inat_username ?? null)
     } catch (e) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msg = String((e as any)?.message ?? '')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (msg.includes('404') || (e as any)?.code === 'HTTP_404') setEnabled(false)
+      if (isInatOff(e)) setEnabled(false)
       setConnected(false)
     }
   }, [])

@@ -1,19 +1,27 @@
 // Copyright (c) 2024
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// NotificationsPage — /notifications (opened from the avatar menu).
+// NotificationsPage, /notifications (opened from the avatar menu).
 // Lists the signed-in user's notifications with type/unread filters and mark-read
-// actions. Degrades to a "coming soon" state when the notifications table isn't
+// actions. The filters run in the query and the list loads a page at a time
+// (UI audit 01 E1). Degrades to a short note when the notifications table isn't
 // deployed in this environment yet (see useNotifications).
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useNotifications, type AppNotification } from '../hooks/useNotifications'
+import { Bell, CircleCheck, Info, PawPrint, WifiOff, type LucideIcon } from 'lucide-react'
+import { NOTIFICATIONS_PAGE, useNotifications, type AppNotification } from '../hooks/useNotifications'
 
-const TYPE_META: Record<string, { icon: string; label: string }> = {
-  species_detection: { icon: '🐾', label: 'Species detection' },
-  camera_silent:     { icon: '📡', label: 'Camera silent' },
-  upload_complete:   { icon: '✅', label: 'Upload complete' },
-  system:            { icon: 'ℹ️', label: 'System' },
+/** The table's four types (ww-backend `54_notifications.sql`), in the filter's order. */
+const TYPE_META: Record<string, { icon: LucideIcon; label: string }> = {
+  species_detection: { icon: PawPrint,    label: 'Species detection' },
+  camera_silent:     { icon: WifiOff,     label: 'Camera silent' },
+  upload_complete:   { icon: CircleCheck, label: 'Upload complete' },
+  system:            { icon: Info,        label: 'System' },
+}
+
+const SELECT_STYLE: React.CSSProperties = {
+  padding: '0.35rem 0.5rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)',
+  background: 'var(--surface)', color: 'var(--text-color)', fontSize: '0.8rem',
 }
 
 function timeAgo(iso: string): string {
@@ -26,16 +34,16 @@ function timeAgo(iso: string): string {
 }
 
 export function NotificationsPage() {
-  const { items, available, loading, unreadCount, markRead, markAllRead } = useNotifications()
   const navigate = useNavigate()
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [unreadOnly, setUnreadOnly] = useState(false)
+  const [limit, setLimit] = useState(NOTIFICATIONS_PAGE)
+  const { items, available, loading, fetching, hasMore, unreadCount, markRead, markAllRead } =
+    useNotifications({ type: typeFilter, unreadOnly }, limit)
 
-  const filtered = useMemo(() => items.filter(n =>
-    (!typeFilter || n.type === typeFilter) && (!unreadOnly || !n.read_at)
-  ), [items, typeFilter, unreadOnly])
-
-  const types = useMemo(() => Array.from(new Set(items.map(n => n.type))), [items])
+  // A new filter starts again from the first page.
+  const changeType = (t: string) => { setTypeFilter(t); setLimit(NOTIFICATIONS_PAGE) }
+  const changeUnread = (v: boolean) => { setUnreadOnly(v); setLimit(NOTIFICATIONS_PAGE) }
 
   const onOpen = (n: AppNotification) => {
     if (!n.read_at) markRead(n.id)
@@ -46,57 +54,49 @@ export function NotificationsPage() {
   return (
     <div style={{ maxWidth: 760 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '1rem' }}>
-        <h2 style={{ margin: '0 0 0.375rem 0' }}>🔔 Notifications</h2>
+        <h2 style={{ margin: '0 0 0.375rem 0' }}>Notifications</h2>
         {available && unreadCount > 0 && (
           <button className="btn" style={{ fontSize: '0.78rem', padding: '0.3rem 0.7rem' }} onClick={() => markAllRead()}>
             Mark all read ({unreadCount})
           </button>
         )}
       </div>
-      <p style={{ opacity: 0.65, fontSize: '0.9rem', marginTop: 0 }}>
-        Alerts about your projects — species detections and (soon) cameras that go silent.
-      </p>
 
-      {!available ? (
-        <div className="card" style={{ padding: '2rem', textAlign: 'center', marginTop: '1rem', opacity: 0.8 }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔔</div>
-          <div style={{ fontWeight: 600 }}>Notifications aren't enabled in this environment yet</div>
-          <div style={{ fontSize: '0.85rem', opacity: 0.65, marginTop: '0.35rem' }}>
-            Once the notifications table is deployed, species-detection and camera-health alerts will
-            appear here. Configure which ones you receive in Settings.
-          </div>
-        </div>
+      {loading ? (
+        <p style={{ color: 'var(--text-muted)' }}>Loading…</p>
+      ) : !available ? (
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+          Notifications aren&apos;t turned on in this environment yet.
+        </p>
       ) : (
         <>
-          {/* Filters */}
+          {/* Filters, applied in the query */}
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', margin: '0.75rem 0 1rem' }}>
             <select
               value={typeFilter}
-              onChange={e => setTypeFilter(e.target.value)}
-              style={{ padding: '0.35rem 0.5rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--surface)', color: 'var(--text-color)', fontSize: '0.8rem' }}
+              onChange={e => changeType(e.target.value)}
+              aria-label="Notification type"
+              style={SELECT_STYLE}
             >
               <option value="">All types</option>
-              {types.map(t => <option key={t} value={t}>{TYPE_META[t]?.label ?? t}</option>)}
+              {Object.entries(TYPE_META).map(([t, meta]) => <option key={t} value={t}>{meta.label}</option>)}
             </select>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', opacity: 0.85 }}>
-              <input type="checkbox" checked={unreadOnly} onChange={e => setUnreadOnly(e.target.checked)} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem' }}>
+              <input type="checkbox" checked={unreadOnly} onChange={e => changeUnread(e.target.checked)} />
               Unread only
             </label>
-            <span style={{ marginLeft: 'auto', fontSize: '0.78rem', opacity: 0.55 }}>{filtered.length} shown</span>
           </div>
 
-          {loading ? (
-            <p style={{ opacity: 0.5 }}>Loading…</p>
-          ) : filtered.length === 0 ? (
-            <div className="card" style={{ padding: '2rem', textAlign: 'center', opacity: 0.7 }}>
-              <div style={{ fontSize: '1.5rem', marginBottom: '0.4rem' }}>🎉</div>
-              <div style={{ fontWeight: 600 }}>You're all caught up</div>
-              <div style={{ fontSize: '0.85rem', opacity: 0.65, marginTop: '0.3rem' }}>No notifications match this filter.</div>
+          {items.length === 0 ? (
+            <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
+              <div style={{ fontWeight: 600 }}>You&apos;re all caught up</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.3rem' }}>No notifications match this filter.</div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {filtered.map(n => {
-                const meta = TYPE_META[n.type] ?? { icon: '🔔', label: n.type }
+              {items.map(n => {
+                const meta = TYPE_META[n.type] ?? { icon: Bell, label: n.type }
+                const Icon = meta.icon
                 return (
                   <div
                     key={n.id}
@@ -108,13 +108,13 @@ export function NotificationsPage() {
                       background: n.read_at ? 'transparent' : 'rgba(76,175,80,0.06)',
                     }}
                   >
-                    <span style={{ fontSize: '1.1rem', lineHeight: 1.2 }}>{meta.icon}</span>
+                    <Icon size={18} aria-label={meta.label} style={{ flexShrink: 0, marginTop: '0.1rem', color: 'var(--text-muted)' }} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'baseline', justifyContent: 'space-between' }}>
                         <span style={{ fontWeight: n.read_at ? 500 : 700, fontSize: '0.875rem' }}>{n.title}</span>
-                        <span style={{ fontSize: '0.7rem', opacity: 0.5, whiteSpace: 'nowrap' }}>{timeAgo(n.created_at)}</span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{timeAgo(n.created_at)}</span>
                       </div>
-                      {n.body && <div style={{ fontSize: '0.8rem', opacity: 0.75, marginTop: '0.15rem' }}>{n.body}</div>}
+                      {n.body && <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}>{n.body}</div>}
                     </div>
                     {!n.read_at && (
                       <button
@@ -128,6 +128,16 @@ export function NotificationsPage() {
                   </div>
                 )
               })}
+              {hasMore && (
+                <button
+                  type="button"
+                  disabled={fetching}
+                  onClick={() => setLimit(l => l + NOTIFICATIONS_PAGE)}
+                  style={{ ...SELECT_STYLE, alignSelf: 'center', cursor: 'pointer', marginTop: '0.5rem' }}
+                >
+                  {fetching ? 'Loading…' : 'Load more'}
+                </button>
+              )}
             </div>
           )}
         </>

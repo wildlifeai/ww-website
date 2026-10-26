@@ -1,13 +1,14 @@
 // Copyright (c) 2024
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// ProjectDefaultsPanel — per-project capture + AI defaults (Settings).
+// ProjectDefaultsPanel: one project's capture and AI defaults (Settings).
 // Sets projects.capture_method_id (default triggering method), projects.model_id
 // (default AI model), the burst, projects.photos_per_trigger and photo_interval_milliseconds
 // (lib/burstCapture.ts), the on-device detection threshold, projects.detection_threshold_pct
 // (lib/detectionThreshold.ts), and the capture flash, projects.flash_* (lib/flashSettings.ts).
 // Writes are gated by RLS to project admins. RLS turns a refused update into 0 rows with no
-// error, so a save asks for the row back and shows what the database holds.
+// error, so a save asks for the row back and shows what the database holds. Members see the
+// same controls switched off, so they can read the settings and ask an admin (decision 8).
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
@@ -53,30 +54,32 @@ const CAPTURE_LABEL: Record<string, string> = {
   timeLapse: 'Timelapse',
 }
 
-export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {}) {
+export function ProjectDefaultsPanel({ projectId, canEdit, onSaved }: {
+  projectId: string
+  /** Project admin of this project (or ww_admin); everyone else gets the controls switched off. */
+  canEdit: boolean
+  /** Called after each save: ok, or not with the message to show. */
+  onSaved: (ok: boolean, text?: string) => void
+}) {
   const { user } = useAuth()
-  const [projects, setProjects] = useState<Project[]>([])
+  const [project, setProject] = useState<Project | null>(null)
   const [methods, setMethods] = useState<CaptureMethod[]>([])
   const [models, setModels] = useState<AiModel[]>([])
   const [loading, setLoading] = useState(true)
-  const [msg, setMsg] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (!user) return
     let cancelled = false
     setLoading(true)
-    // Scope to one project when opened as a per-project action; otherwise list all.
-    let projQuery = supabase.from('projects').select(PROJECT_COLUMNS).order('name')
-    if (projectId) projQuery = projQuery.eq('id', projectId)
     Promise.all([
-      projQuery,
+      supabase.from('projects').select(PROJECT_COLUMNS).eq('id', projectId).maybeSingle(),
       supabase.from('capture_methods').select('id, value, description').eq('is_active', true),
       // A converted or trained model is 'validated' (ready to load); 'deployed' means on a device.
       // Both are usable as a project's Species Brain.
       supabase.from('ai_models').select('id, name, version').in('status', ['validated', 'deployed']).order('name'),
     ]).then(([p, c, m]) => {
       if (cancelled) return
-      setProjects((p.data as Project[] | null) ?? [])
+      setProject((p.data as Project | null) ?? null)
       setMethods((c.data as CaptureMethod[] | null) ?? [])
       setModels((m.data as AiModel[] | null) ?? [])
       setLoading(false)
@@ -88,12 +91,14 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
   const save = async (id: string, patch: Partial<Project>): Promise<boolean> => {
     const { data, error } = await supabase.from('projects').update(patch).eq('id', id).select(PROJECT_COLUMNS)
     const saved = (data as Project[] | null)?.[0]
-    if (saved) setProjects(prev => prev.map(p => (p.id === id ? saved : p)))
-    const text = error
-      ? error.code === '23514' ? `That value is not allowed: ${error.message}` : `Not saved: ${error.message}`
-      : saved ? 'Saved ✓' : 'You need the Project Admin role to change this.'
-    setMsg(m => ({ ...m, [id]: text }))
-    setTimeout(() => setMsg(m => ({ ...m, [id]: '' })), 2500)
+    if (saved) {
+      setProject(saved)
+      onSaved(true)
+    } else {
+      onSaved(false, error
+        ? error.code === '23514' ? `That value is not allowed: ${error.message}` : `Not saved: ${error.message}`
+        : NOT_ALLOWED)
+    }
     return !!saved
   }
 
@@ -122,106 +127,108 @@ export function ProjectDefaultsPanel({ projectId }: { projectId?: string } = {})
     save(p.id, { flash_window_start_minutes_utc: w.startUtc, flash_window_minutes: w.minutes })
   }
 
-  if (loading) return <p style={{ opacity: 0.5 }}>Loading…</p>
-  if (projects.length === 0) return <p style={{ fontSize: '0.85rem', opacity: 0.65 }}>No projects to configure yet.</p>
+  if (loading) return <p style={MUTED}>Loading…</p>
+  if (!project) return <p style={{ ...MUTED, fontSize: '0.85rem' }}>This project is not available to you.</p>
 
+  const p = project
+  const off = !canEdit
   const sel: React.CSSProperties = {
     padding: '0.3rem 0.45rem', fontSize: '0.8rem', border: '1px solid var(--border)',
     borderRadius: 'var(--radius)', background: 'var(--surface)', color: 'var(--text-color)', minWidth: 200,
+    cursor: off ? 'not-allowed' : undefined,
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-      {projects.map(p => (
-        <div key={p.id} style={{ border: projectId ? 'none' : '1px solid var(--border)', borderRadius: 'var(--radius)', padding: projectId ? 0 : '0.75rem 0.9rem' }}>
-          {/* The slide-over header already names the project when scoped to one. */}
-          {!projectId && <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: '0.5rem' }}>{p.name}</div>}
-          <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-            <label style={{ fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              <span style={{ opacity: 0.7 }}>Default triggering method</span>
-              <select
-                value={p.capture_method_id ?? ''}
-                onChange={e => save(p.id, { capture_method_id: e.target.value ? Number(e.target.value) : null })}
-                style={sel}
-              >
-                <option value="">— Not set —</option>
-                {methods.map(m => (
-                  <option key={m.id} value={m.id}>{CAPTURE_LABEL[m.value] ?? m.description ?? m.value}</option>
-                ))}
-              </select>
-            </label>
-            <label style={{ fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              <span style={{ opacity: 0.7 }}>Default AI model</span>
-              <select
-                value={p.model_id ?? ''}
-                onChange={e => save(p.id, { model_id: e.target.value || null })}
-                style={sel}
-              >
-                <option value="">— Photos only (no AI) —</option>
-                {models.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}{m.version ? ` ${m.version}` : ''}</option>
-                ))}
-              </select>
-            </label>
-            <label style={{ fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              <span style={{ opacity: 0.7 }}>Photos per trigger</span>
-              <select
-                value={p.photos_per_trigger}
-                onChange={e => save(p.id, { photos_per_trigger: Number(e.target.value) })}
-                style={{ ...sel, minWidth: 90 }}
-              >
-                {photoCountOptions().map(n => <option key={n} value={n}>{n}</option>)}
-              </select>
-            </label>
-            <label style={{ fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              <span style={{ opacity: 0.7 }}>Time between photos</span>
-              <select
-                value={p.photo_interval_milliseconds}
-                onChange={e => save(p.id, { photo_interval_milliseconds: Number(e.target.value) })}
-                disabled={p.photos_per_trigger <= 1}
-                style={{ ...sel, minWidth: 90 }}
-              >
-                {photoIntervalOptions(p.photo_interval_milliseconds).map(ms => <option key={ms} value={ms}>{formatInterval(ms)}</option>)}
-              </select>
-            </label>
-          </div>
-          {burstCostNote(p.photos_per_trigger) && (
-            <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>{burstCostNote(p.photos_per_trigger)}</div>
-          )}
-          <label style={{ ...FIELD, marginTop: '0.85rem' }}>
-            <span style={{ opacity: 0.7 }}>Detection threshold (%)</span>
-            <input
-              key={p.detection_threshold_pct}
-              type="number"
-              min={DETECTION_THRESHOLD_PCT.min}
-              max={DETECTION_THRESHOLD_PCT.max}
-              step={1}
-              defaultValue={p.detection_threshold_pct}
-              onBlur={e => saveThreshold(p, e.currentTarget)}
-              onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
-              style={{ ...sel, minWidth: 0, width: 90 }}
-            />
-          </label>
-          <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>
-            Minimum confidence for the camera to record a detection, {DETECTION_THRESHOLD_PCT.min} to {DETECTION_THRESHOLD_PCT.max}. Default {DETECTION_THRESHOLD_PCT.default}%.
-          </div>
-          <FlashControls p={p} sel={sel} offset={offset} timezone={BROWSER_TIMEZONE} onMode={saveFlashMode} onLed={led => save(p.id, { flash_led: led })} onWindow={saveWindow} />
-          {msg[p.id] && (
-            <div style={{ fontSize: '0.72rem', marginTop: '0.4rem', color: msg[p.id].startsWith('Saved') ? 'var(--success)' : 'var(--error)' }}>
-              {msg[p.id]}
-            </div>
-          )}
-        </div>
-      ))}
+    <div>
+      {off && <p style={{ ...MUTED, fontSize: '0.8125rem', margin: '0 0 0.85rem 0' }}>Only project admins can change these.</p>}
+      <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+        <label style={FIELD}>
+          <span style={MUTED}>Default triggering method</span>
+          <select
+            value={p.capture_method_id ?? ''}
+            onChange={e => save(p.id, { capture_method_id: e.target.value ? Number(e.target.value) : null })}
+            disabled={off}
+            style={sel}
+          >
+            <option value="">Not set</option>
+            {methods.map(m => (
+              <option key={m.id} value={m.id}>{CAPTURE_LABEL[m.value] ?? m.description ?? m.value}</option>
+            ))}
+          </select>
+        </label>
+        <label style={FIELD}>
+          <span style={MUTED}>Default AI model</span>
+          <select
+            value={p.model_id ?? ''}
+            onChange={e => save(p.id, { model_id: e.target.value || null })}
+            disabled={off}
+            style={sel}
+          >
+            <option value="">Photos only (no AI)</option>
+            {models.map(m => (
+              <option key={m.id} value={m.id}>{m.name}{m.version ? ` ${m.version}` : ''}</option>
+            ))}
+          </select>
+        </label>
+        <label style={FIELD}>
+          <span style={MUTED}>Photos per trigger</span>
+          <select
+            value={p.photos_per_trigger}
+            onChange={e => save(p.id, { photos_per_trigger: Number(e.target.value) })}
+            disabled={off}
+            style={{ ...sel, minWidth: 90 }}
+          >
+            {photoCountOptions().map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </label>
+        <label style={FIELD}>
+          <span style={MUTED}>Time between photos</span>
+          <select
+            value={p.photo_interval_milliseconds}
+            onChange={e => save(p.id, { photo_interval_milliseconds: Number(e.target.value) })}
+            disabled={off || p.photos_per_trigger <= 1}
+            style={{ ...sel, minWidth: 90 }}
+          >
+            {photoIntervalOptions(p.photo_interval_milliseconds).map(ms => <option key={ms} value={ms}>{formatInterval(ms)}</option>)}
+          </select>
+        </label>
+      </div>
+      {burstCostNote(p.photos_per_trigger) && (
+        <div style={{ ...MUTED, fontSize: '0.75rem', marginTop: '0.4rem' }}>{burstCostNote(p.photos_per_trigger)}</div>
+      )}
+      <label
+        style={{ ...FIELD, marginTop: '0.85rem' }}
+        title={`Minimum confidence for the camera to record a detection. Default ${DETECTION_THRESHOLD_PCT.default}%.`}
+      >
+        <span style={MUTED}>Detection threshold ({DETECTION_THRESHOLD_PCT.min} to {DETECTION_THRESHOLD_PCT.max}%)</span>
+        <input
+          key={p.detection_threshold_pct}
+          type="number"
+          min={DETECTION_THRESHOLD_PCT.min}
+          max={DETECTION_THRESHOLD_PCT.max}
+          step={1}
+          defaultValue={p.detection_threshold_pct}
+          onBlur={e => saveThreshold(p, e.currentTarget)}
+          onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+          disabled={off}
+          style={{ ...sel, minWidth: 0, width: 90 }}
+        />
+      </label>
+      <FlashControls p={p} sel={sel} disabled={off} offset={offset} timezone={BROWSER_TIMEZONE} onMode={saveFlashMode} onLed={led => save(p.id, { flash_led: led })} onWindow={saveWindow} />
     </div>
   )
 }
 
+const MUTED: React.CSSProperties = { color: 'var(--text-muted)' }
+
+const NOT_ALLOWED = 'You need the Project Admin role to change this.'
+
 const FIELD: React.CSSProperties = { fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }
 
-function FlashControls({ p, sel, offset, timezone, onMode, onLed, onWindow }: {
+function FlashControls({ p, sel, disabled, offset, timezone, onMode, onLed, onWindow }: {
   p: Project
   sel: React.CSSProperties
+  disabled: boolean
   offset: number
   timezone: string
   onMode: (p: Project, mode: FlashMode) => void
@@ -234,15 +241,15 @@ function FlashControls({ p, sel, offset, timezone, onMode, onLed, onWindow }: {
     <>
       <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.85rem' }}>
         <label style={FIELD}>
-          <span style={{ opacity: 0.7 }}>Capture flash</span>
-          <select value={p.flash_mode} onChange={e => onMode(p, e.target.value as FlashMode)} style={{ ...sel, minWidth: 180 }}>
+          <span style={MUTED}>Capture flash</span>
+          <select value={p.flash_mode} onChange={e => onMode(p, e.target.value as FlashMode)} disabled={disabled} style={{ ...sel, minWidth: 180 }}>
             {FLASH_MODES.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         </label>
         {p.flash_mode !== 'off' && (
           <label style={FIELD}>
-            <span style={{ opacity: 0.7 }}>LED</span>
-            <select value={p.flash_led} onChange={e => onLed(e.target.value as FlashLed)} style={{ ...sel, minWidth: 90 }}>
+            <span style={MUTED}>LED</span>
+            <select value={p.flash_led} onChange={e => onLed(e.target.value as FlashLed)} disabled={disabled} style={{ ...sel, minWidth: 90 }}>
               {FLASH_LEDS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
             </select>
           </label>
@@ -251,23 +258,23 @@ function FlashControls({ p, sel, offset, timezone, onMode, onLed, onWindow }: {
           // Keyed on the stored window so a save, or a refused one, resets the inputs.
           <div key={`${w.startUtc}-${w.minutes}`} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-end' }}>
             <label style={FIELD}>
-              <span style={{ opacity: 0.7 }}>From</span>
-              <input type="time" defaultValue={local.start} onBlur={e => onWindow(p, e.target.value, local.end)} style={{ ...sel, minWidth: 0 }} />
+              <span style={MUTED}>From</span>
+              <input type="time" defaultValue={local.start} onBlur={e => onWindow(p, e.target.value, local.end)} disabled={disabled} style={{ ...sel, minWidth: 0 }} />
             </label>
             <label style={FIELD}>
-              <span style={{ opacity: 0.7 }}>To</span>
-              <input type="time" defaultValue={local.end} onBlur={e => onWindow(p, local.start, e.target.value)} style={{ ...sel, minWidth: 0 }} />
+              <span style={MUTED}>To</span>
+              <input type="time" defaultValue={local.end} onBlur={e => onWindow(p, local.start, e.target.value)} disabled={disabled} style={{ ...sel, minWidth: 0 }} />
             </label>
           </div>
         )}
       </div>
       {p.flash_mode === 'time_of_day' && w && (
-        <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>
+        <div style={{ ...MUTED, fontSize: '0.75rem', marginTop: '0.4rem' }}>
           Times are {timezone}. The camera runs on UTC: {describeUtc(w)}.
         </div>
       )}
       {p.flash_mode === 'off' && (
-        <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.4rem' }}>
+        <div style={{ ...MUTED, fontSize: '0.75rem', marginTop: '0.4rem' }}>
           Off also turns off the night IR light for motion detection.
         </div>
       )}

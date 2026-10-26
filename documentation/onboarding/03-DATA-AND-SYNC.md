@@ -46,9 +46,10 @@ permissions, verify against the **live** DB, not just the migrations.
 | `media` | Annotations grid + modal | RLS (read; uploads via backend) |
 | `media_assets` | embedded in `media` queries (renditions: provider, dimensions, bytes) | RLS read — a missing GRANT aborts the **whole** embedding query (prod, Jul 2026) |
 | `observations` | Annotations modal (confirm/correct/blank/box/add) | RLS — `authenticated` needs INSERT/UPDATE GRANT |
-| `taxa` | SpeciesPicker (local search) | RLS read |
+| `taxa`, view `project_species` | SpeciesPicker (local search; the projects' species before typing, ww-backend #338) | RLS read |
 | `user_roles`, `project_invitations` | members panel, invitation banner; the user's own roles in Settings and the move picker | RPCs only, via `frontend/src/lib/projectMembers.ts` (see below); a user reads only their own `user_roles` rows directly |
-| `media_embeddings`, `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
+| `media_embeddings` | the grid's *Needs review first* order (embedded in the `media` query, ww-backend #337); Wildlife Brain | RLS read for project viewers; writes service-role |
+| `embedding_runs`, `annotation_runs` | Wildlife Brain / provenance | service-role |
 | `devices`, `lorawan_*`, `firmware`, `ai_models`, `api_jobs` | LoRaWAN, manifests, models, jobs | service-role |
 
 **Project membership goes through RPCs, never direct queries.** RLS lets a user read only their
@@ -101,9 +102,11 @@ every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./
 
 Deleting photos soft-deletes their `media` rows only; their observations stay readable, because
 the `observations` read policy checks the deployment, not the photo. Every read that counts or
-lists observations (Insights, My Data, Reporting, Field, the upload summary) goes through
+lists observations (Realtime, the upload summary) goes through
 `frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
-with no photo unless asked not to, and pages past the 1,000-row cap (#198).
+with no photo unless asked not to, and pages past the 1,000-row cap (#198). Insights reads no
+observations: ww-backend's `insights_observation_counts` and `deployment_daily_counts` (#334)
+count them by the same rule, and `frontend/src/lib/insightsReads.ts` calls them.
 
 **A deployment changes project only through the `move_deployment` RPC** (ww-backend#272); a
 direct UPDATE of `deployments.project_id` is refused with 42501. Insights > Deployments, Move to
@@ -193,6 +196,14 @@ and the Upload button waits for it (the deployment count resolves by card folder
    camera: it leaves the selection as soon as the EXIF read lands, whatever its folder, and the page
    says "N test photos skipped" (`withoutTestPhotos`, ww-website#287). A file with no EXIF keeps the
    folder fallback.
+
+   The deployments matched against are those of the projects the user can write to
+   (`useProjectRoles().canWrite`; viewers do not upload, decision 1 of the
+   [2026-10 UI audit](../development%20reports/2026-10_ui-audit/README.md)), read in pages past the
+   1,000-row cap (`lib/uploadTargets.ts`). A claim that matches none of them and that
+   `/api/deployments/validate` calls `valid` is in a project the user only views (`read_only`); those
+   frames and the `no_access` ones are named in "Where these photos will go" as skipped, never
+   offered in triage and never sent.
 2. **Triage of unassigned photos** (`UnassignedTriage`). Files that resolve to no deployment are
    grouped into **capture sessions** — same EXIF id, else same card folder, gaps under 6 h
    (`unassignedSessions.ts`) — and shown with sample thumbnails, time-span stats and, when the
@@ -200,9 +211,12 @@ and the Upload button waits for it (the deployment count resolves by card folder
    deployment, creates one from the photos (`POST /api/deployments`, **under the stamped id**
    when there is one, so the phone that configured the camera converges on the same row when it
    syncs), or skips it. **Skipped photos are not uploaded** and the screen says so; before triage
-   existed they were silently dropped (Jul 2026). On the page the sessions render as a responsive
-   grid of cards (`components/upload/upload.css`, 96 px thumbnails, one card per session) rather
-   than a single scrolling column.
+   existed they were silently dropped (Jul 2026), and since Oct 2026 they are not even sent
+   (`selectForUpload`). Undecided sessions render as a grid of cards (`components/upload/upload.css`,
+   96 px thumbnails); a decided one folds to a line with **Change**. The deployment picker is grouped
+   by project and searchable above ten options (`DeploymentPicker`). With two or more sessions left,
+   **Assign all** binds every undecided session to one deployment and **Create one deployment per
+   session** makes one each, one per stamped id when sessions share it (`planBulkCreate`).
 
    Triage is the **only** way photos get assigned. The older blanket "assign everything to one
    deployment" form is gone: it was gated on the `/validate` verdict for **card-folder prefixes**,
@@ -217,7 +231,10 @@ and the Upload button waits for it (the deployment count resolves by card folder
    post-upload redirect filter like folder-resolved ones. The redirect carries every deployment
    the upload touched (`?deployment=a,b,c`), so the deployment pill reads "N deployments" rather
    than focusing the first.
-4. Each batch → `POST /api/exif/parse`; job polling and the dock live in `UploadContext`.
+4. Each batch → `POST /api/exif/parse`; job polling and the dock live in `UploadContext`. The
+   dock folds to its pill once every batch is sent and opens again on the result, with one next
+   step: the results on Insights, or the failed job's row in Processing history
+   (`/processing?job=<id>`).
 5. **Optimistic cards** (`lib/pendingCards.ts`). The Annotations grid shows a local preview per
    uploaded file until its media row exists. The server renames frames on the way in
    (`A9BC8A30.JPG` becomes `20260905194608_01.jpg`), so a name match never retires a card;
@@ -311,8 +328,13 @@ instant in the **deployment's** timezone at display time.
   recomputes it from the new coordinates, and clears it when they are removed.
 - **Display** — [`frontend/src/lib/time.ts`](../../frontend/src/lib/time.ts) (`formatCaptureTime`,
   `getTimeOfDay`, `hourInTimezone`) renders the UTC instant in the deployment zone (with a label like
-  `10:44 am NZST`) and drives the day/night filter. **Store the IANA name, not a fixed offset**, so DST
-  is handled automatically (NZ is +12 in winter, +13 in summer).
+  `10:44 am NZST`). The review grid's day/night filter is off until the database can answer it (it
+  needs each photo's hour in its deployment's zone in the query). **Store the IANA name, not a fixed
+  offset**, so DST is handled automatically (NZ is +12 in winter, +13 in summer).
+- **Per-day counts**: Insights > Reports counts detections per day by `media.timestamp` in this zone,
+  never by `observations.created_at` (the label time); those without one are counted under the chart.
+  The database dates them (`deployment_daily_counts`, ww-backend #334), in the browser's zone when
+  the deployment has none.
 - **Graceful fallback** — when `timezone` is `NULL` (or the column isn't deployed yet) the UI falls
   back to the **viewer's browser** zone, i.e. the previous behaviour. Deployment queries fetch the
   column defensively (retry without it) so the app keeps working during the schema rollout.

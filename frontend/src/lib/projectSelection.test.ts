@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   EMPTY_SELECTION,
   clearProjects,
+  defaultProjectId,
   projectPickerLabel,
   projectQuery,
   selectAllProjects,
   selectionAfterLoad,
+  toSelectableProject,
   toggleProjectSelection,
   type SelectionState,
 } from './projectSelection'
@@ -17,13 +19,53 @@ const C = { id: 'c', name: 'Charlie' }
 const state = (selectedProjectIds: string[], projects = [A, B], userId = 'u1'): SelectionState =>
   ({ userId, projects, selectedProjectIds })
 
-describe('selectionAfterLoad', () => {
-  it('selects every project when the list first loads after sign-in', () => {
-    expect(selectionAfterLoad(EMPTY_SELECTION, 'u1', [A, B])).toEqual(state(['a', 'b']))
+describe('defaultProjectId', () => {
+  const p = (id: string, latestDeploymentStart: string | null, createdAt: string | null = null) =>
+    ({ id, name: id, latestDeploymentStart, createdAt })
+
+  it('picks the project whose newest deployment started last', () => {
+    expect(defaultProjectId([
+      p('a', '2026-09-01T00:00:00Z'), p('b', '2026-10-01T00:00:00+13:00'), p('c', '2026-09-30T12:00:00Z'),
+    ])).toBe('c') // b starts 2026-09-30T11:00Z, an hour before c: instants, not strings
   })
 
-  it('selects every project for a different user, whatever the last one had ticked', () => {
+  it('prefers any project with a deployment over newer ones without', () => {
+    expect(defaultProjectId([p('a', null, '2026-10-20T00:00:00Z'), p('b', '2020-01-01T00:00:00Z')])).toBe('b')
+  })
+
+  it('falls back to the newest project, then the first, and to null with none', () => {
+    expect(defaultProjectId([p('a', null, '2026-01-01T00:00:00Z'), p('b', null, '2026-02-01T00:00:00Z')])).toBe('b')
+    expect(defaultProjectId([A, B])).toBe('a')
+    expect(defaultProjectId([])).toBeNull()
+  })
+})
+
+describe('toSelectableProject', () => {
+  it('reads the newest deployment and the organisation from the embeds', () => {
+    expect(toSelectableProject({
+      id: 'a', name: 'Alpha', created_at: '2026-01-01T00:00:00Z',
+      organisations: { name: 'General' }, deployments: [{ deployment_start: '2026-10-13T02:01:30Z' }],
+    })).toEqual({
+      id: 'a', name: 'Alpha', organisation: 'General',
+      latestDeploymentStart: '2026-10-13T02:01:30Z', createdAt: '2026-01-01T00:00:00Z',
+    })
+    expect(toSelectableProject({ id: 'b', name: 'Bravo', deployments: [] }).latestDeploymentStart).toBeNull()
+  })
+})
+
+describe('selectionAfterLoad', () => {
+  it('selects the project with the newest deployment when the list first loads after sign-in', () => {
+    const older = { ...A, latestDeploymentStart: '2026-09-01T00:00:00Z' }
+    const newer = { ...B, latestDeploymentStart: '2026-10-01T00:00:00Z' }
+    expect(selectionAfterLoad(EMPTY_SELECTION, 'u1', [older, newer]).selectedProjectIds).toEqual(['b'])
+  })
+
+  it('selects the default project for a different user, whatever the last one had ticked', () => {
     expect(selectionAfterLoad(state([]), 'u2', [C]).selectedProjectIds).toEqual(['c'])
+  })
+
+  it('selects nothing for a user with no projects', () => {
+    expect(selectionAfterLoad(EMPTY_SELECTION, 'u1', []).selectedProjectIds).toEqual([])
   })
 
   it('keeps all as all on a reload, a newly joined project included', () => {
@@ -66,7 +108,7 @@ describe('selectionAfterLoad', () => {
     expect(selectionAfterLoad(state([]), 'u1', [A, B, C]).selectedProjectIds).toEqual([])
   })
 
-  it('selects the first project of a user who had none, since an empty list is all ticked', () => {
+  it('selects the default project of a user who had none', () => {
     expect(selectionAfterLoad(state([], []), 'u1', [C]).selectedProjectIds).toEqual(['c'])
   })
 

@@ -1,41 +1,21 @@
 /**
- * PrototypeBanner — sets expectations on the home page.
+ * PrototypeBanner: sets expectations on the public home page.
  *
  * Wildlife Watcher is in active development and people are testing it with
  * real field data, so the site says so plainly rather than letting a rough
- * edge come as a surprise.
+ * edge come as a surprise. Signed in, the same notice is one line in the footer.
  */
+import { Construction } from 'lucide-react'
+import { Banner } from '../ui/Banner'
+
+const FEEDBACK_MAILTO = 'mailto:contact@wildlife.ai?subject=Wildlife%20Watcher%20feedback'
+
 export function PrototypeBanner() {
   return (
-    <div
-      role="status"
-      style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '0.75rem',
-        padding: '0.875rem 1rem',
-        border: '1px solid var(--border)',
-        borderLeft: '4px solid var(--primary)',
-        borderRadius: 'var(--radius)',
-        background: 'var(--surface)',
-      }}
-    >
-      <span aria-hidden="true" style={{ fontSize: '1.125rem', lineHeight: 1.3 }}>
-        🚧
-      </span>
-      <div style={{ minWidth: 0 }}>
-        <strong style={{ display: 'block', fontSize: '0.9375rem', marginBottom: '0.125rem' }}>
-          This is a prototype — we&apos;re still building it
-        </strong>
-        <span style={{ fontSize: '0.875rem', opacity: 0.75 }}>
-          Features are changing week to week and you may hit rough edges. Keep your
-          own copy of anything important, and tell us what breaks —{' '}
-          <a href="mailto:contact@wildlife.ai?subject=Wildlife%20Watcher%20feedback">
-            contact@wildlife.ai
-          </a>
-          .
-        </span>
-      </div>
-    </div>
+    <Banner tone="info" icon={Construction}>
+      <strong>This is a prototype, we&apos;re still building it.</strong>{' '}
+      Features change week to week and you may hit rough edges. Keep your own copy of anything
+      important, and tell us what breaks: <a href={FEEDBACK_MAILTO}>contact@wildlife.ai</a>.
+    </Banner>
   )
 }

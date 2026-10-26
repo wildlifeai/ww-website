@@ -56,30 +56,18 @@ export function isAiLabel(o: ObservationStatusFields): boolean {
   )
 }
 
+/**
+ * True for a row a person wrote: `source_type='human'`, or an older row with no `source_type`
+ * whose label a person authored. An AI row a reviewer confirmed before UI audit decision 2 keeps
+ * `source_type='ai'` and is not one. lib/humanVerdict.ts writes the photo's verdict to this row.
+ */
+export function isHumanRow(o: ObservationStatusFields): boolean {
+  return o.source_type === 'human' || (!o.source_type && o.classification_method === 'human')
+}
+
 /** True when the label came from the camera's on-device (edge) model. */
 export function isEdgeAi(o: ObservationStatusFields): boolean {
   return isAiLabel(o) && o.ai_origin === 'edge'
-}
-
-export interface AiOriginMeta {
-  icon: string
-  label: string
-  title: string
-}
-
-/**
- * Badge descriptor for an AI observation's producing layer, or null for
- * non-AI rows. Edge → 📟 Camera AI; anything else AI (incl. legacy rows with
- * no ai_origin) → ☁ Cloud AI, since the website pipeline is the only other
- * producer. Lets a surface show "📟 Camera AI: rat 87%" beside
- * "☁ Cloud AI: Rattus rattus 64%".
- */
-export function aiOriginMeta(o: ObservationStatusFields): AiOriginMeta | null {
-  if (!isAiLabel(o)) return null
-  if (o.ai_origin === 'edge') {
-    return { icon: '📟', label: 'Camera AI', title: "On-device (edge) camera model prediction, ingested from the photo's EXIF" }
-  }
-  return { icon: '☁', label: 'Cloud AI', title: 'Cloud pipeline prediction (SpeciesNet / Wildlife Brain)' }
 }
 
 // ── Photo verdict ────────────────────────────────────────────────────────────
@@ -102,12 +90,13 @@ export interface PhotoVerdict<T> {
  * evidence-fusion consensus row (`source_type='consensus'`) decides presence: blank
  * shows Empty, anything else takes its name from the first named per-model row. With
  * neither, the first row, as before the consensus existed. A consensus row a reviewer
- * confirmed is a human verdict, but a reviewed per-model row is preferred as the label.
+ * confirmed is a human verdict, but a reviewed per-model row is preferred as the label, and a
+ * person's own row (`isHumanRow`) over an AI row a reviewer confirmed before decision 2.
  * The public API's `photo_verdict` (backend/app/domain/public_api.py) is a port: change both.
  */
 export function photoVerdict<T extends PresenceFields>(obs: readonly T[]): PhotoVerdict<T> {
   const reviewed = obs.filter(isHumanReviewed)
-  const human = reviewed.find(o => o.source_type !== 'consensus') ?? reviewed[0]
+  const human = reviewed.find(isHumanRow) ?? reviewed.find(o => o.source_type !== 'consensus') ?? reviewed[0]
   const consensus = obs.find(o => o.source_type === 'consensus')
   if (!human && consensus) {
     if (consensus.observation_type === 'blank') return { labelObs: null, isEmpty: true }
@@ -116,16 +105,6 @@ export function photoVerdict<T extends PresenceFields>(obs: readonly T[]): Photo
   }
   const top = human ?? obs[0] ?? null
   return { labelObs: top, isEmpty: !!top && !top.scientific_name && top.observation_type === 'blank' }
-}
-
-/**
- * The rows Confirm stamps human reviewed when no observation is selected (#301): the
- * per-model AI labels not yet reviewed, including older machine rows with no `source_type`.
- * The consensus row is a derived machine verdict and keeps `ai_reviewed`; the photo's verdict
- * follows the human row first.
- */
-export function confirmAllTargets<T extends ObservationStatusFields>(obs: readonly T[]): T[] {
-  return obs.filter(o => isAiLabel(o) && o.source_type !== 'consensus' && !isHumanReviewed(o))
 }
 
 // ── Boxes ────────────────────────────────────────────────────────────────────
@@ -155,9 +134,30 @@ export function groupByBox<T extends ObservationBox>(obs: T[]): T[][] {
   return [...groups.values()]
 }
 
+// CamtrapDP observation types, as a viewer names a row that carries no species.
+const TYPE_LABELS: Record<string, string> = {
+  animal: 'Animal', human: 'Person', vehicle: 'Vehicle', blank: 'Blank', unknown: 'Unknown',
+}
+
 /** What a viewer calls an observation: its common name, else its species, else its type. */
 export function observationLabel(o: { vernacular_name?: string | null; scientific_name: string | null; observation_type: string | null }): string {
-  return o.vernacular_name || o.scientific_name || o.observation_type || 'Unlabelled'
+  if (o.vernacular_name || o.scientific_name) return (o.vernacular_name || o.scientific_name) as string
+  return o.observation_type ? (TYPE_LABELS[o.observation_type] ?? o.observation_type) : 'Unlabelled'
+}
+
+/**
+ * Who gave this opinion, for the viewer's list: the model version for an AI row (SpeciesNet,
+ * BioCLIP, the camera, the consensus), the person for a human row.
+ */
+export function opinionSource(o: ObservationStatusFields & {
+  source_model_version?: string | null
+  classified_by?: string | null
+}): string {
+  if (isHumanRow(o)) return o.classified_by || 'A person'
+  const version = o.source_model_version
+  if (o.source_type === 'consensus') return version ? `Consensus, ${version}` : 'Consensus'
+  if (o.ai_origin === 'edge') return version ? `Camera AI, ${version}` : 'Camera AI'
+  return version || o.classified_by || 'Cloud AI'
 }
 
 // ── Provenance builders ──────────────────────────────────────────────────────
@@ -188,10 +188,9 @@ export function humanCreateFields(actor: Actor) {
 }
 
 /**
- * Fields merged into an EXISTING observation when a human edits / confirms it.
- * Advances the validation lifecycle and records the reviewer, without clobbering
- * the original `source_type` (an AI-originated row stays source_type='ai', now
- * human_reviewed — meaningful "AI proposed, human verified" provenance).
+ * Fields merged into a person's own row when a person changes it (lib/humanVerdict.ts).
+ * Records the reviewer and keeps the original annotator. AI rows are never edited (UI audit
+ * decision 2): a correction or a confirmation is a human row beside them.
  */
 export function humanReviewFields(actor: Actor) {
   return {

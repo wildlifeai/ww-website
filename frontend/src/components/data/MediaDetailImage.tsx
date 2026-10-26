@@ -4,6 +4,7 @@
 // The photo area of the viewer (MediaDetail): the image stage with its boxes, box drawing, pan
 // and movement compare, the "No preview yet" state, and the filmstrip.
 import { useState, useRef, useEffect } from 'react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import type { ObservationRecord, MediaRecord } from './MediaBrowser'
 import { groupByBox, isHumanReviewed, isAiLabel, observationLabel } from '../../lib/observations'
 import { displayImageUrl } from '../../lib/mediaImageUrl'
@@ -222,7 +223,7 @@ function BoxDrawer({ obsId, wrapRef, onDone, onSave }: {
 
 // ── Image stage ──────────────────────────────────────────────────────────────
 export function MediaDetailImage({
-  media, prevUrl, zoom, pan, onPan, brightness, contrast, movement, boxes, selectedObsId, onSelectObs,
+  media, prevUrl, zoom, pan, onPan, brightness, contrast, movement, boxes, selectedObsId, onSelectObs, editableObsId,
   bboxObsId, onBoxDone, onSaveBox, onClose, onNext, onPrev, previewStuck, onRetryPreview,
 }: {
   media: MediaRecord
@@ -238,6 +239,8 @@ export function MediaDetailImage({
   boxes: ObservationRecord[]
   selectedObsId: string | null
   onSelectObs: (id: string) => void
+  /** The row whose box the user may clear here (their own label, when they can write), or null. */
+  editableObsId: string | null
   /** The observation a box is being drawn for, if any. */
   bboxObsId: string | null
   onBoxDone: () => void
@@ -287,8 +290,8 @@ export function MediaDetailImage({
         cursor: zoom > 1 && !bboxObsId ? (panning ? 'grabbing' : 'grab') : 'default',
       }}
     >
-      {onPrev && <button onClick={onPrev} title="Previous (←)" style={{ ...NAV_ARROW, left: 12 }}>‹</button>}
-      {onNext && <button onClick={onNext} title="Next (→)" style={{ ...NAV_ARROW, right: 12 }}>›</button>}
+      {onPrev && <button onClick={onPrev} title="Previous (←)" aria-label="Previous photo" style={{ ...NAV_ARROW, left: 12 }}><ChevronLeft size={26} aria-hidden /></button>}
+      {onNext && <button onClick={onNext} title="Next (→)" aria-label="Next photo" style={{ ...NAV_ARROW, right: 12 }}><ChevronRight size={26} aria-hidden /></button>}
 
       {imgUrl ? (
         <div
@@ -353,16 +356,16 @@ export function MediaDetailImage({
                     )
                   })}
                 </span>
-                {!bboxObsId && selectedInGroup && (
+                {!bboxObsId && selectedInGroup && selectedInGroup.id === editableObsId && (
                   <button
                     onClick={e => { e.stopPropagation(); clearBox(selectedInGroup.id) }}
-                    title="Delete this box"
+                    title="Remove this box (Del)" aria-label="Remove this box"
                     style={{
                       position: 'absolute', top: -8, right: -8, width: 18, height: 18, borderRadius: '50%',
                       border: 'none', cursor: 'pointer', backgroundColor: color, color: '#fff',
-                      fontSize: '0.625rem', lineHeight: 1, padding: 0,
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0,
                     }}
-                  >✕</button>
+                  ><X size={12} aria-hidden /></button>
                 )}
               </div>
             )
@@ -394,7 +397,7 @@ export function MediaDetailImage({
           backgroundColor: 'rgba(245,158,11,0.92)', color: '#1f2937', fontWeight: 600,
           fontSize: '0.75rem', padding: '0.3rem 0.75rem', borderRadius: 'var(--radius)',
         }}>
-          ▭ Drag on the image to draw a box · Esc to cancel
+          Drag on the image to draw a box. Esc cancels.
         </div>
       )}
     </div>

@@ -6,6 +6,11 @@
  *                      assignment panel, optional per-session triage, Upload.
  * Step 2b (camtrapdp): ZIP package summary + inline import progress.
  *
+ * Only projects the user can write to take uploads (decision 1 of the 2026-10
+ * UI audit: viewers are read-only). The deployment read is scoped to those
+ * projects and paged; a frame whose deployment the user can only view is
+ * named in "Where these photos will go" and left out of the upload.
+ *
  * Clicking "Upload" hands the files to UploadContext.startUpload, which owns
  * the batch loop and the ProgressDock, then lands the user on Annotations
  * filtered to the uploaded deployment. Everything before that moment lives in
@@ -17,15 +22,25 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  AlertTriangle, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronUp, FolderDown, FolderOpen,
+  HardDrive, Images, MapPin, Package, RotateCcw, Upload, X,
+} from 'lucide-react'
 import { useDragAndDrop } from '../../hooks/useDragAndDrop'
 import { apiClient } from '../../lib/apiClient'
 import { UnassignedTriage } from './UnassignedTriage'
-import { buildSessions, cardFolderOf, resolutionBreakdown, unresolvedFileIndices, withoutTestPhotos } from './unassignedSessions'
-import type { ResolutionStatus } from './unassignedSessions'
+import {
+  BREAKDOWN_SHOWN, buildSessions, cardFolderOf, fileIndicesWithStatus, foldBreakdown, resolutionBreakdown,
+  selectForUpload, unresolvedFileIndices, withoutTestPhotos,
+} from './unassignedSessions'
+import type { ClaimVerdict, ResolutionStatus } from './unassignedSessions'
 import { readCameraExif } from '../../lib/exifDeploymentId'
 import { supabase } from '../../config/supabase'
+import { fetchDeploymentsInProjects } from '../../lib/uploadTargets'
 import { useUploadStore, type UploadDeployment, type PendingUpload } from '../../contexts/UploadContext'
 import { useProjectSelection } from '../../hooks/useProjectSelection'
+import { PROJECT_ROLES_KEY, useProjectRoles } from '../../hooks/useProjectRoles'
 import './upload.css'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,20 +70,23 @@ const CAMTRAP_STAGES: { label: string; pct: number; after: number }[] = [
   { label: 'Finalising import…', pct: 92, after: 30000 },
 ]
 
+/** What happens to each line of the breakdown, in the user's terms. */
+const STATUS_TEXT: Record<ResolutionStatus, string> = {
+  matched: 'matched, uploads as it is',
+  not_found: 'not in the database, you decide where it goes next',
+  no_access: 'in a project you cannot access, will be skipped',
+  read_only: "in a project you can't upload to, will be skipped",
+  unknown: 'no deployment info, you decide where it goes next',
+}
+
+const NO_DEPLOYMENTS: UploadDeployment[] = []
+
 /**
  * Files the image path accepts. Folder drops often leave `type` empty, so the
  * extensions are matched explicitly. Raw .bmp frames are admitted because the
  * backend re-compresses them to JPEG when FF_BMP_INGEST_ENABLED (and ignores
  * them otherwise); they carry no EXIF, so they bind via the card folder.
  */
-/** What happens to each line of the breakdown, in the user's terms. */
-const STATUS_TEXT: Record<ResolutionStatus, string> = {
-  matched: 'matched, uploads as it is',
-  not_found: 'not in the database, you decide where it goes next',
-  no_access: 'in a project you cannot access, will be skipped',
-  unknown: 'no deployment info, you decide where it goes next',
-}
-
 function isUploadableImage(f: File): boolean {
   const name = f.name.toLowerCase()
   return (
@@ -86,6 +104,7 @@ function isUploadableImage(f: File): boolean {
 export function UploadFlow() {
   const { startUpload, phase } = useUploadStore()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   // ── File selection state (lives for as long as the page is mounted) ────────
   const [files, setFiles] = useState<File[]>([])
@@ -107,14 +126,34 @@ export function UploadFlow() {
   // Whether to run SpeciesNet + Wildlife Brain after upload (server default: on).
   const [runAi, setRunAi] = useState(true)
 
-  // Deployment data (fetched once for stats + validation)
-  const [deployments, setDeployments] = useState<UploadDeployment[]>([])
-  const [invalidDeployments, setInvalidDeployments] = useState<
-    Record<string, 'no_access' | 'not_found'>
-  >({})
+  // What /validate and the role check say about claims that matched no deployment the user can
+  // upload to, keyed by the claim sent (full EXIF id or card-folder prefix).
+  const [claimVerdicts, setClaimVerdicts] = useState<Record<string, ClaimVerdict>>({})
+  const [showAllRows, setShowAllRows] = useState(false)
 
-  // Projects the user can file a new deployment under, offered by the triage cards.
-  const { projects } = useProjectSelection()
+  // Projects the user can upload to: the triage offers their deployments, and files new ones
+  // under them. Viewers are read-only (UI audit decision 1).
+  const { projects, isLoading: projectsLoading, reloadProjects } = useProjectSelection()
+  const roles = useProjectRoles()
+  const writableProjects = useMemo(
+    () => (roles.loading ? [] : projects.filter((p) => roles.canWrite(p.id))),
+    [projects, roles],
+  )
+  const writableIds = useMemo(() => writableProjects.map((p) => p.id).sort(), [writableProjects])
+  const targetsReady = !roles.loading && !projectsLoading
+
+  // Every live deployment in those projects, paged past the 1,000-row cap (UI audit 05 #7).
+  const deploymentsQuery = useQuery({
+    queryKey: ['upload-deployments', writableIds],
+    queryFn: async () => {
+      const { data, error } = await fetchDeploymentsInProjects<UploadDeployment>(supabase, writableIds)
+      if (error) throw new Error(error.message)
+      return data ?? []
+    },
+    enabled: targetsReady && writableIds.length > 0,
+    refetchOnWindowFocus: false,
+  })
+  const deployments = deploymentsQuery.data ?? NO_DEPLOYMENTS
 
   // CamtrapDP import state
   const [camtrapImporting, setCamtrapImporting] = useState(false)
@@ -152,15 +191,6 @@ export function UploadFlow() {
     return () => { clearInterval(ticker); timers.forEach(clearTimeout) }
   }, [camtrapImporting])
 
-  // ── Fetch deployments once on mount (for stats + validation) ──────────────
-  useEffect(() => {
-    supabase
-      .from('deployments')
-      .select('id, project_id, name, location_name, latitude, longitude, deployment_start')
-      .is('deleted_at', null)
-      .then(({ data }) => { if (data) setDeployments(data) })
-  }, [])
-
   const clearSelection = () => {
     selectionRef.current += 1
     setFiles([])
@@ -170,7 +200,8 @@ export function UploadFlow() {
     setTestPhotosSkipped(0)
     setZipFile(null)
     setSelectionError(null)
-    setInvalidDeployments({})
+    setClaimVerdicts({})
+    setShowAllRows(false)
     setCamtrapResult(null)
     setCamtrapError(null)
     setShowTriage(false)
@@ -219,14 +250,26 @@ export function UploadFlow() {
     setExifRead(null)
 
     // Validate what the files claim: full EXIF ids and card-folder prefixes that
-    // match none of the user's deployments. /validate accepts both forms.
-    const known = new Set(deployments.map((d) => d.id.toLowerCase()))
-    const unknownExifIds = Array.from(new Set(ids.filter((id): id is string => !!id && !known.has(id))))
-    const folderPrefixes = Array.from(new Set(keptPaths.flatMap((p) => cardFolderOf(p) ?? [])))
-    const unknownPrefixes = folderPrefixes.filter(
-      (id) => !deployments.some((d) => d.id.toUpperCase().startsWith(id)),
-    )
-    const unknown = [...unknownExifIds, ...unknownPrefixes]
+    // match none of the deployments the user can upload to. /validate accepts both forms.
+    const unknownClaims = (deps: UploadDeployment[]) => {
+      const known = new Set(deps.map((d) => d.id.toLowerCase()))
+      const unknownExifIds = Array.from(new Set(ids.filter((id): id is string => !!id && !known.has(id))))
+      const folderPrefixes = Array.from(new Set(keptPaths.flatMap((p) => cardFolderOf(p) ?? [])))
+      const unknownPrefixes = folderPrefixes.filter(
+        (id) => !deps.some((d) => d.id.toUpperCase().startsWith(id)),
+      )
+      return [...unknownExifIds, ...unknownPrefixes]
+    }
+    let unknown = unknownClaims(deployments)
+    // A claim /validate calls valid but that is not in the list is read as a project the user only
+    // views, so make sure the list is current first (a deployment made since the page opened).
+    let listCurrent = !deploymentsQuery.isError
+    if (unknown.length > 0) {
+      const fresh = await deploymentsQuery.refetch()
+      if (selectionRef.current !== token) return
+      listCurrent = !fresh.isError && !!fresh.data
+      if (fresh.data) unknown = unknownClaims(fresh.data)
+    }
 
     if (unknown.length > 0) {
       try {
@@ -238,11 +281,12 @@ export function UploadFlow() {
         // envelope; tolerate a bare map too (defensive across the split frontend/backend
         // deploy, an old backend still returns it bare).
         const validation: Record<string, 'valid' | 'no_access' | 'not_found'> = res?.data ?? res ?? {}
-        const invalid: Record<string, 'no_access' | 'not_found'> = {}
+        const verdicts: Record<string, ClaimVerdict> = {}
         for (const [id, status] of Object.entries(validation)) {
-          if (status === 'no_access' || status === 'not_found') invalid[id] = status
+          if (status === 'no_access' || status === 'not_found') verdicts[id] = status
+          else if (status === 'valid' && listCurrent) verdicts[id] = 'read_only'
         }
-        setInvalidDeployments(invalid)
+        setClaimVerdicts(verdicts)
       } catch {
         // Non-fatal: proceed without validation feedback
       }
@@ -270,6 +314,9 @@ export function UploadFlow() {
         data: CamtrapImportResult
       }
       setCamtrapResult(res.data)
+      // The import created a project, its admin role included: refresh the picker and the roles.
+      reloadProjects()
+      void queryClient.invalidateQueries({ queryKey: [PROJECT_ROLES_KEY] })
     } catch (err: unknown) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const e = err as any
@@ -286,13 +333,30 @@ export function UploadFlow() {
   const uploadMode: 'idle' | 'images' | 'camtrapdp' =
     zipFile ? 'camtrapdp' : files.length > 0 ? 'images' : 'idle'
 
+  // Per-deployment fate of the selection, shown before Upload and carried into
+  // triage so the photos that already matched are named there too.
+  const breakdown = useMemo(
+    () => (uploadMode === 'images' ? resolutionBreakdown(files, filePaths, exifIds, deployments, claimVerdicts) : []),
+    [uploadMode, files, filePaths, exifIds, deployments, claimVerdicts],
+  )
+  const matchedRows = breakdown.filter((r) => r.status === 'matched').map((r) => ({ label: r.label, count: r.count }))
+
+  // Frames whose deployment is in a project the user cannot upload to (one they
+  // only view, or one they are not in): named in the breakdown as skipped, never
+  // offered in triage, never sent.
+  const blockedIndices = useMemo(
+    () => fileIndicesWithStatus(files, filePaths, exifIds, breakdown, ['read_only', 'no_access']),
+    [files, filePaths, exifIds, breakdown],
+  )
+
   // Files whose deployment cannot be resolved from their EXIF id or the card's
   // folder structure. These are the ones the backend would silently drop (no
   // deployment_id -> not stored -> no media row), so they go through triage.
-  const unresolvedIndices = useMemo(
-    () => (uploadMode === 'images' ? unresolvedFileIndices(files, filePaths, exifIds, deployments) : []),
-    [files, filePaths, exifIds, deployments, uploadMode],
-  )
+  const unresolvedIndices = useMemo(() => {
+    if (uploadMode !== 'images') return []
+    const blocked = new Set(blockedIndices)
+    return unresolvedFileIndices(files, filePaths, exifIds, deployments).filter((i) => !blocked.has(i))
+  }, [files, filePaths, exifIds, deployments, uploadMode, blockedIndices])
 
   const triageSessions = useMemo(
     () => (unresolvedIndices.length ? buildSessions(files, filePaths, unresolvedIndices, exifIds) : []),
@@ -306,43 +370,40 @@ export function UploadFlow() {
 
     // Photos with no resolvable deployment are dropped server-side (the drive
     // job only stores files that have one), so resolve them before uploading.
-    // Triage covers every such photo, grouped into capture sessions, which is
-    // why there is no blanket "assign everything to one deployment" form.
+    // Triage covers every such photo, grouped into capture sessions.
     if (!sessionAssignments && triageSessions.length > 0) {
       setShowTriage(true)
       return
     }
 
-    // Resolve which deployment each file belongs to: the EXIF id, else the folder
-    // prefix. Powers the annotations redirect + optimistic grid.
-    const pending: PendingUpload[] = files
-      .map((f, i) => {
-        const deploymentId = resolveDeploymentId(i)
-        return deploymentId ? { fileName: f.name, deploymentId } : null
-      })
-      .filter((p): p is PendingUpload => p !== null)
+    // Send only what can land: not the blocked frames, and not the triaged
+    // sessions left unassigned, which the server would drop anyway.
+    const assigned = new Set((sessionAssignments ?? []).flatMap((g) => g.indices))
+    const excluded = new Set([...blockedIndices, ...unresolvedIndices.filter((i) => !assigned.has(i))])
+    const send = selectForUpload(files, filePaths, excluded, sessionAssignments)
+    if (send.files.length === 0) return
 
-    // Triaged photos resolve through their session, not the folder prefix, so
-    // fold them in too, otherwise they'd be missing from the optimistic grid
-    // and the post-upload redirect would filter to the wrong deployments.
-    const triaged: PendingUpload[] = []
-    if (sessionAssignments?.length) {
-      const byIndex = new Map<number, string>()
-      for (const g of sessionAssignments) for (const i of g.indices) byIndex.set(i, g.deploymentId)
-      files.forEach((f, i) => {
-        const deploymentId = byIndex.get(i)
-        if (deploymentId) triaged.push({ fileName: f.name, deploymentId })
-      })
-    }
-    const allPending = [...pending, ...triaged]
+    // Resolve which deployment each file belongs to: its triage session, else the
+    // EXIF id, else the folder prefix. Powers the annotations redirect + optimistic
+    // grid; triaged photos must be in it or the redirect filters to the wrong
+    // deployments. A deployment made in triage can also resolve by id once the list
+    // refreshes, so each file is counted once.
+    const byIndex = new Map<number, string>()
+    for (const g of sessionAssignments ?? []) for (const i of g.indices) byIndex.set(i, g.deploymentId)
+    const allPending: PendingUpload[] = []
+    files.forEach((f, i) => {
+      if (excluded.has(i)) return
+      const deploymentId = byIndex.get(i) ?? resolveDeploymentId(i)
+      if (deploymentId) allPending.push({ fileName: f.name, deploymentId })
+    })
     const resolvedDeploymentIds = [...new Set(allPending.map((p) => p.deploymentId))]
 
     // Images always sync to Google Drive (long-term storage is the default).
     // startUpload copies what it needs before its first await, so the page can
     // drop its staged selection straight away; UploadProvider guards the tab
     // while the batches are still sending.
-    startUpload(files, filePaths, true, deployments, {
-      resolvedDeploymentIds, pending: allPending, sessionAssignments, runAi,
+    startUpload(send.files, send.paths, true, deployments, {
+      resolvedDeploymentIds, pending: allPending, sessionAssignments: send.assignments, runAi,
     })
     clearSelection()
 
@@ -383,43 +444,20 @@ export function UploadFlow() {
   const deploymentCount = claimedDeployments.size
   const totalMB = (files.reduce((acc, f) => acc + f.size, 0) / 1024 / 1024).toFixed(1)
 
-  const noAccess = Object.entries(invalidDeployments)
-    .filter(([, s]) => s === 'no_access')
-    .map(([id]) => id)
-
-  // Per-deployment fate of the selection, shown before Upload and carried into
-  // triage so the photos that already matched are named there too.
-  const breakdown = useMemo(
-    () => (uploadMode === 'images' ? resolutionBreakdown(files, filePaths, exifIds, deployments, invalidDeployments) : []),
-    [uploadMode, files, filePaths, exifIds, deployments, invalidDeployments],
-  )
-  const matchedRows = breakdown.filter((r) => r.status === 'matched').map((r) => ({ label: r.label, count: r.count }))
-
   // startUpload refuses to start while a previous batch loop is still sending
   // (busyRef), so say so instead of letting the click do nothing.
   const sending = phase === 'uploading'
   const reading = exifRead !== null
-  const uploadDisabled = reading || sending
+  const sendable = files.length - blockedIndices.length
+  const uploadDisabled = reading || sending || sendable === 0
   const uploadLabel = reading
     ? 'Reading photos…'
     : sending
       ? 'Previous upload still sending…'
-      : `⬆ Upload ${files.length} image${files.length !== 1 ? 's' : ''}`
-
-  // ─────────────────────────────────────────────────────────────────────────
-  const BTN_SECONDARY: React.CSSProperties = {
-    padding: '0.375rem 0.875rem',
-    fontSize: '0.8125rem',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius)',
-    backgroundColor: 'transparent',
-    color: 'var(--text-color)',
-    cursor: 'pointer',
-  }
-
-  const CHECK_LABEL: React.CSSProperties = {
-    display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.8125rem', cursor: 'pointer',
-  }
+      : sendable === 0
+        ? 'Nothing to upload'
+        : `Upload ${sendable} image${sendable !== 1 ? 's' : ''}`
+  const shownRows = showAllRows ? breakdown : foldBreakdown(breakdown)
 
   const testPhotosNote = testPhotosSkipped > 0 && (
     <div className="upload-note" role="status">
@@ -437,14 +475,37 @@ export function UploadFlow() {
           exifIds={exifIds}
           unresolved={unresolvedIndices}
           matched={matchedRows}
+          blockedCount={blockedIndices.length}
           deployments={deployments}
-          projects={projects}
+          projects={writableProjects}
           onCancel={() => setShowTriage(false)}
+          onDeploymentCreated={() => queryClient.invalidateQueries({ queryKey: ['upload-deployments'] })}
           onDone={(assignments: { deploymentId: string; indices: number[] }[]) => {
             setShowTriage(false)
             handleUpload(assignments)
           }}
         />
+      </div>
+    )
+  }
+
+  // Nothing role-dependent until the roles and the project list have loaded.
+  if (!targetsReady) return null
+  // A user who can upload to no project sees one line instead of the drop zone.
+  if (writableProjects.length === 0) {
+    return (
+      <p className="upload-note" role="status">
+        {projects.length === 0
+          ? 'You are not in a project yet, so there is nowhere to upload to.'
+          : 'You can view your projects but not upload to them. Ask a project admin to make you a member.'}
+      </p>
+    )
+  }
+  if (deploymentsQuery.isError && deploymentsQuery.data === undefined) {
+    return (
+      <div className="upload-error" role="alert">
+        <AlertTriangle size={14} aria-hidden="true" />
+        Couldn&apos;t load your deployments. Reload the page to try again.
       </div>
     )
   }
@@ -460,11 +521,13 @@ export function UploadFlow() {
             onClick={() => folderInputRef.current?.click()}
           >
             <div style={{ pointerEvents: 'none' }}>
-              <div className="upload-zone-icon">{isDragging ? '📥' : '📂'}</div>
+              <div className="upload-zone-icon">
+                {isDragging ? <FolderDown size={40} aria-hidden="true" /> : <FolderOpen size={40} aria-hidden="true" />}
+              </div>
               <p style={{ fontWeight: 500, marginBottom: '0.25rem', fontSize: '0.9375rem' }}>
                 {isDragging ? 'Drop to select' : 'Click to select a folder or drag & drop it here'}
               </p>
-              <p style={{ fontSize: '0.75rem', opacity: 0.55 }}>
+              <p className="upload-zone-hint">
                 Wildlife Watcher SD card folder (MEDIA/…) or CamtrapDP .zip package
               </p>
             </div>
@@ -478,15 +541,8 @@ export function UploadFlow() {
             />
           </div>
           {selectionError && (
-            <div style={{
-              padding: '0.75rem',
-              borderRadius: 'var(--radius)',
-              backgroundColor: 'rgba(244,67,54,0.08)',
-              color: 'var(--error, #f44336)',
-              fontSize: '0.8125rem',
-              textAlign: 'center'
-            }}>
-              ⚠ {selectionError}
+            <div className="upload-error" role="alert">
+              <AlertTriangle size={14} aria-hidden="true" /> {selectionError}
             </div>
           )}
           {testPhotosNote}
@@ -498,15 +554,15 @@ export function UploadFlow() {
         <>
           {/* Summary tiles */}
           <div className="upload-tiles">
-            {[
-              ['🖼', files.length, 'images'],
-              ['📍', deploymentCount || '?', 'deployments'],
-              ['💾', `${totalMB} MB`, 'total size'],
-            ].map(([icon, value, label]) => (
-              <div key={label as string} className="upload-tile">
-                <div style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>{icon}</div>
+            {([
+              [Images, files.length, 'images'],
+              [MapPin, deploymentCount || '?', 'deployments'],
+              [HardDrive, `${totalMB} MB`, 'total size'],
+            ] as const).map(([Icon, value, label]) => (
+              <div key={label} className="upload-tile">
+                <div className="upload-tile-icon"><Icon size={20} aria-hidden="true" /></div>
                 <div style={{ fontWeight: 700, fontSize: '1.125rem' }}>{value}</div>
-                <div style={{ fontSize: '0.75rem', opacity: 0.6 }}>{label}</div>
+                <div className="upload-tile-label">{label}</div>
               </div>
             ))}
           </div>
@@ -524,7 +580,7 @@ export function UploadFlow() {
             <div className="upload-breakdown">
               <div className="upload-breakdown-title">Where these photos will go</div>
               <ul>
-                {breakdown.map((row) => (
+                {shownRows.map((row) => (
                   <li key={row.claim ?? 'none'} className={`is-${row.status}`}>
                     <span className="upload-breakdown-count">{row.count}</span>
                     <span className="upload-breakdown-label" title={row.claim ?? undefined}>{row.label}</span>
@@ -532,65 +588,37 @@ export function UploadFlow() {
                   </li>
                 ))}
               </ul>
+              {breakdown.length > BREAKDOWN_SHOWN && (
+                <button type="button" className="upload-breakdown-more" onClick={() => setShowAllRows((v) => !v)}>
+                  {showAllRows ? 'Show fewer' : `Show all ${breakdown.length}`}
+                </button>
+              )}
             </div>
           )}
 
           {testPhotosNote}
 
-          {/* Drive storage note: images always sync to Google Drive by default */}
-          <div style={{
-            padding: '0.75rem 1rem',
-            border: '1px solid var(--border)',
-            borderRadius: 'var(--radius)',
-            fontSize: '0.8125rem',
-            display: 'flex', alignItems: 'center', gap: '0.625rem',
-          }}>
-            <span style={{ fontSize: '1rem' }}>☁️</span>
-            <span style={{ opacity: 0.75 }}>
-              Images are saved to your connected Google Drive folder for long-term storage.
-            </span>
-          </div>
-
-          {/* No-access notice: these photos are blocked server-side and excluded from the upload */}
-          {noAccess.length > 0 && (
-            <div style={{
-              padding: '0.75rem',
-              borderRadius: 'var(--radius)',
-              backgroundColor: 'rgba(244,67,54,0.08)',
-              border: '1px solid rgba(244,67,54,0.3)',
-              fontSize: '0.8125rem',
-            }}>
-              <strong style={{ color: 'var(--error, #f44336)', display: 'block', marginBottom: '0.25rem' }}>
-                🚫 Some photos will be skipped
-              </strong>
-              <p style={{ margin: 0 }}>
-                <code style={{ fontFamily: 'monospace' }}>{noAccess.join(', ')}</code>{' '}
-                belong to a project you don't have access to, so those photos won't be uploaded.
-                Contact the project admin if you think this is wrong.
-              </p>
-            </div>
-          )}
-
           {/* AI opt-out: the server runs the pipeline unless told not to */}
-          <label style={CHECK_LABEL}>
-            <input type="checkbox" checked={runAi} onChange={(e) => setRunAi(e.target.checked)} style={{ marginTop: '0.15rem' }} />
+          <label className="upload-check">
+            <input type="checkbox" checked={runAi} onChange={(e) => setRunAi(e.target.checked)} />
             <span>
               <strong>Run AI analysis after upload</strong>
-              <span style={{ opacity: 0.65 }}> (SpeciesNet detection, species ID and clustering)</span>
+              <span className="upload-muted"> (SpeciesNet detection, species ID and clustering)</span>
             </span>
           </label>
 
           {/* Action row */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', paddingTop: '0.25rem' }}>
-            <button style={BTN_SECONDARY} onClick={clearSelection}>
-              ← Change selection
+          <div className="upload-actions">
+            <button type="button" className="upload-btn-secondary" onClick={clearSelection}>
+              <ArrowLeft size={14} aria-hidden="true" /> Change selection
             </button>
             <button
-              className="btn"
+              type="button"
+              className="btn upload-btn-primary"
               onClick={() => handleUpload()}
               disabled={uploadDisabled}
-              style={{ padding: '0.5rem 1.5rem', fontWeight: 600, opacity: uploadDisabled ? 0.6 : 1 }}
             >
+              {!uploadDisabled && <Upload size={16} aria-hidden="true" />}
               {uploadLabel}
             </button>
           </div>
@@ -608,33 +636,36 @@ export function UploadFlow() {
             backgroundColor: 'var(--surface)',
           }}>
             <div>
-              <div style={{ fontWeight: 600 }}>📦 CamtrapDP Package</div>
-              <div style={{ fontSize: '0.8125rem', opacity: 0.6, marginTop: '0.2rem' }}>
+              <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                <Package size={16} aria-hidden="true" /> CamtrapDP package
+              </div>
+              <div className="upload-muted" style={{ fontSize: '0.8125rem', marginTop: '0.2rem' }}>
                 {zipFile.name} · {(zipFile.size / 1024).toFixed(1)} KB
               </div>
             </div>
             {!camtrapImporting && !camtrapResult && (
-              <button style={BTN_SECONDARY} onClick={clearSelection}>✕ Clear</button>
+              <button type="button" className="upload-btn-secondary" onClick={clearSelection}>
+                <X size={14} aria-hidden="true" /> Clear
+              </button>
             )}
           </div>
 
-          <p style={{ fontSize: '0.8125rem', opacity: 0.65, margin: 0 }}>
-            This will create a new project and import all deployments, media records, and observations
-            from the package. You can explore the results in the <strong>Annotations</strong> tab.
+          <p className="upload-note" style={{ margin: 0 }}>
+            Importing creates a new project with the package&apos;s deployments, photos and observations.
           </p>
 
           {/* Import button */}
           {!camtrapResult && !camtrapImporting && !camtrapError && (
             <>
-              <label style={CHECK_LABEL}>
-                <input type="checkbox" checked={camtrapRunAi} onChange={(e) => setCamtrapRunAi(e.target.checked)} style={{ marginTop: '0.15rem' }} />
+              <label className="upload-check">
+                <input type="checkbox" checked={camtrapRunAi} onChange={(e) => setCamtrapRunAi(e.target.checked)} />
                 <span>
                   <strong>Run AI analysis after import</strong>
-                  <span style={{ opacity: 0.65 }}> (off by default: CamtrapDP data usually arrives already labelled)</span>
+                  <span className="upload-muted"> (off by default: CamtrapDP data usually arrives already labelled)</span>
                 </span>
               </label>
-              <button className="btn" onClick={handleCamtrapImport} style={{ alignSelf: 'flex-start', padding: '0.5rem 1.5rem' }}>
-                ⬆ Import CamtrapDP Package
+              <button type="button" className="btn upload-btn-primary" onClick={handleCamtrapImport} style={{ alignSelf: 'flex-start' }}>
+                <Upload size={16} aria-hidden="true" /> Import CamtrapDP package
               </button>
             </>
           )}
@@ -649,7 +680,7 @@ export function UploadFlow() {
                 <span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>
                   {CAMTRAP_STAGES[camtrapStage]?.label ?? 'Importing…'}
                 </span>
-                <span style={{ fontSize: '0.75rem', opacity: 0.55, fontVariantNumeric: 'tabular-nums' }}>
+                <span className="upload-muted" style={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
                   {camtrapElapsed}s
                 </span>
               </div>
@@ -662,7 +693,7 @@ export function UploadFlow() {
                   backgroundImage: 'linear-gradient(90deg, var(--primary), #66bb6a)',
                 }} />
               </div>
-              <p style={{ fontSize: '0.75rem', opacity: 0.5, margin: '0.5rem 0 0 0' }}>
+              <p className="upload-muted" style={{ fontSize: '0.75rem', margin: '0.5rem 0 0 0' }}>
                 Large packages can take 30 to 60 s. Please keep this tab open.
               </p>
             </div>
@@ -671,15 +702,11 @@ export function UploadFlow() {
           {/* Error */}
           {camtrapError && (
             <>
-              <div style={{
-                padding: '0.75rem', borderRadius: 'var(--radius)',
-                backgroundColor: 'rgba(244,67,54,0.08)',
-                color: 'var(--error, #f44336)', fontSize: '0.8125rem',
-              }}>
-                ⚠ {camtrapError}
+              <div className="upload-error" role="alert">
+                <AlertTriangle size={14} aria-hidden="true" /> {camtrapError}
               </div>
-              <button className="btn" onClick={handleCamtrapImport} style={{ alignSelf: 'flex-start', padding: '0.5rem 1.5rem' }}>
-                ↺ Retry Import
+              <button type="button" className="btn upload-btn-primary" onClick={handleCamtrapImport} style={{ alignSelf: 'flex-start' }}>
+                <RotateCcw size={16} aria-hidden="true" /> Retry import
               </button>
             </>
           )}
@@ -692,8 +719,8 @@ export function UploadFlow() {
               border: '1px solid rgba(76,175,80,0.3)',
               fontSize: '0.8125rem',
             }}>
-              <div style={{ fontWeight: 600, marginBottom: '0.625rem', color: 'var(--primary)' }}>
-                ✓ Import successful
+              <div style={{ fontWeight: 600, marginBottom: '0.625rem', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                <Check size={16} aria-hidden="true" /> Import successful
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginBottom: '0.75rem' }}>
                 {([
@@ -706,12 +733,12 @@ export function UploadFlow() {
                     style={{ textAlign: 'center', padding: '0.375rem', backgroundColor: 'var(--surface)', borderRadius: 'var(--radius)' }}
                   >
                     <div style={{ fontSize: '1.125rem', fontWeight: 700 }}>{count}</div>
-                    <div style={{ opacity: 0.6, fontSize: '0.75rem' }}>{label}</div>
+                    <div className="upload-muted" style={{ fontSize: '0.75rem' }}>{label}</div>
                   </div>
                 ))}
               </div>
               {camtrapResult.warnings.length > 0 && (
-                <div style={{ opacity: 0.75, marginBottom: '0.5rem' }}>
+                <div style={{ marginBottom: '0.5rem' }}>
                   <strong>Warnings ({camtrapResult.warnings.length}):</strong>
                   <ul style={{ margin: '0.25rem 0 0 1rem', padding: 0 }}>
                     {(showAllWarnings
@@ -723,28 +750,31 @@ export function UploadFlow() {
                   </ul>
                   {camtrapResult.warnings.length > 3 && (
                     <button
+                      type="button"
                       onClick={() => setShowAllWarnings((v) => !v)}
-                      style={{ marginTop: '0.35rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.75rem', padding: 0 }}
+                      style={{ marginTop: '0.35rem', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--primary)', fontSize: '0.75rem', padding: 0, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
                     >
-                      {showAllWarnings ? '▲ Show fewer' : `▼ Show all ${camtrapResult.warnings.length}`}
+                      {showAllWarnings
+                        ? <><ChevronUp size={12} aria-hidden="true" /> Show fewer</>
+                        : <><ChevronDown size={12} aria-hidden="true" /> Show all {camtrapResult.warnings.length}</>}
                     </button>
                   )}
                 </div>
               )}
               {camtrapResult.ai_job_id && (
-                <div style={{ marginBottom: '0.5rem', opacity: 0.85 }}>
-                  🧠 AI analysis queued for the bundled images. Track it in{' '}
+                <div style={{ marginBottom: '0.5rem' }}>
+                  AI analysis queued for the bundled images. Track it in{' '}
                   <Link to="/processing" style={{ color: 'var(--primary)' }}>Processing history</Link>.
                 </div>
               )}
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.25rem' }}>
                 <Link
                   to="/annotations"
-                  style={{ color: 'var(--primary)', fontWeight: 500, textDecoration: 'none' }}
+                  style={{ color: 'var(--primary)', fontWeight: 500, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}
                 >
-                  View in Annotations →
+                  View in Media <ArrowRight size={14} aria-hidden="true" />
                 </Link>
-                <button style={BTN_SECONDARY} onClick={clearSelection}>Import another</button>
+                <button type="button" className="upload-btn-secondary" onClick={clearSelection}>Import another</button>
               </div>
             </div>
           )}

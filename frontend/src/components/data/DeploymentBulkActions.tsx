@@ -1,16 +1,19 @@
 // Copyright (c) 2024
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// DeploymentBulkActions — selection toolbar for the Insights ▸ Deployments table.
-// Replaces the per-row Actions column: the user ticks rows, then picks one action from
-// this dropdown. Some actions only make sense for a single deployment (Results, Edit location,
-// Move to project);
-// those appear only when exactly one row is selected.
+// DeploymentBulkActions: selection toolbar for the Insights > Deployments table.
+// Replaces the per-row Actions column: the user ticks rows, then picks one action from this
+// dropdown. Some actions only make sense for a single deployment (Show in Reports, Edit location,
+// Move to project); those appear only when exactly one row is selected. The write actions appear
+// only to a role that may do them on the selected rows' project (UI audit decision 1): Edit
+// location to a project member, Move and Delete to a project admin. The table's CSV button
+// exports the selection.
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Camera, ChartColumn, ChevronDown, FolderInput, Map as MapIcon, MapPin, Trash2, type LucideIcon } from 'lucide-react'
 import { useProjectSelection } from '../../hooks/useProjectSelection'
+import { useProjectRoles } from '../../hooks/useProjectRoles'
 import { apiClient } from '../../lib/apiClient'
-import { useDemoGuard } from '../common/DemoGuard'
 import { showUndoToast } from '../common/undoToastBus'
 import type { DeploymentRow } from './DeploymentActionRow'
 import { EditLocationDialog } from './EditLocationDialog'
@@ -29,23 +32,27 @@ interface Props {
   onMoved?: () => void
 }
 
-function downloadCsv(rows: DeploymentRow[]) {
-  const cols: (keyof DeploymentRow)[] = ['project_name', 'device_name', 'location_name', 'latitude', 'longitude', 'deployment_start', 'deployment_end']
-  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
-  const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc((r as any)[c])).join(','))].join('\n')
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-  const a = document.createElement('a')
-  a.href = url; a.download = `deployments-selected-${new Date().toISOString().slice(0, 10)}.csv`; a.click()
-  URL.revokeObjectURL(url)
+const ITEM: React.CSSProperties = {
+  display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%', textAlign: 'left', padding: '0.45rem 0.875rem',
+  fontSize: '0.8125rem', border: 'none', background: 'transparent', color: 'var(--text-color)', cursor: 'pointer',
+}
+
+function MenuItem({ icon: Icon, label, onClick, danger }: { icon: LucideIcon; label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <button style={danger ? { ...ITEM, color: 'var(--error, #f44336)' } : ITEM} onClick={onClick}>
+      <Icon size={14} aria-hidden />{label}
+    </button>
+  )
 }
 
 export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDeleted, onEdited, onMoved }: Props) {
   const navigate = useNavigate()
   const { clearAll, toggleProject } = useProjectSelection()
-  const { guard } = useDemoGuard()
+  const roles = useProjectRoles()
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [movingId, setMovingId] = useState<string | null>(null)
   const ref = useRef<HTMLDivElement>(null)
@@ -61,23 +68,26 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
 
   const selectedRows = rows.filter(r => selected.has(r.id))
   const single = selectedRows.length === 1 ? selectedRows[0] : null
+  const projectIds = [...new Set(selectedRows.map(r => r.project_id))]
+  // Nothing role-dependent while the roles load. The creator rule for Edit location stays
+  // server-side; a refusal comes back as the dialog's error.
+  const canEdit = !!single && !roles.loading && roles.canWrite(single.project_id)
+  const canMove = !!single && !roles.loading && roles.isProjectAdmin(single.project_id)
+  const canDelete = !roles.loading && projectIds.length > 0 && projectIds.every(id => roles.isProjectAdmin(id))
 
-  const item: React.CSSProperties = {
-    display: 'block', width: '100%', textAlign: 'left', padding: '0.45rem 0.875rem',
-    fontSize: '0.8125rem', border: 'none', background: 'transparent', color: 'var(--text-color)', cursor: 'pointer',
-  }
   const run = (fn: () => void) => { setOpen(false); fn() }
 
   const openAnnotations = () => {
     if (single) { navigate(`/annotations?deployment=${single.id}`); return }
     clearAll()
-    Array.from(new Set(selectedRows.map(r => r.project_id))).forEach(pid => toggleProject(pid))
+    projectIds.forEach(pid => toggleProject(pid))
     navigate('/annotations')
   }
 
   const doDelete = async () => {
     const ids = selectedRows.map(r => r.id)
     setDeleting(true)
+    setDeleteError(null)
     try {
       const res = await apiClient.del('/api/deployments/batch', { deployment_ids: ids }) as {
         deleted_at?: string; deployment_ids?: string[]; refused_ids?: string[]
@@ -99,7 +109,8 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
         })
       }
     } catch (e) {
-      alert(e instanceof Error ? e.message : 'Delete failed — you may not have permission.')
+      setConfirming(false); setOpen(false)
+      setDeleteError(e instanceof Error ? e.message : 'Not deleted.')
     } finally {
       setDeleting(false)
     }
@@ -113,8 +124,12 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
     }}>
       <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{selected.size} selected</span>
       <div ref={ref} style={{ position: 'relative' }}>
-        <button className="btn" style={{ fontSize: '0.8rem', padding: '0.3rem 0.7rem' }} onClick={() => { setOpen(v => !v); setConfirming(false) }}>
-          Actions ▾
+        <button
+          className="btn"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.8rem', padding: '0.3rem 0.7rem' }}
+          onClick={() => { setOpen(v => !v); setConfirming(false); setDeleteError(null) }}
+        >
+          Actions <ChevronDown size={14} aria-hidden />
         </button>
         {open && (
           <div style={{
@@ -129,7 +144,7 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
                   their photos and detections. You can undo.
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                  <button style={{ ...item, width: 'auto', padding: '0.3rem 0.7rem' }} onClick={() => setConfirming(false)}>Cancel</button>
+                  <button style={{ ...ITEM, width: 'auto', padding: '0.3rem 0.7rem' }} onClick={() => setConfirming(false)}>Cancel</button>
                   <button
                     onClick={doDelete}
                     disabled={deleting}
@@ -141,25 +156,30 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
               </div>
             ) : (
               <>
-                <button style={item} onClick={() => run(openAnnotations)}>🏷️ Open in Annotations</button>
-                <button style={item} onClick={() => run(onShowMap)}>🗺 Show on map</button>
-                <button style={item} onClick={() => run(() => downloadCsv(selectedRows))}>📄 Export selected (CSV)</button>
+                <MenuItem icon={Camera} label="Open in Media" onClick={() => run(openAnnotations)} />
+                <MenuItem icon={MapIcon} label="Show on map" onClick={() => run(onShowMap)} />
                 {single && (
-                  <button style={item} onClick={() => run(() => navigate(`/reporting/${single.id}`))}>📊 Results</button>
+                  <MenuItem icon={ChartColumn} label="Show in Reports"
+                    onClick={() => run(() => navigate(`/insights?tab=reports&deployment=${single.id}`))} />
                 )}
-                {single && (
-                  <button style={item} onClick={guard(() => { setOpen(false); setEditingId(single.id) })}>📍 Edit location</button>
+                {canEdit && (
+                  <MenuItem icon={MapPin} label="Edit location" onClick={() => { setOpen(false); setEditingId(single.id) }} />
                 )}
-                {single && (
-                  <button style={item} onClick={guard(() => { setOpen(false); setMovingId(single.id) })}>📦 Move to project</button>
+                {canMove && (
+                  <MenuItem icon={FolderInput} label="Move to project" onClick={() => { setOpen(false); setMovingId(single.id) }} />
                 )}
-                <div style={{ height: 1, background: 'var(--border)', margin: '0.25rem 0' }} />
-                <button style={{ ...item, color: 'var(--error, #f44336)' }} onClick={guard(() => setConfirming(true))}>🗑 Delete</button>
+                {canDelete && (
+                  <>
+                    <div style={{ height: 1, background: 'var(--border)', margin: '0.25rem 0' }} />
+                    <MenuItem icon={Trash2} label="Delete" danger onClick={() => setConfirming(true)} />
+                  </>
+                )}
               </>
             )}
           </div>
         )}
       </div>
+      {deleteError && <span role="alert" style={{ fontSize: '0.8rem', color: 'var(--error, #ef4444)' }}>{deleteError}</span>}
       {editingId && (
         <EditLocationDialog
           deploymentId={editingId}
@@ -172,7 +192,7 @@ export function DeploymentBulkActions({ selected, rows, onClear, onShowMap, onDe
           onClose={changed => { setMovingId(null); if (changed) onMoved?.() }}
         />
       )}
-      <button onClick={onClear} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.78rem', opacity: 0.65 }}>
+      <button onClick={() => { setDeleteError(null); onClear() }} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
         Clear
       </button>
     </div>

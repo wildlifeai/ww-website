@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../lib/apiClient'
+import { settleWithLimit } from '../lib/settleWithLimit'
 
 // ── Types (mirror backend brain router responses) ──────────────────────────
 
@@ -126,43 +127,29 @@ export function useEmbedDeployment() {
   })
 }
 
-// ── Active learning / review queue (Phase 8) ───────────────────────────────
+/** Review calls in flight at once while reassign still posts one call per photo (03 #18). */
+const REVIEW_CONCURRENCY = 4
 
-export interface ReviewQueueItem {
-  media_id: string
-  active_learning_score: number | null
-  cluster_id: number
-  is_outlier: boolean
-  cluster_confidence: number | null
-  ai_label: string | null
-  ai_confidence: number | null
-  human_label: string | null
-}
-
-export function useReviewQueue(deploymentId?: string, limit = 50) {
-  return useQuery({
-    queryKey: ['brain', 'review-queue', deploymentId, limit],
-    queryFn: async () => {
-      const r = (await apiClient.get(`/api/brain/review-queue/${deploymentId}?limit=${limit}`)) as any
-      return r.data as { queue: ReviewQueueItem[]; count: number }
-    },
-    enabled: !!deploymentId,
-  })
-}
-
-export type ReviewDecision = 'approve' | 'reassign' | 'expert'
-
-export function useReviewDecision() {
+/**
+ * Reassign photos to a species, or flag them for an expert: one `/api/brain/review` call per
+ * photo, each adding a human row, at most four at a time. A batch route would make it one call.
+ */
+export function useBulkReview(deploymentId?: string) {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: async (args: {
-      mediaId: string
-      decision: ReviewDecision
-      scientific_name?: string
-      vernacular_name?: string
+      mediaIds: string[]
+      decision: 'reassign' | 'expert'
+      taxon?: { taxon_id: string | null; scientific_name: string; vernacular_name: string | null }
     }) => {
-      const { mediaId, ...body } = args
-      const r = (await apiClient.post(`/api/brain/review/${mediaId}`, body)) as any
-      return r.data as { media_id: string; decision: string; review_status: string }
+      const body = args.decision === 'reassign' ? { decision: args.decision, ...args.taxon } : { decision: args.decision }
+      const results = await settleWithLimit(args.mediaIds, REVIEW_CONCURRENCY, mid =>
+        apiClient.post(`/api/brain/review/${mid}`, body))
+      const ok = results.filter(r => r.status === 'fulfilled').length
+      return { ok, failed: results.length - ok }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['brain', 'clusters', deploymentId] })
     },
   })
 }

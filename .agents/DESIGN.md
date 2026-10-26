@@ -33,9 +33,10 @@ colors:
     error: "#f44336"     # also #ef4444
     info: "#2196f3"      # also #3b82f6
   annotation-status:
-    issue: "rgba(239, 68, 68, 0.88)"     # red ✕ — needs action
-    ai: "rgba(20, 184, 166, 0.88)"       # teal ⚙ — AI-labelled only
-    reviewed: "rgba(16, 185, 129, 0.88)" # green ✓ — human reviewed
+    issue: "rgba(239, 68, 68, 0.88)"     # red, lucide X, needs action
+    ai: "rgba(20, 184, 166, 0.88)"       # teal, lucide Cpu, AI-labelled only
+    reviewed: "rgba(16, 185, 129, 0.88)" # green, lucide Check, human reviewed
+    # not labelled yet: no badge (the card says "No label")
   primary-tints: "rgba(76, 175, 80, 0.04–0.30) for hover, selection and highlight fills"
   third-party:
     inaturalist: "#74ac00"  # iNaturalist brand green — only on iNat badges/panels
@@ -101,9 +102,11 @@ surfaces keep imagery (camera-trap photos) the visual focus.
   should prefer the Tailwind-palette values: `#f59e0b`, `#ef4444`, `#3b82f6`,
   `#10b981`.)
 - **Annotation status** is a fixed three-state vocabulary used on media
-  thumbnails and lists (see `components/ui/StatusBadge.tsx`): red ✕ "issue",
-  teal ⚙ "AI", green ✓ "reviewed", each as an 0.88-alpha fill with a 0.4-alpha
-  border of the same hue and white text. Do not repurpose these hues.
+  thumbnails and lists (see `components/ui/StatusBadge.tsx`): red "issue"
+  (lucide `X`), teal "AI" (`Cpu`), green "reviewed" (`Check`), each as an
+  0.88-alpha fill with a 0.4-alpha border of the same hue and white text; on a
+  thumbnail the badge is the icon alone. A photo not labelled yet has no badge,
+  and its card says "No label". Do not repurpose these hues.
 - **iNaturalist green** `#74ac00` appears only on iNaturalist badges and
   panels — it is their brand, not ours.
 - **Dark mode** is automatic via `prefers-color-scheme`; every screen must
@@ -133,9 +136,11 @@ loaded it and the site rendered in the system fallback.
   dashboard page.
 - **StatusBadge**: the annotation-status pill described above; `sm` overlays
   thumbnails, `md` sits inline in lists.
-- **DataTable / ControlBar**: dense tables (0.75–0.8125rem cells, bordered,
-  `var(--surface)` headers) with a control bar of filters above. Most pages
-  are a ControlBar + table/grid + map or chart.
+- **DataTable**: dense tables (0.75–0.8125rem cells, bordered,
+  `var(--surface)` headers, client paging) with search, column toggle and
+  export in its own toolbar. A filter sits beside the search as a
+  `FilterSelect` in the `toolbar` slot, or in a Ribbon group. Most pages are
+  a heading, a table or grid, and a map or chart.
 - **Modal**: centred dialog over `rgba(0,0,0,0.45–0.5)` scrim, card styling
   inside.
 - **Icons**: lucide-react, sized to the text they accompany.
@@ -147,13 +152,13 @@ loaded it and the site rendered in the system fallback.
 The product's native shape is a **catalog with review workflows**, organised
 project → deployment → media → observations:
 
-- **Explore/triage surfaces**: Image Explorer, Media Browser, Review Queue,
-  Cluster Review, Event Review — thumbnail grids with status badges plus
-  filters.
-- **Analysis surfaces**: Insights, Analysis, Reporting, Dataset Health, UMAP
-  Explorer — charts and tables over the same data.
-- **Field/ops surfaces**: Upload Data, Field, Manifest, Toolkit — task-driven
-  forms and progress docks.
+- **Explore/triage surfaces**: Image Explorer, Media Browser, Cluster Review:
+  thumbnail grids with status badges plus filters.
+- **Analysis surfaces**: Insights (one deployment is its Reports tab with
+  `?deployment=`), Dataset Health, UMAP Explorer: charts and tables over the
+  same data.
+- **Field/ops surfaces**: Upload Data, Realtime (`/field`), Manifest, Toolkit:
+  task-driven forms and progress docks.
 - **Long-form**: Guides and FAQ render markdown via the `.guide-markdown`
   styles in `index.css`.
 

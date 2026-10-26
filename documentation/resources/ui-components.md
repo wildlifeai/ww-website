@@ -7,7 +7,7 @@ and inline styles — no Tailwind, no component-library dependency.
 Import from the barrel:
 
 ```tsx
-import { Modal, Ribbon, DataTable, ControlBar, FilterSelect, SearchInput, ColumnToggle,
+import { Modal, Ribbon, DataTable, FilterSelect, SearchInput, ColumnToggle,
          StatusBadge, deriveAnnotationStatus, VegaChart } from '../components/ui'
 import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS } from '../components/common'
 ```
@@ -17,12 +17,14 @@ import { ThreeStepGuide, DEFAULT_SIGNED_IN_STEPS } from '../components/common'
 | Export | File | Used by |
 |---|---|---|
 | `<Ribbon>` | `Ribbon.tsx` | **Annotations + Insights command bars** (Word-style menu bar + grouped ribbon) |
+| `<Banner>`, `BannerSlot`, `BannerProgress` | `Banner.tsx` | Every notice: on a page, and stacked in the Layout's `BannerSlot` above every page (demo, invitations, quota) |
 | `<Modal>` | `Modal.tsx` | Advanced settings, create-project (the upload flow is a page now, `/upload-data`) |
 | `<DataTable>` | `DataTable.tsx` | Insights → Deployments / Projects tables |
-| `<ControlBar>`, `<FilterSelect>`, `<SearchInput>`, `<ColumnToggle>` | `ControlBar.tsx` | `FilterSelect` inside ribbon groups; `ControlBar` is the older flat toolbar |
-| `<StatusBadge>`, `deriveAnnotationStatus` | `StatusBadge.tsx` | Annotation thumbnail grid + modal |
+| `<FilterSelect>`, `<SearchInput>`, `<ColumnToggle>` | `ControlBar.tsx` | `FilterSelect` inside ribbon groups and the admin Devices toolbar; the other two inside `DataTable` |
+| `<StatusBadge>`, `deriveAnnotationStatus` | `StatusBadge.tsx`, `../../lib/annotationStatus.ts` | Annotation thumbnail grid + modal |
 | `<VegaChart>`, `VEGA_CONFIG` | `VegaChart.tsx` | All charts (Vega-Lite) |
 | `<ThreeStepGuide>` | `../common/ThreeStepGuide.tsx` | Marketing + signed-in landing |
+| `<PageHelp>` | `../common/PageHelp.tsx` | The "?" beside a page heading: Settings, Upload, upload triage, Prepare SD card |
 
 ---
 
@@ -77,7 +79,8 @@ Overlay dialog with focus trap, ESC-to-close, and click-backdrop-to-close.
 
 ## `<DataTable>`
 
-Generic typed table with sort, search, column toggle, CSV + JSON export, and optional client paging.
+Generic typed table with sort, search, column toggle, CSV + JSON export, row selection, and optional
+client paging. With a selection, CSV exports the selected rows only.
 
 | Prop | Type | Description |
 |---|---|---|
@@ -85,17 +88,19 @@ Generic typed table with sort, search, column toggle, CSV + JSON export, and opt
 | `rows` / `rowKey` | `T[]` / `(row) => string` | data + stable key |
 | `searchable`, `searchPlaceholder` | | search box |
 | `exportFilename` | `string` | enables CSV + JSON buttons |
+| `exportJson` | `boolean` | `false` hides the JSON button (Insights > Deployments) |
 | `onRowClick`, `selectedKeys` | | row click + highlight |
+| `onSelectionChange` | `(keys) => void` | adds a checkbox column; `selectedKeys` holds the selection |
 | `toolbar` | `ReactNode` | extra content beside search |
 | `pageSize` | `number` | `0` = no paging |
 
 ---
 
-## `<ControlBar>` / `<FilterSelect>` / `<SearchInput>` / `<ColumnToggle>`
+## `<FilterSelect>` / `<SearchInput>` / `<ColumnToggle>`
 
-`ControlBar` is the original flat filters+actions toolbar; the Annotations and Insights pages have
-since moved to `<Ribbon>`. `FilterSelect` (a sized `<select>`) is still used **inside ribbon
-groups**; `SearchInput` and `ColumnToggle` are used by `DataTable`.
+`FilterSelect` (a sized `<select>`) is used **inside ribbon groups** and as a `DataTable`
+`toolbar`; `SearchInput` and `ColumnToggle` are used by `DataTable`. They live in `ControlBar.tsx`,
+named after a flat toolbar that had no users and was removed in October 2026.
 
 ```tsx
 <FilterSelect value={dep} onChange={setDep}
@@ -132,7 +137,8 @@ Props: `status: AnnotationStatus`, `size: 'sm' | 'md'` (default `sm`), `label?` 
 ## `<VegaChart>`
 
 Thin wrapper around `vega-embed` with the shared `VEGA_CONFIG` theme. Pass a Vega-Lite spec; the
-chart sizes to its container. Used by `ObservationReports`, `ChartBuilder`, `ReportingPage`.
+chart sizes to its container. Used by `ReportsDashboard` (Insights > Reports, specs from
+`components/data/chartSpec.ts` over tables `lib/observationSummary.ts` sums from the database counts).
 
 ---
 
@@ -141,6 +147,15 @@ chart sizes to its container. Used by `ObservationReports`, `ChartBuilder`, `Rep
 Three-card "how it works" component shared by the marketing page and the signed-in landing.
 Props: `steps: GuideStep[]` (`{ icon, title, description, linkTo, linkLabel }`), optional `heading`.
 Presets: `DEFAULT_SIGNED_IN_STEPS`, `DEFAULT_MARKETING_STEPS` from `../components/common`.
+
+---
+
+## `<PageHelp>`
+
+A "?" button beside a page heading. Clicking it opens one or two sentences about the page and a
+link to its guide; Escape or a click outside closes it. The page then carries no line of
+explanation of its own. Props: `label` (the button's accessible name, e.g. "About settings"),
+`guide` (the guide's route), optional `guideLabel`, and the summary as children.
 
 ---
 

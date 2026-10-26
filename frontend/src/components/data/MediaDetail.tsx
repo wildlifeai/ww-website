@@ -1,15 +1,20 @@
 import { useState, useEffect, useEffectEvent, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { Ban, Check, SlidersHorizontal, Square, Tag, Trash2, User, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { supabase } from '../../config/supabase'
 import { useAuth } from '../../hooks/useAuth'
+import { useCanLabel } from '../../hooks/useCanLabel'
 import type { ObservationRecord, MediaRecord } from './MediaBrowser'
-import { confirmAllTargets, humanCreateFields, humanReviewFields, isHumanReviewed, isAiLabel, observationLabel } from '../../lib/observations'
+import { isEdgeAi, isHumanReviewed, isHumanRow, isAiLabel, observationLabel, opinionSource, photoVerdict } from '../../lib/observations'
+import {
+  confirmLabel, labelOf, removeHumanRow, updateHumanRow, verdictIsReviewed, writeVerdict,
+  type VerdictLabel, type VerdictWrite,
+} from '../../lib/humanVerdict'
+import { labelledSpecies } from '../../lib/speciesSuggestions'
+import { showErrorToast, showUndoToast } from '../common/undoToastBus'
 import { SpeciesPicker } from './SpeciesPicker'
 import { StatusBadge } from '../ui/StatusBadge'
-import { AiOriginBadge } from '../ui/AiOriginBadge'
 import { cameraModel, cameraScores } from '../../lib/cameraScores'
 import { formatCaptureTime } from '../../lib/time'
-import { canEditObservations, deleteObservation as deleteObservationRow } from '../../lib/observationWrites'
 import { usePrefetchNeighbours } from '../../hooks/usePrefetchNeighbours'
 import { Filmstrip, MediaDetailImage } from './MediaDetailImage'
 import { displayImageUrl } from '../../lib/mediaImageUrl'
@@ -18,7 +23,7 @@ interface Props {
   media: MediaRecord
   /** Deployment IANA timezone for rendering the capture time in local time. */
   timezone?: string | null
-  /** The filtered media set, in order — powers the filmstrip carousel + movement compare. */
+  /** The filtered media set, in order: powers the filmstrip carousel and movement compare. */
   mediaList?: MediaRecord[]
   /** Jump to a specific media id (filmstrip click). */
   onSelect?: (id: string) => void
@@ -48,102 +53,136 @@ const TOOL_BTN: React.CSSProperties = {
 const TOOL_BTN_ACTIVE: React.CSSProperties = { ...TOOL_BTN, backgroundColor: '#f59e0b', borderColor: '#f59e0b', color: '#fff' }
 const CONFIRM_BTN: React.CSSProperties = { ...TOOL_BTN, color: '#10b981', borderColor: 'rgba(16,185,129,0.5)' }
 const REJECT_BTN: React.CSSProperties = { ...TOOL_BTN, color: '#ef4444', borderColor: 'rgba(239,68,68,0.5)' }
-// ── Read-only observation list (right panel) ─────────────────────────────────
-function ObservationList({ media, selectedId, onSelectObs }: {
+const MUTED: React.CSSProperties = { color: 'var(--text-muted)' }
+const VIEW_ROW: React.CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', fontSize: '0.75rem' }
+const ROW_BTN: React.CSSProperties = {
+  textAlign: 'left', width: '100%', cursor: 'pointer', padding: '0.5rem 0.625rem',
+  borderRadius: 'var(--radius)', fontSize: '0.8125rem', color: 'var(--text-color)',
+}
+
+const pct = (p: number | null | undefined) => (p != null ? `${(p * 100).toFixed(0)}%` : '')
+const hasBox = (o: ObservationRecord) => o.bbox_x != null
+const labelText = (l: VerdictLabel) =>
+  observationLabel({ vernacular_name: l.vernacular_name, scientific_name: l.scientific_name ?? null, observation_type: l.observation_type }) +
+  (l.count ? ` ×${l.count}` : '')
+
+// ── Verdict: what the photo's card says, and who said it ─────────────────────
+function VerdictCard({ media, selectedId, onSelectObs }: {
   media: MediaRecord
   selectedId: string | null
   onSelectObs: (id: string) => void
 }) {
-  if (media.observations.length === 0) {
-    return (
-      <p style={{ fontSize: '0.8125rem', opacity: 0.55, padding: '0.75rem 1rem' }}>
-        No observations on this image yet. Use the actions under the image to add one.
-      </p>
-    )
+  const { labelObs, isEmpty } = photoVerdict(media.observations)
+  // A consensus "blank" has no label row; it is still the row that decided.
+  const row = labelObs ?? (isEmpty ? media.observations.find(o => o.source_type === 'consensus') ?? null : null)
+  if (!row && !isEmpty) {
+    return <p style={{ ...MUTED, fontSize: '0.8125rem', margin: '0.25rem 1rem 0.75rem' }}>No label yet.</p>
   }
-  const ranked = [...media.observations].sort((a, b) =>
-    ((isHumanReviewed(b) ? 1 : 0) - (isHumanReviewed(a) ? 1 : 0)) ||
-    ((b.classification_probability ?? 0) - (a.classification_probability ?? 0))
+  const reviewed = !!labelObs && isHumanReviewed(labelObs)
+  const selected = !!row && row.id === selectedId
+  const body = (
+    <>
+      <StatusBadge status={reviewed ? 'reviewed' : 'ai'} size="sm" label={reviewed ? 'Reviewed' : `AI ${pct(row?.classification_probability)}`.trim()} />
+      <div style={{ fontWeight: 700, fontSize: '0.9375rem', marginTop: '0.3rem' }}>
+        {isEmpty ? 'Empty' : observationLabel(row!)}{!isEmpty && row?.count ? ` ×${row.count}` : ''}
+      </div>
+      {!isEmpty && row?.scientific_name && row.vernacular_name && (
+        <div style={{ ...MUTED, fontStyle: 'italic', fontSize: '0.75rem' }}>{row.scientific_name}</div>
+      )}
+      {row && (
+        <div style={{ ...MUTED, fontSize: '0.7rem', marginTop: '0.2rem' }}>
+          {opinionSource(row)}{hasBox(row) ? ', boxed' : ''}
+        </div>
+      )}
+    </>
   )
   return (
-    <div style={{ padding: '0.5rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-      {ranked.map(obs => {
-        const reviewed = isHumanReviewed(obs)
-        const status = reviewed ? 'reviewed' : isAiLabel(obs) ? 'ai' : 'issue'
-        const selected = obs.id === selectedId
-        return (
-          <button
-            key={obs.id}
-            onClick={() => onSelectObs(obs.id)}
-            style={{
-              textAlign: 'left', width: '100%', cursor: 'pointer',
-              padding: '0.625rem', borderRadius: 'var(--radius)', fontSize: '0.8125rem',
-              backgroundColor: selected ? 'rgba(16,185,129,0.08)' : 'var(--surface)',
-              border: selected ? '1px solid var(--primary, #10b981)' : '1px solid var(--border)',
-              color: 'var(--text-color)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.35rem' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                <StatusBadge
-                  status={status}
-                  size="sm"
-                  label={status === 'ai' && obs.classification_probability != null
-                    ? `AI ${(obs.classification_probability * 100).toFixed(0)}%`
-                    : undefined}
-                />
-                <AiOriginBadge obs={obs} />
-              </span>
-              {obs.count != null && <span style={{ fontSize: '0.7rem', opacity: 0.6 }}>×{obs.count}</span>}
-            </div>
-            <div style={{ fontWeight: 600 }}>{observationLabel(obs)}</div>
-            {(obs.scientific_name && obs.vernacular_name) && (
-              <div style={{ fontStyle: 'italic', opacity: 0.6, fontSize: '0.75rem' }}>{obs.scientific_name}</div>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.3rem', fontSize: '0.7rem', opacity: 0.6 }}>
-              {obs.observation_type && <span>{obs.observation_type}</span>}
-              {obs.life_stage && <span>· {obs.life_stage}</span>}
-              {obs.sex && <span>· {obs.sex}</span>}
-              {(obs.bbox_x != null) && <span>· ▭ box</span>}
-            </div>
-            <div style={{ fontSize: '0.6875rem', opacity: 0.45, marginTop: '0.3rem' }}>
-              {reviewed ? '👤' : '🤖'} {obs.classified_by || '—'}
-            </div>
-          </button>
-        )
-      })}
+    <div style={{ padding: '0 0.75rem 0.5rem' }}>
+      {row ? (
+        <button
+          type="button"
+          onClick={() => onSelectObs(row.id)}
+          aria-pressed={selected}
+          style={{
+            ...ROW_BTN,
+            backgroundColor: selected ? 'rgba(16,185,129,0.08)' : 'var(--surface)',
+            border: selected ? '1px solid var(--primary, #10b981)' : '1px solid var(--border)',
+          }}
+        >{body}</button>
+      ) : <div style={{ ...ROW_BTN, cursor: 'default', border: '1px solid var(--border)' }}>{body}</div>}
     </div>
   )
 }
 
-// ── Camera AI verdict: what the device decided in the field ──────────────────
-// Every frame carries the on-device model's per-class scores in its EXIF
-// (lib/cameraScores). A 📟 Camera AI observation is only reflected for a target
-// score at or above the model's threshold, so this line is the only place a
-// "no person 62%" frame shows the camera's decision, and it is there from the
-// moment the row exists rather than after the cloud pipeline.
-function CameraVerdict({ media }: { media: MediaRecord }) {
+// ── Model opinions: every other row, with the model that wrote it ────────────
+// The camera's per-class EXIF scores are shown once: under its Camera AI row when one was
+// reflected, otherwise as their own entry (a "no person 62%" frame has no row).
+function ModelOpinions({ media, selectedId, onSelectObs }: {
+  media: MediaRecord
+  selectedId: string | null
+  onSelectObs: (id: string) => void
+}) {
+  const { labelObs, isEmpty } = photoVerdict(media.observations)
+  const verdictId = labelObs?.id ?? (isEmpty ? media.observations.find(o => o.source_type === 'consensus')?.id : undefined)
+  const others = media.observations
+    .filter(o => o.id !== verdictId)
+    .sort((a, b) => (b.classification_probability ?? 0) - (a.classification_probability ?? 0))
   const scores = cameraScores(media.exif_metadata)
-  if (scores.length === 0) return null
   const model = cameraModel(media.exif_metadata)
-  return (
-    <div
-      title="Per-class scores the camera wrote into this frame's EXIF UserComment"
-      style={{
-        margin: '0.25rem 1rem 0.5rem', padding: '0.5rem 0.625rem', fontSize: '0.75rem',
-        borderRadius: 'var(--radius)', border: '1px solid rgba(139,92,246,0.45)', backgroundColor: 'rgba(139,92,246,0.08)',
-      }}
-    >
-      <span style={{ fontWeight: 700, color: '#7c3aed' }}>📟 Camera AI</span>
-      <span style={{ opacity: 0.6 }}> on the device{model ? `, ${model}` : ''}</span>
-      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-        {scores.map(({ label, pct }, i) => (
-          <span key={label} style={{ fontWeight: i === 0 ? 600 : 400, opacity: i === 0 ? 1 : 0.75 }}>
-            {label} {pct}%
-          </span>
-        ))}
-      </div>
+  const edgeRow = media.observations.find(isEdgeAi)
+  const scoreLine = scores.length > 0 && (
+    <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.2rem', fontSize: '0.72rem' }}>
+      {scores.map(({ label, pct: p }, i) => (
+        <span key={label} style={i === 0 ? { fontWeight: 600 } : MUTED}>{label} {p}%</span>
+      ))}
     </div>
+  )
+  const count = others.length + (!edgeRow && scores.length > 0 ? 1 : 0)
+  if (count === 0) return null
+  return (
+    <details style={{ padding: '0 0.75rem 0.5rem' }}>
+      <summary style={{ cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, padding: '0.25rem 0.25rem 0.4rem', userSelect: 'none' }}>
+        {count} model opinion{count !== 1 ? 's' : ''}
+      </summary>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.375rem' }}>
+        {others.map(o => {
+          const selected = o.id === selectedId
+          return (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => onSelectObs(o.id)}
+              aria-pressed={selected}
+              style={{
+                ...ROW_BTN,
+                backgroundColor: selected ? 'rgba(16,185,129,0.08)' : 'var(--surface)',
+                border: selected ? '1px solid var(--primary, #10b981)' : '1px solid var(--border)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                <span style={{ fontWeight: 600 }}>{observationLabel(o)}{o.count ? ` ×${o.count}` : ''}</span>
+                <span style={MUTED}>{isAiLabel(o) ? pct(o.classification_probability) : ''}</span>
+              </div>
+              <div style={{ ...MUTED, fontSize: '0.7rem', marginTop: '0.15rem' }}>
+                {o === edgeRow && model && !o.source_model_version ? `Camera AI, ${model}` : opinionSource(o)}
+                {hasBox(o) ? ', boxed' : ''}
+              </div>
+              {o === edgeRow && scoreLine}
+            </button>
+          )
+        })}
+        {!edgeRow && scoreLine && (
+          <div
+            title="Per-class scores the camera wrote into this frame's EXIF UserComment"
+            style={{ ...ROW_BTN, cursor: 'default', border: '1px solid var(--border)', backgroundColor: 'var(--surface)' }}
+          >
+            <div style={{ fontWeight: 600 }}>Camera scores</div>
+            <div style={{ ...MUTED, fontSize: '0.7rem', marginTop: '0.15rem' }}>{model ? `Camera AI, ${model}` : 'Camera AI'}</div>
+            {scoreLine}
+          </div>
+        )}
+      </div>
+    </details>
   )
 }
 
@@ -194,11 +233,11 @@ function MediaInfoSection({ media, timezone }: { media: MediaRecord; timezone?: 
   )
 }
 
-// ── Right panel: read-only observations + media info ────────────────────────
-function DetailSidebar({ media, timezone, saveMsg, selectedObsId, onSelectObs, onClose }: {
+// ── Right panel: verdict, model opinions, media info ─────────────────────────
+function DetailSidebar({ media, timezone, canLabel, selectedObsId, onSelectObs, onClose }: {
   media: MediaRecord
   timezone?: string | null
-  saveMsg: string | null
+  canLabel: boolean
   selectedObsId: string | null
   onSelectObs: (id: string) => void
   onClose: () => void
@@ -213,20 +252,14 @@ function DetailSidebar({ media, timezone, saveMsg, selectedObsId, onSelectObs, o
         <div style={{ fontWeight: 600, fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {media.file_name || media.file_path.split('/').pop()}
         </div>
-        <button onClick={onClose} title="Close (Esc)" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', opacity: 0.6 }}>✕</button>
+        <button onClick={onClose} title="Close (Esc)" aria-label="Close" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'inline-flex', padding: 0 }}>
+          <X size={18} aria-hidden />
+        </button>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.6rem 1rem 0.3rem' }}>
-        <strong style={{ fontSize: '0.8125rem' }}>Observations ({media.observations.length})</strong>
-        {saveMsg && <span style={{ fontSize: '0.72rem', color: saveMsg.startsWith('Error') ? 'var(--error, #ef4444)' : 'var(--success, #10b981)' }}>{saveMsg}</span>}
-      </div>
-      <p style={{ fontSize: '0.7rem', opacity: 0.5, margin: '0 1rem 0.25rem' }}>
-        Edit with the actions under the image. Select an observation to relabel, box, or remove it.
-      </p>
-
-      <CameraVerdict media={media} />
-
-      <ObservationList media={media} selectedId={selectedObsId} onSelectObs={onSelectObs} />
+      <strong style={{ fontSize: '0.8125rem', padding: '0.6rem 1rem 0.35rem' }}>Verdict</strong>
+      <VerdictCard media={media} selectedId={selectedObsId} onSelectObs={onSelectObs} />
+      <ModelOpinions media={media} selectedId={selectedObsId} onSelectObs={onSelectObs} />
 
       <details style={{ marginTop: 'auto', borderTop: '1px solid var(--border)' }}>
         <summary style={{ cursor: 'pointer', fontSize: '0.8125rem', fontWeight: 600, padding: '0.6rem 1rem', userSelect: 'none' }}>
@@ -235,27 +268,100 @@ function DetailSidebar({ media, timezone, saveMsg, selectedObsId, onSelectObs, o
         <MediaInfoSection media={media} timezone={timezone} />
       </details>
 
-      <div style={{ fontSize: '0.68rem', opacity: 0.45, padding: '0.6rem 1rem', borderTop: '1px solid var(--border)', lineHeight: 1.6 }}>
-        <strong style={{ opacity: 0.7 }}>Shortcuts</strong><br />
-        ←/→ prev/next · +/−/0 zoom · M movement · F filter · C confirm · A add · B blank · Del remove · Esc close
+      <div style={{ ...MUTED, fontSize: '0.68rem', padding: '0.6rem 1rem', borderTop: '1px solid var(--border)', lineHeight: 1.6 }}>
+        <strong>Shortcuts</strong><br />
+        {canLabel
+          ? '←/→ prev/next, C confirm, A label, B blank, Del clear the box or your label, +/−/0 zoom, M movement, F boxes, Esc close'
+          : '←/→ prev/next, +/−/0 zoom, M movement, F boxes, Esc close'}
       </div>
     </div>
+  )
+}
+
+// ── View menu: image tools kept off the verb bar (03 #11) ────────────────────
+function ViewMenu({ zoom, onZoom, onReset, brightness, onBrightness, contrast, onContrast, movement, canMove, onMovement, filter, onFilter, open, onOpen }: {
+  zoom: number
+  onZoom: (factor: number) => void
+  onReset: () => void
+  brightness: number
+  onBrightness: (v: number) => void
+  contrast: number
+  onContrast: (v: number) => void
+  movement: boolean
+  canMove: boolean
+  onMovement: () => void
+  filter: AnnotationFilter
+  onFilter: (f: AnnotationFilter) => void
+  open: boolean
+  onOpen: (open: boolean) => void
+}) {
+  const changed = zoom !== 1 || brightness !== 100 || contrast !== 100 || movement || filter !== 'all'
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => onOpen(!open)}
+        aria-expanded={open}
+        style={changed ? { ...TOOL_BTN, borderColor: '#f59e0b' } : TOOL_BTN}
+        title="Zoom, brightness, contrast, movement and which boxes show"
+      >
+        <SlidersHorizontal size={14} aria-hidden /> View{changed ? ` ${Math.round(zoom * 100)}%` : ''}
+      </button>
+      {open && (
+        <>
+          <div role="presentation" onClick={() => onOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 8 }} />
+          <div
+            className="card"
+            style={{
+              position: 'absolute', bottom: 'calc(100% + 6px)', left: '0.75rem', zIndex: 9, width: 260,
+              padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.6rem',
+              boxShadow: '0 6px 18px rgba(0,0,0,0.3)', color: 'var(--text-color)',
+            }}
+          >
+            <div style={VIEW_ROW}>
+              <span>Zoom</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                <button type="button" onClick={() => onZoom(0.8)} style={TOOL_BTN} title="Zoom out (−)" aria-label="Zoom out"><ZoomOut size={14} aria-hidden /></button>
+                <span style={{ ...MUTED, minWidth: 38, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+                <button type="button" onClick={() => onZoom(1.25)} style={TOOL_BTN} title="Zoom in (+)" aria-label="Zoom in"><ZoomIn size={14} aria-hidden /></button>
+              </span>
+            </div>
+            <label style={VIEW_ROW}>
+              Brightness
+              <input type="range" min={40} max={200} value={brightness} onChange={e => onBrightness(+e.target.value)} style={{ width: 120 }} />
+            </label>
+            <label style={VIEW_ROW}>
+              Contrast
+              <input type="range" min={40} max={200} value={contrast} onChange={e => onContrast(+e.target.value)} style={{ width: 120 }} />
+            </label>
+            <label style={{ ...VIEW_ROW, justifyContent: 'flex-start', ...(canMove ? {} : MUTED) }} title={canMove ? undefined : 'No previous photo to compare'}>
+              <input type="checkbox" checked={movement} disabled={!canMove} onChange={onMovement} />
+              Highlight movement (M)
+            </label>
+            <label style={VIEW_ROW}>
+              Boxes (F)
+              <select value={filter} onChange={e => onFilter(e.target.value as AnnotationFilter)} style={{ ...TOOL_BTN, fontWeight: 400 }}>
+                <option value="all">All</option>
+                <option value="reviewed">Reviewed only</option>
+                <option value="ai">AI only</option>
+                <option value="none">Hidden</option>
+              </select>
+            </label>
+            <button type="button" onClick={onReset} style={{ ...TOOL_BTN, justifyContent: 'center' }} title="Reset zoom and position (0)">Reset view</button>
+          </div>
+        </>
+      )}
+    </>
   )
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onUpdated, onNext, onPrev, focusObsId, previewStuck, onRetryPreview }: Props) {
   const { user } = useAuth()
-  // Remove is offered only to users the database lets delete (#183).
-  const { data: canRemove = false } = useQuery({
-    queryKey: ['can-edit-observations', media.deployment_id, user?.id],
-    queryFn: () => canEditObservations(supabase, user!.id, media.deployment_id),
-    enabled: !!user,
-    staleTime: 5 * 60_000,
-  })
+  // Write controls only for project members and above on this photo's project (decision 1).
+  const { canLabel, loading: roleLoading, projectId } = useCanLabel(media.deployment_id)
 
   const [saving, setSaving] = useState(false)
-  const [saveMsg, setSaveMsg] = useState<string | null>(null)
 
   // Image controls
   const [zoom, setZoom] = useState(1)
@@ -264,129 +370,118 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
   const [contrast, setContrast] = useState(100)
   const [movement, setMovement] = useState(false)
   const [annFilter, setAnnFilter] = useState<AnnotationFilter>('all')
+  const [viewOpen, setViewOpen] = useState(false)
 
   // Selection + editing
   const [selectedObsId, setSelectedObsId] = useState<string | null>(null)
-  const [picker, setPicker] = useState<null | 'add' | 'relabel'>(null)
+  const [picker, setPicker] = useState(false)
+  const [count, setCount] = useState('')
 
-  // Bounding-box drawing. Moving to another photo (or focused observation) leaves draw mode,
-  // adjusted during render rather than in the reset effect below.
+  // Bounding-box drawing.
   const [bboxObsId, setBboxObsId] = useState<string | null>(null)
-  const viewKey = `${media.id}|${focusObsId ?? ''}`
-  const [bboxView, setBboxView] = useState(viewKey)
-  if (bboxView !== viewKey) { setBboxView(viewKey); setBboxObsId(null) }
 
-  // Reset per-image view state when the image changes. Pre-select the focused
-  // observation (the crop card the user clicked) when it belongs to this image.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one reset per image, not a render loop
+  // Moving to another photo (or focused observation) resets the view, leaves draw mode and the
+  // label bar, and pre-selects the focused observation (the crop card the user clicked) when it
+  // belongs to this photo. Adjusted during render rather than in an effect.
+  const viewKey = `${media.id}|${focusObsId ?? ''}`
+  const [shownView, setShownView] = useState<string | null>(null)
+  if (shownView !== viewKey) {
+    setShownView(viewKey)
     setZoom(1); setPan({ x: 0, y: 0 }); setBrightness(100); setContrast(100)
-    setMovement(false); setPicker(null)
-    const focus = focusObsId && media.observations.some(o => o.id === focusObsId) ? focusObsId : null
-    setSelectedObsId(focus)
-  }, [media.id, focusObsId])
+    setMovement(false); setPicker(false); setBboxObsId(null)
+    setSelectedObsId(focusObsId && media.observations.some(o => o.id === focusObsId) ? focusObsId : null)
+  }
 
   const idx = useMemo(() => mediaList?.findIndex(m => m.id === media.id) ?? -1, [mediaList, media.id])
   usePrefetchNeighbours(mediaList, idx)
   const prevMedia = idx > 0 ? mediaList?.[idx - 1] : undefined
   const prevUrl = prevMedia ? displayImageUrl(prevMedia, 'full') : null
 
+  // The picker offers the species of this photo's project before it searches, and the species
+  // labelled on the photos in view until those are read.
+  const seeds = useMemo(() => labelledSpecies((mediaList ?? [media]).flatMap(m => m.observations)), [mediaList, media])
+
   const selectedObs = media.observations.find(o => o.id === selectedObsId) || null
+  // Only a person's own row can be boxed or removed; AI rows stay as the model wrote them.
+  const editableObs = canLabel && selectedObs && isHumanRow(selectedObs) ? selectedObs : null
 
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }) }
   const zoomBy = (f: number) => setZoom(z => Math.min(6, Math.max(1, +(z * f).toFixed(2))))
 
-  // ── Observation mutations (all stamp human provenance) ─────────────────────
-  const updateObservation = async (obsId: string, fields: Partial<ObservationRecord>) => {
-    setSaving(true); setSaveMsg(null)
-    const patch = { ...fields, ...humanReviewFields({ userId: user?.id, userEmail: user?.email }) }
-    const { error } = await supabase.from('observations').update(patch).eq('id', obsId)
-    if (error) {
-      setSaveMsg(`Error: ${error.message}`)
-    } else {
-      onUpdated({ ...media, observations: media.observations.map(o => o.id === obsId ? { ...o, ...patch } : o) })
-      setSaveMsg('Saved ✓')
-      setTimeout(() => setSaveMsg(null), 1800)
-    }
-    setSaving(false)
-  }
-
-  const addObservation = async (species?: { taxon_id?: string | null; scientific_name?: string | null; vernacular_name?: string | null }) => {
-    setSaving(true); setSaveMsg(null)
-    const newObs = {
-      deployment_id: media.deployment_id,
-      media_id: media.id,
-      observation_level: 'media',
-      observation_type: 'animal',
-      taxon_id: species?.taxon_id ?? null,
-      scientific_name: species?.scientific_name ?? null,
-      vernacular_name: species?.vernacular_name ?? null,
-      ...humanCreateFields({ userId: user?.id, userEmail: user?.email }),
-    }
-    const { data, error } = await supabase.from('observations').insert(newObs).select().single()
-    if (error) {
-      setSaveMsg(`Error: ${error.message}`)
-    } else if (data) {
-      const row = data as unknown as ObservationRecord
-      onUpdated({ ...media, observations: [...media.observations, row] })
-      setSelectedObsId(row.id)
-      setSaveMsg('Added ✓')
-      setTimeout(() => setSaveMsg(null), 1800)
-    }
-    setPicker(null)
-    setSaving(false)
-  }
-
-  const deleteObservation = async (obsId: string) => {
-    setSaving(true); setSaveMsg(null)
+  // ── Label writes (lib/humanVerdict): a human row per photo, AI rows untouched ──
+  // Each write shows an Undo toast, or the refusal as an error toast (never "saved").
+  const actor = { userId: user?.id, userEmail: user?.email }
+  const run = async (
+    write: () => Promise<VerdictWrite<ObservationRecord>>,
+    message: string,
+    after: { advance?: boolean; select?: boolean } = {},
+  ) => {
+    if (saving || !canLabel) return
+    setSaving(true)
+    const base = media
     try {
-      await deleteObservationRow(supabase, obsId)
-      onUpdated({ ...media, observations: media.observations.filter(o => o.id !== obsId) })
-      if (selectedObsId === obsId) setSelectedObsId(null)
-      setSaveMsg('Removed ✓')
-      setTimeout(() => setSaveMsg(null), 1800)
+      const result = await write()
+      onUpdated({ ...base, observations: result.observations })
+      if (after.select && result.rowId) setSelectedObsId(result.rowId)
+      showUndoToast({
+        message,
+        onUndo: async () => { onUpdated({ ...base, observations: await result.undo() }) },
+      })
+      if (after.advance) onNext?.()
     } catch (e) {
-      setSaveMsg(`Error: ${(e as Error).message}`)
+      showErrorToast((e as Error).message)
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
-  // Confirm: accept as-is (stamp human review). With no selection, confirm every
-  // unreviewed per-model AI observation on the image (never the consensus row), then advance.
-  const confirm = async () => {
-    const targets = selectedObs
-      ? [selectedObs]
-      : confirmAllTargets(media.observations)
-    if (targets.length === 0) { onNext?.(); return }
-    // One batched update instead of N sequential requests (no per-row flicker).
-    setSaving(true); setSaveMsg(null)
-    const patch = humanReviewFields({ userId: user?.id, userEmail: user?.email })
-    const ids = targets.map(t => t.id)
-    const { error } = await supabase.from('observations').update(patch).in('id', ids)
-    if (error) {
-      setSaveMsg(`Error: ${error.message}`)
-    } else {
-      onUpdated({ ...media, observations: media.observations.map(o => ids.includes(o.id) ? { ...o, ...patch } : o) })
-      setSaveMsg('Saved ✓')
-      setTimeout(() => setSaveMsg(null), 1800)
-      onNext?.()
-    }
-    setSaving(false)
+  const applyLabel = (label: VerdictLabel) => {
+    setPicker(false)
+    return run(() => writeVerdict(supabase, media, label, actor), `Labelled ${labelText(label)}`, { select: true })
   }
 
-  const blank = async () => {
-    const target = selectedObs ?? media.observations[0]
-    if (!target) return
-    await updateObservation(target.id, { observation_type: 'blank', scientific_name: null, vernacular_name: null, taxon_id: null })
-    onNext?.()
+  // Confirm agrees with the selected row, or with the photo's verdict, by writing it as the
+  // person's label (one request), then moves on. A photo a person already ruled on just moves on.
+  const confirm = () => {
+    const label = selectedObs
+      ? (isHumanRow(selectedObs) ? null : labelOf(selectedObs))
+      : (verdictIsReviewed(media.observations) ? null : confirmLabel(media.observations))
+    if (!label) { onNext?.(); return }
+    return run(() => writeVerdict(supabase, media, label, actor), `Confirmed ${labelText(label)}`, { advance: true })
   }
+
+  const blank = () => run(() => writeVerdict(supabase, media, { observation_type: 'blank' }, actor), 'Marked blank', { advance: true })
+
+  const saveBox = (obsId: string, fields: Partial<ObservationRecord>) => {
+    const drawing = fields.bbox_x != null
+    return run(
+      () => updateHumanRow(supabase, media, obsId, drawing ? { ...fields, observation_level: 'media' } : fields, actor),
+      drawing ? 'Box saved' : 'Box removed',
+    )
+  }
+
+  const removeLabel = (obsId: string) => {
+    if (selectedObsId === obsId) setSelectedObsId(null)
+    return run(() => removeHumanRow(supabase, media, obsId), 'Removed your label')
+  }
+
+  // Del clears the selected box first, then the label itself (03 #24).
+  const clearSelected = () => {
+    if (!editableObs) return
+    if (hasBox(editableObs)) saveBox(editableObs.id, { bbox_x: null, bbox_y: null, bbox_w: null, bbox_h: null })
+    else removeLabel(editableObs.id)
+  }
+
+  const openPicker = () => { setCount(''); setPicker(p => !p) }
+  const countValue = /^\d+$/.test(count) && +count >= 1 ? +count : null
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
   // An effect event always sees the current state, so the listener is added once.
   const onKey = useEffectEvent((e: KeyboardEvent) => {
-    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement
     if (e.key === 'Escape') {
-      if (picker) setPicker(null)
+      if (picker) setPicker(false)
+      else if (viewOpen) setViewOpen(false)
       else if (bboxObsId) setBboxObsId(null)
       else onClose()
       return
@@ -400,10 +495,11 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
       case '0': resetView(); break
       case 'm': case 'M': if (prevUrl) setMovement(v => !v); break
       case 'f': case 'F': setAnnFilter(p => p === 'all' ? 'reviewed' : p === 'reviewed' ? 'ai' : p === 'ai' ? 'none' : 'all'); break
-      case 'c': case 'C': if (!saving) confirm(); break
-      case 'b': case 'B': if (!saving) blank(); break
-      case 'a': case 'A': setPicker('add'); break
-      case 'Delete': case 'Backspace': if (selectedObs && !saving && canRemove) deleteObservation(selectedObs.id); break
+      case 'c': case 'C': if (canLabel && !saving) confirm(); break
+      case 'b': case 'B': if (canLabel && !saving) blank(); break
+      // preventDefault: the key would otherwise type itself into the picker it opens.
+      case 'a': case 'A': if (canLabel) { e.preventDefault(); openPicker() } break
+      case 'Delete': case 'Backspace': if (!saving) clearSelected(); break
     }
   })
   useEffect(() => {
@@ -420,6 +516,10 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
     return true
   })
 
+  const confirmTitle = selectedObs
+    ? `Confirm ${observationLabel(selectedObs)} as your label (C)`
+    : 'Confirm the verdict as your label and go to the next photo (C)'
+
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 300, backgroundColor: 'rgba(0,0,0,0.86)', display: 'flex' }}>
       {/* ── LEFT: image stage + toolbar + filmstrip ─────────────── */}
@@ -429,103 +529,81 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
           media={media} prevUrl={prevUrl} zoom={zoom} pan={pan} onPan={setPan}
           brightness={brightness} contrast={contrast} movement={movement}
           boxes={visibleObs} selectedObsId={selectedObsId} onSelectObs={setSelectedObsId}
-          bboxObsId={bboxObsId} onBoxDone={() => setBboxObsId(null)} onSaveBox={updateObservation}
+          editableObsId={editableObs?.id ?? null}
+          bboxObsId={bboxObsId} onBoxDone={() => setBboxObsId(null)} onSaveBox={saveBox}
           onClose={onClose} onNext={onNext} onPrev={onPrev}
           previewStuck={previewStuck} onRetryPreview={onRetryPreview}
         />
 
-        {/* Quick-action toolbar */}
+        {/* Toolbar: the View menu, then the verbs */}
         <div style={{
-          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem',
+          position: 'relative', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem',
           padding: '0.5rem 0.75rem', backgroundColor: 'var(--surface)', borderTop: '1px solid var(--border)',
         }}>
-          {/* View controls */}
-          <button onClick={() => zoomBy(0.8)} style={TOOL_BTN} title="Zoom out (−)">🔍−</button>
-          <span style={{ fontSize: '0.7rem', opacity: 0.6, minWidth: 38, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-          <button onClick={() => zoomBy(1.25)} style={TOOL_BTN} title="Zoom in (+)">🔍+</button>
-          <button onClick={resetView} style={TOOL_BTN} title="Reset view (0)">Reset</button>
-
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', opacity: 0.8 }} title="Brightness">
-            🔆<input type="range" min={40} max={200} value={brightness} onChange={e => setBrightness(+e.target.value)} style={{ width: 70 }} />
-          </label>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.7rem', opacity: 0.8 }} title="Contrast">
-            ◐<input type="range" min={40} max={200} value={contrast} onChange={e => setContrast(+e.target.value)} style={{ width: 70 }} />
-          </label>
-
-          <button
-            onClick={() => prevUrl && setMovement(v => !v)}
-            disabled={!prevUrl}
-            style={movement ? TOOL_BTN_ACTIVE : { ...TOOL_BTN, opacity: prevUrl ? 1 : 0.4 }}
-            title={prevUrl ? 'Highlight movement vs previous photo (M)' : 'No previous photo to compare'}
-          >🌗 Movement</button>
-
-          <select
-            value={annFilter}
-            onChange={e => setAnnFilter(e.target.value as AnnotationFilter)}
-            title="Filter annotations shown (F)"
-            style={{ ...TOOL_BTN, paddingRight: '0.4rem' }}
-          >
-            <option value="all">▣ All annotations</option>
-            <option value="reviewed">Reviewed only</option>
-            <option value="ai">AI (unreviewed) only</option>
-            <option value="none">Hide annotations</option>
-          </select>
+          <ViewMenu
+            zoom={zoom} onZoom={zoomBy} onReset={resetView}
+            brightness={brightness} onBrightness={setBrightness} contrast={contrast} onContrast={setContrast}
+            movement={movement} canMove={!!prevUrl} onMovement={() => prevUrl && setMovement(v => !v)}
+            filter={annFilter} onFilter={setAnnFilter} open={viewOpen} onOpen={setViewOpen}
+          />
 
           <span style={{ flex: 1 }} />
 
-          {/* Editing verbs */}
-          <button onClick={confirm} disabled={saving} style={CONFIRM_BTN} title={selectedObs ? 'Confirm selected (C)' : 'Confirm all AI labels (C)'}>
-            ✓ {selectedObs ? 'Confirm' : 'Confirm all'}
-          </button>
-          <button onClick={() => setPicker(picker === 'add' ? null : 'add')} disabled={saving} style={picker === 'add' ? TOOL_BTN_ACTIVE : TOOL_BTN} title="Add observation (A)">
-            ＋ Add
-          </button>
-          {selectedObs && (
+          {canLabel && (
             <>
-              <button onClick={() => setPicker(picker === 'relabel' ? null : 'relabel')} disabled={saving} style={picker === 'relabel' ? TOOL_BTN_ACTIVE : TOOL_BTN} title="Relabel species">
-                🏷 Relabel
+              <button onClick={confirm} disabled={saving} style={CONFIRM_BTN} title={confirmTitle}>
+                <Check size={14} aria-hidden /> Confirm
               </button>
-              <button onClick={() => setBboxObsId(bboxObsId === selectedObs.id ? null : selectedObs.id)} disabled={saving} style={bboxObsId === selectedObs.id ? TOOL_BTN_ACTIVE : TOOL_BTN} title="Draw bounding box">
-                ▭ Box
+              <button onClick={openPicker} disabled={saving} style={picker ? TOOL_BTN_ACTIVE : TOOL_BTN} title="Label this photo (A)">
+                <Tag size={14} aria-hidden /> Label
               </button>
-              <button onClick={blank} disabled={saving} style={REJECT_BTN} title="Mark false trigger / blank (B)">✕ Blank</button>
-              {canRemove && (
-                <button onClick={() => deleteObservation(selectedObs.id)} disabled={saving} style={REJECT_BTN} title="Remove observation (Del)">🗑 Remove</button>
+              <button onClick={blank} disabled={saving} style={REJECT_BTN} title="Mark blank, nothing in the photo (B)">
+                <Ban size={14} aria-hidden /> Blank
+              </button>
+              {editableObs && (
+                <>
+                  <button onClick={() => setBboxObsId(bboxObsId === editableObs.id ? null : editableObs.id)} disabled={saving} style={bboxObsId === editableObs.id ? TOOL_BTN_ACTIVE : TOOL_BTN} title="Draw a box around the animal">
+                    <Square size={14} aria-hidden /> Box
+                  </button>
+                  <button onClick={() => removeLabel(editableObs.id)} disabled={saving} style={REJECT_BTN} title="Remove your label; the AI verdict shows again">
+                    <Trash2 size={14} aria-hidden /> Remove
+                  </button>
+                </>
               )}
             </>
           )}
+          {!canLabel && !roleLoading && <span style={{ ...MUTED, fontSize: '0.75rem' }}>View only</span>}
         </div>
 
-        {/* Inline species picker (add / relabel) */}
-        {picker && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', backgroundColor: 'var(--surface)', borderTop: '1px solid var(--border)' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 600, whiteSpace: 'nowrap' }}>
-              {picker === 'add' ? 'Add observation:' : 'Relabel as:'}
-            </span>
-            <div style={{ flex: 1, maxWidth: 360 }}>
+        {/* Label bar: species, or a person, with an optional count */}
+        {picker && canLabel && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', backgroundColor: 'var(--surface)', borderTop: '1px solid var(--border)' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 600, whiteSpace: 'nowrap' }}>Label as</span>
+            <div style={{ flex: 1, minWidth: 200, maxWidth: 360 }}>
               <SpeciesPicker
-                initialQuery={picker === 'relabel' ? (selectedObs?.vernacular_name || selectedObs?.scientific_name || '') : ''}
+                autoFocus
+                seeds={seeds}
+                projectIds={projectId ? [projectId] : undefined}
                 placeholder="Search species…"
                 disabled={saving}
-                onSelect={sel => {
-                  if (picker === 'add') {
-                    addObservation({ taxon_id: sel.taxon_id, scientific_name: sel.scientific_name, vernacular_name: sel.vernacular_name })
-                  } else if (selectedObs) {
-                    updateObservation(selectedObs.id, {
-                      taxon_id: sel.taxon_id, scientific_name: sel.scientific_name,
-                      vernacular_name: sel.vernacular_name, observation_type: 'animal',
-                    })
-                    setPicker(null)
-                  }
-                }}
+                onSelect={sel => applyLabel({ observation_type: 'animal', ...sel, count: countValue })}
               />
             </div>
-            {picker === 'add' && (
-              <button onClick={() => addObservation()} disabled={saving} style={TOOL_BTN} title="Add without a species label">
-                Add as unknown animal
-              </button>
-            )}
-            <button onClick={() => setPicker(null)} style={TOOL_BTN}>Cancel</button>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.75rem' }}>
+              Count
+              <input
+                type="number" min={1} step={1} value={count} placeholder="1"
+                onChange={e => setCount(e.target.value)}
+                style={{ ...TOOL_BTN, width: 56, fontWeight: 400, cursor: 'text' }}
+              />
+            </label>
+            <button onClick={() => applyLabel({ observation_type: 'human', count: countValue })} disabled={saving} style={TOOL_BTN} title="A person is in the photo">
+              <User size={14} aria-hidden /> Person
+            </button>
+            <button onClick={() => applyLabel({ observation_type: 'animal', count: countValue })} disabled={saving} style={TOOL_BTN} title="An animal you cannot name">
+              Unknown animal
+            </button>
+            <button onClick={() => setPicker(false)} style={TOOL_BTN}>Cancel</button>
           </div>
         )}
 
@@ -533,9 +611,9 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
         {mediaList && onSelect && <Filmstrip items={mediaList} currentId={media.id} onSelect={onSelect} />}
       </div>
 
-      {/* ── RIGHT: read-only observations + media info ──────────── */}
+      {/* ── RIGHT: verdict, model opinions, media info ──────────── */}
       <DetailSidebar
-        media={media} timezone={timezone} saveMsg={saveMsg} onClose={onClose}
+        media={media} timezone={timezone} canLabel={canLabel} onClose={onClose}
         selectedObsId={selectedObsId} onSelectObs={id => setSelectedObsId(prev => prev === id ? null : id)}
       />
     </div>
