@@ -5265,6 +5265,82 @@
         ]
       }
     },
+    "/api/reports/gbf": {
+      "get": {
+        "description": "The GBF contribution report for the projects over the period. It only reads, so the demo\naccount may call it; the caller needs read access to every project (``404`` otherwise).",
+        "operationId": "get_gbf_report_api_reports_gbf_get",
+        "parameters": [
+          {
+            "description": "Comma-separated project ids",
+            "in": "query",
+            "name": "project_ids",
+            "required": true,
+            "schema": {
+              "description": "Comma-separated project ids",
+              "title": "Project Ids",
+              "type": "string"
+            }
+          },
+          {
+            "description": "First day of the period (UTC)",
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "First day of the period (UTC)",
+              "format": "date",
+              "title": "From",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Last day of the period (UTC), included",
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "Last day of the period (UTC), included",
+              "format": "date",
+              "title": "To",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Gbf Report",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
     "/api/v1/api-keys": {
       "get": {
         "description": "List an organisation's active (unrevoked) API keys. Managers only.",

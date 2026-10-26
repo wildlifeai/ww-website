@@ -69,6 +69,7 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_CAMTRAPDP_IMPORT_ENABLED` | `true` | CamtrapDP package import |
 | `FF_CAMTRAPDP_EXPORT_ENABLED` | `true` | CamtrapDP export with the original photos (`POST /api/exports/camtrapdp`); needs the private `CAMTRAPDP_EXPORT_BUCKET`, which the job reads, so set it and `CAMTRAPDP_EXPORT_MAX_BYTES` on the **worker** too |
 | `FF_PIPELINE_ENABLED` | `false` | AI pipeline inference endpoints |
+| `FF_GBF_REPORT_ENABLED` | `false` | The GBF contribution report (`GET /api/reports/gbf`) |
 | `FF_SPECIESNET_ENABLED` | `false` | SpeciesNet detector+classifier step |
 | `FF_BIOCLIP_ENABLED` | `false` | BioCLIP secondary/zero-shot classifier step |
 | `FF_PER_CROP_CLASSIFY_ENABLED` | `false` | One AI observation per detection (not collapsed per image) — requires the GPU worker; see [04-AI-PIPELINE](./04-AI-PIPELINE.md) |

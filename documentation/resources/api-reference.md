@@ -76,6 +76,7 @@ On error:
 - [Deployments](#deployments)
 - [CamtrapDP Import](#camtrapdp-import)
 - [CamtrapDP Export](#camtrapdp-export)
+- [Reports](#reports)
 - [Wildlife Brain — Embeddings & Clustering](#wildlife-brain--embeddings--clustering)
 - [Conservation Intelligence](#conservation-intelligence)
 - [QA](#qa)
@@ -314,6 +315,17 @@ and the Download CamtrapDP buttons then fall back to the Edge Function's metadat
 | Method · Path | Description |
 |---|---|
 | `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_viewer` check decides (viewers and organisation managers export too, ww-backend #331); `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from Drive with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private `CAMTRAPDP_EXPORT_BUCKET` (default `exports`) under `camtrapdp/<job_id>.zip`, `result_url` is a signed link valid for 24 hours, and exports older than 7 days are deleted when the next one is stored. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
+
+---
+
+## Reports
+
+Prefix `/api/reports`. JWT required, the demo account included: it only reads. Gated by
+`FF_GBF_REPORT_ENABLED`, off by default (`FEATURE_DISABLED`).
+
+| Method · Path | Description |
+|---|---|
+| `GET /api/reports/gbf?project_ids=<id>,<id>&from=<date>&to=<date>` | The GBF contribution report (#371): what the projects contribute to targets 6, 4, 20 and 22 of the Global Biodiversity Framework over UTC days `from` to `to`, both included. Needs read access to every project, `404` otherwise and for a deleted one; `422` for a malformed id or `from` after `to`. Returns `{ method_version, period: { from, to }, projects: [{ id, name }], camera_nights_by_month: [{ month, camera_nights }], target_6, target_4, target_20, target_21, target_22 }`. `target_6` (invasive species) and `target_4` (IUCN Vulnerable or worse) are each `{ sites_monitored, species_recorded, species }`, every species `{ taxon_id, scientific_name, common_name, conservation_status, invasive, detections, rate, sites_with, monthly: [{ month, detections, rate }], first_detections: [{ deployment_id, deployment_name, date }] }`, highest rate first; a species can be in both. `target_20` is `{ cameras, sites, camera_nights, photos, photos_with_ai, photos_reviewed }`, `target_22` is `{ reviewers }`, a count, and `target_21` is `null`. The definitions (photo verdict, detections by the 30-minute rule, camera-nights, rate per 100 camera-nights, sites) are in `domain/gbf_report.py`. Rate limit 10/minute |
 
 ---
 

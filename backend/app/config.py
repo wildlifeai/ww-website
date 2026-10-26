@@ -59,6 +59,7 @@ class Settings(BaseSettings):
         description="Largest export ZIP, spooled on the job's local disk and sent as one standard Storage upload",
     )
     FF_PIPELINE_ENABLED: bool = Field(False, description="Enable AI pipeline inference endpoints")
+    FF_GBF_REPORT_ENABLED: bool = Field(False, description="GET /api/reports/gbf, the GBF contribution report (#371). Off: FEATURE_DISABLED")
 
     # ── v4 Wildlife Brain feature flags ──────────────────────────────
     FF_SPECIESNET_ENABLED: bool = Field(False, description="Use SpeciesNet (detector + classifier) as the pipeline step")

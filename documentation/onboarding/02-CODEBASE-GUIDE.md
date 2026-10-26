@@ -123,7 +123,8 @@ registries/→ static config (camera configs, model + embedding registries)
 ```
 
 **Routers** (`/api/*`, registered in `app/main.py`): `auth` (demo session), `admin` (system-admin
-device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `exports`, `models`, `media`,
+device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `exports`, `reports` (the GBF
+report, answering `FEATURE_DISABLED` without `FF_GBF_REPORT_ENABLED`), `models`, `media`,
 `public_api`, `inaturalist`, `clustering`, and, each behind its feature flag, `camtrapdp`,
 `pipeline`, `brain`
 (embeddings/clusters/UMAP/similarity), `qa` (AI-vs-human agreement), `intelligence`
@@ -132,7 +133,7 @@ device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `exports`, 
 **Key domain modules**: `exif`, `photo_preprocessing`, `pipeline` (SpeciesNet steps), `events`,
 `clustering`, `wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
 `intelligence`, `media_registry` / `media_resolver`, `model`, `manifest`, `camtrapdp`, `camtrapdp_export`, `inaturalist`,
-`public_api`.
+`public_api`, `gbf_report`.
 
 ### Adding a feature (backend)
 

@@ -38,6 +38,7 @@ from app.routers import (
     projects,
     public_api,
     qa,
+    reports,
 )
 
 logger = structlog.get_logger()
@@ -157,6 +158,7 @@ app.include_router(projects.router)
 app.include_router(exif.router)
 app.include_router(manifest.router)
 app.include_router(exports.router)
+app.include_router(reports.router)
 app.include_router(models.router)
 app.include_router(media.router)
 app.include_router(public_api.router)
