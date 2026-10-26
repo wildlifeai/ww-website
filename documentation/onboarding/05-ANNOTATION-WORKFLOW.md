@@ -27,13 +27,14 @@ with Prev and Next), the Photo / Labels toggle, the thumbnail size and *All on p
 
 A paginated thumbnail grid, 100 photos a page. Every filter runs in the media query
 (`lib/gridFilters.ts`), so the pager's total is the filtered total, counted once per filter set and
-again after a write (`lib/gridPage.ts`); the species, model and annotator lists cover the whole
-selection, read from ww-backend's `grid_facets` in one call per 150 deployments
-(`lib/gridFacets.ts`, #336). *Needs review first* orders the same query by the photo's
-active-learning score on `media_embeddings`, highest first, photos with no score last, then newest
-first (`gridSortPlan`, #337). *Time of day* reads `media.local_hour`, the capture hour in the
-deployment's zone (UTC when it has none) that ww-backend keeps (#335): day is 06:00 to 18:00
-(`DAY_START_HOUR` in `lib/time.ts`), and a photo with no capture time is neither.
+again after a write (`lib/gridPage.ts`). With no deployment picked, the query names the selected
+projects through the photo's deployment rather than every deployment id (`gridScopePlan`). The
+species, model and annotator lists cover the whole selection, read from ww-backend's `grid_facets`
+in one call per 150 deployments (`lib/gridFacets.ts`, #336). *Needs review first* orders the same
+query by the photo's active-learning score on `media_embeddings`, highest first, photos with no
+score last, then newest first (`gridSortPlan`, #337). *Time of day* reads `media.local_hour`, the
+capture hour in the deployment's zone (UTC when it has none) that ww-backend keeps (#335): day is
+06:00 to 18:00 (`DAY_START_HOUR` in `lib/time.ts`), and a photo with no capture time is neither.
 Groups split the page: grouping by deployment is offered for 2 to 12 deployments, by cluster for
 one (`lib/gridGrouping.ts`), and grouping is not remembered between visits. Each card shows the
 photo's verdict (`photoVerdict`, common name first) with one confidence and a **StatusBadge**

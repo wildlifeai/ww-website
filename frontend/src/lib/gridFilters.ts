@@ -129,6 +129,22 @@ export function gridFilterPlan(f: GridFilters): FilterPlan {
   return { embeds, ops }
 }
 
+/**
+ * The photos the grid reads: the deployments the user picked, by id, or else every deployment of
+ * the selected projects, through an inner embed of the photo's deployment. One id per deployment
+ * made a URL of about 4 KB for 100 deployments (UI audit 02 #8); project ids stay short. RLS hides
+ * deleted deployments from the embed, as it does from the deployment list.
+ */
+export function gridScopePlan(pickedDeploymentIds: readonly string[], projectIds: readonly string[]): FilterPlan {
+  if (pickedDeploymentIds.length) {
+    return { embeds: [], ops: [{ op: 'in', column: 'deployment_id', values: [...pickedDeploymentIds] }] }
+  }
+  return {
+    embeds: ['f_project:deployments!inner()'],
+    ops: [{ op: 'in', column: 'f_project.project_id', values: [...projectIds] }],
+  }
+}
+
 /** The calls `applyFilterOps` makes; a supabase-js filter builder has all of them. */
 export interface FilterableQuery<Q> {
   in(column: string, values: readonly string[]): Q

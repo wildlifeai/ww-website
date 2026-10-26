@@ -44,7 +44,7 @@ import { applySelectIntent, arrowTarget, cardClickIntent, cardKeyIntent, circleC
 import { writeVerdicts, type VerdictLabel } from '../../lib/humanVerdict'
 import { labelledSpecies } from '../../lib/speciesSuggestions'
 import {
-  applyFilterOps, applyOrder, gridFilterPlan, gridQueryKey, gridSortPlan, hasAdvancedFilters, hasAnyFilter, NO_FILTERS,
+  applyFilterOps, applyOrder, gridFilterPlan, gridQueryKey, gridScopePlan, gridSortPlan, hasAdvancedFilters, hasAnyFilter, NO_FILTERS,
   type GridFilters, type GridSort,
 } from '../../lib/gridFilters'
 import {
@@ -340,6 +340,9 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   // timezone fill, a parent re-render) does not refetch or reset the page.
   const deploymentKey = (filterDeployments.length ? filterDeployments : deployments.map(d => d.id)).join(',')
   const activeDeploymentIds = useMemo(() => (deploymentKey ? deploymentKey.split(',') : []), [deploymentKey])
+  // The query itself names the selected projects unless deployments were picked (02 #8).
+  const projectKey = [...new Set(deployments.map(d => d.project_id))].toSorted().join(',')
+  const scope = useMemo(() => gridScopePlan(filterDeployments, projectKey ? projectKey.split(',') : []), [filterDeployments, projectKey])
   const queryKey = gridQueryKey(activeDeploymentIds, filters)
   const plan = useMemo(() => gridFilterPlan(filters), [filters])
   const singleDeployment = activeDeploymentIds.length === 1 ? activeDeploymentIds[0] : null
@@ -520,10 +523,9 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
 
     const query = supabase
       .from('media')
-      .select([MEDIA_SELECT, ...plan.embeds, ...order.embeds].join(', '), wantCount ? { count: 'exact' } : undefined)
-      .in('deployment_id', activeDeploymentIds)
+      .select([MEDIA_SELECT, ...scope.embeds, ...plan.embeds, ...order.embeds].join(', '), wantCount ? { count: 'exact' } : undefined)
       .is('deleted_at', null)
-    applyOrder(applyFilterOps(query, plan.ops), order.orders)
+    applyOrder(applyFilterOps(query, [...scope.ops, ...plan.ops]), order.orders)
       .range(from, to)
       .then(({ data, error: err, count }) => {
         if (cancelled) return
@@ -540,7 +542,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
       })
 
     return () => { cancelled = true }
-  }, [user, activeDeploymentIds, queryKey, plan, sort, page, reloadKey])
+  }, [user, activeDeploymentIds, queryKey, scope, plan, sort, page, reloadKey])
 
   // While an upload is running, poll so newly-registered media appear in the grid
   // without a manual refresh, and do one final refresh when it finishes (cleanup

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  applyFilterOps, applyOrder, gridFilterPlan, gridQueryKey, gridSortPlan, hasAdvancedFilters, hasAnyFilter, NO_FILTERS,
+  applyFilterOps, applyOrder, gridFilterPlan, gridQueryKey, gridScopePlan, gridSortPlan, hasAdvancedFilters, hasAnyFilter,
+  NO_FILTERS,
   type FilterableQuery,
 } from './gridFilters'
 import { DAY_START_HOUR, NIGHT_START_HOUR } from './time'
@@ -88,6 +89,22 @@ describe('gridFilterPlan', () => {
       { op: 'or', filters: 'timestamp.is.null,timestamp.gte.2026-01-01' },
       { op: 'or', filters: 'local_hour.gte.18,local_hour.lt.6' },
     ])
+  })
+})
+
+describe('gridScopePlan', () => {
+  it('reads the picked deployments by id', () => {
+    expect(gridScopePlan(['d1', 'd2'], ['p1'])).toEqual({
+      embeds: [],
+      ops: [{ op: 'in', column: 'deployment_id', values: ['d1', 'd2'] }],
+    })
+  })
+
+  it("reads every deployment of the selected projects through the photo's deployment", () => {
+    expect(gridScopePlan([], ['p1', 'p2'])).toEqual({
+      embeds: ['f_project:deployments!inner()'],
+      ops: [{ op: 'in', column: 'f_project.project_id', values: ['p1', 'p2'] }],
+    })
   })
 })
 
