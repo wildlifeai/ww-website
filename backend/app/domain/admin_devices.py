@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Every device in the system, for a ``ww_admin`` (#343).
 
-The database keeps devices organisation-scoped: ``can_read_device`` has no ``ww_admin``
-branch (ww-backend#313), so this reads with the service role and the router gates it.
+Reads as the caller, under RLS. Every signed-in user reads every camera (ww-backend#346) and
+a ``ww_admin`` reads every deployment, project and organisation, so the admin the router lets
+through sees them all.
 
 Soft-deleted devices are left out. A device's latest deployment is its live deployment
 with the most recent ``deployment_start``, in a live project; a deleted deployment, or one
-whose project is deleted, never counts.
+whose project is deleted, never counts. Cameras belong to no organisation (ww-backend#346), so
+a device's ``organisation`` is its latest deployment's project's, and none without one.
 """
 
 from __future__ import annotations
@@ -17,8 +19,8 @@ from typing import Any, Callable
 # PostgREST returns at most 1,000 rows per response, so both reads page.
 _PAGE = 1000
 
-_DEVICE_COLUMNS = "id, name, bluetooth_id, device_eui, organisations(id, name)"
-_DEPLOYMENT_COLUMNS = "id, name, device_id, deployment_start, deployment_end, projects(id, name, deleted_at)"
+_DEVICE_COLUMNS = "id, name, bluetooth_id, device_eui"
+_DEPLOYMENT_COLUMNS = "id, name, device_id, deployment_start, deployment_end, projects(id, name, deleted_at, organisations(id, name))"
 
 
 def _read_all(build_query: Callable[[], Any]) -> list[dict]:
@@ -44,20 +46,20 @@ def _latest_deployments(deployments: list[dict]) -> dict[str, dict]:
     return latest
 
 
-def list_devices(svc) -> list[dict]:
-    """Live devices with their organisation and latest live deployment, ordered by name.
+def list_devices(client) -> list[dict]:
+    """Live devices with their latest live deployment and its project's organisation, ordered by name.
 
-    Two paged reads with the organisation and project embedded, so the cost does not grow
+    Two paged reads with the project and organisation embedded, so the cost does not grow
     with a query per device.
     """
-    devices = _read_all(lambda: svc.table("devices").select(_DEVICE_COLUMNS).is_("deleted_at", "null").order("id"))
-    deployments = _read_all(lambda: svc.table("deployments").select(_DEPLOYMENT_COLUMNS).is_("deleted_at", "null").order("id"))
+    devices = _read_all(lambda: client.table("devices").select(_DEVICE_COLUMNS).is_("deleted_at", "null").order("id"))
+    deployments = _read_all(lambda: client.table("deployments").select(_DEPLOYMENT_COLUMNS).is_("deleted_at", "null").order("id"))
     latest = _latest_deployments(deployments)
 
     out = []
     for dev in devices:
-        org = dev.get("organisations")
         dep = latest.get(dev["id"])
+        org = dep["projects"].get("organisations") if dep else None
         out.append(
             {
                 "id": dev["id"],
