@@ -180,7 +180,8 @@ animal crop ──DINOv3──▶ media_embeddings ──HDBSCAN──▶ cluste
   `media_embeddings` in its media query (ww-backend #337); the website calls the route only to
   learn whether the flag is on (`lib/featureFlags.ts`).
 - **QA**: `qa_report()` computes AI-vs-human agreement (a precision proxy over images carrying both
-  an AI and a human label) → shown on `DatasetHealthPage` (`/intelligence/:id`) via `useProjectQa`.
+  an AI and a human label); `qa_project_report()` does it for a whole project in one request,
+  shown on `DatasetHealthPage` (`/intelligence/:id`) via `useProjectQa`.
 
 ## Observation data model (shared by both tracks)
 

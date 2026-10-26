@@ -21,7 +21,7 @@ export function DatasetHealthPage() {
   const { project_id } = useParams<{ project_id: string }>()
   const { data: health, isLoading, error } = useDatasetHealth(project_id)
   const { data: alertsData } = useAlerts(project_id)
-  // One QA call per deployment: only once the page itself answered (03 #19).
+  // One QA call for the project, once the page itself answered (03 #19).
   const { data: qa, isLoading: qaLoading } = useProjectQa(project_id, !!health)
 
   if (isLoading) return <div style={{ padding: '2rem' }}>Loading dataset health…</div>
