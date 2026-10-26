@@ -27,6 +27,7 @@ How to deploy the Wildlife Watcher V2 platform (backend + frontend) to productio
 | **Supabase** | `qegeovogqxiouqbrxmnh` (Dev_Wildlife_Watcher) | `nuhwmubvygxyddkycmpa` (Stag_Wildlife_Watcher) |
 | **Azure Container App** | `ww-backend-dev` (WW-AE RG) | `ww-backend` (WW-AE RG) |
 | **Azure Blob Container** | `wildlife-watcher-uploads-dev` | `wildlife-watcher-uploads` (storage account `wwuploadsae`) |
+| **CamtrapDP export ZIPs** | `camtrapdp-exports`, shared with staging | `camtrapdp-exports` (same account) |
 | **Frontend** | Cloudflare Pages preview deploys (per branch) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
 | **Google Drive** | `Data/dev` — `1-F6cQc5lpYOJNSPKRs7i79Gh539N5hUT` | `Data/Production` — `1apf13KX075Fv4K0A2nbaTqOmCwZ9vJzr` |
 
@@ -146,7 +147,7 @@ See [00-GETTING-STARTED.md](../onboarding/00-GETTING-STARTED.md#environment-vari
 - [ ] `SENTRY_DSN` is set for error tracking
 - [ ] `LOG_LEVEL` is `info` (not `debug`)
 - [ ] `RATE_LIMIT_PER_MINUTE` is appropriate for your traffic
-- [ ] `AZURE_STORAGE_CONNECTION_STRING` is set for image buffering
+- [ ] `AZURE_STORAGE_CONNECTION_STRING` is set for image buffering and the CamtrapDP export ZIPs
 - [ ] `GOOGLE_DRIVE_ENABLED` is set to `true` if Drive uploads are needed
 
 ### Azure Container App Environment Variables
@@ -184,7 +185,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 
 | Var | Enables |
 |-----|---------|
-| `AZURE_STORAGE_CONNECTION_STRING` (+ `AZURE_STORAGE_CONTAINER_NAME`) | Blob buffering of originals — **this is the one that bites.** The container *name* alone does nothing; without the **connection string** every upload logs `azure_storage_not_configured_for_store` and no media rows are created. |
+| `AZURE_STORAGE_CONNECTION_STRING` (+ `AZURE_STORAGE_CONTAINER_NAME`) | Blob buffering of originals. **This is the one that bites.** The container *name* alone does nothing; without the **connection string** every upload logs `azure_storage_not_configured_for_store` and no media rows are created. It also stores the CamtrapDP export ZIPs (`CAMTRAPDP_EXPORT_CONTAINER`); without it the export answers `FEATURE_DISABLED`. |
 | `SUPABASE_MEDIA_BUCKET` | Supabase Storage bucket for media. |
 | `GOOGLE_DRIVE_ENABLED=true` + `GOOGLE_SERVICE_ACCOUNT_JSON` + `GOOGLE_DRIVE_FOLDER_ID` | Drive archival. **Folder ID alone does nothing** — without `ENABLED` + the service account, queued uploads stay `pending_drive_uploads` and the images never become servable. |
 
