@@ -4071,7 +4071,7 @@
     },
     "/api/jobs": {
       "get": {
-        "description": "List the authenticated user's recent processing jobs (newest first).\n\nPowers the avatar-menu \"Processing history\" view so a user can see whether a\npast upload / AI run finished or failed after the live dock has gone away.\nScoped to the caller \u2014 only jobs stamped with their ``user_id`` are returned.",
+        "description": "List the authenticated user's processing jobs, newest first, a page at a time.\n\nPowers the avatar-menu \"Processing history\" view so a user can see whether a\npast upload / AI run finished or failed after the live dock has gone away.\nScoped to the caller: only jobs stamped with their ``user_id`` are returned.\n``next_before`` reads the next page and is null on the last one.",
         "operationId": "list_user_jobs_api_jobs_get",
         "parameters": [
           {
@@ -4084,6 +4084,65 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only jobs in these statuses; repeat the parameter for several",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/components/schemas/JobStatus"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only jobs in these statuses; repeat the parameter for several",
+              "title": "Status"
+            }
+          },
+          {
+            "description": "Only jobs of this kind, such as upload or ai_pipeline",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^[a-z_]{1,40}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only jobs of this kind, such as upload or ai_pipeline",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "The previous page's next_before",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{6}Z\\|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The previous page's next_before",
+              "title": "Before"
             }
           },
           {
