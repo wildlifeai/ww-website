@@ -8,7 +8,9 @@ huggingface_hub>=0.23            # Gated DINOv3 model download
 hdbscan>=0.8.33                  # Density clustering of embeddings
 scikit-learn>=1.4                # Clustering/reduction utilities
 umap-learn>=0.5                  # UMAP 2D/50D reduction (stable coords)
-speciesnet>=4.0.1                # Detector + species classifier ensemble
+speciesnet==5.0.6               # Detector + species classifier ensemble. Pinned: 5.0.6 changed the output
+#                                  format (classification moved into detections[].processed_classification)
+#                                  without a major bump, so check speciesnet_service's parser before raising it.
 pybioclip>=1.0                   # BioCLIP secondary/zero-shot classifier (Tree-of-Life)
 google-cloud-storage==3.17.1     # gcp trainer (services/gcp_training.py): dataset upload, artefact download
 google-cloud-run==0.16.2         # gcp trainer: run_v2 JobsClient / ExecutionsClient (imported lazily)

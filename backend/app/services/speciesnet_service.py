@@ -153,28 +153,59 @@ def _parse_bbox(raw: Any) -> Optional[tuple[float, float, float, float]]:
     return (x, y, w, h)
 
 
+# Category "0" is the whole-image classifier's pseudo-detection (speciesnet >= 5.0.6):
+# a full-frame box that carries the image's classification, not something the detector saw.
+_WHOLE_IMAGE_CATEGORY = "0"
+
+
+def _detection_confidence(det: dict[str, Any]) -> float:
+    return float(det.get("conf", det.get("confidence", 0.0)) or 0.0)
+
+
+def _image_classification(pred: dict[str, Any]) -> tuple[Optional[str], Optional[float]]:
+    """Return the image's (taxonomy label, score).
+
+    Each classified detection carries its own ``processed_classification``
+    (``class``/``score``). The image keeps a single classification here, so take the
+    whole-image pseudo-detection's when there is one, else the highest-confidence
+    classified detection's.
+    """
+    classified = [d for d in pred.get("detections", []) or [] if d.get("processed_classification")]
+    if not classified:
+        return None, None
+    best = max(
+        classified,
+        key=lambda d: (str(d.get("category")) == _WHOLE_IMAGE_CATEGORY, _detection_confidence(d)),
+    )
+    processed = best["processed_classification"]
+    return processed.get("class"), processed.get("score")
+
+
 def parse_speciesnet_output(raw: dict[str, Any]) -> list[ImagePrediction]:
     """Convert raw SpeciesNet ``predict`` output into ``ImagePrediction`` list.
 
     Tolerant of missing fields so a partial/older SpeciesNet response still maps
-    cleanly. Detection confidence key is ``conf``; classification is the
-    ``prediction``/``prediction_score`` pair.
+    cleanly. Detection confidence key is ``conf``; the classification is read from
+    the detections by ``_image_classification``. Expects the speciesnet 5.0.6 format
+    (``format_version`` 20261015), the version pinned in ``requirements-ml.txt``.
     """
     out: list[ImagePrediction] = []
     for pred in raw.get("predictions", []) or []:
         detections: list[Detection] = []
         for det in pred.get("detections", []) or []:
             category = det.get("category", det.get("label", "unknown"))
+            if str(category) == _WHOLE_IMAGE_CATEGORY:
+                continue
             detections.append(
                 Detection(
                     category=str(category),
                     observation_type=category_to_observation_type(category),
-                    confidence=float(det.get("conf", det.get("confidence", 0.0)) or 0.0),
+                    confidence=_detection_confidence(det),
                     bbox=_parse_bbox(det.get("bbox")),
                 )
             )
-        scientific_name, common_name = parse_prediction_string(pred.get("prediction"))
-        score = pred.get("prediction_score")
+        label, score = _image_classification(pred)
+        scientific_name, common_name = parse_prediction_string(label)
         out.append(
             ImagePrediction(
                 filepath=pred.get("filepath", ""),
@@ -182,7 +213,7 @@ def parse_speciesnet_output(raw: dict[str, Any]) -> list[ImagePrediction]:
                 scientific_name=scientific_name,
                 common_name=common_name,
                 classification_score=float(score) if score is not None else None,
-                taxonomy=parse_taxonomy(pred.get("prediction")),
+                taxonomy=parse_taxonomy(label),
             )
         )
     return out
