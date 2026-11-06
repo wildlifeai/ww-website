@@ -5,6 +5,17 @@ on:
     branches:
       - dev
       - main
+    # Only the files the two images are built from (backend/Dockerfile copies app/ and the
+    # requirements files) or this workflow. A frontend, docs, test or dependency-manifest
+    # push elsewhere used to rebuild the 8 to 10 GB worker image in the registry for about
+    # 12 minutes each time: 38 builds and NZ$34 of build time between 21 and 26 Oct 2026.
+    # workflow_dispatch still runs regardless of paths.
+    paths:
+      - 'backend/app/**'
+      - 'backend/requirements*.txt'
+      - 'backend/Dockerfile'
+      - 'backend/.dockerignore'
+      - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
     inputs:
       tag:
