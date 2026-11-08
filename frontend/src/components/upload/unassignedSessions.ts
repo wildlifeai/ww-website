@@ -344,6 +344,46 @@ export function planBulkCreate(sessions: TriageSession[]): BulkCreatePlan[] {
  * sessions left unassigned, which the server would only drop), with the session assignments
  * re-indexed to the kept list.
  */
+/**
+ * What the Upload button says and whether it is live, in the order the user should hear it.
+ * The deployment list gate is the one that matters: deciding on photos before the list has
+ * loaded sent every photo to triage and then collided with its own deployment (409) when the
+ * list arrived a moment later.
+ */
+export function uploadButtonState(opts: { reading: boolean; listSettled: boolean; sending: boolean; sendable: number }): {
+  disabled: boolean
+  label: string
+} {
+  if (opts.reading) return { disabled: true, label: 'Reading photos…' }
+  if (!opts.listSettled) return { disabled: true, label: 'Loading deployments…' }
+  if (opts.sending) return { disabled: true, label: 'Previous upload still sending…' }
+  if (opts.sendable === 0) return { disabled: true, label: 'Nothing to upload' }
+  return { disabled: false, label: `Upload ${opts.sendable} image${opts.sendable !== 1 ? 's' : ''}` }
+}
+
+/**
+ * The triage's sessions held against the page's live list of unresolved files. Sessions are
+ * grouped once, when the screen opens, but the list they were judged against keeps loading and
+ * refreshing underneath (a deployment made here, a slow first load). A photo that the list now
+ * resolves leaves its session; a session with no photo left disappears. `resolvedElsewhere`
+ * counts the photos that left, so the screen can say so. Decisions on the remaining photos stand.
+ */
+export function liveSessions(sessions: TriageSession[], unresolved: number[]): {
+  sessions: TriageSession[]
+  resolvedElsewhere: number
+} {
+  const live = new Set(unresolved)
+  let resolvedElsewhere = 0
+  const out: TriageSession[] = []
+  for (const s of sessions) {
+    const indices = s.indices.filter((i) => live.has(i))
+    resolvedElsewhere += s.indices.length - indices.length
+    if (indices.length === 0) continue
+    out.push(indices.length === s.indices.length ? s : { ...s, indices })
+  }
+  return { sessions: out, resolvedElsewhere }
+}
+
 export function selectForUpload<T>(
   files: T[],
   paths: string[],

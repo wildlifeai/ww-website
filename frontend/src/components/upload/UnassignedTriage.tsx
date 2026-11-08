@@ -17,10 +17,10 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PageHelp } from '../common/PageHelp'
-import { apiClient } from '../../lib/apiClient'
+import { ApiError, apiClient } from '../../lib/apiClient'
 import { deploymentPickerGroups, pickerLabels, type UploadTarget } from '../../lib/uploadTargets'
 import { DeploymentPicker } from './DeploymentPicker'
-import { buildSessions, defaultDeploymentName, fmt, planBulkCreate, span } from './unassignedSessions'
+import { buildSessions, defaultDeploymentName, fmt, liveSessions, planBulkCreate, span } from './unassignedSessions'
 import type { TriageSession } from './unassignedSessions'
 
 interface Props {
@@ -45,8 +45,12 @@ interface Props {
   onCancel: () => void
   /** A deployment was created here, so the page's list is out of date. */
   onDeploymentCreated?: () => void
-  /** Sessions the user resolved; skipped ones are excluded. */
-  onDone: (assignments: { deploymentId: string; indices: number[] }[], skipped: number) => void
+  /**
+   * Sessions the user resolved, and the photos of the sessions they skipped. The skipped photos
+   * are named by index because the page's list may have resolved some of them since the skip,
+   * and a skip is a decision not to upload them, whatever the list now says.
+   */
+  onDone: (assignments: { deploymentId: string; indices: number[] }[], skippedIndices: number[]) => void
 }
 
 /** What POST /api/deployments returns. */
@@ -57,6 +61,19 @@ interface CreatedDeployment {
   location_name: string | null
   deployment_start: string | null
 }
+
+/**
+ * The API refuses to create a deployment under an id that already exists (409). In triage that
+ * means the camera's deployment is real and was simply not in the list this screen was judged
+ * against (still loading, or in a project the user cannot upload to). Refreshing the list lets
+ * the first case resolve itself; the second stays for the user to decide.
+ */
+function isExistingDeploymentConflict(e: unknown): boolean {
+  return e instanceof ApiError && (e.code === 'HTTP_409' || /already exists/i.test(e.message))
+}
+
+const CONFLICT_MESSAGE =
+  "This camera's deployment already exists. If it is in one of your projects these photos will match it in a moment; otherwise ask that project's admin, or skip them."
 
 async function createDeployment(projectId: string, name: string, exifDeploymentId: string | null): Promise<UploadTarget> {
   // When the camera stamped a deployment id, create the row under that id: the
@@ -127,7 +144,7 @@ function ProjectSelect({ projects, value, onChange, label }: {
 }
 
 function SessionCard({
-  session, files, filePaths, groups, projects, onAssign, onCreated, onSkip,
+  session, files, filePaths, groups, projects, onAssign, onCreated, onConflict, onSkip,
 }: {
   session: TriageSession
   files: File[]
@@ -136,6 +153,8 @@ function SessionCard({
   projects: { id: string; name: string }[]
   onAssign: (deploymentId: string) => void
   onCreated: (deployment: UploadTarget) => void
+  /** The deployment already exists under the camera's id; the page should refresh its list. */
+  onConflict: () => void
   onSkip: () => void
 }) {
   const picks = useSamplePicks(session.indices)
@@ -164,7 +183,12 @@ function SessionCard({
       onCreated(await createDeployment(projectId, name.trim(), session.exifDeploymentId))
       setCreating(false)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not create the deployment.')
+      if (isExistingDeploymentConflict(e)) {
+        setError(CONFLICT_MESSAGE)
+        onConflict()
+      } else {
+        setError(e instanceof Error ? e.message : 'Could not create the deployment.')
+      }
     } finally {
       setBusy(false)
     }
@@ -322,6 +346,9 @@ export function UnassignedTriage({
   const [sessions, setSessions] = useState<TriageSession[]>(
     () => buildSessions(files, filePaths, unresolved, exifIds),
   )
+  // Sessions are grouped once, but the page's list keeps loading and refreshing under this
+  // screen; photos it now resolves leave their session here (see liveSessions).
+  const { sessions: shown, resolvedElsewhere } = useMemo(() => liveSessions(sessions, unresolved), [sessions, unresolved])
   // Deployments made on this screen, offered to every other session too.
   const [created, setCreated] = useState<UploadTarget[]>([])
   const [bulkBusy, setBulkBusy] = useState(false)
@@ -349,14 +376,14 @@ export function UnassignedTriage({
     setCreated((prev) => [...prev, dep])
     onDeploymentCreated?.()
     const keys: string[] = []
-    for (const s of sessions) {
+    for (const s of shown) {
       if (s.key === key || (exifDeploymentId && s.exifDeploymentId === exifDeploymentId)) keys.push(s.key)
     }
     assign(keys, dep.id)
   }
 
   const createAll = async (projectId: string) => {
-    const plans = planBulkCreate(sessions)
+    const plans = planBulkCreate(shown)
     setBulkBusy(true)
     setBulkError(null)
     let done = 0
@@ -372,7 +399,9 @@ export function UnassignedTriage({
         setBulkProgress(`Created ${done} of ${plans.length}…`)
       }))
       failures = results.flatMap((r) => (r.status === 'rejected' ? [r.reason] : []))
-      if (failures.length < plans.length) onDeploymentCreated?.()
+      // Refresh the list after any success, and after a conflict: that deployment exists and
+      // the refreshed list resolves its photos by id.
+      if (failures.length < plans.length || failures.some(isExistingDeploymentConflict)) onDeploymentCreated?.()
     } finally {
       setBulkProgress(null)
       setBulkBusy(false)
@@ -384,10 +413,10 @@ export function UnassignedTriage({
   }
 
   const matchedCount = matched.reduce((n, m) => n + m.count, 0)
-  const assignedCount = sessions.filter((s) => s.deploymentId).reduce((n, s) => n + s.indices.length, 0)
-  const skippedCount = sessions.filter((s) => s.skipped).reduce((n, s) => n + s.indices.length, 0)
-  const pending = sessions.filter((s) => !s.deploymentId && !s.skipped)
-  const decided = sessions.filter((s) => s.deploymentId || s.skipped)
+  const assignedCount = shown.filter((s) => s.deploymentId).reduce((n, s) => n + s.indices.length, 0)
+  const skippedCount = shown.filter((s) => s.skipped).reduce((n, s) => n + s.indices.length, 0)
+  const pending = shown.filter((s) => !s.deploymentId && !s.skipped)
+  const decided = shown.filter((s) => s.deploymentId || s.skipped)
   // What will actually be sent: the photos that matched on their own plus the
   // ones resolved here. Counting only the latter read "0 photos ready" while
   // ten matched photos were about to upload.
@@ -395,10 +424,10 @@ export function UnassignedTriage({
   const leftOut = skippedCount + blockedCount
 
   const finish = () => {
-    const assignments = sessions
+    const assignments = shown
       .filter((s): s is TriageSession & { deploymentId: string } => !!s.deploymentId)
       .map((s) => ({ deploymentId: s.deploymentId, indices: s.indices }))
-    onDone(assignments, skippedCount)
+    onDone(assignments, sessions.filter((s) => s.skipped).flatMap((s) => s.indices))
   }
 
   const matchedNames = matched.slice(0, MATCHED_NAMED).map((m) => `${m.label} (${m.count})`).join(', ')
@@ -418,7 +447,7 @@ export function UnassignedTriage({
           </div>
         </div>
         <div className="triage-tally">
-          <strong>{sessions.length - pending.length} of {sessions.length}</strong>
+          <strong>{shown.length - pending.length} of {shown.length}</strong>
           <span>sessions resolved</span>
         </div>
       </header>
@@ -427,6 +456,11 @@ export function UnassignedTriage({
         <p className="triage-matched">
           <strong>{plural(matchedCount, 'photo')} already matched</strong> and will upload as they
           are: {matchedNames}{matchedMore}.
+        </p>
+      )}
+      {resolvedElsewhere > 0 && (
+        <p className="triage-hint" role="status">
+          {plural(resolvedElsewhere, 'photo')} matched a deployment that loaded after this screen opened and will upload with the rest.
         </p>
       )}
       {blockedCount > 0 && (
@@ -460,6 +494,7 @@ export function UnassignedTriage({
               projects={projects}
               onAssign={(deploymentId) => assign([s.key], deploymentId)}
               onCreated={(dep) => takeCreated(dep, s.key, s.exifDeploymentId)}
+              onConflict={() => onDeploymentCreated?.()}
               onSkip={() => update(s.key, { skipped: true, deploymentId: null })}
             />
           ))}
