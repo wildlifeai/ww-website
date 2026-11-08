@@ -32,7 +32,7 @@ import { apiClient } from '../../lib/apiClient'
 import { UnassignedTriage } from './UnassignedTriage'
 import {
   BREAKDOWN_SHOWN, buildSessions, cardFolderOf, fileIndicesWithStatus, foldBreakdown, resolutionBreakdown,
-  selectForUpload, unresolvedFileIndices, withoutTestPhotos,
+  selectForUpload, unresolvedFileIndices, uploadButtonState, withoutTestPhotos,
 } from './unassignedSessions'
 import type { ClaimVerdict, ResolutionStatus } from './unassignedSessions'
 import { readCameraExif } from '../../lib/exifDeploymentId'
@@ -154,6 +154,11 @@ export function UploadFlow() {
     refetchOnWindowFocus: false,
   })
   const deployments = deploymentsQuery.data ?? NO_DEPLOYMENTS
+  // The list the selection is judged against has landed for the current set of writable
+  // projects and is not being refetched. Until then nothing may be decided: a click on an
+  // incomplete list sent every photo to triage, where creating a deployment the list was about
+  // to show collided with the existing row (409).
+  const listSettled = targetsReady && (writableIds.length === 0 || (deploymentsQuery.data !== undefined && !deploymentsQuery.isFetching))
 
   // CamtrapDP import state
   const [camtrapImporting, setCamtrapImporting] = useState(false)
@@ -365,8 +370,11 @@ export function UploadFlow() {
 
   const handleUpload = async (
     sessionAssignments?: { deploymentId: string; indices: number[] }[],
+    skippedIndices: number[] = [],
   ) => {
     if (files.length === 0) return
+    // The button is disabled until the list has settled; this guards every other way in.
+    if (!sessionAssignments && !listSettled) return
 
     // Photos with no resolvable deployment are dropped server-side (the drive
     // job only stores files that have one), so resolve them before uploading.
@@ -376,10 +384,11 @@ export function UploadFlow() {
       return
     }
 
-    // Send only what can land: not the blocked frames, and not the triaged
-    // sessions left unassigned, which the server would drop anyway.
+    // Send only what can land: not the blocked frames, not the triaged sessions left
+    // unassigned, which the server would drop anyway, and not the photos the user skipped in
+    // triage, even where the list has since resolved them.
     const assigned = new Set((sessionAssignments ?? []).flatMap((g) => g.indices))
-    const excluded = new Set([...blockedIndices, ...unresolvedIndices.filter((i) => !assigned.has(i))])
+    const excluded = new Set([...blockedIndices, ...skippedIndices, ...unresolvedIndices.filter((i) => !assigned.has(i))])
     const send = selectForUpload(files, filePaths, excluded, sessionAssignments)
     if (send.files.length === 0) return
 
@@ -449,14 +458,7 @@ export function UploadFlow() {
   const sending = phase === 'uploading'
   const reading = exifRead !== null
   const sendable = files.length - blockedIndices.length
-  const uploadDisabled = reading || sending || sendable === 0
-  const uploadLabel = reading
-    ? 'Reading photos…'
-    : sending
-      ? 'Previous upload still sending…'
-      : sendable === 0
-        ? 'Nothing to upload'
-        : `Upload ${sendable} image${sendable !== 1 ? 's' : ''}`
+  const { disabled: uploadDisabled, label: uploadLabel } = uploadButtonState({ reading, listSettled, sending, sendable })
   const shownRows = showAllRows ? breakdown : foldBreakdown(breakdown)
 
   const testPhotosNote = testPhotosSkipped > 0 && (
@@ -480,9 +482,9 @@ export function UploadFlow() {
           projects={writableProjects}
           onCancel={() => setShowTriage(false)}
           onDeploymentCreated={() => queryClient.invalidateQueries({ queryKey: ['upload-deployments'] })}
-          onDone={(assignments: { deploymentId: string; indices: number[] }[]) => {
+          onDone={(assignments, skippedIndices) => {
             setShowTriage(false)
-            handleUpload(assignments)
+            handleUpload(assignments, skippedIndices)
           }}
         />
       </div>

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  BREAKDOWN_SHOWN, buildSessions, defaultDeploymentName, fileIndicesWithStatus, foldBreakdown, planBulkCreate,
-  resolutionBreakdown, selectForUpload, SESSION_GAP_MS, unresolvedFileIndices, withoutTestPhotos,
+  BREAKDOWN_SHOWN, buildSessions, defaultDeploymentName, fileIndicesWithStatus, foldBreakdown, liveSessions,
+  planBulkCreate, resolutionBreakdown, selectForUpload, SESSION_GAP_MS, unresolvedFileIndices, uploadButtonState,
+  withoutTestPhotos,
 } from './unassignedSessions'
 import type { ResolutionRow, TriageSession } from './unassignedSessions'
 
@@ -423,5 +424,62 @@ describe('foldBreakdown', () => {
     const shown = foldBreakdown(rows).map((r) => r.label)
     expect(shown).toHaveLength(BREAKDOWN_SHOWN)
     expect(shown).toEqual(['m0', 'm1', 'm2', 'm3', 'm4', 'm5', 'x', 'y'])
+  })
+})
+
+describe('uploadButtonState', () => {
+  const live = { reading: false, listSettled: true, sending: false, sendable: 3 }
+
+  it('is live with the count once nothing blocks it', () => {
+    expect(uploadButtonState(live)).toEqual({ disabled: false, label: 'Upload 3 images' })
+    expect(uploadButtonState({ ...live, sendable: 1 }).label).toBe('Upload 1 image')
+  })
+
+  it('waits for the deployment list before anything can be decided', () => {
+    expect(uploadButtonState({ ...live, listSettled: false })).toEqual({ disabled: true, label: 'Loading deployments…' })
+  })
+
+  it('names the blockers in order: reading, then the list, then a previous send, then nothing to send', () => {
+    expect(uploadButtonState({ ...live, reading: true, listSettled: false, sending: true }).label).toBe('Reading photos…')
+    expect(uploadButtonState({ ...live, listSettled: false, sending: true }).label).toBe('Loading deployments…')
+    expect(uploadButtonState({ ...live, sending: true, sendable: 0 }).label).toBe('Previous upload still sending…')
+    expect(uploadButtonState({ ...live, sendable: 0 })).toEqual({ disabled: true, label: 'Nothing to upload' })
+  })
+})
+
+describe('liveSessions', () => {
+  const session = (key: string, indices: number[], extra: Partial<TriageSession> = {}): TriageSession => ({
+    key, indices, firstMs: T0, lastMs: T0, cardFolder: null, folderCount: 0, exifDeploymentId: null,
+    deploymentId: null, skipped: false, ...extra,
+  })
+
+  it('keeps every session while every photo is still unresolved', () => {
+    const sessions = [session('a', [0, 1]), session('b', [2])]
+    expect(liveSessions(sessions, [0, 1, 2])).toEqual({ sessions, resolvedElsewhere: 0 })
+  })
+
+  it('drops a session whose photos the list now resolves, and counts them', () => {
+    const a = session('a', [0, 1])
+    const b = session('b', [2])
+    const out = liveSessions([a, b], [2])
+    expect(out.sessions).toEqual([b])
+    expect(out.resolvedElsewhere).toBe(2)
+  })
+
+  it('narrows a session to the photos still unresolved', () => {
+    const out = liveSessions([session('a', [0, 1, 2])], [1])
+    expect(out.sessions.map((s) => s.indices)).toEqual([[1]])
+    expect(out.resolvedElsewhere).toBe(2)
+  })
+
+  it('keeps a decision on the photos that remain', () => {
+    const decided = session('a', [0, 1], { deploymentId: 'dep-1' })
+    const out = liveSessions([decided], [1])
+    expect(out.sessions).toEqual([{ ...decided, indices: [1] }])
+  })
+
+  it('returns the same session object when nothing changed', () => {
+    const a = session('a', [0])
+    expect(liveSessions([a], [0]).sessions[0]).toBe(a)
   })
 })
