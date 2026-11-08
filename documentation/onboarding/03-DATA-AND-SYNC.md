@@ -186,7 +186,10 @@ The staged selection (files, card paths, EXIF ids) is page state: it lives in `U
 `startUpload` takes it, so leaving or reloading the page drops it. A `beforeunload` guard warns
 before a reload does, and **Change selection** is the explicit way out. Reading the EXIF heads of a
 large card takes a moment; the page shows a "Reading photos… N of M" count under the summary tiles
-and the Upload button waits for it (the deployment count resolves by card folder until then).
+and the Upload button waits for it (the deployment count resolves by card folder until then). It also
+waits, as "Loading deployments…", until the list of deployments the user can upload to has loaded for
+their writable projects: judging the selection against a half-loaded list sent every photo to triage,
+where creating its deployment collided with the row the list was about to show.
 
 1. **Deployment resolution, EXIF first.** Every WW500 frame carries the full deployment UUID in
    EXIF tag `0xF200`; the browser reads it from each file's head (`lib/exifDeploymentId.ts`) and

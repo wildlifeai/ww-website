@@ -25,22 +25,26 @@ from app.services.speciesnet_service import (
     parse_taxonomy,
 )
 
+_KIWI = "12345678-1234-1234-1234-1234567890ab;mammalia;apterygiformes;apterygidae;apteryx;mantelli;north island brown kiwi"
+
 _RAW = {
     "predictions": [
         {
             "filepath": "/tmp/a.jpg",
             "detections": [
-                {"category": "1", "label": "animal", "conf": 0.93, "bbox": [0.1, 0.2, 0.3, 0.4]},
+                {
+                    "category": "1",
+                    "label": "animal",
+                    "conf": 0.93,
+                    "bbox": [0.1, 0.2, 0.3, 0.4],
+                    "processed_classification": {"class": _KIWI, "score": 0.87, "source": "classifier"},
+                },
                 {"category": "1", "label": "animal", "conf": 0.10, "bbox": [0.5, 0.5, 0.1, 0.1]},
             ],
-            "prediction": "12345678-1234-1234-1234-1234567890ab;mammalia;apterygiformes;apterygidae;apteryx;mantelli;north island brown kiwi",
-            "prediction_score": 0.87,
         },
         {
             "filepath": "/tmp/blank.jpg",
             "detections": [],
-            "prediction": "",
-            "prediction_score": None,
         },
     ]
 }
@@ -88,6 +92,78 @@ def test_parse_speciesnet_output_shapes():
     assert a.scientific_name == "Apteryx mantelli"
     assert a.classification_score == 0.87
     assert not a.is_blank
+    assert blank.is_blank
+
+
+# Labels captured from a real speciesnet 5.0.6 run of the pinned v4.0.1a model on a
+# grey heron frame. The classification lives on each classified detection.
+_BIRD = "b1352069-a39c-4a84-a949-60044271c0c1;aves;;;;;bird"
+_EGRET = "f8db21f0-6b79-4444-8be4-b87906d56e6a;aves;pelecaniformes;ardeidae;ardea;albus;great egret"
+
+
+def _sn_det(conf: float, label: str | None = None, score: float = 0.0, category: str = "1") -> dict:
+    det: dict = {"category": category, "label": "animal", "conf": conf, "bbox": [0.36, 0.62, 0.32, 0.28]}
+    if label:
+        det["raw_classifications"] = {"classes": [label], "scores": [score]}
+        det["processed_classification"] = {"class": label, "score": score, "source": "classifier"}
+    return det
+
+
+def test_parse_speciesnet_reads_processed_classification():
+    raw = {
+        "info": {"format_version": "20261015"},
+        "predictions": [
+            {
+                "filepath": "/tmp/a.jpg",
+                "country": "NZL",
+                "detections": [_sn_det(0.9415, _BIRD, 0.8927)],
+                "model_version": "4.0.1a",
+            }
+        ],
+    }
+    (pred,) = parse_speciesnet_output(raw)
+    assert pred.common_name == "bird"
+    assert pred.classification_score == 0.8927
+    assert pred.taxonomy["class"] == "aves"
+    assert len(pred.detections) == 1
+
+
+def test_parse_speciesnet_takes_highest_confidence_classified_detection():
+    raw = {
+        "predictions": [
+            {
+                "filepath": "/tmp/a.jpg",
+                # Not in confidence order on purpose; an unclassified box outranks both.
+                "detections": [_sn_det(0.40, _BIRD, 0.9), _sn_det(0.95), _sn_det(0.80, _EGRET, 0.6)],
+            }
+        ]
+    }
+    (pred,) = parse_speciesnet_output(raw)
+    assert pred.scientific_name == "Ardea albus"
+    assert pred.classification_score == 0.6
+    assert len(pred.detections) == 3
+
+
+def test_parse_speciesnet_whole_image_pseudo_detection():
+    # The whole-image classifier (v4.0.3b) adds a category "0" full-frame box carrying the
+    # classification. It is not a detection, so it must not become an observation.
+    whole = _sn_det(1.0, _EGRET, 0.7, category="0")
+    raw = {"predictions": [{"filepath": "/tmp/a.jpg", "detections": [whole, _sn_det(0.9)]}]}
+    (pred,) = parse_speciesnet_output(raw)
+    assert pred.scientific_name == "Ardea albus"
+    assert [d.category for d in pred.detections] == ["1"]
+
+
+def test_parse_speciesnet_unclassified_and_blank():
+    raw = {
+        "predictions": [
+            {"filepath": "/tmp/low.jpg", "detections": [_sn_det(0.05)]},
+            {"filepath": "/tmp/blank.jpg", "detections": []},
+        ]
+    }
+    low, blank = parse_speciesnet_output(raw)
+    assert (low.scientific_name, low.classification_score, low.taxonomy) == (None, None, {})
+    assert not low.is_blank
     assert blank.is_blank
 
 

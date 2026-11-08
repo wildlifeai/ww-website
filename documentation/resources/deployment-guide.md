@@ -397,7 +397,12 @@ vector database.
 
 ### Backend: GitHub Actions → ACR → Azure Container App
 
-The workflow `.github/workflows/deploy-backend.yml` triggers on pushes to `dev` and `main`:
+The workflow `.github/workflows/deploy-backend.yml` triggers on pushes to `dev` and `main` that touch
+what the images are built from: `backend/app/`, `backend/requirements*.txt`, `backend/Dockerfile`,
+`backend/.dockerignore` or the workflow itself. A frontend, docs or test push does not rebuild or
+redeploy anything; `workflow_dispatch` forces a run. The filter exists because every push used to
+rebuild the worker image in the registry, about 12 minutes of paid build time each (NZ$34 in
+October 2026).
 
 | Branch | Target Container App | Image Tag |
 |--------|---------------------|-----------|
