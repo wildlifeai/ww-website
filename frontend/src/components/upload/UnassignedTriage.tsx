@@ -427,7 +427,7 @@ export function UnassignedTriage({
     const assignments = shown
       .filter((s): s is TriageSession & { deploymentId: string } => !!s.deploymentId)
       .map((s) => ({ deploymentId: s.deploymentId, indices: s.indices }))
-    onDone(assignments, sessions.filter((s) => s.skipped).flatMap((s) => s.indices))
+    onDone(assignments, sessions.flatMap((s) => (s.skipped ? s.indices : [])))
   }
 
   const matchedNames = matched.slice(0, MATCHED_NAMED).map((m) => `${m.label} (${m.count})`).join(', ')
