@@ -1,0 +1,96 @@
+# Deploy the backend to AWS (approach B of the AWS + REANNZ migration), beside the Azure
+# workflow (deploy-backend.yml), which stays the live path until the cutover.
+#
+# Manual only, and inert until the repository variable AWS_DEPLOY_ENABLED is "true". Each
+# environment is its own AWS account, so AWS_DEPLOY_ROLE_ARN (infra/aws/shared.yaml's output),
+# AWS_REGION and ECR_REGISTRY (<account>.dkr.ecr.<region>.amazonaws.com) are variables of the
+# GitHub environments dev and staging; AWS_BUCKET_DEV / AWS_BUCKET_PROD and AWS_ALARM_EMAIL are
+# repository variables. No secrets: GitHub OIDC assumes the deploy role, and GITHUB_TOKEN pushes
+# the GPU image. GitHub dispatches it only once this file is on main, the default branch.
+# Design: documentation/development reports/2026-10_aws-reannz-migration/README.md
+name: Deploy Backend to AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Environment (dev or prod)"
+        required: true
+        default: dev
+        type: choice
+        options: [dev, prod]
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+concurrency:
+  group: deploy-aws-${{ github.event.inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  # The GPU image first: the API tells the cluster which tag to run (GPU_IMAGE in SSM), so
+  # the tag must exist before the functions that announce it.
+  gpu-image:
+    if: vars.AWS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.target == 'prod' && 'staging' || 'dev' }}
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - id: tag
+        run: echo "image=ghcr.io/wildlifeai/ww-backend-gpu:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - name: Build and push the GPU image (public, no weights, no secrets)
+        run: |
+          docker build --target gpu -t "${{ steps.tag.outputs.image }}" backend
+          docker push "${{ steps.tag.outputs.image }}"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - name: Tell the API which GPU image the cluster runs
+        run: |
+          aws ssm put-parameter --name "/ww/${{ github.event.inputs.target }}/GPU_IMAGE" \
+            --value "${{ steps.tag.outputs.image }}" --type String --overwrite
+
+  deploy:
+    needs: gpu-image
+    if: vars.AWS_DEPLOY_ENABLED == 'true'
+    # arm64, as the functions run (Architectures: [arm64] in the template).
+    runs-on: ubuntu-24.04-arm
+    environment: ${{ github.event.inputs.target == 'prod' && 'staging' || 'dev' }}
+    env:
+      TARGET: ${{ github.event.inputs.target }}
+      IMAGE: ${{ vars.ECR_REGISTRY }}/ww-backend:${{ github.event.inputs.target }}-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push the Lambda image
+        run: |
+          docker build --target lambda -t "$IMAGE" backend
+          docker push "$IMAGE"
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - name: Deploy the stack
+        run: |
+          if [ "$TARGET" = prod ]; then BUCKET="${{ vars.AWS_BUCKET_PROD }}"; else BUCKET="${{ vars.AWS_BUCKET_DEV }}"; fi
+          sam deploy --template-file infra/aws/template.yaml --stack-name "ww-$TARGET" \
+            --parameter-overrides "Env=$TARGET" "ImageUri=$IMAGE" "BucketName=$BUCKET" "AlarmEmail=${{ vars.AWS_ALARM_EMAIL }}" \
+            --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --no-confirm-changeset
+      - name: Health check
+        run: |
+          URL=$(aws cloudformation describe-stacks --stack-name "ww-$TARGET" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "${URL%/}/health")
+          echo "Health check ($TARGET): $STATUS at ${URL}"
+          test "$STATUS" = 200
