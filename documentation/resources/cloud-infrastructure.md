@@ -3,7 +3,9 @@
 > **Status:** 🟢 Living — the authoritative map of every cloud resource the platform uses, what it's
 > for, and how to keep it from drifting into sprawl. Pairs with [deployment-guide](deployment-guide.md)
 > (*how to deploy*); this doc is *what exists and how to maintain it*. **Re-audit quarterly** (see the
-> [review checklist](#periodic-review-checklist)). Last updated: **2026-10-26**.
+> [review checklist](#periodic-review-checklist)). Last updated: **2026-11-19**.
+
+> **In progress, 2026-11-19:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path. The AWS accounts and sign-in exist ([AWS](#aws)) but nothing is deployed there, so everything else below still describes the live estate. Design and status: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md).
 
 > ### ✅ Single-RG AU East (migration complete — 2026-06-30)
 > The org runs **only the `WW-AE` resource group** (`australiaeast`). The old `WW-Website` RG and the three
@@ -12,7 +14,7 @@
 > *(One unrelated soft-deleted vault, `secrets-staging` in `newzealandnorth`, was intentionally left alone —
 > decide separately whether to recover or purge it.)*
 
-The platform spans four providers. Keep this list complete — an unlisted resource is either undocumented
+The platform spans four providers, and a fifth, AWS, is being set up. Keep this list complete: an unlisted resource is either undocumented
 or orphaned, and both are bugs.
 
 | Provider | What it hosts |
@@ -21,6 +23,7 @@ or orphaned, and both are bugs.
 | **Supabase** | Postgres + RLS, Auth, Storage (renditions), the system of record — **two projects** (dev / prod) |
 | **Cloudflare** | Frontend (Pages + per-branch previews), DNS for `wildlifewatcher.ai`, CDN |
 | **Google Drive** | Permanent original-image archive (`gdrive://`) |
+| **AWS** | Being set up, nothing live: wildlife.ai's organization, the `ww-dev` account, Identity Center sign-in ([AWS](#aws)) |
 
 ---
 
@@ -200,6 +203,96 @@ but it's a product call: it's what keeps the public demo button fast.
 
 ---
 
+## AWS
+
+> **Being set up, nothing live (2026-11-19).** The accounts and sign-in exist for the move in
+> [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md).
+> No stack is deployed and no traffic reaches AWS.
+
+| Piece | Setting | Why |
+|---|---|---|
+| Organization | wildlife.ai's own, all features on | The wildlife.ai account left an outside organization on 2026-11-19, so it pays its own bills and receives its own credits |
+| Management account (`Wildlife.ai`) | Billing, the organization and IAM Identity Center, no workloads | Organization policies cannot restrict the management account |
+| `ww-dev` | Member account for the dev stack | A dev mistake cannot reach prod data, and closing the account removes everything in it |
+| `ww-prod` | Not created yet; made like `ww-dev` at the prod step | |
+| Region | Asia Pacific (New Zealand), `ap-southeast-6`, in every account | An opt-in region: a new account starts with it off ([Adding an account](#adding-an-aws-account)) |
+| IAM Identity Center | Single-Region instance in Auckland, its own user directory | Multi-Region would copy users to US West (Oregon) and needs a KMS key |
+| Permission set | `AdministratorAccess`, 8-hour sessions, assigned on `ww-dev` | |
+| Buckets | `wildlifewatcher-dev-media`, `wildlifewatcher-prod-media` | Each environment's stack creates its own; both names were free on 2026-11-19 |
+
+Account IDs and the access portal address are not written in this repository, which is public.
+They are in the access portal and the Identity Center dashboard, and GitHub keeps the ones CI
+needs as environment variables.
+
+### Signing in to AWS
+
+People sign in to the member accounts through IAM Identity Center, never with access keys.
+
+1. An administrator creates your Identity Center user and assigns a permission set on each
+   account you need. A user created through the API or the CLI gets no welcome email, so the
+   administrator then uses **Reset password** on the user to email you a link.
+2. Set your password, sign in to the access portal and register a multi-factor device.
+3. Install AWS CLI 2.32 or later (on Windows, `winget install --id Amazon.AWSCLI -e`).
+4. Add the session and one profile per account to `~/.aws/config`, with the portal address and
+   the account ID from the access portal:
+
+   ```ini
+   [sso-session wildlife]
+   sso_start_url = <AWS access portal URL>
+   sso_region = ap-southeast-6
+   sso_registration_scopes = sso:account:access
+
+   [profile ww-dev]
+   sso_session = wildlife
+   sso_account_id = <ww-dev account ID>
+   sso_role_name = AdministratorAccess
+   region = ap-southeast-6
+   ```
+
+5. Sign in once per 8 hours, and name the profile on each command:
+
+   ```bash
+   aws sso login --sso-session wildlife
+   aws sts get-caller-identity --profile ww-dev
+   ```
+
+In Windows PowerShell a quoted path to the CLI needs the call operator,
+`& 'C:\Program Files\Amazon\AWSCLIV2\aws.exe' sso login --sso-session wildlife`; without `&` it
+is a parse error. A shell started after the install finds `aws` on its PATH.
+
+Root of the management account keeps its multi-factor device. Until a permission set is
+assigned on the management account, its organization and billing tasks are done as root.
+Member accounts have no root password; leave it that way.
+
+GitHub Actions uses neither: `deploy-aws.yml` assumes the `ww-gha-deploy` role from
+`infra/aws/shared.yaml` through GitHub's OIDC provider, one role per account.
+
+### Adding an AWS account
+
+From the management account:
+
+```bash
+aws organizations create-account --email <an address no other AWS account uses> --account-name ww-prod
+aws organizations describe-create-account-status --create-account-request-id <id from the line above>
+aws account enable-region --account-id <new account ID> --region-name ap-southeast-6
+```
+
+Then request 1,000 concurrent Lambda executions for the new account in Service Quotas (quota
+`L-B99A9384`): a new account can start at 10, the environment stack reserves 15, and AWS always
+keeps 100 unreserved, so the stack cannot deploy until the increase lands. `ww-dev` started at
+10. Last, assign the permission set on the new account in Identity Center and add a profile
+for it like `ww-dev`'s. `enable-region` for another account works because the organization's trusted
+access for AWS Account Management is on (since 2026-11-19).
+
+### How to keep AWS clean
+- **Audit:** every resource in a member account belongs to a CloudFormation stack, `ww-shared` or
+  `ww-<env>`; anything else is sprawl. The management account holds no workloads.
+- **Cost:** each environment stack carries an AWS Budget (`ww-<env>-monthly`) that emails the
+  stack's alarm address. Check Billing and Cost Management monthly once a stack exists.
+- **Access:** every Identity Center user is someone who still needs access.
+
+---
+
 ## Supabase
 
 **Two projects** (do not cross the wires: each environment's API, worker and KEDA scaler must all point
@@ -290,6 +383,8 @@ Run quarterly (or before a cost review):
       secrets as plaintext — the rebuilt apps use ACA secrets; rotate any exposed keys).
 - [ ] Cost Management has no surprise line items.
 - [ ] `python scripts/parity_audit.py` reports **no unexplained gaps** (see below).
+- [ ] AWS: member accounts hold only the `ww-shared` and `ww-<env>` stacks, the management account
+      holds no workloads, and every Identity Center user still needs access.
 
 ## Dev → prod parity audit
 
@@ -318,4 +413,5 @@ Rules of use:
 
 - Container apps: `ww-<role>[-dev]` (`ww-backend`, `ww-backend-dev`, `ww-embedding-worker`, `ww-embedding-worker-dev`, `ww-redis`, `ww-redis-dev`).
 - ACR: `wwregistry` (`wwregistry.azurecr.io`); repos `ww-backend` (api) + `ww-backend-worker` (worker); tags `dev-latest` / `latest` / `<sha>` / `stable` (pinned rollback anchor — never purged; re-point on each blessed build).
+- AWS: accounts `ww-<env>`; stacks `ww-shared` (one per account) and `ww-<env>`; functions `ww-<env>-api` and `ww-<env>-cpu`; bucket `wildlifewatcher-<env>-media`; SSM parameters under `/ww/<env>/`; deploy role `ww-gha-deploy`. `<env>` is `dev` or `prod`; the GitHub environment for `prod` is `staging`.
 - Storage: `wwuploadsae`. One resource group (`WW-AE`), one region (**Australia East**) for everything.

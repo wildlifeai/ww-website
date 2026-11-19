@@ -69,6 +69,7 @@ On error:
 - [Manifest Generation](#manifest-generation)
 - [Model Conversion](#model-conversion)
 - [EXIF Parsing](#exif-parsing)
+- [Uploads](#uploads)
 - [iNaturalist Integration](#inaturalist-integration)
 - [Image Clustering](#image-clustering)
 - [AI Pipeline](#ai-pipeline)
@@ -153,6 +154,10 @@ are readable by any signed-in user, and an API key's jobs are read with `GET /ap
 **Status values:** `queued` → `processing` → `completed` · `completed_with_errors` (some items failed —
 check `summary`/logs) · `failed` (`error` carries the reason).
 
+**Cluster lease routes** (`/api/worker/*`): the REANNZ batch job's own routes, with a bearer lease
+token, outside the OpenAPI document. Every route answers `404` unless `WORKER_TOKEN_SHA256` is set.
+Contract: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md#contracts).
+
 ---
 
 ## Manifest Generation
@@ -204,6 +209,26 @@ image-upload pipeline — see [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.
 `latitude`/`longitude` (GPS DMS→decimal), `date` (Original → Create → DateTime), `Make`/`Model`,
 and `temperature_c`/`battery_pct` (parsed from `UserComment` telemetry). The full set lands in
 `media.exif_metadata`.
+
+---
+
+## Uploads
+
+How this server takes uploaded files. JWT. Prefix `/api/uploads`. On an S3-backed server
+(`OBJECT_STORE_BACKEND=s3`, the AWS Lambda backend, whose request bodies are capped near 6 MB)
+the browser sends each file to the bucket on a presigned POST, then calls the upload endpoint
+with keys instead of bytes; `apiClient.upload` does this through `frontend/src/lib/objectStoreUpload.ts`.
+
+| Method · Path | Description |
+|---|---|
+| `GET /api/uploads/config` | `{ mode: "s3" \| "multipart", max_bytes: { photos, camtrapdp, model } }` |
+| `POST /api/uploads/presign` | Not the demo. Body `{ purpose: "photos" \| "camtrapdp" \| "model", files: [{ name, size, content_type? }] }`, 1 to 500 files → `{ upload_id, files: [{ key, url, fields }] }`: one presigned POST per file under `incoming/<user>/<upload_id>/`, valid 15 minutes. `404` on a server that takes request bodies, `413` when a file is over its purpose's cap |
+
+The upload endpoints take the keys as form fields, after or instead of files: `files_key` (one per
+file) on `POST /api/exif/parse`, `file_key` on `POST /api/camtrapdp/import` and
+`POST /api/models/convert`. A key needs a signed-in caller and must sit under the caller's own
+`incoming/` prefix (`403` otherwise, `404` when nothing was uploaded there, `400` on a server
+without S3). Objects under `incoming/` expire after a day.
 
 ---
 

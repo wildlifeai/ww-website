@@ -30,7 +30,7 @@ The `ww-website` repository is a multi-service platform consisting of:
 > * `documentation/onboarding/03-DATA-AND-SYNC.md`
 > * `documentation/resources/api-reference.md`
 > * `documentation/resources/deployment-guide.md`
-> * `documentation/resources/cloud-infrastructure.md`: what actually exists in Azure/Supabase/Cloudflare
+> * `documentation/resources/cloud-infrastructure.md`: what actually exists in Azure, AWS, Supabase and Cloudflare, and how to sign in to AWS
 > * `documentation/README.md`: the index; says which docs are **living** vs **frozen history**
 > * `.agents/DESIGN.md`: design system (colors, typography, spacing, component patterns) for any UI work or screen generation
 >
@@ -73,8 +73,9 @@ The `ww-website` repository is a multi-service platform consisting of:
 2. **Backend layering is `routers` to `domain` to `services`.** No FastAPI or HTTP imports in
    `domain/`, no business logic in `routers/`.
 3. **The service-role key is backend-only.** Never expose it to frontend code.
-4. **Gate unfinished work behind a feature flag**, and set AI flags on the ARQ worker as well
-   as the API, or the pipeline silently no-ops.
+4. **Gate unfinished work behind a feature flag**, and set AI flags wherever the pipeline runs
+   (on Azure the ARQ worker as well as the API; on AWS the shared `/ww/<env>/` SSM parameters),
+   or the pipeline silently no-ops.
 5. **Every file is LF, UTF-8, no BOM.** A diff where insertions are about equal to deletions is
    flipped line endings, not an edit.
 
