@@ -163,7 +163,7 @@ async def import_camtrapdp(
     if result.pending_drive_uploads:
         from app.config import settings as app_settings
 
-        if not app_settings.GOOGLE_DRIVE_ENABLED:
+        if not app_settings.archive_enabled:
             result.warnings.append(
                 f"{len(result.pending_drive_uploads)} image(s) found in zip but "
                 "Google Drive upload is disabled (GOOGLE_DRIVE_ENABLED=false). "
@@ -172,13 +172,13 @@ async def import_camtrapdp(
         else:
             try:
                 from app.services.google_drive import (
-                    GoogleDriveService,
                     build_deployment_folder_name,
                     sanitize_filename,
                     slugify,
                 )
+                from app.services.object_store import archive_service, archived_path
 
-                drive = GoogleDriveService()
+                drive = archive_service()
 
                 # Build the file list in the format upload_analysis_images expects
                 drive_files = []
@@ -214,7 +214,7 @@ async def import_camtrapdp(
                     if not uf.get("media_id"):
                         continue  # only the CamtrapDP path pre-creates media to patch
                     try:
-                        svc.table("media").update({"file_path": f"gdrive://{uf['file_id']}", "file_public": False}).eq("id", uf["media_id"]).execute()
+                        svc.table("media").update({"file_path": archived_path(uf), "file_public": False}).eq("id", uf["media_id"]).execute()
                         patched += 1
                     except Exception as exc:
                         logger.warning(

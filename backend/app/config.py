@@ -280,6 +280,22 @@ class Settings(BaseSettings):
     )
     AZURE_STORAGE_CONTAINER_NAME: str = Field("wildlife-watcher-uploads", description="Default container name in Azure Blob Storage")
 
+    # ── Object store and the AWS + REANNZ batch path ──────────────────
+    # Every default keeps today's Azure behaviour. Design and status:
+    # documentation/development reports/2026-10_aws-reannz-migration/README.md
+    OBJECT_STORE_BACKEND: Literal["azure", "s3", "local"] = Field(
+        "azure",
+        description="Where the upload buffer, export ZIPs and batch results live: azure (Blob, today), s3, or local (a directory, for dev and tests)",
+    )
+    ARCHIVE_BACKEND: Literal["gdrive", "s3"] = Field(
+        "gdrive",
+        description="Where the upload job archives originals: gdrive (today, GOOGLE_DRIVE_*) or s3 (S3_BUCKET, originals/ prefix, s3:// paths)",
+    )
+    S3_BUCKET: str = Field("", description="The environment's bucket for OBJECT_STORE_BACKEND=s3 and ARCHIVE_BACKEND=s3")
+    S3_REGION: str = Field("", description="Region of S3_BUCKET; empty = the SDK default (AWS_REGION on Lambda)")
+    S3_PRESIGN_GET_SECONDS: int = Field(300, ge=30, le=3600, description="Lifetime of a presigned GET handed to a browser or the cluster")
+    LOCAL_OBJECT_STORE_DIR: str = Field("", description="Directory of OBJECT_STORE_BACKEND=local; empty = <system temp>/ww_objects")
+
     # ── Media Registry renditions (Supabase Storage public bucket; originals stay in Drive) ──
     SUPABASE_MEDIA_BUCKET: str = Field(
         "media-renditions",
@@ -309,9 +325,25 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     @property
+    def object_store_configured(self) -> bool:
+        """The object store backend has what it needs: a connection string, a bucket, or nothing (local)."""
+        if self.OBJECT_STORE_BACKEND == "s3":
+            return bool(self.S3_BUCKET)
+        if self.OBJECT_STORE_BACKEND == "local":
+            return True
+        return bool(self.AZURE_STORAGE_CONNECTION_STRING)
+
+    @property
+    def archive_enabled(self) -> bool:
+        """Uploaded originals have somewhere to go: Google Drive (today) or the S3 bucket."""
+        if self.ARCHIVE_BACKEND == "s3":
+            return bool(self.S3_BUCKET)
+        return self.GOOGLE_DRIVE_ENABLED
+
+    @property
     def camtrapdp_export_enabled(self) -> bool:
-        """The export with the original photos is on, and there is Azure Blob storage for its ZIPs."""
-        return self.FF_CAMTRAPDP_EXPORT_ENABLED and bool(self.AZURE_STORAGE_CONNECTION_STRING)
+        """The export with the original photos is on, and the object store can hold its ZIPs."""
+        return self.FF_CAMTRAPDP_EXPORT_ENABLED and self.object_store_configured
 
 
 # The required fields come from the environment, which pyright cannot see.

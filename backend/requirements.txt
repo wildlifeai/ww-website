@@ -16,6 +16,7 @@ cryptography>=43.0               # Fernet encryption for iNat tokens
 google-api-python-client>=2.0    # Google Drive API
 google-auth>=2.0                 # Service account authentication
 azure-storage-blob>=12.31.0      # Azure Blob Storage
+boto3>=1.40.0                    # Amazon S3 (services/object_store.py) and Lambda invokes; OBJECT_STORE_BACKEND=s3
 aiohttp>=3.9.0                   # Async transport for Azure Storage
 timezonefinder>=6.5.0            # GPS coordinates → timezone lookup
 Pillow>=10.0.0                   # Image processing for clustering (dHash, sharpness)

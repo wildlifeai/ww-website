@@ -10,7 +10,7 @@ Supported providers (extensible via ``RESOLVERS`` dict):
 - ``https://`` / ``http://`` — Public URL, fetched directly
 - ``gdrive://`` — Google Drive file ID, fetched via service account
 - ``supabase://`` — Supabase Storage bucket/path (placeholder)
-- ``s3://`` — AWS S3 bucket/key (placeholder)
+- ``s3://``: AWS S3 bucket/key, read through ``services.object_store``
 - Relative paths — unresolved local files (returns None)
 
 To add a new provider, implement an async function matching the
@@ -156,9 +156,24 @@ async def _resolve_supabase(path: str, size: ImageSize) -> Optional[Tuple[bytes,
 
 
 async def _resolve_s3(path: str, size: ImageSize) -> Optional[Tuple[bytes, str]]:
-    """Placeholder for AWS S3 resolution."""
-    logger.info("media_resolve_s3_not_implemented", path=path)
-    return None
+    """Fetch an original archived to S3 (``s3://bucket/key``, prefix already stripped).
+
+    There is no server-side thumbnail for an S3 original, so ``thumb`` returns the full
+    image; the grid reads the Supabase renditions instead.
+    """
+    from app.services import object_store
+
+    try:
+        bucket, key = object_store.parse_s3_path(path)
+        found = await object_store.get_object(key, bucket=bucket)
+    except Exception as exc:  # noqa: BLE001 - a bad path or a refused read is "not resolvable"
+        logger.warning("media_resolve_s3_failed", path=path, error=str(exc))
+        return None
+    if not found:
+        logger.warning("media_resolve_s3_missing", path=path)
+        return None
+    data, content_type = found
+    return data, content_type if content_type.startswith("image/") else "image/jpeg"
 
 
 # ── Resolver registry ───────────────────────────────────────────────

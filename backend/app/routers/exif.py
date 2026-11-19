@@ -35,8 +35,8 @@ from app.jobs.runner import enqueue_local_job
 from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiMeta, ApiResponse
-from app.services.azure_storage import store_blob
 from app.services.db_utils import rows_of
+from app.services.object_store import store_blob
 from app.services.supabase_client import create_service_client, reset_service_client
 
 logger = structlog.get_logger()
@@ -306,7 +306,7 @@ async def parse_exif(
     # ── 3. Drive upload pipeline ─────────────────────────────────
     # user is already resolved from step 0 (image limit check)
 
-    if not settings.GOOGLE_DRIVE_ENABLED:
+    if not settings.archive_enabled:
         drive_upload_info = {"enabled": False, "reason": "server_disabled"}
     elif not upload_to_drive:
         drive_upload_info = {"enabled": False, "reason": "not_requested"}

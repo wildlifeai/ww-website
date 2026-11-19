@@ -10,7 +10,7 @@ import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from app.authz import assert_write, require_deployment_access, require_media_access
@@ -20,7 +20,7 @@ from app.domain.media_registry import resolve_url, with_resolved_urls
 from app.domain.media_resolver import resolve_media
 from app.domain.soft_delete import now_iso, restore_media_as_user, soft_delete_media_as_user
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
-from app.services import supabase_client
+from app.services import object_store, supabase_client
 from app.services.db_utils import row_of, rows_of
 
 router = APIRouter(prefix="/api/media", tags=["media"])
@@ -58,6 +58,13 @@ async def get_media_image(
         raise HTTPException(status_code=404, detail="Media record not found")
 
     file_path = row.get("file_path", "")
+
+    # An original in S3 goes to the browser straight from the bucket on a short presigned
+    # URL, so the API never proxies (or, on Lambda, size-limits) the bytes.
+    if file_path.startswith("s3://") and settings.OBJECT_STORE_BACKEND == "s3":
+        bucket, key = object_store.parse_s3_path(file_path)
+        url = object_store.presign_get(key, bucket=bucket)
+        return RedirectResponse(url, status_code=307, headers={"Cache-Control": "private, max-age=60"})
 
     resolved = await resolve_media(file_path, size=size)
     if not resolved:
