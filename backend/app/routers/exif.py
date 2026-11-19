@@ -30,8 +30,7 @@ from app.authz import assert_write, classify_deployment_access, deployment_id_pr
 from app.config import settings
 from app.dependencies import get_optional_user, is_email_confirmed
 from app.domain.exif import is_test_photo, parse_exif_from_bytes, resolve_deployment_source
-from app.jobs.definitions import upload_drive_images_job
-from app.jobs.runner import enqueue_local_job
+from app.jobs.dispatch import enqueue_job
 from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiMeta, ApiResponse
@@ -633,7 +632,7 @@ async def _enqueue_drive_upload(
     }
 
     try:
-        enqueue_local_job(upload_drive_images_job(job_id, payload))
+        await enqueue_job("upload_drive_images_job", job_id, payload)
     except Exception as exc:
         logger.error("arq_enqueue_failed", job_id=job_id, error=str(exc))
         return {

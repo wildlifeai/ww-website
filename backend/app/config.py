@@ -11,6 +11,8 @@ from typing import Literal, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from app.aws_params import load_parameters_into_environ
+
 
 class Settings(BaseSettings):
     """Application settings, loaded from environment variables / .env file."""
@@ -305,6 +307,7 @@ class Settings(BaseSettings):
             "lambda: GPU jobs wait in api_jobs for the REANNZ batch, CPU jobs go to CPU_FUNCTION_NAME"
         ),
     )
+    CPU_FUNCTION_NAME: str = Field("", description="Lambda function that runs CPU jobs under WORKER_BACKEND=lambda; empty = run them in-process")
     WORKER_TOKEN_SHA256: str = Field("", description="Hex SHA-256 of the cluster's lease token; empty disables /api/worker/*")
     GPU_IMAGE: str = Field("", description="GPU image the cluster should run (ghcr.io/...:<sha>), returned by /api/worker/pending")
     BATCH_MIN_PHOTOS: int = Field(100, ge=1, description="Submit a cluster job once this many photos are queued...")
@@ -314,6 +317,7 @@ class Settings(BaseSettings):
     BATCH_MAX_ATTEMPTS: int = Field(2, ge=1, description="Leases a batch job may expire through before it is failed")
     BATCH_LEASE_MAX_PHOTOS: int = Field(2000, ge=1, description="Photos one lease hands to the cluster")
     BATCH_PART_MAX_PHOTOS: int = Field(500, ge=1, description="Photos per results part, so each ingest stays well inside 15 minutes")
+    WW_LAMBDA_ROLE: Literal["", "api", "cpu"] = Field("", description="Set by the SAM template: which Lambda function this process is")
 
     # ── Media Registry renditions (Supabase Storage public bucket; originals stay in Drive) ──
     SUPABASE_MEDIA_BUCKET: str = Field(
@@ -376,5 +380,8 @@ class Settings(BaseSettings):
         return self.FF_CAMTRAPDP_EXPORT_ENABLED and self.object_store_configured
 
 
-# The required fields come from the environment, which pyright cannot see.
+# On Lambda the secrets live in SSM Parameter Store, under WW_SSM_PREFIX; elsewhere a no-op.
+load_parameters_into_environ()
+
+# The fields come from the environment, which pyright cannot see.
 settings = Settings()  # pyright: ignore[reportCallIssue]

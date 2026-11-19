@@ -25,9 +25,7 @@ from app.dependencies import get_current_user, get_manager_roles, get_user_clien
 from app.domain.label_map import fetch_model_label_map, save_model_label_map
 from app.domain.model import next_model_version, resolve_or_create_model_family
 from app.domain.training import media_deployments, training_mode, training_status
-from app.jobs.definitions import convert_model_job, download_github_pretrained_job, download_pretrained_job
 from app.jobs.dispatch import enqueue_job
-from app.jobs.runner import enqueue_local_job
 from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
@@ -150,7 +148,7 @@ async def convert_model(
         },
     )
 
-    enqueue_local_job(convert_model_job(job_id, user.id, model_id))
+    await enqueue_job("convert_model_job", job_id, user.id, model_id)
 
     return ApiResponse(
         data={
@@ -320,7 +318,7 @@ async def download_pretrained(
 
         job_id = await create_job(user_id=user.id, kind="model_download", label=f"Download model {body.architecture} @ {body.resolution}")
 
-        enqueue_local_job(download_github_pretrained_job(job_id, user.id, org_id, body.architecture, body.resolution, body.description))
+        await enqueue_job("download_github_pretrained_job", job_id, user.id, org_id, body.architecture, body.resolution, body.description)
 
         return ApiResponse(
             data=JobCreateResponse(job_id=job_id).model_dump(),
@@ -333,7 +331,7 @@ async def download_pretrained(
 
         job_id = await create_job(user_id=user.id, kind="model_download", label=f"Download SenseCap model {body.model_name or body.sscma_uuid}")
 
-        enqueue_local_job(download_pretrained_job(job_id, user.id, body.sscma_uuid, org_id, body.model_name, body.description))
+        await enqueue_job("download_pretrained_job", job_id, user.id, body.sscma_uuid, org_id, body.model_name, body.description)
 
         return ApiResponse(
             data=JobCreateResponse(job_id=job_id).model_dump(),

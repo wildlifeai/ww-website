@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.domain import batch_lease
 from app.jobs import dispatch, store
-from app.services import locks, object_store
+from app.services import lambda_invoke, locks, object_store
 
 TOKEN = "cluster-token-for-tests"
 TOKEN_SHA = hashlib.sha256(TOKEN.encode()).hexdigest()
@@ -55,6 +55,52 @@ async def test_lambda_backend_leaves_a_gpu_job_queued_with_a_dispatch_record(mon
     assert spec["args"] == [[DEP], "u1"] and spec["kwargs"] == {} and spec["attempts"] == 0
     gap = datetime.fromisoformat(spec["not_before"]) - datetime.fromisoformat(spec["queued_at"])
     assert gap == timedelta(seconds=60)
+
+
+async def test_lambda_backend_sends_cpu_jobs_to_the_cpu_function(monkeypatch):
+    monkeypatch.setattr(settings, "WORKER_BACKEND", "lambda")
+    monkeypatch.setattr(settings, "CPU_FUNCTION_NAME", "ww-dev-cpu")
+    invoke = AsyncMock()
+    monkeypatch.setattr(lambda_invoke, "invoke_job", invoke)
+    assert await dispatch.enqueue_job("export_camtrapdp_originals_job", JOB, {"p": 1}, {"c": 2}) == "lambda"
+    invoke.assert_awaited_once_with("export_camtrapdp_originals_job", (JOB, {"p": 1}, {"c": 2}), {})
+
+
+async def test_in_process_jobs_stay_in_process_even_with_redis(monkeypatch):
+    """The five call sites that used enqueue_local_job keep running in the API process on Azure."""
+    monkeypatch.setattr(settings, "REDIS_URL", "redis://localhost:6379")
+    ran = []
+
+    async def fake_job(*args):
+        ran.append(args)
+
+    monkeypatch.setattr("app.jobs.definitions.generate_manifest_job", fake_job)
+    monkeypatch.setattr("app.jobs.runner.enqueue_local_job", lambda coro: coro.close())
+    assert await dispatch.enqueue_job("generate_manifest_job", JOB, {"x": 1}) == "local"
+
+
+async def test_invoke_job_inlines_small_payloads_and_spills_large_ones(monkeypatch):
+    client = MagicMock()
+    lambda_invoke.set_lambda_client(client)
+    monkeypatch.setattr(settings, "CPU_FUNCTION_NAME", "ww-dev-cpu")
+    stored = {}
+
+    async def store_blob(key, data, metadata=None):
+        stored[key] = data
+
+    monkeypatch.setattr(object_store, "store_blob", store_blob)
+    try:
+        await lambda_invoke.invoke_job("convert_model_job", ["j", "u", "m"], {})
+        event = json.loads(client.invoke.call_args.kwargs["Payload"])
+        assert event == {"ww-job": "convert_model_job", "args": ["j", "u", "m"], "kwargs": {}}
+        assert client.invoke.call_args.kwargs["InvocationType"] == "Event"
+
+        await lambda_invoke.invoke_job("upload_drive_images_job", ["j", {"files": ["x" * 300_000]}], {})
+        event = json.loads(client.invoke.call_args.kwargs["Payload"])
+        assert event["payload_key"].startswith("payloads/") and "args" not in event
+        assert event["payload_key"] in stored
+    finally:
+        lambda_invoke.set_lambda_client(None)
 
 
 # ── the reaper's batch rules ─────────────────────────────────────────

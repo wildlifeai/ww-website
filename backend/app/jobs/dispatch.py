@@ -40,6 +40,20 @@ BATCH_JOBS: dict[str, str] = {
     "embed_deployments_job": "embed",
 }
 
+# Jobs that run in the API process today, whatever REDIS_URL says. Under
+# WORKER_BACKEND=lambda every job that is not a batch job goes to CPU_FUNCTION_NAME.
+IN_PROCESS_JOBS = frozenset(
+    {
+        "upload_drive_images_job",
+        "generate_manifest_job",
+        "convert_model_job",
+        "download_pretrained_job",
+        "download_github_pretrained_job",
+        "ingest_results_part_job",
+        "finalize_batch_job",
+    }
+)
+
 
 async def _queue_for_batch(name: str, args: tuple, kwargs: dict) -> str:
     """Leave the job's ``api_jobs`` row queued with a dispatch record the cluster's lease reads."""
@@ -78,14 +92,23 @@ async def enqueue_job(name: str, *args, **kwargs) -> str:
     The ARQ control kwargs (_defer_by, _job_id) only apply on the Redis path; the in-process
     fallback runs immediately, ignoring those but forwarding any real job kwargs to the function.
 
-    Returns the routing mode actually used ("batch", "arq" or "local") for logging/telemetry.
+    Returns the routing mode actually used ("batch", "lambda", "arq" or "local") for logging/telemetry.
 
-    Under ``WORKER_BACKEND=lambda`` a :data:`BATCH_JOBS` name waits in ``api_jobs`` for the
-    REANNZ batch.
+    Routing: under ``WORKER_BACKEND=lambda`` a :data:`BATCH_JOBS` name waits in ``api_jobs`` for
+    the REANNZ batch and every other job goes to ``CPU_FUNCTION_NAME``. Otherwise an
+    :data:`IN_PROCESS_JOBS` name runs here, as it always has, and the rest go to ARQ when
+    ``REDIS_URL`` is set.
     """
-    if settings.WORKER_BACKEND == "lambda" and name in BATCH_JOBS:
-        return await _queue_for_batch(name, args, kwargs)
-    if settings.REDIS_URL:
+    if settings.WORKER_BACKEND == "lambda":
+        if name in BATCH_JOBS:
+            return await _queue_for_batch(name, args, kwargs)
+        if settings.CPU_FUNCTION_NAME:
+            from app.services.lambda_invoke import invoke_job
+
+            await invoke_job(name, args, {k: v for k, v in kwargs.items() if not k.startswith("_")})
+            logger.info("job_invoked_lambda", job=name, function=settings.CPU_FUNCTION_NAME)
+            return "lambda"
+    elif settings.REDIS_URL and name not in IN_PROCESS_JOBS:
         try:
             from arq import create_pool
             from arq.connections import RedisSettings

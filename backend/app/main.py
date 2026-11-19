@@ -88,12 +88,15 @@ async def lifespan(app: FastAPI):
                 logger.warning("reaper_iteration_failed", error=str(e))
             await asyncio.sleep(15 * 60)
 
-    reaper_task = asyncio.create_task(_reaper_loop())
+    # On Lambda the environment is frozen between requests, so the scheduled tick
+    # (lambda_events) runs the reaper instead of this loop.
+    reaper_task = asyncio.create_task(_reaper_loop()) if not settings.WW_LAMBDA_ROLE else None
 
     yield
 
     # Shutdown
-    reaper_task.cancel()
+    if reaper_task is not None:
+        reaper_task.cancel()
     logger.info("app_shutdown")
 
 
@@ -129,6 +132,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# On Lambda, finish every detached job-status sync before the response returns: a
+# frozen environment would otherwise drop it (the ARQ adapter's finally does the same).
+if settings.WW_LAMBDA_ROLE:
+
+    @app.middleware("http")
+    async def flush_job_syncs(request, call_next):
+        from app.jobs.store import flush_pending_syncs
+
+        response = await call_next(request)
+        await flush_pending_syncs()
+        return response
+
 
 # Rate limiting
 app.state.limiter = limiter
@@ -177,6 +193,11 @@ app.include_router(inaturalist.router)
 app.include_router(clustering.router)
 # The REANNZ batch's lease endpoints: 404 until WORKER_TOKEN_SHA256 is set, not in the OpenAPI document.
 app.include_router(worker.router)
+# Lambda Web Adapter hands non-HTTP events (job invokes, the scheduled tick) to POST /events.
+if settings.WW_LAMBDA_ROLE:
+    from app import lambda_events
+
+    app.include_router(lambda_events.router)
 if settings.FF_CAMTRAPDP_IMPORT_ENABLED:
     app.include_router(camtrapdp.router)
 if settings.FF_PIPELINE_ENABLED:
