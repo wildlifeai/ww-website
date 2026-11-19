@@ -14,6 +14,7 @@ POST /api/models/train    → train a Species Brain from an Annotations selectio
 
 import asyncio
 import uuid
+from typing import Optional, cast
 
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -33,6 +34,7 @@ from app.schemas.job import JobCreateResponse
 from app.schemas.model import LabelMapRequest, TrainModelRequest
 from app.services.blob_store import store_blob
 from app.services.db_utils import rows_of
+from app.services.incoming import IncomingError, incoming_files
 from app.services.sscma import get_sscma_catalog
 from app.services.supabase_client import create_service_client
 
@@ -63,7 +65,8 @@ def resolve_managed_org(requested_org_id: str | None, manager_roles: list) -> st
 @router.post("/convert")
 async def convert_model(
     request: Request,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    file_key: Optional[str] = Form(None),
     model_name: str = Form(...),
     description: str = Form(""),
     organisation_id: str = Form(""),
@@ -77,6 +80,14 @@ async def convert_model(
     4. Inserts an ai_models row
     5. Stores the file in blob store and enqueues the worker job
     """
+    # The model in the body, or as a key in S3 (services/incoming.py).
+    try:
+        sent = await incoming_files(user.id, [file] if file else [], [file_key] if file_key else [])
+    except IncomingError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    if len(sent) != 1:
+        raise HTTPException(status_code=400, detail="Send one model file.")
+    file = cast(UploadFile, sent[0])  # an UploadFile or services.incoming.IncomingFile
     if file.content_type not in ALLOWED_MIME_TYPES and not (file.filename or "").endswith((".zip", ".tflite", ".cc")):
         raise HTTPException(400, detail=f"Invalid file type: {file.content_type}")
 

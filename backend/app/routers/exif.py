@@ -35,6 +35,7 @@ from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiMeta, ApiResponse
 from app.services.db_utils import rows_of
+from app.services.incoming import IncomingError, incoming_files
 from app.services.object_store import store_blob
 from app.services.supabase_client import create_service_client, reset_service_client
 
@@ -125,7 +126,8 @@ async def _auto_create_deployments(deployment_ids: List[str], project_id: str, u
 @limiter.limit("30/minute")
 async def parse_exif(
     request: Request,
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] = File([]),
+    files_key: List[str] = Form([]),
     paths: List[str] = Form([]),
     project_id: Optional[str] = Form(None),
     deployment_id: Optional[str] = Form(None),
@@ -169,6 +171,13 @@ async def parse_exif(
     MAX_ANON_IMAGES = 50
     MAX_AUTH_IMAGES = settings.MAX_UPLOAD_IMAGES_PER_REQUEST
     user = await get_optional_user(authorization)
+    # Files sent straight to S3 arrive as keys (services/incoming.py), after any in the body.
+    try:
+        files = await incoming_files(getattr(user, "id", None) if user else None, files, files_key)
+    except IncomingError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    if not files:
+        raise HTTPException(status_code=422, detail="Send at least one file.")
 
     # Block storage-consuming uploads for authenticated-but-unverified accounts
     # (anonymous EXIF-only parsing without Drive is still allowed up to the cap).
