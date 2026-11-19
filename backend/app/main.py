@@ -39,6 +39,7 @@ from app.routers import (
     public_api,
     qa,
     reports,
+    worker,
 )
 
 logger = structlog.get_logger()
@@ -171,6 +172,8 @@ app.include_router(media.router)
 app.include_router(public_api.router)
 app.include_router(inaturalist.router)
 app.include_router(clustering.router)
+# The REANNZ batch's lease endpoints: 404 until WORKER_TOKEN_SHA256 is set, not in the OpenAPI document.
+app.include_router(worker.router)
 if settings.FF_CAMTRAPDP_IMPORT_ENABLED:
     app.include_router(camtrapdp.router)
 if settings.FF_PIPELINE_ENABLED:

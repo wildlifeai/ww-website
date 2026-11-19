@@ -1599,6 +1599,79 @@ def deployment_lock_name(deployment_id: str) -> str:
     return f"pipeline:deployment:{deployment_id}"
 
 
+def fetch_pipeline_media(
+    svc,
+    deployment_id: str,
+    steps: list[PipelineStepType],
+    *,
+    only_unannotated: bool = True,
+    force: bool = False,
+    media_ids: list[str] | None = None,
+) -> list[dict]:
+    """The media a run of ``steps`` on ``deployment_id`` would touch, with the guards applied.
+
+    Shared by :func:`run_pipeline` and the REANNZ batch lease (``domain/batch_lease.py``), so
+    the cluster is sent exactly the photos the run will write rows for. Blocking (PostgREST).
+
+    - **Idempotency (always, unless force):** skip media already annotated by *this run's
+      model versions*, so a repeated trigger, a re-upload or even a manual
+      ``only_unannotated=False`` re-run is a no-op on identical content and model, the key
+      defence against running AI on the same images continuously. ``force=True``
+      (privileged) is the only true reprocess.
+    - **Incremental (only_unannotated, the default):** additionally skip any AI-annotated
+      media, so a normal run only touches NEW images.
+    - **Human verdicts (always, unless force):** skip media a person has ruled on. Each step
+      checks again just before it writes (without_human_verdicts).
+
+    Every read pages past PostgREST's 1,000-row cap; id breaks ordering ties.
+    """
+    step_versions = {
+        PipelineStepType.SPECIESNET: SPECIESNET_VERSION,
+        PipelineStepType.BIOCLIP: BIOCLIP_VERSION,
+    }
+    run_versions = [step_versions[s] for s in steps if s in step_versions]
+
+    def _media_query():
+        q = svc.table("media").select("id, deployment_id, file_path, file_name, file_mediatype, timestamp").eq("deployment_id", deployment_id)
+        # Scope to specific media when given (e.g. a CamtrapDP import runs AI only on the
+        # image-backed rows, not the fileless CSV references that would choke media_prep).
+        if media_ids:
+            q = q.in_("id", media_ids)
+        return q.order("timestamp").order("id")
+
+    rows = read_all(_media_query)
+    if force or not rows:
+        return rows
+
+    skip: set[str] = set()
+    if run_versions:
+        done = read_all(
+            lambda: (
+                svc.table("observations")
+                .select("media_id")
+                .eq("deployment_id", deployment_id)
+                .in_("source_model_version", run_versions)
+                .not_.is_("media_id", "null")
+                .order("id")
+            )
+        )
+        skip |= {o["media_id"] for o in done}
+    if only_unannotated:
+        ai = read_all(
+            lambda: (
+                svc.table("observations")
+                .select("media_id, ai_origin")
+                .eq("deployment_id", deployment_id)
+                .eq("source_type", "ai")
+                .not_.is_("media_id", "null")
+                .order("id")
+            )
+        )
+        skip |= cloud_annotated_media_ids(ai)
+    skip |= human_verdict_media_ids(svc, deployment_id=deployment_id)
+    return [m for m in rows if m["id"] not in skip]
+
+
 async def run_pipeline(
     deployment_id: str,
     steps: list[PipelineStepType],
@@ -1691,68 +1764,10 @@ async def _run_pipeline_held(
     config["force"] = force
     svc = create_service_client()
 
-    # Model versions whose observations this run would (re)create. Used for the
-    # idempotency guard below — re-running the same model on the same media is a
-    # no-op, so skip it and don't burn GPU.
-    _step_versions = {
-        PipelineStepType.SPECIESNET: SPECIESNET_VERSION,
-        PipelineStepType.BIOCLIP: BIOCLIP_VERSION,
-    }
-    run_versions = [_step_versions[s] for s in steps if s in _step_versions]
-
-    # 1. Fetch media for the deployment, applying the abuse/idempotency guards.
-    #  - **Idempotency (always, unless force):** skip media already annotated by
-    #    *this run's model versions*. This makes repeated triggers / re-uploads /
-    #    even a manual `only_unannotated=False` re-run a no-op on identical
-    #    content+model — the key defence against running AI on the same images
-    #    continuously. ``force=True`` (privileged) is the only true reprocess.
-    #  - **Incremental (only_unannotated, the default):** additionally skip any
-    #    AI-annotated media, so a normal run only touches NEW images.
-    #  - **Human verdicts (always, unless force):** skip media a person has ruled on.
-    #    Each step checks again just before it writes (without_human_verdicts).
-    # Every read pages past PostgREST's 1,000-row cap; id breaks ordering ties.
-    def _fetch_media():
-        def _media_query():
-            q = svc.table("media").select("id, deployment_id, file_path, file_name, file_mediatype, timestamp").eq("deployment_id", deployment_id)
-            # Scope to specific media when given (e.g. a CamtrapDP import runs AI only on the
-            # image-backed rows, not the fileless CSV references that would choke media_prep).
-            if media_ids:
-                q = q.in_("id", media_ids)
-            return q.order("timestamp").order("id")
-
-        rows = read_all(_media_query)
-        if force or not rows:
-            return rows
-
-        skip: set[str] = set()
-        if run_versions:
-            done = read_all(
-                lambda: (
-                    svc.table("observations")
-                    .select("media_id")
-                    .eq("deployment_id", deployment_id)
-                    .in_("source_model_version", run_versions)
-                    .not_.is_("media_id", "null")
-                    .order("id")
-                )
-            )
-            skip |= {o["media_id"] for o in done}
-        if only_unannotated:
-            ai = read_all(
-                lambda: (
-                    svc.table("observations")
-                    .select("media_id, ai_origin")
-                    .eq("deployment_id", deployment_id)
-                    .eq("source_type", "ai")
-                    .not_.is_("media_id", "null")
-                    .order("id")
-                )
-            )
-            skip |= cloud_annotated_media_ids(ai)
-        skip |= human_verdict_media_ids(svc, deployment_id=deployment_id)
-        return [m for m in rows if m["id"] not in skip]
-
-    media = await asyncio.to_thread(_fetch_media)
+    # 1. Fetch media for the deployment, applying the guards (fetch_pipeline_media says which).
+    media = await asyncio.to_thread(
+        fetch_pipeline_media, svc, deployment_id, steps, only_unannotated=only_unannotated, force=force, media_ids=media_ids
+    )
 
     if not media:
         logger.warning("pipeline_no_media", deployment_id=deployment_id)

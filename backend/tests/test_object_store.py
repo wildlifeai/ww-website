@@ -46,6 +46,7 @@ def _body(data: bytes) -> StreamingBody:
 def test_defaults_are_todays_azure_and_drive():
     assert settings.OBJECT_STORE_BACKEND == "azure"
     assert settings.ARCHIVE_BACKEND == "gdrive"
+    assert settings.WORKER_BACKEND == "local"
 
 
 async def test_azure_backend_delegates_to_azure_storage(monkeypatch):

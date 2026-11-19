@@ -295,6 +295,22 @@ class Settings(BaseSettings):
     S3_REGION: str = Field("", description="Region of S3_BUCKET; empty = the SDK default (AWS_REGION on Lambda)")
     S3_PRESIGN_GET_SECONDS: int = Field(300, ge=30, le=3600, description="Lifetime of a presigned GET handed to a browser or the cluster")
     LOCAL_OBJECT_STORE_DIR: str = Field("", description="Directory of OBJECT_STORE_BACKEND=local; empty = <system temp>/ww_objects")
+    WORKER_BACKEND: Literal["local", "lambda"] = Field(
+        "local",
+        description=(
+            "local: today (ARQ when REDIS_URL is set, else in-process). "
+            "lambda: GPU jobs wait in api_jobs for the REANNZ batch, CPU jobs go to CPU_FUNCTION_NAME"
+        ),
+    )
+    WORKER_TOKEN_SHA256: str = Field("", description="Hex SHA-256 of the cluster's lease token; empty disables /api/worker/*")
+    GPU_IMAGE: str = Field("", description="GPU image the cluster should run (ghcr.io/...:<sha>), returned by /api/worker/pending")
+    BATCH_MIN_PHOTOS: int = Field(100, ge=1, description="Submit a cluster job once this many photos are queued...")
+    BATCH_MAX_WAIT_MINUTES: int = Field(60, ge=0, description="...or once the oldest queued batch job is this old")
+    BATCH_MAX_QUEUE_HOURS: int = Field(24, ge=1, description="The reaper spares a queued batch job this long, instead of 60 minutes")
+    BATCH_LEASE_MINUTES: int = Field(30, ge=5, description="A lease with no heartbeat for this long is requeued, then failed")
+    BATCH_MAX_ATTEMPTS: int = Field(2, ge=1, description="Leases a batch job may expire through before it is failed")
+    BATCH_LEASE_MAX_PHOTOS: int = Field(2000, ge=1, description="Photos one lease hands to the cluster")
+    BATCH_PART_MAX_PHOTOS: int = Field(500, ge=1, description="Photos per results part, so each ingest stays well inside 15 minutes")
 
     # ── Media Registry renditions (Supabase Storage public bucket; originals stay in Drive) ──
     SUPABASE_MEDIA_BUCKET: str = Field(
@@ -332,6 +348,11 @@ class Settings(BaseSettings):
         if self.OBJECT_STORE_BACKEND == "local":
             return True
         return bool(self.AZURE_STORAGE_CONNECTION_STRING)
+
+    @property
+    def gpu_offload_configured(self) -> bool:
+        """Heavy AI runs off this process: on the ARQ worker (REDIS_URL) or the REANNZ batch (WORKER_BACKEND=lambda)."""
+        return bool(self.REDIS_URL) or self.WORKER_BACKEND == "lambda"
 
     @property
     def archive_enabled(self) -> bool:

@@ -1,6 +1,6 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Job dispatch — route a job to the ARQ worker (GPU offload) or run it in-process.
+"""Job dispatch: route a job to the ARQ worker (GPU offload), the REANNZ batch, or this process.
 
 Single seam used by GPU/ML-heavy endpoints (the Wildlife Brain) so the routers
 don't care *where* a job runs:
@@ -30,6 +30,42 @@ logger = structlog.get_logger()
 # (see app/jobs/worker.py). KEDA scales the GPU worker on this list's length.
 GPU_PENDING_KEY = "ww:gpu:pending"
 
+# GPU jobs the REANNZ batch runs under WORKER_BACKEND=lambda, with the kind of lease each
+# needs: ``annotate`` (originals through SpeciesNet and BioCLIP) or ``embed`` (crops through
+# DINOv3). The batch path is in domain/batch_lease.py, jobs/batch_infer.py and jobs/ingest.py.
+BATCH_JOBS: dict[str, str] = {
+    "annotate_deployments_job": "annotate",
+    "embed_deployment_job": "embed",
+    "reprocess_deployment_job": "embed",
+    "embed_deployments_job": "embed",
+}
+
+
+async def _queue_for_batch(name: str, args: tuple, kwargs: dict) -> str:
+    """Leave the job's ``api_jobs`` row queued with a dispatch record the cluster's lease reads."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.jobs.store import set_job_dispatch
+
+    job_id, *rest = args
+    now = datetime.now(timezone.utc)
+    defer = kwargs.get("_defer_by")
+    not_before = now + (defer if isinstance(defer, timedelta) else timedelta(seconds=float(defer or 0)))
+    spec = {
+        "backend": "batch",
+        "name": name,
+        "kind": BATCH_JOBS[name],
+        "args": list(rest),
+        "kwargs": {k: v for k, v in kwargs.items() if not k.startswith("_")},
+        "queued_at": now.isoformat(),
+        "not_before": not_before.isoformat(),
+        "attempts": 0,
+    }
+    if not await set_job_dispatch(str(job_id), spec):
+        raise ValueError(f"No api_jobs row for batch job {job_id}")
+    logger.info("job_queued_for_batch", job=name, job_id=job_id, kind=spec["kind"])
+    return "batch"
+
 
 async def enqueue_job(name: str, *args, **kwargs) -> str:
     """Dispatch a job by its definition function name.
@@ -42,8 +78,13 @@ async def enqueue_job(name: str, *args, **kwargs) -> str:
     The ARQ control kwargs (_defer_by, _job_id) only apply on the Redis path; the in-process
     fallback runs immediately, ignoring those but forwarding any real job kwargs to the function.
 
-    Returns the routing mode actually used ("arq" or "local") for logging/telemetry.
+    Returns the routing mode actually used ("batch", "arq" or "local") for logging/telemetry.
+
+    Under ``WORKER_BACKEND=lambda`` a :data:`BATCH_JOBS` name waits in ``api_jobs`` for the
+    REANNZ batch.
     """
+    if settings.WORKER_BACKEND == "lambda" and name in BATCH_JOBS:
+        return await _queue_for_batch(name, args, kwargs)
     if settings.REDIS_URL:
         try:
             from arq import create_pool
