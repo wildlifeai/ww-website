@@ -28,6 +28,7 @@ from app.schemas.pipeline import (
     PipelineStepResult,
     PipelineStepType,
 )
+from app.services import inference_cache
 from app.services.bioclip_service import BIOCLIP_VERSION
 from app.services.db_utils import read_all, rows_of
 from app.services.speciesnet_service import SPECIESNET_VERSION
@@ -174,6 +175,20 @@ class MediaPreparationStep(PipelineStep):
 
 
 # ── Animal Crop Step (DINOv3 input) ──────────────────────────────────
+
+
+def bbox_of(row: dict) -> Optional[tuple[float, float, float, float]]:
+    """An observation's box as ``(x, y, w, h)``, or None when it has none (``chk_bbox_complete``)."""
+    values = (row.get("bbox_x"), row.get("bbox_y"), row.get("bbox_w"), row.get("bbox_h"))
+    return None if any(v is None for v in values) else tuple(float(v) for v in values)  # type: ignore[return-value]
+
+
+def hero_detection(rows: list[dict]) -> Optional[dict]:
+    """The observation whose crop becomes the photo's hero ``animal_crop_url``: the most
+    confident one with a box, the first of equals. ``generate_observation_crops`` orders the
+    crops by it, and the BioCLIP step names the hero crop by its box for the REANNZ batch."""
+    boxed = [r for r in rows if bbox_of(r) is not None]
+    return max(boxed, key=lambda r: float(r.get("confidence") or 0.0)) if boxed else None
 
 
 class AnimalCropStep(PipelineStep):
@@ -1397,7 +1412,14 @@ class BioCLIPStep(PipelineStep):
                     logger.warning("bioclip_resolve_error", media_id=m.get("id"), error=str(exc))
                     errors += 1
 
-            predictions = await classifier.classify(list(path_to_media.keys()), config)
+            paths = list(path_to_media.keys())
+            if inference_cache.active() is not None:
+                # The REANNZ batch answers by (media, box): the hero crop's box, or None for a whole frame.
+                heroes = await asyncio.to_thread(_hero_boxes, svc, list(crop_map))
+                keys = [(path_to_media[p]["id"], heroes.get(path_to_media[p]["id"]) if path_to_media[p]["id"] in crop_map else None) for p in paths]
+                predictions = await classifier.classify(paths, config, keys=keys)
+            else:
+                predictions = await classifier.classify(paths, config)
 
             timestamp = datetime.now(timezone.utc).isoformat()
             obs_batch: list[dict] = []
@@ -1516,7 +1538,12 @@ class BioCLIPStep(PipelineStep):
                     logger.warning("crop_classify_resolve_error", observation_id=obs.get("id"), error=str(exc))
                     errors += 1
 
-            predictions = await classifier.classify(list(path_to_obs.keys()), config)
+            paths = list(path_to_obs.keys())
+            if inference_cache.active() is not None:
+                keys = [(path_to_obs[p]["media_id"], bbox_of(path_to_obs[p])) for p in paths]
+                predictions = await classifier.classify(paths, config, keys=keys)
+            else:
+                predictions = await classifier.classify(paths, config)
             timestamp = datetime.now(timezone.utc).isoformat()
 
             obs_batch: list[dict] = []
@@ -1560,6 +1587,28 @@ class BioCLIPStep(PipelineStep):
             duration_seconds=round(duration, 2),
             model_version=model_version,
         )
+
+
+def _hero_boxes(svc, media_ids: list[str]) -> dict[str, Optional[tuple[float, float, float, float]]]:
+    """The hero crop's box per photo, as ``generate_observation_crops`` chose it. Blocking."""
+    out: dict[str, Optional[tuple[float, float, float, float]]] = {}
+    for i in range(0, len(media_ids), 100):
+        resp = (
+            svc.table("observations")
+            .select("media_id, bbox_x, bbox_y, bbox_w, bbox_h, confidence")
+            .in_("media_id", media_ids[i : i + 100])
+            .eq("source_type", "ai")
+            .eq("observation_type", "animal")
+            .not_.is_("bbox_x", "null")
+            .execute()
+        )
+        by_media: dict[str, list[dict]] = {}
+        for r in rows_of(resp):
+            by_media.setdefault(r["media_id"], []).append(r)
+        for mid, rows in by_media.items():
+            hero = hero_detection(rows)
+            out[mid] = bbox_of(hero) if hero else None
+    return out
 
 
 # ── Step Registry ────────────────────────────────────────────────────

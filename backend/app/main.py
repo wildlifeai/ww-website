@@ -44,6 +44,9 @@ from app.routers import (
 
 logger = structlog.get_logger()
 
+# The API needs its database; the settings default empty only for the GPU image.
+settings.require_supabase()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

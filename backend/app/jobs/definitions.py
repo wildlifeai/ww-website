@@ -1906,6 +1906,52 @@ async def embeddings_backup_job(job_id: str):
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
 
 
+async def embed_deployments_job(job_id: str, deployment_ids: list[str], model_name: str | None = None):
+    """Embed and cluster several deployments' crops: the clustering that follows an annotate batch."""
+    logger.info("job_start", job_type="embed_deployments", job_id=job_id, deployments=len(deployment_ids))
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.05, message="Starting embedding…")
+    try:
+        from app.domain.wildlife_brain import embed_and_cluster_deployment
+
+        images = clusters = 0
+        for n, deployment_id in enumerate(deployment_ids):
+            result = await embed_and_cluster_deployment(deployment_id, model_name=model_name)
+            images += int(result.get("image_count") or 0)
+            clusters += int(result.get("clusters") or 0)
+            await update_job(job_id, progress=0.05 + 0.9 * (n + 1) / max(len(deployment_ids), 1))
+        await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message=f"Embedded {images} crops → {clusters} clusters")
+    except Exception as e:
+        logger.error("job_failed", job_type="embed_deployments", job_id=job_id, error=str(e))
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+
+
+async def ingest_results_part_job(lease_id: str, job_id: str, part: int):
+    """Write one REANNZ results part's rows (``jobs/ingest.py``); the last part finishes the job."""
+    from app.jobs.ingest import ingest_results_part
+
+    try:
+        outcome = await ingest_results_part(lease_id, job_id, int(part))
+        logger.info("job_complete", job_type="ingest_results_part", job_id=job_id, part=part, outcome=outcome)
+    except Exception as e:
+        # The part stays in the object store without its marker, so a retry (the dead-letter
+        # queue on Lambda) ingests it and finishes the job.
+        logger.error("job_failed", job_type="ingest_results_part", job_id=job_id, part=part, error=str(e))
+        await update_job(job_id, status=JobStatus.FAILED, error=f"Results part {part} could not be written: {e}")
+        raise
+
+
+async def finalize_batch_job(lease_id: str, job_id: str):
+    """Finish a REANNZ batch job once the cluster has reported and every part is ingested."""
+    from app.jobs.ingest import finalize_if_complete
+
+    try:
+        await finalize_if_complete(lease_id, job_id)
+    except Exception as e:
+        logger.error("job_failed", job_type="finalize_batch", job_id=job_id, error=str(e))
+        await update_job(job_id, status=JobStatus.FAILED, error=f"The GPU batch results could not be finished: {e}")
+        raise
+
+
 JOBS = [
     convert_model_job,
     train_species_brain_job,
@@ -1922,4 +1968,7 @@ JOBS = [
     reprocess_all_job,
     recompute_al_job,
     embeddings_backup_job,
+    embed_deployments_job,
+    ingest_results_part_job,
+    finalize_batch_job,
 ]

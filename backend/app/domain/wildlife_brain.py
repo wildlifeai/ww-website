@@ -45,8 +45,16 @@ class EmbeddingUnavailableError(RuntimeError):
 
 
 def ensure_embedding_available(model_name: Optional[str] = None) -> None:
-    """Raise :class:`EmbeddingUnavailableError` before a run writes or supersedes anything."""
+    """Raise :class:`EmbeddingUnavailableError` before a run writes or supersedes anything.
+
+    While ingest runs on the REANNZ cluster's results the vectors are already computed, so
+    this process needs no ML stack.
+    """
+    from app.services import inference_cache
     from app.services.dinov3 import unavailable_reason
+
+    if inference_cache.active() is not None:
+        return
 
     reason = unavailable_reason(model_name)
     if reason:
@@ -475,8 +483,15 @@ async def embed_and_cluster_deployment(
 
         media_ids = [c["id"] for c in crops]
 
-        await _tick(0.15, f"Downloading {len(crops)} crops…")
-        resolved_crops = await _resolve_crops_concurrent(crops)
+        from app.services import inference_cache
+
+        part = inference_cache.active()
+        if part is not None:
+            # The cluster embedded these crops already: keep the ones it has a vector for.
+            resolved_crops = [(c["id"], c["deployment_id"], b"") for c in crops if part.has_vector(c["id"])]
+        else:
+            await _tick(0.15, f"Downloading {len(crops)} crops…")
+            resolved_crops = await _resolve_crops_concurrent(crops)
         images: list[bytes] = [img for (_mid, _dep, img) in resolved_crops]
         kept_ids: list[str] = [mid for (mid, _dep, _img) in resolved_crops]
         media_ids = kept_ids
@@ -486,7 +501,7 @@ async def embed_and_cluster_deployment(
 
         await _tick(0.35, f"Embedding {len(images)} crops with DINOv3…")
         dino = dino or get_dinov3_service()
-        embeddings = await dino.embed(images)
+        embeddings = await (dino.embed(images, keys=kept_ids) if part is not None else dino.embed(images))
 
         await _tick(0.65, "Reducing + clustering…")
         umap_2d = await asyncio.to_thread(reduce_umap, embeddings, 2, UMAP_PERSIST_PARAMS)

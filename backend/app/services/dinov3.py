@@ -120,8 +120,11 @@ class DinoV3Service:
             out.extend(cls.cpu().tolist())
         return out
 
-    async def embed(self, images: Sequence[bytes]) -> list[list[float]]:
-        """Extract 1280-d embeddings for a list of image bytes (off the event loop)."""
+    async def embed(self, images: Sequence[bytes], keys: Optional[Sequence[str]] = None) -> list[list[float]]:
+        """Extract 1280-d embeddings for a list of image bytes (off the event loop).
+
+        ``keys`` (media ids) is for the precomputed provider of the REANNZ batch; ignored here.
+        """
         if not images:
             return []
         vectors = await asyncio.to_thread(self._embed_sync, list(images))
@@ -136,8 +139,13 @@ class DinoV3Service:
 _service: Optional[DinoV3Service] = None
 
 
-def get_dinov3_service() -> DinoV3Service:
-    """Return a process-wide DinoV3Service instance."""
+def get_dinov3_service() -> Any:
+    """Return a process-wide DinoV3Service instance, or the cluster's results while ingest runs one."""
+    from app.services.inference_cache import precomputed_dinov3
+
+    precomputed = precomputed_dinov3()
+    if precomputed is not None:
+        return precomputed
     global _service
     if _service is None:
         _service = DinoV3Service()

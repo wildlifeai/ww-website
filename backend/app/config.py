@@ -16,9 +16,12 @@ class Settings(BaseSettings):
     """Application settings, loaded from environment variables / .env file."""
 
     # ── Supabase ─────────────────────────────────────────────────────
-    SUPABASE_URL: str = Field(..., description="Supabase project URL")
-    SUPABASE_ANON_KEY: str = Field(..., description="Supabase anonymous/public key")
-    SUPABASE_SERVICE_ROLE_KEY: str = Field(..., description="Supabase service-role key (admin ops only)")
+    # Empty defaults so the REANNZ GPU image (jobs/batch_infer.py), which has no database
+    # access by design, can import the app. The API refuses to start without all three
+    # (require_supabase, called from main.py).
+    SUPABASE_URL: str = Field("", description="Supabase project URL")
+    SUPABASE_ANON_KEY: str = Field("", description="Supabase anonymous/public key")
+    SUPABASE_SERVICE_ROLE_KEY: str = Field("", description="Supabase service-role key (admin ops only)")
 
     # ── Redis (future — not yet required) ────────────────────────────
     REDIS_URL: str = Field("", description="Redis connection URL (empty = in-memory fallback)")
@@ -339,6 +342,12 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         """Parse comma-separated CORS origins into a list."""
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
+
+    def require_supabase(self) -> None:
+        """Refuse to run the API without its database settings (they default empty for the GPU image)."""
+        missing = [n for n in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY") if not getattr(self, n)]
+        if missing:
+            raise RuntimeError(f"Missing required settings: {', '.join(missing)}")
 
     @property
     def object_store_configured(self) -> bool:

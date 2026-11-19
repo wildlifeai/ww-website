@@ -221,6 +221,11 @@ async def generate_observation_crops(media_id: str) -> Optional[str]:
     def _set_crop_url(obs_id: str, url: str):
         svc.table("observations").update({"crop_url": url}).eq("id", obs_id).execute()
 
+    from app.domain.pipeline import hero_detection
+
+    # The hero first, so it is the first crop to land (the database order already puts it there).
+    hero = hero_detection(obs_rows)
+    obs_rows = ([hero] if hero else []) + [o for o in obs_rows if o is not hero]
     hero_url: Optional[str] = None
     for o in obs_rows:
         bbox = (o["bbox_x"], o["bbox_y"], o["bbox_w"], o["bbox_h"])

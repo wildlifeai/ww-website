@@ -278,8 +278,13 @@ class SpeciesNetService:
 _service: Optional[SpeciesNetService] = None
 
 
-def get_speciesnet_service() -> SpeciesNetService:
-    """Return a process-wide SpeciesNetService instance."""
+def get_speciesnet_service() -> Any:
+    """Return a process-wide SpeciesNetService instance, or the cluster's results while ingest runs one."""
+    from app.services.inference_cache import precomputed_speciesnet
+
+    precomputed = precomputed_speciesnet()
+    if precomputed is not None:
+        return precomputed
     global _service
     if _service is None:
         _service = SpeciesNetService()
