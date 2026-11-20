@@ -63,15 +63,15 @@ function uploadMode(deps: UploadDeps): Promise<string> {
   return modePromise
 }
 
+/** Run `run` over `items`, at most `size` at a time: each worker takes the next item when its last one settles. */
 async function inPool<T>(items: T[], size: number, run: (item: T, index: number) => Promise<void>): Promise<void> {
   let next = 0
-  const workers = Array.from({ length: Math.min(size, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++
-      await run(items[index], index)
-    }
-  })
-  await Promise.all(workers)
+  const take = (): Promise<void> => {
+    if (next >= items.length) return Promise.resolve()
+    const index = next++
+    return run(items[index], index).then(take)
+  }
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, take))
 }
 
 /**

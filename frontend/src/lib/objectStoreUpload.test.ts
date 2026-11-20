@@ -60,6 +60,24 @@ describe('uploads straight to S3', () => {
     expect(d.posted.sort()).toEqual(['A.JPG', 'B.JPG'])
   })
 
+  it('sends every file, never more than four at once', async () => {
+    const d = deps('s3')
+    let inFlight = 0
+    let most = 0
+    d.postFile = vi.fn(async (_target, file: File) => {
+      most = Math.max(most, ++inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      inFlight--
+      d.posted.push(file.name)
+    })
+    const fd = new FormData()
+    for (let i = 0; i < 10; i++) fd.append('files', new File(['x'], `P${i}.JPG`, { type: 'image/jpeg' }))
+    const out = await prepareUpload('/api/exif/parse', fd, d)
+    expect(most).toBe(4)
+    expect(d.posted).toHaveLength(10)
+    expect(out.getAll('files_key')).toEqual(Array.from({ length: 10 }, (_, i) => `incoming/u1/up/${i}-P${i}.JPG`))
+  })
+
   it('sends the form unchanged when the server takes multipart', async () => {
     const d = deps('multipart')
     const fd = form()
