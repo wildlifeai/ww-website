@@ -71,12 +71,20 @@ _s3_client: Any = None
 
 
 def new_s3_client(**kwargs: Any) -> Any:
-    """A boto3 S3 client as the app uses it: SigV4 (presigned URLs need it) and standard retries."""
+    """A boto3 S3 client as the app uses it: SigV4 (presigned URLs need it) and standard retries.
+
+    With a region, the client uses that region's endpoint. Without one, boto3 presigns against
+    the global ``<bucket>.s3.amazonaws.com``, which does not serve a bucket in an opt-in region
+    such as ``ap-southeast-6``: the browser's presigned POST then fails with no CORS answer.
+    """
     import boto3
     from botocore.config import Config
 
     kwargs.setdefault("region_name", settings.S3_REGION or None)
-    return boto3.client("s3", config=Config(signature_version="s3v4", retries={"max_attempts": 4, "mode": "standard"}), **kwargs)
+    if kwargs["region_name"] and "endpoint_url" not in kwargs:
+        kwargs["endpoint_url"] = f"https://s3.{kwargs['region_name']}.amazonaws.com"
+    config = Config(signature_version="s3v4", s3={"addressing_style": "virtual"}, retries={"max_attempts": 4, "mode": "standard"})
+    return boto3.client("s3", config=config, **kwargs)
 
 
 def s3_client() -> Any:

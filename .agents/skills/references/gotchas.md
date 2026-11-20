@@ -238,6 +238,16 @@ the consensus row included, use `ai_reviewed`.
 
 ---
 
+## S3 in Auckland needs the regional endpoint
+
+`ap-southeast-6` is an opt-in region, and the global `<bucket>.s3.amazonaws.com` host does not
+serve its buckets. boto3 presigns against that global host unless the client has an
+`endpoint_url`, so a browser's presigned POST fails with `net::ERR_FAILED` and no CORS answer.
+`services/object_store.new_s3_client` sets `https://s3.<region>.amazonaws.com` with
+virtual-hosted addressing; create every S3 client through it.
+
+---
+
 ## Gemini API key limits
 
 `GEMINI_API_KEY` in the root `.env` is on the free tier: 15 requests per minute and 500 per
