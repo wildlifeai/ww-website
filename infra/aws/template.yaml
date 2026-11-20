@@ -14,8 +14,8 @@
 # SecureString, one parameter per variable (app/aws_params.py loads them at cold start). This
 # template only sets what the stack itself decides (role, bucket, function names).
 #
-# The account's budget is not here: CloudFormation in ap-southeast-6 has no AWS::Budgets::Budget,
-# so it is created once per account with the CLI (cloud-infrastructure.md, "Adding an AWS account").
+# The budget is not here: CloudFormation in ap-southeast-6 has no AWS::Budgets::Budget, so one
+# organization-wide budget is set in the management account (cloud-infrastructure.md).
 
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31

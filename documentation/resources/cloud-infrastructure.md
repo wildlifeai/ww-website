@@ -217,7 +217,7 @@ but it's a product call: it's what keeps the public demo button fast.
 | `ww-dev` | Member account for the dev stack | A dev mistake cannot reach prod data, and closing the account removes everything in it |
 | In `ww-dev` (2026-11-20) | Stack `ww-shared`: ECR repository `ww-backend`, deploy role `ww-gha-deploy`. Stack `ww-dev`: functions `ww-dev-api` and `ww-dev-cpu`, an HTTP API (its address is the stack's `ApiUrl` output), bucket `wildlifewatcher-dev-media`, queue `ww-dev-dlq`, the 15-minute tick, alarms to the maintainer. SSM: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` under `/ww/dev/`, every flag off. Lambda concurrency quota 1,000 | Deployed from a workstation; `infra/aws/` holds both templates |
 | `ww-prod` | Not created yet; made like `ww-dev` at the prod step | |
-| Region | Asia Pacific (New Zealand), `ap-southeast-6`, in every account | An opt-in region: a new account starts with it off ([Adding an account](#adding-an-aws-account)). It has no Lambda Function URLs and no CloudFormation budget resource (checked 2026-11-20), so the API sits behind an API Gateway HTTP API and budgets are set by hand |
+| Region | Asia Pacific (New Zealand), `ap-southeast-6`, in every account | An opt-in region: a new account starts with it off ([Adding an account](#adding-an-aws-account)). It has no Lambda Function URLs and no CloudFormation budget resource (checked 2026-11-20), so the API sits behind an API Gateway HTTP API and the budget is set by hand |
 | IAM Identity Center | Single-Region instance in Auckland, its own user directory | Multi-Region would copy users to US West (Oregon) and needs a KMS key |
 | Permission set | `AdministratorAccess`, 8-hour sessions, assigned on `ww-dev` | |
 | Buckets | `wildlifewatcher-dev-media`, `wildlifewatcher-prod-media` | Each environment's stack creates its own; both names were free on 2026-11-19 |
@@ -281,19 +281,21 @@ aws account enable-region --account-id <new account ID> --region-name ap-southea
 
 Then request 1,000 concurrent Lambda executions for the new account in Service Quotas (quota
 `L-B99A9384`): a new account can start at 10, the environment stack reserves 15, and AWS always
-keeps 100 unreserved, so the stack cannot deploy until the increase lands. `ww-dev` started at
-10. In the management account's Billing and Cost Management, add the budget: monthly cost,
-US$20, filtered to the new linked account, an email at 80% of actual spend. Last, assign the
-permission set on the new account in Identity Center and add a profile for it like `ww-dev`'s. `enable-region` for another account works because the organization's trusted
-access for AWS Account Management is on (since 2026-11-19).
+keeps 100 unreserved, so the stack cannot deploy until the increase lands; `ww-dev` started
+at 10. The organization's budget already covers a new account; raise it if the new account
+adds steady spend. Last, assign the permission set on the new account in Identity Center and
+add a profile for it like `ww-dev`'s. `enable-region` for another account works because the
+organization's trusted access for AWS Account Management is on (since 2026-11-19).
 
 ### How to keep AWS clean
 - **Audit:** every resource in a member account belongs to a CloudFormation stack, `ww-shared` or
   `ww-<env>`; anything else is sprawl. The management account holds no workloads.
-- **Cost:** each environment account has an AWS Budget (`ww-<env>-monthly`, US$20, an email at
-  80%) set in the management account, not in the stack: CloudFormation in `ap-southeast-6` has
-  no budget resource, and a member account cannot create one until the payer account enables
-  budgets. Check Billing and Cost Management monthly once a stack exists.
+- **Cost:** one AWS Budget for the whole organization, `wildlife-ai-monthly` (all services,
+  US$20 a month, an email at 80% of actual spend), set in the management account's console on
+  2026-11-20. It is not in a stack: CloudFormation in `ap-southeast-6` has no budget resource,
+  and a member account cannot create one. A per-account budget filters by Linked account, which
+  the console lists only after a day of that account's cost data. Check Billing and Cost
+  Management monthly.
 - **Access:** every Identity Center user is someone who still needs access.
 
 ---
