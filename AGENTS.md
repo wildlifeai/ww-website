@@ -103,7 +103,8 @@ run them by hand when API key, `/api/v1`, or deployment and project delete code 
 - **The service-role key is backend-only.** Never expose it to frontend code, never commit
   secrets, never bypass the auth dependencies.
 - **Gate unfinished work behind a feature flag** in `backend/app/config.py`, and set AI flags
-  on the **ARQ worker**, not just the API, or the pipeline silently no-ops.
+  wherever the pipeline runs, or it silently no-ops: on Azure the **ARQ worker** as well as the
+  API; on AWS both functions read the same `/ww/<env>/` parameters in SSM.
 - **Every file is LF, UTF-8, no BOM.** `.gitattributes` enforces it; PowerShell's
   `Out-File`/`Set-Content` will quietly rewrite a whole file to CRLF, so don't edit through them.
 - **Update the docs with the change.** Route changes update the codebase guide; API changes
@@ -124,7 +125,7 @@ run them by hand when API key, `/api/v1`, or deployment and project delete code 
 | Doc index, what's living vs frozen | [`documentation/README.md`](documentation/README.md) |
 | Deep agent rules | [`.agents/skills/SKILL.md`](.agents/skills/SKILL.md) |
 | UI design system | [`.agents/DESIGN.md`](.agents/DESIGN.md) |
-| What actually exists in Azure/Supabase/Cloudflare | [`documentation/resources/cloud-infrastructure.md`](documentation/resources/cloud-infrastructure.md) |
+| What actually exists in Azure, AWS, Supabase and Cloudflare, and signing in to AWS | [`documentation/resources/cloud-infrastructure.md`](documentation/resources/cloud-infrastructure.md) |
 | API endpoints | [`documentation/resources/api-reference.md`](documentation/resources/api-reference.md) (authoritative: `/docs`) |
 | How the code got this way | [`documentation/development reports/`](documentation/development%20reports/README.md) |
 | Frozen history, read for *why*, never as current behaviour | `documentation/development reports/_archive/` |

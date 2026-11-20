@@ -14,6 +14,7 @@ POST /api/models/train    → train a Species Brain from an Annotations selectio
 
 import asyncio
 import uuid
+from typing import Optional, cast
 
 import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -25,9 +26,7 @@ from app.dependencies import get_current_user, get_manager_roles, get_user_clien
 from app.domain.label_map import fetch_model_label_map, save_model_label_map
 from app.domain.model import next_model_version, resolve_or_create_model_family
 from app.domain.training import media_deployments, training_mode, training_status
-from app.jobs.definitions import convert_model_job, download_github_pretrained_job, download_pretrained_job
 from app.jobs.dispatch import enqueue_job
-from app.jobs.runner import enqueue_local_job
 from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
@@ -35,6 +34,7 @@ from app.schemas.job import JobCreateResponse
 from app.schemas.model import LabelMapRequest, TrainModelRequest
 from app.services.blob_store import store_blob
 from app.services.db_utils import rows_of
+from app.services.incoming import IncomingError, incoming_files
 from app.services.sscma import get_sscma_catalog
 from app.services.supabase_client import create_service_client
 
@@ -65,7 +65,8 @@ def resolve_managed_org(requested_org_id: str | None, manager_roles: list) -> st
 @router.post("/convert")
 async def convert_model(
     request: Request,
-    file: UploadFile = File(...),
+    file: Optional[UploadFile] = File(None),
+    file_key: Optional[str] = Form(None),
     model_name: str = Form(...),
     description: str = Form(""),
     organisation_id: str = Form(""),
@@ -79,6 +80,14 @@ async def convert_model(
     4. Inserts an ai_models row
     5. Stores the file in blob store and enqueues the worker job
     """
+    # The model in the body, or as a key in S3 (services/incoming.py).
+    try:
+        sent = await incoming_files(user.id, [file] if file else [], [file_key] if file_key else [])
+    except IncomingError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    if len(sent) != 1:
+        raise HTTPException(status_code=400, detail="Send one model file.")
+    file = cast(UploadFile, sent[0])  # an UploadFile or services.incoming.IncomingFile
     if file.content_type not in ALLOWED_MIME_TYPES and not (file.filename or "").endswith((".zip", ".tflite", ".cc")):
         raise HTTPException(400, detail=f"Invalid file type: {file.content_type}")
 
@@ -150,7 +159,7 @@ async def convert_model(
         },
     )
 
-    enqueue_local_job(convert_model_job(job_id, user.id, model_id))
+    await enqueue_job("convert_model_job", job_id, user.id, model_id)
 
     return ApiResponse(
         data={
@@ -320,7 +329,7 @@ async def download_pretrained(
 
         job_id = await create_job(user_id=user.id, kind="model_download", label=f"Download model {body.architecture} @ {body.resolution}")
 
-        enqueue_local_job(download_github_pretrained_job(job_id, user.id, org_id, body.architecture, body.resolution, body.description))
+        await enqueue_job("download_github_pretrained_job", job_id, user.id, org_id, body.architecture, body.resolution, body.description)
 
         return ApiResponse(
             data=JobCreateResponse(job_id=job_id).model_dump(),
@@ -333,7 +342,7 @@ async def download_pretrained(
 
         job_id = await create_job(user_id=user.id, kind="model_download", label=f"Download SenseCap model {body.model_name or body.sscma_uuid}")
 
-        enqueue_local_job(download_pretrained_job(job_id, user.id, body.sscma_uuid, org_id, body.model_name, body.description))
+        await enqueue_job("download_pretrained_job", job_id, user.id, body.sscma_uuid, org_id, body.model_name, body.description)
 
         return ApiResponse(
             data=JobCreateResponse(job_id=job_id).model_dump(),

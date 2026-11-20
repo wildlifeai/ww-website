@@ -30,13 +30,13 @@ from app.authz import assert_write, classify_deployment_access, deployment_id_pr
 from app.config import settings
 from app.dependencies import get_optional_user, is_email_confirmed
 from app.domain.exif import is_test_photo, parse_exif_from_bytes, resolve_deployment_source
-from app.jobs.definitions import upload_drive_images_job
-from app.jobs.runner import enqueue_local_job
+from app.jobs.dispatch import enqueue_job
 from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiMeta, ApiResponse
-from app.services.azure_storage import store_blob
 from app.services.db_utils import rows_of
+from app.services.incoming import IncomingError, incoming_files
+from app.services.object_store import store_blob
 from app.services.supabase_client import create_service_client, reset_service_client
 
 logger = structlog.get_logger()
@@ -126,7 +126,8 @@ async def _auto_create_deployments(deployment_ids: List[str], project_id: str, u
 @limiter.limit("30/minute")
 async def parse_exif(
     request: Request,
-    files: List[UploadFile] = File(...),
+    files: List[UploadFile] = File([]),
+    files_key: List[str] = Form([]),
     paths: List[str] = Form([]),
     project_id: Optional[str] = Form(None),
     deployment_id: Optional[str] = Form(None),
@@ -170,6 +171,13 @@ async def parse_exif(
     MAX_ANON_IMAGES = 50
     MAX_AUTH_IMAGES = settings.MAX_UPLOAD_IMAGES_PER_REQUEST
     user = await get_optional_user(authorization)
+    # Files sent straight to S3 arrive as keys (services/incoming.py), after any in the body.
+    try:
+        files = await incoming_files(getattr(user, "id", None) if user else None, files, files_key)
+    except IncomingError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    if not files:
+        raise HTTPException(status_code=422, detail="Send at least one file.")
 
     # Block storage-consuming uploads for authenticated-but-unverified accounts
     # (anonymous EXIF-only parsing without Drive is still allowed up to the cap).
@@ -306,7 +314,7 @@ async def parse_exif(
     # ── 3. Drive upload pipeline ─────────────────────────────────
     # user is already resolved from step 0 (image limit check)
 
-    if not settings.GOOGLE_DRIVE_ENABLED:
+    if not settings.archive_enabled:
         drive_upload_info = {"enabled": False, "reason": "server_disabled"}
     elif not upload_to_drive:
         drive_upload_info = {"enabled": False, "reason": "not_requested"}
@@ -633,7 +641,7 @@ async def _enqueue_drive_upload(
     }
 
     try:
-        enqueue_local_job(upload_drive_images_job(job_id, payload))
+        await enqueue_job("upload_drive_images_job", job_id, payload)
     except Exception as exc:
         logger.error("arq_enqueue_failed", job_id=job_id, error=str(exc))
         return {

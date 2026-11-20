@@ -1,0 +1,6 @@
+# The cpu Lambda function's extras over requirements.txt (Dockerfile --target lambda): the
+# clustering half of the Wildlife Brain, which ingest runs on vectors the REANNZ cluster
+# computed. No torch, no model weights: the models run on the cluster (requirements-ml.txt).
+hdbscan>=0.8.33                  # Density clustering of embeddings
+scikit-learn>=1.4                # Clustering/reduction utilities
+umap-learn>=0.5                  # UMAP 2D/50D reduction (stable coords)

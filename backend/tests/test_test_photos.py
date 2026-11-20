@@ -136,8 +136,12 @@ async def test_an_assigned_deployment_never_picks_up_a_test_photo(monkeypatch):
     monkeypatch.setattr(exif_router, "classify_deployment_access", classify)
     monkeypatch.setattr(exif_router, "store_blob", store_blob)
     monkeypatch.setattr(exif_router, "create_job", create_job)
-    monkeypatch.setattr(exif_router, "upload_drive_images_job", lambda job_id, payload: jobs.append(payload))
-    monkeypatch.setattr(exif_router, "enqueue_local_job", lambda _coro: None)
+
+    async def enqueue_job(name, job_id, payload):
+        assert name == "upload_drive_images_job"
+        jobs.append(payload)
+
+    monkeypatch.setattr(exif_router, "enqueue_job", enqueue_job)
 
     files = [SimpleNamespace(filename="test.jpg"), SimpleNamespace(filename="loose.jpg")]
     out = await exif_router._enqueue_drive_upload(

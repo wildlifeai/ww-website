@@ -10,8 +10,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.dependencies import get_optional_user
 from app.domain.manifest import fetch_github_branches
-from app.jobs.definitions import generate_manifest_job
-from app.jobs.runner import enqueue_local_job
+from app.jobs.dispatch import enqueue_job
 from app.jobs.store import create_job
 from app.schemas.common import ApiMeta, ApiResponse
 from app.schemas.job import JobCreateResponse
@@ -36,7 +35,7 @@ async def generate_manifest(
         label="Generate MANIFEST.zip",
     )
 
-    enqueue_local_job(generate_manifest_job(job_id, body.model_dump()))
+    await enqueue_job("generate_manifest_job", job_id, body.model_dump())
 
     return ApiResponse(
         data=JobCreateResponse(job_id=job_id).model_dump(),

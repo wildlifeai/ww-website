@@ -31,6 +31,7 @@ from app.jobs.store import (
 from app.schemas.job import EventType, JobStatus, ProgressEvent, ProgressPhase
 from app.services.db_utils import rows_of
 from app.services.notifications_service import emit_detection_notifications
+from app.services.object_store import archived_path
 
 logger = structlog.get_logger()
 
@@ -551,7 +552,8 @@ async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: d
     ``selection`` is an ``ExportSelection`` and ``caller`` an ``ExportCaller`` as dicts: a user's
     token for the Download buttons, or an organisation id for an API key (#327). The work is in
     ``domain/camtrapdp_export.py``. The ZIP is built in a temporary directory removed at the end,
-    after it is uploaded to the Azure Blob container ``CAMTRAPDP_EXPORT_CONTAINER``.
+    after it is uploaded to the object store (``OBJECT_STORE_BACKEND``: the Azure Blob container
+    ``CAMTRAPDP_EXPORT_CONTAINER`` today, or ``exports/`` in S3).
     """
     import tempfile
     from pathlib import Path
@@ -560,10 +562,15 @@ async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: d
     from app.domain import camtrapdp_export as export
 
     logger.info("job_start", job_type="export_camtrapdp_originals", job_id=job_id)
-    if not settings.AZURE_STORAGE_CONNECTION_STRING:
+    if not settings.object_store_configured:
         # Refuse before reading every original from Drive, not at the end.
         await update_job(job_id, status=JobStatus.FAILED, error="This server has no storage for exports. Try again later.")
-        logger.error("job_failed", job_type="export_camtrapdp_originals", job_id=job_id, error="AZURE_STORAGE_CONNECTION_STRING is not set")
+        logger.error(
+            "job_failed",
+            job_type="export_camtrapdp_originals",
+            job_id=job_id,
+            error=f"no {settings.OBJECT_STORE_BACKEND} object store configured",
+        )
         return
     await update_job(job_id, status=JobStatus.PROCESSING, progress=0.02, message="Reading the project's records…")
     sel = export.ExportSelection(**selection)
@@ -740,7 +747,7 @@ def unregistered_uploads(svc, candidates: list[dict]) -> list[dict]:
     seen: set[tuple[str, str, str]] = set()
     fresh: list[dict] = []
     for uf in candidates:
-        own = [("path", f"gdrive://{uf['file_id']}")]
+        own = [("path", archived_path(uf))]
         if uf.get("file_hash"):
             own.append(("hash", uf["file_hash"]))
         batch_keys = [(uf["deployment_id"], *k) for k in own]
@@ -764,7 +771,7 @@ def existing_media_keys(svc, candidates: list[dict]) -> set[tuple[str, str]]:
         hashes, paths = by_dep.setdefault(uf["deployment_id"], (set(), set()))
         if uf.get("file_hash"):
             hashes.add(uf["file_hash"])
-        paths.add(f"gdrive://{uf['file_id']}")
+        paths.add(archived_path(uf))
 
     keys: set[tuple[str, str]] = set()
     for dep in sorted(by_dep):
@@ -1085,8 +1092,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
     )
 
     try:
-        from app.services.azure_storage import delete_blob, retrieve_blob
-        from app.services.google_drive import GoogleDriveService
+        from app.services.object_store import archive_service, delete_blob, retrieve_blob
 
         # Shared mutable state for heartbeat visibility
         last_event_ts = time.monotonic()
@@ -1261,7 +1267,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         # ── Phase 2: DRIVE UPLOAD ────────────────────────────
         await start_phase(job_id, ProgressPhase.DRIVE_UPLOAD)
 
-        drive = GoogleDriveService()
+        drive = archive_service()
         drive_total = len(files_with_bytes)
         drive_completed = 0
         last_event_ts = time.monotonic()
@@ -1379,7 +1385,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             {
                 "id": str(_uuid.uuid4()),
                 "deployment_id": uf["deployment_id"],
-                "file_path": f"gdrive://{uf['file_id']}",
+                "file_path": archived_path(uf),
                 "file_name": uf.get("filename") or "image.jpg",
                 "file_mediatype": "image/jpeg",
                 "timestamp": _normalize_exif_timestamp(uf.get("timestamp")),
@@ -1514,10 +1520,11 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         if _dep_ids and _steps and not _run_ai:
             logger.info("ai_pipeline_skipped_by_request", job_id=job_id, deployments=len(_dep_ids))
         pipeline_errors = 0
-        # Run the AI inline only on a single-container / dev image (no Redis worker).
-        # When REDIS_URL is set, the heavy AI is offloaded to the GPU worker (the
-        # `elif` branch below) so this CPU process never imports torch/SpeciesNet.
-        if _dep_ids and _steps and _run_ai and not settings.REDIS_URL:
+        # Run the AI inline only on a single-container / dev image (no GPU offload).
+        # With REDIS_URL set (the ARQ GPU worker) or WORKER_BACKEND=lambda (the REANNZ
+        # batch), the heavy AI is offloaded (the `elif` branch below) so this CPU
+        # process never imports torch/SpeciesNet.
+        if _dep_ids and _steps and _run_ai and not settings.gpu_offload_configured:
             await start_phase(job_id, ProgressPhase.AI_PIPELINE)
             # Record the resolved deployments so the Annotations grid can show a
             # "being processed" banner for them while this inline AI phase runs.
@@ -1597,7 +1604,7 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         # process. The upload itself is complete; AI is tracked as its own
         # Processing-history job. enqueue_job falls back to in-process if Redis is
         # unreachable, so this never silently drops the analysis. ──
-        elif _dep_ids and _steps and _run_ai and settings.REDIS_URL:
+        elif _dep_ids and _steps and _run_ai and settings.gpu_offload_configured:
             from datetime import timedelta  # noqa: PLC0415
 
             from app.jobs.dispatch import enqueue_job  # noqa: PLC0415
@@ -1899,6 +1906,52 @@ async def embeddings_backup_job(job_id: str):
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
 
 
+async def embed_deployments_job(job_id: str, deployment_ids: list[str], model_name: str | None = None):
+    """Embed and cluster several deployments' crops: the clustering that follows an annotate batch."""
+    logger.info("job_start", job_type="embed_deployments", job_id=job_id, deployments=len(deployment_ids))
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.05, message="Starting embedding…")
+    try:
+        from app.domain.wildlife_brain import embed_and_cluster_deployment
+
+        images = clusters = 0
+        for n, deployment_id in enumerate(deployment_ids):
+            result = await embed_and_cluster_deployment(deployment_id, model_name=model_name)
+            images += int(result.get("image_count") or 0)
+            clusters += int(result.get("clusters") or 0)
+            await update_job(job_id, progress=0.05 + 0.9 * (n + 1) / max(len(deployment_ids), 1))
+        await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message=f"Embedded {images} crops → {clusters} clusters")
+    except Exception as e:
+        logger.error("job_failed", job_type="embed_deployments", job_id=job_id, error=str(e))
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+
+
+async def ingest_results_part_job(lease_id: str, job_id: str, part: int):
+    """Write one REANNZ results part's rows (``jobs/ingest.py``); the last part finishes the job."""
+    from app.jobs.ingest import ingest_results_part
+
+    try:
+        outcome = await ingest_results_part(lease_id, job_id, int(part))
+        logger.info("job_complete", job_type="ingest_results_part", job_id=job_id, part=part, outcome=outcome)
+    except Exception as e:
+        # The part stays in the object store without its marker, so a retry (the dead-letter
+        # queue on Lambda) ingests it and finishes the job.
+        logger.error("job_failed", job_type="ingest_results_part", job_id=job_id, part=part, error=str(e))
+        await update_job(job_id, status=JobStatus.FAILED, error=f"Results part {part} could not be written: {e}")
+        raise
+
+
+async def finalize_batch_job(lease_id: str, job_id: str):
+    """Finish a REANNZ batch job once the cluster has reported and every part is ingested."""
+    from app.jobs.ingest import finalize_if_complete
+
+    try:
+        await finalize_if_complete(lease_id, job_id)
+    except Exception as e:
+        logger.error("job_failed", job_type="finalize_batch", job_id=job_id, error=str(e))
+        await update_job(job_id, status=JobStatus.FAILED, error=f"The GPU batch results could not be finished: {e}")
+        raise
+
+
 JOBS = [
     convert_model_job,
     train_species_brain_job,
@@ -1915,4 +1968,7 @@ JOBS = [
     reprocess_all_job,
     recompute_al_job,
     embeddings_backup_job,
+    embed_deployments_job,
+    ingest_results_part_job,
+    finalize_batch_job,
 ]

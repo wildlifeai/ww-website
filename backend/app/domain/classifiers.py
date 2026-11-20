@@ -63,8 +63,12 @@ class Classifier(ABC):
         ...
 
     @abstractmethod
-    async def classify(self, crop_paths: list[str], config: dict) -> list[ClassifierResult]:
-        """Classify each crop path; returns one result per resolvable path."""
+    async def classify(self, crop_paths: list[str], config: dict, keys: Optional[list] = None) -> list[ClassifierResult]:
+        """Classify each crop path; returns one result per resolvable path.
+
+        ``keys`` names each crop as ``(media_id, bbox)``, ``bbox`` None for a whole frame. A
+        model ignores it; the REANNZ batch's precomputed answers are looked up by it.
+        """
         ...
 
 
@@ -131,13 +135,16 @@ class BioClipClassifier(Classifier):
 
         return BIOCLIP_VERSION
 
-    async def classify(self, crop_paths: list[str], config: dict) -> list[ClassifierResult]:
+    async def classify(self, crop_paths: list[str], config: dict, keys: Optional[list] = None) -> list[ClassifierResult]:
         from app.config import settings
         from app.services.bioclip_service import get_bioclip_service
 
         labels = config.get("bioclip_labels")
         rank = config.get("bioclip_rank", settings.BIOCLIP_RANK)
-        preds = await get_bioclip_service().predict(crop_paths, labels=labels, rank=rank)
+        if keys is None:
+            preds = await get_bioclip_service().predict(crop_paths, labels=labels, rank=rank)
+        else:
+            preds = await get_bioclip_service().predict(crop_paths, labels=labels, rank=rank, keys=keys)
         return [ClassifierResult(p.filepath, p.scientific_name, p.common_name, p.score, p.rank) for p in preds]
 
 

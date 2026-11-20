@@ -1,4 +1,5 @@
 import { supabase } from '../config/supabase'
+import { postFileToS3, prepareUpload } from './objectStoreUpload'
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -108,8 +109,16 @@ export const apiClient = {
     request(path, { method: 'PATCH', body: JSON.stringify(data) }),
   put: (path: string, data?: unknown) =>
     request(path, { method: 'PUT', body: JSON.stringify(data) }),
-  upload: (path: string, formData: FormData) =>
-    request(path, { method: 'POST', body: formData }),
+  /** A multipart upload; on an S3-backed server the files go to the bucket first (objectStoreUpload). */
+  upload: async (path: string, formData: FormData) =>
+    request(path, {
+      method: 'POST',
+      body: await prepareUpload(path, formData, {
+        getConfig: () => request('/api/uploads/config'),
+        presign: (purpose, files) => request('/api/uploads/presign', { method: 'POST', body: JSON.stringify({ purpose, files }) }),
+        postFile: postFileToS3,
+      }),
+    }),
   del: (path: string, data?: any) =>
     request(path, { method: 'DELETE', body: data ? JSON.stringify(data) : undefined }),
 }

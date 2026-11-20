@@ -28,6 +28,11 @@ services:
       # iNaturalist OAuth
       - INAT_CLIENT_ID=${INAT_CLIENT_ID:-}
       - INAT_CLIENT_SECRET=${INAT_CLIENT_SECRET:-}
+      # AWS + REANNZ batch (2026-10_aws-reannz-migration); the defaults are today's path.
+      - OBJECT_STORE_BACKEND=${OBJECT_STORE_BACKEND:-azure}
+      - LOCAL_OBJECT_STORE_DIR=${LOCAL_OBJECT_STORE_DIR:-}
+      - WORKER_BACKEND=${WORKER_BACKEND:-local}
+      - WORKER_TOKEN_SHA256=${WORKER_TOKEN_SHA256:-}
       - INAT_REDIRECT_URI=${INAT_REDIRECT_URI:-http://localhost:8000/api/inat/callback}
       # Feature Flags
       - FF_INAT_ENABLED=${FF_INAT_ENABLED:-false}
@@ -115,4 +120,40 @@ services:
               count: 1
               capabilities: [gpu]
     restart: unless-stopped
+
+  # --- The REANNZ batch job, run here against this API (jobs/batch_infer.py) ---
+  # Inert unless WW_WORKER_TOKEN is set. To try the batch path locally: on the api set
+  # WORKER_BACKEND=lambda, OBJECT_STORE_BACKEND=local and WORKER_TOKEN_SHA256 to the SHA-256
+  # of WW_WORKER_TOKEN, then `docker compose --profile gpu run --rm batch-infer`. It leases
+  # until the queue is empty and exits; the api ingests each part in-process.
+  batch-infer:
+    build:
+      context: ./backend
+      target: gpu
+    profiles: ["gpu"]
+    command:
+      - sh
+      - -c
+      - >-
+        [ -n "$$WW_WORKER_TOKEN" ] || { echo "batch-infer: WW_WORKER_TOKEN unset, nothing to do"; exit 0; };
+        printf %s "$$WW_WORKER_TOKEN" > /tmp/ww.token &&
+        python -m app.jobs.batch_infer --api http://api:8000 --token-file /tmp/ww.token --work /tmp/work
+    environment:
+      - WW_WORKER_TOKEN=${WW_WORKER_TOKEN:-}
+      # Locally the weights download on first use (the cluster runs offline from a cache).
+      - HF_HUB_OFFLINE=0
+      - HF_TOKEN=${HF_TOKEN:-}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
+      - BIOCLIP_DEVICE=${BIOCLIP_DEVICE:-cuda}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      - api
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: "no"
 
