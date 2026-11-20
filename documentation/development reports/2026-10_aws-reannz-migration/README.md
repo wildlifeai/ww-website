@@ -1,6 +1,6 @@
 # AWS and REANNZ migration, approach B
 
-> **Status:** 🔧 Active, 2026-11-19: approach B is built behind settings whose defaults keep today's Azure path. wildlife.ai's AWS organization, the `ww-dev` account and Identity Center sign-in exist ([cloud-infrastructure.md](../../resources/cloud-infrastructure.md#aws)); no stack is deployed and no REANNZ resource exists. Next: the Lambda quota and the REANNZ email (step 0), then the `ww-dev` stacks (step 1).
+> **Status:** 🔧 Active, 2026-11-20: approach B is built behind settings whose defaults keep today's Azure path. wildlife.ai's AWS organization, the `ww-dev` account and Identity Center sign-in exist ([cloud-infrastructure.md](../../resources/cloud-infrastructure.md#aws)); no stack is deployed. The cluster side runs under the existing REANNZ project `wildlife03546`, where nothing for Wildlife Watcher exists yet. Next: the Lambda quota and the REANNZ email (step 0), then the `ww-dev` stacks (step 1).
 
 The design is [approach-b.md](approach-b.md), the proposal ranked first on 31 October 2026. The estate it replaces is [cloud-infrastructure.md](../../resources/cloud-infrastructure.md); the Google Cloud plan it supersedes is [2026-09_gcp-pilot-and-migration](../2026-09_gcp-pilot-and-migration/README.md).
 
@@ -108,9 +108,9 @@ From [approach-b.md](approach-b.md), section 4, in approach A's order as the rev
 
 | # | Step | Status | Rollback |
 |---|---|---|---|
-| 0 | REANNZ email (allocation of `wildlife03546`, login-node crontab, compute-node HTTPS to the API host, memory above the L4 bundle, a service account for the job); Supabase region; AWS account, Auckland enabled, Lambda quota | AWS done 2026-11-19 except the quota: `ww-dev` allows 10 concurrent Lambda executions, the stack reserves 15 and AWS keeps 100 unreserved, so request 1,000 (Service Quotas, `L-B99A9384`) before step 1. REANNZ email drafted, Supabase region not read | none |
+| 0 | REANNZ email (login-node crontab, compute-node HTTPS to the API host, memory above the L4 bundle, a service account for the job); Supabase region; AWS account, Auckland enabled, Lambda quota | Wildlife Watcher runs under the existing project `wildlife03546`, beside Spyfish, not a new one (decided 2026-11-20). AWS done 2026-11-19; the Lambda quota (`ww-dev` allows 10 concurrent executions, the stack reserves 15 and AWS keeps 100 unreserved) has 1,000 requested 2026-11-20 (Service Quotas, `L-B99A9384`), pending. REANNZ email drafted, Supabase region not read | none |
 | 1 | `infra/aws/shared.yaml` (`GitHubEnvironment=dev`), then `ww-dev` from `infra/aws/template.yaml` with bucket `wildlifewatcher-dev-media`, in the `ww-dev` account; SSM parameters | not started; templates written, never deployed | delete the stacks |
-| 2 | Code behind flags into `dev` | committed on `feat/aws-reannz-batch` in eight commits (2026-11-19), not merged | revert |
+| 2 | Code behind flags into `dev` | on `feat/aws-reannz-batch`, [pull request #442](https://github.com/wildlifeai/ww-website/pull/442) into `dev` (2026-11-20), not merged | revert |
 | 3 | Dev API on Lambda; Pages preview `VITE_API_BASE_URL`; `ALLOWED_ORIGINS` | not started | Pages preview env back to the ACA FQDN |
 | 4 | Dev cluster: SIF, weights, token, crontab; two weeks measuring seconds per photo, cold start, queue wait, RSU, ingest time, precomputed misses | not started; scripts written | comment out the crontab line |
 | 5 | `ww-prod`; the Azure prod API gets the `s3://` read path (in this branch) and a read-only key | not started | delete the stack |
