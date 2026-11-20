@@ -97,6 +97,14 @@ export function FaqPage() {
         <Link to="/guides/camera-ai-and-cloud-ai" style={{ color: 'var(--primary)' }}>How the AIs work together</Link>.
       </FaqItem>
 
+      <FaqItem q="Why do I still need to review the AI's identifications?">
+        Because the AI still gets some animals wrong, most often the rare and little-photographed
+        species that a project may care about most. For now, its answer is a suggestion until a
+        person confirms or corrects it. The research behind this, and how to review a photo, are
+        under "Why a person still checks the AI" in{' '}
+        <Link to="/guides/camera-ai-and-cloud-ai" style={{ color: 'var(--primary)' }}>How the AIs work together</Link>.
+      </FaqItem>
+
       <FaqItem q="What is the camera's focal length, and can I change it?">
         The main camera has a fixed <strong>3.04 mm</strong> lens (f/2.0) with a ~62° field of
         view — chosen for close-range monitoring: positioned 30–50 cm above a platform, it

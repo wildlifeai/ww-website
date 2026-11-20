@@ -1,9 +1,9 @@
 ---
 title: How Wildlife Watcher's AIs work together
-description: What the Camera AI on your device and the Cloud AI on the website each do, why one photo can have two opinions, and how the Wildlife Brain groups look-alikes
+description: What the Camera AI on your device and the Cloud AI on the website each do, why one photo can have two opinions, why a person still checks them, and how the Wildlife Brain groups look-alikes
 category: Analysis
 order: 20
-updated: 2026-07-11
+updated: 2026-11-20
 ---
 
 Wildlife Watcher identifies animals in two places — once on the camera itself, and again on the website after you upload — and then a third tool, the **Wildlife Brain**, groups the look-alikes to speed up your review. They are different tools with different jobs, and your photos benefit from all of them.
@@ -48,6 +48,22 @@ On the website, a photo can carry both opinions side by side, each with a small 
 - **👤 Reviewed** — a person has checked it.
 
 When they disagree, a person decides: **human review always wins**, then Cloud AI, then Camera AI. So the labels aren't a conflict to resolve — they're two independent checks that make it easy to trust the ones that agree and focus your attention on the ones that don't.
+
+## Why a person still checks the AI
+
+Neither AI is right every time, so the website treats every AI label as a suggestion. A photo only shows **👤 Reviewed** once a person has confirmed or corrected it.
+
+A 2026 study in the *Biodiversity Data Journal* shows why. It asked a general-purpose AI model, the kind behind chat assistants, to name the species in 10,000 photos of Colombian amphibians, birds, fish, mammals and reptiles. That is not the AI Wildlife Watcher uses, and the photos were nature photos shared online rather than camera-trap photos, but its lessons apply to any AI that names species:
+
+- **The fewer photos of a species there are online, the worse the AI does.** For species with fewer online photos than nine in ten others, the study estimated the AI would name the exact species only 6% to 12% of the time in most groups, and 41% of the time for mammals.
+- **Recently described species are hard too.** Accuracy fell sharply for species that scientists named in recent years, and in one case the AI gave an out-of-date name.
+- **Mistakes are not random, and some are far off.** Some answers were not even in the right group of animals, most often for fish and reptiles. In another example, a camera-trap AI suggested a species whose range does not include Colombia.
+
+The hard cases can be the ones that matter most. A wrong label on a rare species can hide a real sighting, or create a false one that sends a survey to the wrong place. The study recommends treating an AI's answer as a suggestion rather than a confirmed record, letting the AI say when it is unsure, checking each name against the species known from the area, and sending rare or newly described species to an expert.
+
+The small animals Wildlife Watcher is built to watch, such as skinks, frogs and invertebrates, are often the kind of species with few photos for an AI to learn from. So for now, a person makes the final call. To review a photo, open it on the **Media** page and choose **Confirm** if the AI is right, **Label** to pick the right species, or **Blank** if there is nothing in it. The [Wildlife Brain](/guides/wildlife-brain) lets you confirm a whole group of look-alikes at once.
+
+> **Source:** Paez Salamanca GN (2026) [Is conservation AI ready? Quantifying the challenges of automated species identification in Colombia](https://doi.org/10.3897/BDJ.14.e208137). *Biodiversity Data Journal* 14: e208137.
 
 ## Wildlife Brain — grouping look-alikes
 
