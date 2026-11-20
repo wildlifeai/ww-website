@@ -110,6 +110,11 @@ Rules:
   [2026-10_aws-reannz-migration](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md).
   A model call that bypasses `get_speciesnet_service()`, `get_bioclip_service()` or
   `get_dinov3_service()` breaks that path.
+* On AWS the API sits behind an API Gateway HTTP API: a request must finish within 30 s and a
+  response stay under 6 MB, or the caller gets a 503. Work that can take longer goes through
+  `enqueue_job`, a large result goes to the object store with a link, and uploads arrive as
+  `files_key`. The routes that break this today are in the migration report's "Left" table;
+  don't add another.
 
 Live infrastructure detail: `documentation/resources/cloud-infrastructure.md`. Everything under
 `documentation/development reports/_archive/` (including `v2-architecture-plan.md`) is **frozen

@@ -2,7 +2,7 @@
 
 How to deploy the Wildlife Watcher V2 platform (backend + frontend) to production.
 
-> **In progress, 2026-11-19:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path. The AWS accounts exist but nothing is deployed there, so everything below still describes how to deploy today. Design, status and the AWS deploy steps: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md); signing in to AWS: [cloud-infrastructure.md](cloud-infrastructure.md#signing-in-to-aws).
+> **In progress, 2026-11-20:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path. A dev stack runs on AWS, but no site points at it, so everything below still describes how to deploy today. Design, status and the AWS deploy steps: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md); signing in to AWS: [cloud-infrastructure.md](cloud-infrastructure.md#signing-in-to-aws).
 
 ## Table of Contents
 

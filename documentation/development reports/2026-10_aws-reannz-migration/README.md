@@ -1,6 +1,6 @@
 # AWS and REANNZ migration, approach B
 
-> **Status:** 🔧 Active, 2026-11-20: approach B is built behind settings whose defaults keep today's Azure path. wildlife.ai's AWS organization, the `ww-dev` account and Identity Center sign-in exist ([cloud-infrastructure.md](../../resources/cloud-infrastructure.md#aws)); no stack is deployed. The cluster side runs under the existing REANNZ project `wildlife03546`, where nothing for Wildlife Watcher exists yet. Next: the Lambda quota and the REANNZ email (step 0), then the `ww-dev` stacks (step 1).
+> **Status:** 🔧 Active, 2026-11-20: approach B is built behind settings whose defaults keep today's Azure path. wildlife.ai's AWS organization, the `ww-dev` account, Identity Center sign-in and the `ww-dev` stacks exist ([cloud-infrastructure.md](../../resources/cloud-infrastructure.md#aws)); the dev API answers `/health` on AWS, and nothing points at it yet. The cluster side gets its own REANNZ project, applied for from Victor's existing login; nothing for Wildlife Watcher exists on the cluster yet. Next: the budget, the REANNZ project and email (steps 0 and 1), then the dev cutover (step 3).
 
 The design is [approach-b.md](approach-b.md), the proposal ranked first on 31 October 2026. The estate it replaces is [cloud-infrastructure.md](../../resources/cloud-infrastructure.md); the Google Cloud plan it supersedes is [2026-09_gcp-pilot-and-migration](../2026-09_gcp-pilot-and-migration/README.md).
 
@@ -79,6 +79,8 @@ Defaults are today's behaviour. On AWS the stack sets the first group; every oth
 | Training as a tick-driven state machine | Not built | See "Left" |
 | Accounts not specified | One AWS account per environment (`ww-dev`, later `ww-prod`) in wildlife.ai's organization; `ww-shared` deploys in each, its role trusting only that account's GitHub environment (`GitHubEnvironment`) | A dev mistake cannot reach prod, and the management account holds no workloads |
 | Compose `gpu` profile replaces Redis and the ARQ worker | `batch-infer` added to the `gpu` profile, inert without `WW_WORKER_TOKEN` | The Azure path stays until teardown |
+| The `api` function on a Function URL with response streaming | An API Gateway HTTP API (`$default` route to the `api` function), the Web Adapter in buffered mode | Function URLs do not exist in `ap-southeast-6` (found at the first deploy, 2026-11-20; Victor chose this over a REST API or a Sydney API). A request must finish in 30 s and a response stay under 6 MB; the routes that cannot are under "Left" |
+| A budget in the environment stack | Set by hand in the management account ([cloud-infrastructure.md](../../resources/cloud-infrastructure.md#adding-an-aws-account)) | CloudFormation in `ap-southeast-6` has no `AWS::Budgets::Budget`, and a member account cannot create budgets until the payer account enables them |
 
 On the hero-crop BioCLIP path (`FF_PER_CROP_CLASSIFY_ENABLED` off) a Gemini box that outranks every SpeciesNet box gives a hero the cluster did not crop; that photo gets no BioCLIP row and the part counts a miss. The per-crop path, on in production, matches exactly (parity tests).
 
@@ -87,14 +89,17 @@ On the hero-crop BioCLIP path (`FF_PER_CROP_CLASSIFY_ENABLED` off) a Gemini box 
 | Item | Effect until done | Where |
 |---|---|---|
 | Export link that outlives the Lambda role session (HMAC route redirecting to a fresh presigned URL) | An emailed export link can stop working within hours on AWS | `backend/app/domain/camtrapdp_export.py`, `backend/app/routers/exports.py` |
-| `train_species_brain_job` resumable, polled by the tick | Can exceed the 15-minute limit on the `cpu` function; keep `FF_MODEL_TRAINING_ENABLED` off on AWS | `backend/app/jobs/definitions.py` |
+| `train_species_brain_job` as a batch job on the REANNZ cluster, where training is planned (camera models, per-project species models, larger fine-tunes on an A100; 2026-11-20) | Can exceed the 15-minute limit on the `cpu` function; keep `FF_MODEL_TRAINING_ENABLED` off on AWS | `backend/app/jobs/definitions.py`, `backend/app/jobs/dispatch.py` |
 | `reprocess_project_job` and `reprocess_all_job` fanned out to per-deployment embed batches | On AWS they reach the `cpu` function, which cannot embed, and fail with a clear message | `backend/app/jobs/dispatch.py` |
 | Drive archive copy and path rewrite (`migrate_archive_job`, step 7) | `gdrive://` rows keep resolving through the media route | |
 | Upload dock copy: cloud AI arrives in the next batch window | Users see a queued AI job for up to the window | `frontend/src/contexts/UploadContext.tsx` |
 | `scripts/parity_audit.py`, `scripts/fetch-env.sh` for SSM and Lambda | Azure-only until then | |
 | A test of the flush middleware on a Lambda-mounted app | Covered by reading only | `backend/app/main.py` |
 | Least-privilege review of `infra/aws/shared.yaml`'s deploy role; action versions in `deploy-aws.yml` | Neither has run | |
+| The new REANNZ project's code in `cluster/reannz/*` (`--account` and the `/nesi/project` and `/nesi/nobackup` paths), and in the cluster layout and crontab below | They name Spyfish's `wildlife03546` until REANNZ assigns the code | `cluster/reannz/` |
 | Executable bit on `cluster/reannz/*` | Set with `git update-index --chmod=+x` when committing, or `chmod +x` on the cluster | |
+| Routes that do their work inside the request (audit 2026-11-20): `POST /api/pipeline/run` (SpeciesNet and BioCLIP inline, and the Lambda image has neither), `/api/clustering/analyze` and `/analyze/csv` (multipart only), `/api/camtrapdp/import`, `/api/inat/publish` (a 120 s budget), `/api/inat/sync`, `GET /api/reports/gbf`, `POST /api/pipeline/events/cluster` | On AWS each can outrun the HTTP API's 30 s and answer 503; on Azure nothing changes. Each becomes a job, or a shorter budget where the route already resumes | `backend/app/routers/` |
+| Responses that can pass 6 MB: `POST /api/worker/lease` (up to 2,000 presigned URLs), non-`s3://` originals through `GET /api/media/{id}/image` and the lease media route, `POST /api/brain/clusters/multi` (no deployment limit); and `MAX_UPLOAD_IMAGES_PER_REQUEST` (500) read in series in `/api/exif/parse` | Fail on Lambda only | page the lease manifest, redirect originals, cap the request |
 
 ## ww-backend, issue descriptions for Victor (none required by this branch)
 
@@ -108,8 +113,8 @@ From [approach-b.md](approach-b.md), section 4, in approach A's order as the rev
 
 | # | Step | Status | Rollback |
 |---|---|---|---|
-| 0 | REANNZ email (login-node crontab, compute-node HTTPS to the API host, memory above the L4 bundle, a service account for the job); Supabase region; AWS account, Auckland enabled, Lambda quota | Wildlife Watcher runs under the existing project `wildlife03546`, beside Spyfish, not a new one (decided 2026-11-20). AWS done 2026-11-19; the Lambda quota (`ww-dev` allows 10 concurrent executions, the stack reserves 15 and AWS keeps 100 unreserved) has 1,000 requested 2026-11-20 (Service Quotas, `L-B99A9384`), pending. REANNZ email drafted, Supabase region not read | none |
-| 1 | `infra/aws/shared.yaml` (`GitHubEnvironment=dev`), then `ww-dev` from `infra/aws/template.yaml` with bucket `wildlifewatcher-dev-media`, in the `ww-dev` account; SSM parameters | not started; templates written, never deployed | delete the stacks |
+| 0 | A REANNZ project for Wildlife Watcher and the email (allocation class, login-node crontab, compute-node HTTPS to the API host, memory above the L4 bundle, a service account for the job); Supabase region; AWS account, Auckland enabled, Lambda quota | A new project, applied for from Victor's existing REANNZ login, separate from Spyfish's `wildlife03546` (2026-11-20); not applied for yet. The request to July 2027: about 900 L4 hours (600 inference, 300 training), 50 A100 hours, 200 GB project storage, 100 GB scratch. L4 is the cheapest GPU on the 30 October price list. AWS done: the Lambda quota (`ww-dev` allowed 10 concurrent executions, the stack reserves 15 and AWS keeps 100 unreserved) is 1,000 since 2026-11-20. REANNZ email drafted, Supabase region not read | none |
+| 1 | `infra/aws/shared.yaml` (`GitHubEnvironment=dev`), then `ww-dev` from `infra/aws/template.yaml` with bucket `wildlifewatcher-dev-media`, in the `ww-dev` account; SSM parameters; the account's budget | 2026-11-20: `ww-shared` and `ww-dev` deployed from a workstation, `/health` 200 on the stack's `ApiUrl`; only `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` in `/ww/dev/`, every flag off; budget not set (management account) | delete the stacks |
 | 2 | Code behind flags into `dev` | on `feat/aws-reannz-batch`, [pull request #442](https://github.com/wildlifeai/ww-website/pull/442) into `dev` (2026-11-20), not merged | revert |
 | 3 | Dev API on Lambda; Pages preview `VITE_API_BASE_URL`; `ALLOWED_ORIGINS` | not started | Pages preview env back to the ACA FQDN |
 | 4 | Dev cluster: SIF, weights, token, crontab; two weeks measuring seconds per photo, cold start, queue wait, RSU, ingest time, precomputed misses | not started; scripts written | comment out the crontab line |
@@ -127,7 +132,7 @@ From [approach-b.md](approach-b.md), section 4, in approach A's order as the rev
 | Every other setting and secret | SSM SecureString `/ww/<env>/<NAME>` |
 | Signing in to AWS | Identity Center, the `ww-dev` profile: [cloud-infrastructure.md](../../resources/cloud-infrastructure.md#signing-in-to-aws) |
 | Variables for `deploy-aws.yml` | Per GitHub environment (`dev`, `staging`), because each is its own AWS account: `AWS_DEPLOY_ROLE_ARN`, `ECR_REGISTRY`, `AWS_REGION` (`ap-southeast-6`). Repository-wide: `AWS_DEPLOY_ENABLED`, `AWS_BUCKET_DEV` (`wildlifewatcher-dev-media`), `AWS_BUCKET_PROD` (`wildlifewatcher-prod-media`), `AWS_ALARM_EMAIL` |
-| The first `ww-dev` deploy | `workflow_dispatch` only runs a workflow that exists on the default branch (`main`), so until a release carries `deploy-aws.yml` there, step 1 runs from a workstation: Docker with buildx for the arm64 `lambda` image, the SAM CLI, and the `ww-dev` profile |
+| The first `ww-dev` deploy | `workflow_dispatch` only runs a workflow that exists on the default branch (`main`), so until a release carries `deploy-aws.yml` there, step 1 runs from a workstation: Docker with buildx for the arm64 `lambda` image (`--platform linux/arm64 --provenance=false`; about 15 minutes emulated, most of it building `hdbscan`), the SAM CLI, and the `ww-dev` profile. `sam deploy` needs `--image-repository <registry>/ww-backend`. On Windows, `docker login` to ECR fails in Credential Manager because the token is too long: push with a temporary `DOCKER_CONFIG` whose `config.json` already holds the registry's `auths` entry, then delete it |
 | GHCR package visibility | public, once, after the first push of `ww-backend-gpu` |
 | Cluster layout | `/nesi/project/wildlife03546/ww/{bin,sif,models,slurm_logs,logs}`; the three scripts in `bin/`; weights under `models/` (`hf`, `kaggle`, `torch`) cached once with `HF_TOKEN` in the session only |
 | Crontab | `*/30 * * * * /nesi/project/wildlife03546/ww/bin/ww_cron.sh <env> >> /nesi/project/wildlife03546/ww/logs/cron-<env>.log 2>&1` |

@@ -3,7 +3,7 @@
 > **Status:** 🟢 Living — the authoritative map of every cloud resource the platform uses, what it's
 > for, and how to keep it from drifting into sprawl. Pairs with [deployment-guide](deployment-guide.md)
 > (*how to deploy*); this doc is *what exists and how to maintain it*. **Re-audit quarterly** (see the
-> [review checklist](#periodic-review-checklist)). Last updated: **2026-11-19**.
+> [review checklist](#periodic-review-checklist)). Last updated: **2026-11-20**.
 
 > **In progress, 2026-11-19:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path. The AWS accounts and sign-in exist ([AWS](#aws)) but nothing is deployed there, so everything else below still describes the live estate. Design and status: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md).
 
@@ -205,17 +205,19 @@ but it's a product call: it's what keeps the public demo button fast.
 
 ## AWS
 
-> **Being set up, nothing live (2026-11-19).** The accounts and sign-in exist for the move in
+> **Dev deployed, nothing live (2026-11-20).** The accounts, sign-in and the `ww-dev` stacks exist
+> for the move in
 > [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md).
-> No stack is deployed and no traffic reaches AWS.
+> The dev API answers on AWS, but no site points at it, so no traffic reaches AWS.
 
 | Piece | Setting | Why |
 |---|---|---|
 | Organization | wildlife.ai's own, all features on | The wildlife.ai account left an outside organization on 2026-11-19, so it pays its own bills and receives its own credits |
 | Management account (`Wildlife.ai`) | Billing, the organization and IAM Identity Center, no workloads | Organization policies cannot restrict the management account |
 | `ww-dev` | Member account for the dev stack | A dev mistake cannot reach prod data, and closing the account removes everything in it |
+| In `ww-dev` (2026-11-20) | Stack `ww-shared`: ECR repository `ww-backend`, deploy role `ww-gha-deploy`. Stack `ww-dev`: functions `ww-dev-api` and `ww-dev-cpu`, an HTTP API (its address is the stack's `ApiUrl` output), bucket `wildlifewatcher-dev-media`, queue `ww-dev-dlq`, the 15-minute tick, alarms to the maintainer. SSM: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` under `/ww/dev/`, every flag off. Lambda concurrency quota 1,000 | Deployed from a workstation; `infra/aws/` holds both templates |
 | `ww-prod` | Not created yet; made like `ww-dev` at the prod step | |
-| Region | Asia Pacific (New Zealand), `ap-southeast-6`, in every account | An opt-in region: a new account starts with it off ([Adding an account](#adding-an-aws-account)) |
+| Region | Asia Pacific (New Zealand), `ap-southeast-6`, in every account | An opt-in region: a new account starts with it off ([Adding an account](#adding-an-aws-account)). It has no Lambda Function URLs and no CloudFormation budget resource (checked 2026-11-20), so the API sits behind an API Gateway HTTP API and budgets are set by hand |
 | IAM Identity Center | Single-Region instance in Auckland, its own user directory | Multi-Region would copy users to US West (Oregon) and needs a KMS key |
 | Permission set | `AdministratorAccess`, 8-hour sessions, assigned on `ww-dev` | |
 | Buckets | `wildlifewatcher-dev-media`, `wildlifewatcher-prod-media` | Each environment's stack creates its own; both names were free on 2026-11-19 |
@@ -280,15 +282,18 @@ aws account enable-region --account-id <new account ID> --region-name ap-southea
 Then request 1,000 concurrent Lambda executions for the new account in Service Quotas (quota
 `L-B99A9384`): a new account can start at 10, the environment stack reserves 15, and AWS always
 keeps 100 unreserved, so the stack cannot deploy until the increase lands. `ww-dev` started at
-10. Last, assign the permission set on the new account in Identity Center and add a profile
-for it like `ww-dev`'s. `enable-region` for another account works because the organization's trusted
+10. In the management account's Billing and Cost Management, add the budget: monthly cost,
+US$20, filtered to the new linked account, an email at 80% of actual spend. Last, assign the
+permission set on the new account in Identity Center and add a profile for it like `ww-dev`'s. `enable-region` for another account works because the organization's trusted
 access for AWS Account Management is on (since 2026-11-19).
 
 ### How to keep AWS clean
 - **Audit:** every resource in a member account belongs to a CloudFormation stack, `ww-shared` or
   `ww-<env>`; anything else is sprawl. The management account holds no workloads.
-- **Cost:** each environment stack carries an AWS Budget (`ww-<env>-monthly`) that emails the
-  stack's alarm address. Check Billing and Cost Management monthly once a stack exists.
+- **Cost:** each environment account has an AWS Budget (`ww-<env>-monthly`, US$20, an email at
+  80%) set in the management account, not in the stack: CloudFormation in `ap-southeast-6` has
+  no budget resource, and a member account cannot create one until the payer account enables
+  budgets. Check Billing and Cost Management monthly once a stack exists.
 - **Access:** every Identity Center user is someone who still needs access.
 
 ---

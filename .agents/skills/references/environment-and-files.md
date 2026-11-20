@@ -74,6 +74,14 @@ How the accounts are laid out and how a person signs in:
   parameter, an account, a quota or an Identity Center user needs the maintainer's yes first.
 * This repository is public: account IDs, the access portal address and ARNs that carry an
   account ID stay out of it. GitHub variables and `~/.aws/config` hold them.
+* CI does not check `infra/aws/*.yaml`. After a change, run
+  `sam validate --lint --template-file infra/aws/template.yaml --profile ww-dev --region ap-southeast-6`,
+  and before adding a resource type, check Auckland offers it:
+  `aws cloudformation describe-type --type RESOURCE --type-name <type> --profile ww-dev --region ap-southeast-6`.
+  Function URLs (`AWS::Lambda::Url`) and `AWS::Budgets::Budget` are missing there.
+* Deploying from a workstation, including the Windows ECR login trap: the "Setting up step 1"
+  table in the
+  [migration report](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md#setting-up-step-1-and-step-4-by-hand).
 
 ## Docker trap: a bind-mount source that does not exist
 
