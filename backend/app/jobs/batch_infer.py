@@ -287,7 +287,7 @@ async def run(api: Api, work: Path, models: Optional[Models] = None, max_leases:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Lease work from the API, run the models, upload results parts.")
-    parser.add_argument("--api", required=True, help="API base URL, e.g. https://<id>.lambda-url.ap-southeast-6.on.aws")
+    parser.add_argument("--api", required=True, help="API base URL, e.g. https://<id>.execute-api.ap-southeast-6.amazonaws.com")
     parser.add_argument("--token-file", required=True, help="File holding the environment's lease token (mode 600)")
     parser.add_argument("--work", required=True, help="Scratch directory for the photos (nobackup)")
     parser.add_argument("--max-leases", type=int, default=0, help="Stop after this many leases (0: until none is left)")

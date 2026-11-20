@@ -85,6 +85,7 @@ jobs:
         run: |
           if [ "$TARGET" = prod ]; then BUCKET="${{ vars.AWS_BUCKET_PROD }}"; else BUCKET="${{ vars.AWS_BUCKET_DEV }}"; fi
           sam deploy --template-file infra/aws/template.yaml --stack-name "ww-$TARGET" \
+            --image-repository "${{ vars.ECR_REGISTRY }}/ww-backend" \
             --parameter-overrides "Env=$TARGET" "ImageUri=$IMAGE" "BucketName=$BUCKET" "AlarmEmail=${{ vars.AWS_ALARM_EMAIL }}" \
             --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --no-confirm-changeset
       - name: Health check

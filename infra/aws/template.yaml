@@ -13,6 +13,9 @@
 # Secrets and every application setting live in SSM Parameter Store under /ww/<env>/ as
 # SecureString, one parameter per variable (app/aws_params.py loads them at cold start). This
 # template only sets what the stack itself decides (role, bucket, function names).
+#
+# The account's budget is not here: CloudFormation in ap-southeast-6 has no AWS::Budgets::Budget,
+# so it is created once per account with the CLI (cloud-infrastructure.md, "Adding an AWS account").
 
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
@@ -34,10 +37,7 @@ Parameters:
     Description: Browser origins allowed to POST uploads to and GET originals from the bucket
   AlarmEmail:
     Type: String
-    Description: Where the alarms and the budget warning go
-  MonthlyBudgetUsd:
-    Type: Number
-    Default: 20
+    Description: Where the alarms go
   ApiReservedConcurrency:
     Type: Number
     Default: 10
@@ -54,10 +54,9 @@ Mappings:
     prod:
       TickRate: rate(5 minutes)
 
+# PackageType and ImageUri are set on each function: SAM does not accept them in Globals.
 Globals:
   Function:
-    PackageType: Image
-    ImageUri: !Ref ImageUri
     Architectures: [arm64]
     Environment:
       Variables:
@@ -132,20 +131,31 @@ Resources:
       MessageRetentionPeriod: 1209600
 
   # ── Functions ────────────────────────────────────────────────────
+  # Lambda Function URLs do not exist in ap-southeast-6 (checked 2026-11-20), so an API Gateway
+  # HTTP API fronts the api function. A request must finish within its 30-second cap and a
+  # response stay under Lambda's 6 MB synchronous limit; longer work goes through enqueue_job.
+  # The function keeps 300 s for the scheduled tick, which does not pass through the API.
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub ww-${Env}-api
+      PackageType: Image
+      ImageUri: !Ref ImageUri
       MemorySize: 1024
       Timeout: 300
       ReservedConcurrentExecutions: !Ref ApiReservedConcurrency
       Environment:
         Variables:
           WW_LAMBDA_ROLE: api
-      FunctionUrlConfig:
-        AuthType: NONE
-        InvokeMode: RESPONSE_STREAM
       Events:
+        Http:
+          # No path or method: the HTTP API's $default route sends every request here.
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
         Tick:
           Type: ScheduleV2
           Properties:
@@ -168,6 +178,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub ww-${Env}-cpu
+      PackageType: Image
+      ImageUri: !Ref ImageUri
       MemorySize: 3008
       Timeout: 900
       EphemeralStorage:
@@ -291,29 +303,10 @@ Resources:
       TreatMissingData: notBreaching
       AlarmActions: [!Ref AlarmTopic]
 
-  MonthlyBudget:
-    Type: AWS::Budgets::Budget
-    Properties:
-      Budget:
-        BudgetName: !Sub ww-${Env}-monthly
-        BudgetType: COST
-        TimeUnit: MONTHLY
-        BudgetLimit:
-          Amount: !Ref MonthlyBudgetUsd
-          Unit: USD
-      NotificationsWithSubscribers:
-        - Notification:
-            NotificationType: ACTUAL
-            ComparisonOperator: GREATER_THAN
-            Threshold: 80
-          Subscribers:
-            - SubscriptionType: EMAIL
-              Address: !Ref AlarmEmail
-
 Outputs:
   ApiUrl:
     Description: The API base URL for VITE_API_BASE_URL and the cluster's WW_API
-    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
   BucketName:
     Value: !Ref MediaBucket
   DeadLetterQueueUrl:
