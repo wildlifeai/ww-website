@@ -1764,8 +1764,25 @@ async def start_thumbnail_backfill(deployment_id: str, user_id: str | None, dela
     grid's "Processing…" covers that deployment while it waits and runs. A job still waiting for
     the deployment is reused; one that has started gets a follow-up, which picks up the photos it
     missed (the backfill only makes the thumbnails that are missing).
+
+    Under ``WORKER_BACKEND=lambda`` the job goes to the ``cpu`` function at once: a task left
+    running in this process stops when the invocation returns, so it would never start. Each
+    upload chunk then gets its own job, which is harmless for the same reason.
     """
+    from app.config import settings
     from app.jobs.runner import enqueue_local_job
+
+    if settings.WORKER_BACKEND == "lambda":
+        from app.jobs.dispatch import enqueue_job
+
+        job_id = await create_job(
+            user_id=user_id,
+            kind="media_prep",
+            label=f"Thumbnails for deployment {deployment_id[:8]}",
+            deployment_ids=[deployment_id],
+        )
+        await enqueue_job("backfill_thumbnails_job", job_id, deployment_id)
+        return job_id
 
     waiting = _pending_thumbnails.get(deployment_id)
     if waiting:

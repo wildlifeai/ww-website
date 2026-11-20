@@ -115,6 +115,10 @@ Rules:
   `enqueue_job`, a large result goes to the object store with a link, and uploads arrive as
   `files_key`. The routes that break this today are in the migration report's "Left" table;
   don't add another.
+* On Lambda a task left running in the process (`enqueue_local_job`, `asyncio.create_task`)
+  stops when the invocation returns, so the job never finishes and the reaper fails it an hour
+  later. Code that can run there dispatches through `enqueue_job`, which invokes the `cpu`
+  function; `start_thumbnail_backfill` shows the branch.
 
 Live infrastructure detail: `documentation/resources/cloud-infrastructure.md`. Everything under
 `documentation/development reports/_archive/` (including `v2-architecture-plan.md`) is **frozen

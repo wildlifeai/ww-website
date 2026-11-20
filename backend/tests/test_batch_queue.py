@@ -66,6 +66,24 @@ async def test_lambda_backend_sends_cpu_jobs_to_the_cpu_function(monkeypatch):
     invoke.assert_awaited_once_with("export_camtrapdp_originals_job", (JOB, {"p": 1}, {"c": 2}), {})
 
 
+async def test_lambda_thumbnail_backfill_goes_to_the_cpu_function(monkeypatch):
+    """A background task would stop when the invocation returns, so the job is invoked instead."""
+    from app.jobs import definitions
+
+    monkeypatch.setattr(settings, "WORKER_BACKEND", "lambda")
+    monkeypatch.setattr(settings, "CPU_FUNCTION_NAME", "ww-dev-cpu")
+    monkeypatch.setattr(definitions, "create_job", AsyncMock(return_value=JOB))
+    invoke = AsyncMock()
+    monkeypatch.setattr(lambda_invoke, "invoke_job", invoke)
+    local = []
+    monkeypatch.setattr("app.jobs.runner.enqueue_local_job", lambda coro: local.append(coro.close()))
+    dep = "d0000000-0000-0000-0000-000000000001"
+    assert await definitions.start_thumbnail_backfill(dep, "u1", delay_s=20) == JOB
+    invoke.assert_awaited_once_with("backfill_thumbnails_job", (JOB, dep), {})
+    assert local == []
+    assert dep not in definitions._pending_thumbnails
+
+
 async def test_in_process_jobs_stay_in_process_even_with_redis(monkeypatch):
     """The five call sites that used enqueue_local_job keep running in the API process on Azure."""
     monkeypatch.setattr(settings, "REDIS_URL", "redis://localhost:6379")
