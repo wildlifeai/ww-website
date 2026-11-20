@@ -36,6 +36,15 @@ def local(monkeypatch, tmp_path):
     return tmp_path
 
 
+def test_presigned_urls_use_the_regional_endpoint():
+    """Auckland is an opt-in region: the global s3.amazonaws.com host does not serve its buckets."""
+    client = object_store.new_s3_client(region_name="ap-southeast-6", aws_access_key_id="testing", aws_secret_access_key="testing")
+    post = client.generate_presigned_post("wildlifewatcher-dev-media", "incoming/u1/a.jpg")
+    get = client.generate_presigned_url("get_object", Params={"Bucket": "wildlifewatcher-dev-media", "Key": "k"})
+    assert post["url"] == "https://wildlifewatcher-dev-media.s3.ap-southeast-6.amazonaws.com/"
+    assert get.startswith("https://wildlifewatcher-dev-media.s3.ap-southeast-6.amazonaws.com/k?")
+
+
 def _body(data: bytes) -> StreamingBody:
     return StreamingBody(io.BytesIO(data), len(data))
 
