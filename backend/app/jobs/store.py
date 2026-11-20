@@ -212,16 +212,29 @@ async def reap_stale_jobs(max_age_minutes: int = 60) -> int:
     def _run() -> int:
         client = create_service_client()
         resp = (
-            client.table("api_jobs").select("id, job_data, updated_at").in_("status", [JobStatus.QUEUED.value, JobStatus.PROCESSING.value]).execute()
+            client.table("api_jobs")
+            .select("id, status, job_data, updated_at")
+            .in_("status", [JobStatus.QUEUED.value, JobStatus.PROCESSING.value])
+            .execute()
         )
         reaped = 0
         for row in rows_of(resp):
             jd = row.get("job_data") or {}
+            # A job waiting for, or leased to, the REANNZ batch has its own clock.
+            action, reason = batch_reap_decision(row.get("status") or jd.get("status") or "", jd)
+            if action == "keep":
+                continue
+            if action == "requeue":
+                jd = requeued_job_data(jd, reason)
+                client.table("api_jobs").update({"status": jd["status"], "job_data": jd}).eq("id", row["id"]).execute()
+                _remember(row["id"], jd)
+                logger.warning("batch_job_requeued", job_id=row["id"], attempts=jd["dispatch"].get("attempts"))
+                continue
             last = jd.get("updated_at") or row.get("updated_at") or ""
-            if not last or last >= cutoff:
+            if action != "fail" and (not last or last >= cutoff):
                 continue
             jd["status"] = JobStatus.FAILED.value
-            jd["error"] = f"Stalled: no progress for over {max_age_minutes} minutes."
+            jd["error"] = reason if action == "fail" else f"Stalled: no progress for over {max_age_minutes} minutes."
             jd["message"] = "❌ Failed: the job stalled and was cleaned up automatically."
             jd["updated_at"] = datetime.now(timezone.utc).isoformat()
             client.table("api_jobs").update({"status": jd["status"], "job_data": jd}).eq("id", row["id"]).execute()
@@ -236,6 +249,119 @@ async def reap_stale_jobs(max_age_minutes: int = 60) -> int:
     except Exception as e:
         logger.warning("reap_stale_jobs_failed", error=str(e))
         return 0
+
+
+def batch_lease_name(lease_id: str) -> str:
+    """The ``services.locks`` name of one cluster lease."""
+    return f"batch-lease:{lease_id}"
+
+
+def batch_reap_decision(status: str, jd: dict, now: Optional[datetime] = None) -> tuple[Optional[str], str]:
+    """What the reaper does with a row of the REANNZ batch: ``keep``, ``requeue``, ``fail`` or None (the 60-minute rule).
+
+    A queued batch job waits for a window and the cluster's queue, so it is spared for
+    ``BATCH_MAX_QUEUE_HOURS``. A leased job lives while its lease row (``services.locks``)
+    does: an expired lease is requeued until ``BATCH_MAX_ATTEMPTS``, then failed. A released
+    lease means the cluster finished and ingest owns the job, so the usual rule applies.
+    """
+    from datetime import timedelta  # noqa: PLC0415
+
+    from app.config import settings  # noqa: PLC0415
+
+    dispatch = jd.get("dispatch")
+    if not dispatch or dispatch.get("backend") != "batch":
+        return None, ""
+    now = now or datetime.now(timezone.utc)
+    if status == JobStatus.QUEUED.value:
+        queued_at = dispatch.get("queued_at") or jd.get("created_at") or ""
+        limit = (now - timedelta(hours=settings.BATCH_MAX_QUEUE_HOURS)).isoformat()
+        if queued_at and queued_at < limit:
+            return "fail", f"Waited over {settings.BATCH_MAX_QUEUE_HOURS} hours for the GPU cluster."
+        return "keep", ""
+    lease = jd.get("lease") or {}
+    if status != JobStatus.PROCESSING.value or not lease.get("id"):
+        return None, ""
+    from app.services.locks import lease_state  # noqa: PLC0415
+
+    state = lease_state(batch_lease_name(lease["id"]))
+    if state == "held":
+        return "keep", ""
+    if state == "released":
+        return None, ""
+    if int(dispatch.get("attempts") or 0) + 1 < settings.BATCH_MAX_ATTEMPTS:
+        return "requeue", "Requeued: the GPU cluster job stopped reporting."
+    return "fail", "The GPU cluster job stopped reporting, and so did its retry."
+
+
+def requeued_job_data(jd: dict, message: str) -> dict:
+    """``jd`` back in the queue for the next lease, with one attempt used."""
+    out = {k: v for k, v in jd.items() if k != "lease"}
+    dispatch = dict(jd.get("dispatch") or {})
+    dispatch["attempts"] = int(dispatch.get("attempts") or 0) + 1
+    out["dispatch"] = dispatch
+    out["status"] = JobStatus.QUEUED.value
+    out["message"] = message
+    out["updated_at"] = datetime.now(timezone.utc).isoformat()
+    return out
+
+
+async def set_job_dispatch(job_id: str, spec: dict) -> bool:
+    """Record how a job is to run (``job_data.dispatch``) and write it through to Supabase.
+
+    The REANNZ batch reads this record from ``api_jobs``: no broker holds the job. Awaited,
+    so the row carries the record before the caller returns.
+    """
+    raw = await _get_raw(job_id)
+    if not raw:
+        logger.warning("set_job_dispatch_not_found", job_id=job_id)
+        return False
+    data = json.loads(raw)
+    data["dispatch"] = spec
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _memory_store[f"job:{job_id}"] = json.dumps(data)
+    await flush_pending_syncs(job_id)
+    await _sync_to_supabase(job_id, flush=True)
+    return True
+
+
+def _remember(job_id: str, jd: dict) -> None:
+    """Keep this process's memory copy equal to a row just written."""
+    data = dict(jd)
+    events = data.pop("events", None)
+    if events is not None:
+        _memory_events[f"job:{job_id}:events"] = [json.dumps(e) for e in events]
+    _memory_store[f"job:{job_id}"] = json.dumps(data)
+
+
+async def patch_job_data(job_id: str, patch: dict, *, status: Optional[JobStatus] = None) -> Optional[dict]:
+    """Merge ``patch`` into the job's row as Supabase holds it now, never a memory copy.
+
+    For writers in another process from the job's runner (the lease endpoints, ingest), whose
+    memory copy may be stale. Returns the new ``job_data``, or None when the row is gone.
+    """
+
+    def _run() -> Optional[dict]:
+        client = create_service_client()
+        rows = rows_of(client.table("api_jobs").select("job_data").eq("id", job_id).execute())
+        if not rows:
+            return None
+        jd = dict(rows[0].get("job_data") or {})
+        jd.update(patch)
+        if status is not None:
+            jd["status"] = status.value
+        jd["updated_at"] = datetime.now(timezone.utc).isoformat()
+        client.table("api_jobs").update({"status": jd.get("status") or JobStatus.QUEUED.value, "job_data": jd}).eq("id", job_id).execute()
+        return jd
+
+    jd = await asyncio.to_thread(_run)
+    if jd is not None:
+        _remember(job_id, jd)
+    return jd
+
+
+async def refresh_job(job_id: str) -> bool:
+    """Reload this process's copy of a job from Supabase, before working on a job another process touched."""
+    return await asyncio.to_thread(_hydrate_from_supabase, job_id) is not None
 
 
 async def create_job(

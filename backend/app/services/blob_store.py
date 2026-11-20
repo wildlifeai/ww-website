@@ -6,6 +6,9 @@ Used for model conversion: the API process stores the uploaded ZIP in Redis,
 the worker retrieves it by job_id, processes it, then deletes it.
 
 Blobs auto-expire after 1 hour as a safety net.
+
+Under ``WORKER_BACKEND=lambda`` the job runs in the CPU function, not this process, so the
+three functions hand off through the object store (``handoff-<key>`` in its buffer) instead.
 """
 
 import asyncio
@@ -22,8 +25,19 @@ BLOB_DIR = Path(tempfile.gettempdir()) / "ww_blobs"
 BLOB_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _shared() -> bool:
+    from app.config import settings
+
+    return settings.WORKER_BACKEND == "lambda"
+
+
 async def store_blob(key: str, data: bytes, metadata: dict | None = None) -> None:
     """Store a binary blob to the local temp filesystem."""
+    if _shared():
+        from app.services import object_store
+
+        await object_store.store_blob(f"handoff-{key}", data, metadata=metadata)
+        return
     data_path = BLOB_DIR / f"{key}.data"
     meta_path = BLOB_DIR / f"{key}.meta"
 
@@ -39,6 +53,10 @@ async def store_blob(key: str, data: bytes, metadata: dict | None = None) -> Non
 
 async def retrieve_blob(key: str) -> tuple[bytes | None, dict | None]:
     """Retrieve a blob and its metadata from the local temp filesystem."""
+    if _shared():
+        from app.services import object_store
+
+        return await object_store.retrieve_blob(f"handoff-{key}")
     data_path = BLOB_DIR / f"{key}.data"
     meta_path = BLOB_DIR / f"{key}.meta"
 
@@ -57,6 +75,11 @@ async def retrieve_blob(key: str) -> tuple[bytes | None, dict | None]:
 
 async def delete_blob(key: str) -> None:
     """Delete a blob and its metadata from disk."""
+    if _shared():
+        from app.services import object_store
+
+        await object_store.delete_blob(f"handoff-{key}")
+        return
     data_path = BLOB_DIR / f"{key}.data"
     meta_path = BLOB_DIR / f"{key}.meta"
 

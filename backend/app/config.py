@@ -11,14 +11,19 @@ from typing import Literal, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+from app.aws_params import load_parameters_into_environ
+
 
 class Settings(BaseSettings):
     """Application settings, loaded from environment variables / .env file."""
 
     # ── Supabase ─────────────────────────────────────────────────────
-    SUPABASE_URL: str = Field(..., description="Supabase project URL")
-    SUPABASE_ANON_KEY: str = Field(..., description="Supabase anonymous/public key")
-    SUPABASE_SERVICE_ROLE_KEY: str = Field(..., description="Supabase service-role key (admin ops only)")
+    # Empty defaults so the REANNZ GPU image (jobs/batch_infer.py), which has no database
+    # access by design, can import the app. The API refuses to start without all three
+    # (require_supabase, called from main.py).
+    SUPABASE_URL: str = Field("", description="Supabase project URL")
+    SUPABASE_ANON_KEY: str = Field("", description="Supabase anonymous/public key")
+    SUPABASE_SERVICE_ROLE_KEY: str = Field("", description="Supabase service-role key (admin ops only)")
 
     # ── Redis (future — not yet required) ────────────────────────────
     REDIS_URL: str = Field("", description="Redis connection URL (empty = in-memory fallback)")
@@ -280,6 +285,40 @@ class Settings(BaseSettings):
     )
     AZURE_STORAGE_CONTAINER_NAME: str = Field("wildlife-watcher-uploads", description="Default container name in Azure Blob Storage")
 
+    # ── Object store and the AWS + REANNZ batch path ──────────────────
+    # Every default keeps today's Azure behaviour. Design and status:
+    # documentation/development reports/2026-10_aws-reannz-migration/README.md
+    OBJECT_STORE_BACKEND: Literal["azure", "s3", "local"] = Field(
+        "azure",
+        description="Where the upload buffer, export ZIPs and batch results live: azure (Blob, today), s3, or local (a directory, for dev and tests)",
+    )
+    ARCHIVE_BACKEND: Literal["gdrive", "s3"] = Field(
+        "gdrive",
+        description="Where the upload job archives originals: gdrive (today, GOOGLE_DRIVE_*) or s3 (S3_BUCKET, originals/ prefix, s3:// paths)",
+    )
+    S3_BUCKET: str = Field("", description="The environment's bucket for OBJECT_STORE_BACKEND=s3 and ARCHIVE_BACKEND=s3")
+    S3_REGION: str = Field("", description="Region of S3_BUCKET; empty = the SDK default (AWS_REGION on Lambda)")
+    S3_PRESIGN_GET_SECONDS: int = Field(300, ge=30, le=3600, description="Lifetime of a presigned GET handed to a browser or the cluster")
+    LOCAL_OBJECT_STORE_DIR: str = Field("", description="Directory of OBJECT_STORE_BACKEND=local; empty = <system temp>/ww_objects")
+    WORKER_BACKEND: Literal["local", "lambda"] = Field(
+        "local",
+        description=(
+            "local: today (ARQ when REDIS_URL is set, else in-process). "
+            "lambda: GPU jobs wait in api_jobs for the REANNZ batch, CPU jobs go to CPU_FUNCTION_NAME"
+        ),
+    )
+    CPU_FUNCTION_NAME: str = Field("", description="Lambda function that runs CPU jobs under WORKER_BACKEND=lambda; empty = run them in-process")
+    WORKER_TOKEN_SHA256: str = Field("", description="Hex SHA-256 of the cluster's lease token; empty disables /api/worker/*")
+    GPU_IMAGE: str = Field("", description="GPU image the cluster should run (ghcr.io/...:<sha>), returned by /api/worker/pending")
+    BATCH_MIN_PHOTOS: int = Field(100, ge=1, description="Submit a cluster job once this many photos are queued...")
+    BATCH_MAX_WAIT_MINUTES: int = Field(60, ge=0, description="...or once the oldest queued batch job is this old")
+    BATCH_MAX_QUEUE_HOURS: int = Field(24, ge=1, description="The reaper spares a queued batch job this long, instead of 60 minutes")
+    BATCH_LEASE_MINUTES: int = Field(30, ge=5, description="A lease with no heartbeat for this long is requeued, then failed")
+    BATCH_MAX_ATTEMPTS: int = Field(2, ge=1, description="Leases a batch job may expire through before it is failed")
+    BATCH_LEASE_MAX_PHOTOS: int = Field(2000, ge=1, description="Photos one lease hands to the cluster")
+    BATCH_PART_MAX_PHOTOS: int = Field(500, ge=1, description="Photos per results part, so each ingest stays well inside 15 minutes")
+    WW_LAMBDA_ROLE: Literal["", "api", "cpu"] = Field("", description="Set by the SAM template: which Lambda function this process is")
+
     # ── Media Registry renditions (Supabase Storage public bucket; originals stay in Drive) ──
     SUPABASE_MEDIA_BUCKET: str = Field(
         "media-renditions",
@@ -308,11 +347,41 @@ class Settings(BaseSettings):
         """Parse comma-separated CORS origins into a list."""
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
+    def require_supabase(self) -> None:
+        """Refuse to run the API without its database settings (they default empty for the GPU image)."""
+        missing = [n for n in ("SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY") if not getattr(self, n)]
+        if missing:
+            raise RuntimeError(f"Missing required settings: {', '.join(missing)}")
+
+    @property
+    def object_store_configured(self) -> bool:
+        """The object store backend has what it needs: a connection string, a bucket, or nothing (local)."""
+        if self.OBJECT_STORE_BACKEND == "s3":
+            return bool(self.S3_BUCKET)
+        if self.OBJECT_STORE_BACKEND == "local":
+            return True
+        return bool(self.AZURE_STORAGE_CONNECTION_STRING)
+
+    @property
+    def gpu_offload_configured(self) -> bool:
+        """Heavy AI runs off this process: on the ARQ worker (REDIS_URL) or the REANNZ batch (WORKER_BACKEND=lambda)."""
+        return bool(self.REDIS_URL) or self.WORKER_BACKEND == "lambda"
+
+    @property
+    def archive_enabled(self) -> bool:
+        """Uploaded originals have somewhere to go: Google Drive (today) or the S3 bucket."""
+        if self.ARCHIVE_BACKEND == "s3":
+            return bool(self.S3_BUCKET)
+        return self.GOOGLE_DRIVE_ENABLED
+
     @property
     def camtrapdp_export_enabled(self) -> bool:
-        """The export with the original photos is on, and there is Azure Blob storage for its ZIPs."""
-        return self.FF_CAMTRAPDP_EXPORT_ENABLED and bool(self.AZURE_STORAGE_CONNECTION_STRING)
+        """The export with the original photos is on, and the object store can hold its ZIPs."""
+        return self.FF_CAMTRAPDP_EXPORT_ENABLED and self.object_store_configured
 
 
-# The required fields come from the environment, which pyright cannot see.
+# On Lambda the secrets live in SSM Parameter Store, under WW_SSM_PREFIX; elsewhere a no-op.
+load_parameters_into_environ()
+
+# The fields come from the environment, which pyright cannot see.
 settings = Settings()  # pyright: ignore[reportCallIssue]

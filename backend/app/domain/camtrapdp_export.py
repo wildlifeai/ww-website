@@ -381,17 +381,20 @@ async def _fetch_original(file_path: str) -> Optional[bytes]:
 
 
 async def store_export(zip_path: Path, job_id: str, filename: str, container: str) -> str:
-    """Upload the ZIP to the private Azure Blob container and return a link that works for a day."""
-    from app.services import azure_storage
+    """Upload the ZIP to the private object store and return a link that works for a day.
+
+    ``container`` is the Azure Blob container; the S3 and local backends use ``exports/``.
+    """
+    from app.services import object_store
 
     name = blob_name(job_id)
     try:
-        await azure_storage.upload_file(container, name, zip_path, "application/zip")
+        await object_store.upload_export(name, zip_path, "application/zip", container=container)
     except Exception as exc:  # noqa: BLE001 - the user sees one message, the log has the cause
         logger.error("camtrapdp_export_store_failed", job_id=job_id, error=str(exc))
         raise ExportError("The export could not be saved. Try again later.") from exc
     try:
-        return azure_storage.read_link(container, name, LINK_TTL_SECONDS, filename)
+        return object_store.export_link(name, LINK_TTL_SECONDS, filename, container=container)
     except Exception as exc:  # noqa: BLE001
         logger.error("camtrapdp_export_link_failed", job_id=job_id, error=str(exc))
         raise ExportError("The export was saved but no download link could be made. Try again later.") from exc

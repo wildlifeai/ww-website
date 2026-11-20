@@ -1,0 +1,313 @@
+# Wildlife Watcher on AWS, one stack per environment (ww-dev, ww-prod).
+#
+# Approach B of the AWS + REANNZ migration: the API and the CPU jobs on Lambda from one arm64
+# image (Dockerfile --target lambda), originals and batch results in one private bucket, the
+# GPU work on the REANNZ cluster, which pulls it through the API's /api/worker routes.
+# Design and status: documentation/development reports/2026-10_aws-reannz-migration/README.md
+#
+# Not deployed by this branch. Deploy with .github/workflows/deploy-aws.yml (manual), or:
+#   sam deploy --template-file infra/aws/template.yaml --stack-name ww-dev \
+#     --parameter-overrides Env=dev ImageUri=<account>.dkr.ecr.<region>.amazonaws.com/ww-backend:dev-<sha> \
+#       BucketName=wildlifewatcher-dev-media AlarmEmail=<address> --capabilities CAPABILITY_IAM
+#
+# Secrets and every application setting live in SSM Parameter Store under /ww/<env>/ as
+# SecureString, one parameter per variable (app/aws_params.py loads them at cold start). This
+# template only sets what the stack itself decides (role, bucket, function names).
+#
+# The budget is not here: CloudFormation in ap-southeast-6 has no AWS::Budgets::Budget, so one
+# organization-wide budget is set in the management account (cloud-infrastructure.md).
+
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Wildlife Watcher API, CPU jobs and media bucket (approach B, serverless)
+
+Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, prod]
+  ImageUri:
+    Type: String
+    Description: The lambda image in ECR (ww-backend:<env>-<sha>)
+  BucketName:
+    Type: String
+    Description: Globally unique, e.g. wildlifewatcher-dev-media
+  AllowedOrigins:
+    Type: CommaDelimitedList
+    Default: "https://wildlifewatcher.ai,https://*.ww-website.pages.dev,http://localhost:5173"
+    Description: Browser origins allowed to POST uploads to and GET originals from the bucket
+  AlarmEmail:
+    Type: String
+    Description: Where the alarms go
+  ApiReservedConcurrency:
+    Type: Number
+    Default: 10
+    Description: The ceiling on API cost and on the per-environment rate limits
+  CpuReservedConcurrency:
+    Type: Number
+    Default: 5
+    Description: The ceiling on parallel CPU jobs, which also protects Supabase
+
+Mappings:
+  EnvSettings:
+    dev:
+      TickRate: rate(15 minutes)
+    prod:
+      TickRate: rate(5 minutes)
+
+# PackageType and ImageUri are set on each function: SAM does not accept them in Globals.
+Globals:
+  Function:
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        WW_ENV: !Ref Env
+        WW_SSM_PREFIX: !Sub /ww/${Env}/
+        OBJECT_STORE_BACKEND: s3
+        ARCHIVE_BACKEND: s3
+        S3_BUCKET: !Ref BucketName
+        S3_REGION: !Ref AWS::Region
+        WORKER_BACKEND: lambda
+        CPU_FUNCTION_NAME: !Sub ww-${Env}-cpu
+
+Resources:
+  # ── Storage ──────────────────────────────────────────────────────
+  MediaBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: !Ref AllowedOrigins
+            AllowedMethods: [GET, HEAD, POST, PUT]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+      LifecycleConfiguration:
+        Rules:
+          - Id: originals-to-glacier-ir
+            Status: Enabled
+            Prefix: originals/
+            Transitions:
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 90
+          - Id: incoming-1-day
+            Status: Enabled
+            Prefix: incoming/
+            ExpirationInDays: 1
+          - Id: buffer-1-day
+            Status: Enabled
+            Prefix: buffer/
+            ExpirationInDays: 1
+          - Id: exports-7-days
+            Status: Enabled
+            Prefix: exports/
+            ExpirationInDays: 7
+          - Id: results-90-days
+            Status: Enabled
+            Prefix: results/
+            ExpirationInDays: 90
+          - Id: abort-stale-multipart
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  DeadLetterQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ww-${Env}-dlq
+      MessageRetentionPeriod: 1209600
+
+  # ── Functions ────────────────────────────────────────────────────
+  # Lambda Function URLs do not exist in ap-southeast-6 (checked 2026-11-20), so an API Gateway
+  # HTTP API fronts the api function. A request must finish within its 30-second cap and a
+  # response stay under Lambda's 6 MB synchronous limit; longer work goes through enqueue_job.
+  # The function keeps 300 s for the scheduled tick, which does not pass through the API.
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ww-${Env}-api
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      MemorySize: 1024
+      Timeout: 300
+      ReservedConcurrentExecutions: !Ref ApiReservedConcurrency
+      Environment:
+        Variables:
+          WW_LAMBDA_ROLE: api
+      Events:
+        Http:
+          # No path or method: the HTTP API's $default route sends every request here.
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+        Tick:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: !FindInMap [EnvSettings, !Ref Env, TickRate]
+            Input: '{"ww-tick": true}'
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref BucketName
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:ww-${Env}-cpu
+            - Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/${Env}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/${Env}/*
+
+  CpuFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub ww-${Env}-cpu
+      PackageType: Image
+      ImageUri: !Ref ImageUri
+      MemorySize: 3008
+      Timeout: 900
+      EphemeralStorage:
+        Size: 10240
+      ReservedConcurrentExecutions: !Ref CpuReservedConcurrency
+      Environment:
+        Variables:
+          WW_LAMBDA_ROLE: cpu
+      EventInvokeConfig:
+        # As ARQ's max_tries = 1: a failed job is not rerun; the event waits in the DLQ.
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 21600
+        DestinationConfig:
+          OnFailure:
+            Type: SQS
+            Destination: !GetAtt DeadLetterQueue.Arn
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref BucketName
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt DeadLetterQueue.QueueName
+        - Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:ww-${Env}-cpu
+            - Effect: Allow
+              Action: ssm:GetParametersByPath
+              Resource:
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/${Env}
+                - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/${Env}/*
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ww-${Env}-api
+      RetentionInDays: 30
+
+  CpuLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/ww-${Env}-cpu
+      RetentionInDays: 30
+
+  # ── Alarms ───────────────────────────────────────────────────────
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ww-${Env}-alarms
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlarmEmail
+
+  DeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ww-${Env}-dlq-not-empty
+      AlarmDescription: A CPU job or a results ingest failed; its event waits in the DLQ for a redrive
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt DeadLetterQueue.QueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  ApiErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ww-${Env}-api-errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ApiFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  CpuErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ww-${Env}-cpu-errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref CpuFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+  OldestQueuedAlarm:
+    # The tick prints the queue's age in Embedded Metric Format (app/lambda_events.py). Six
+    # hours of queued cloud AI means the cron, the cluster or the token needs a look.
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ww-${Env}-batch-queue-stuck
+      Namespace: WildlifeWatcher
+      MetricName: BatchOldestQueuedMinutes
+      Dimensions:
+        - Name: Environment
+          Value: !Ref Env
+      Statistic: Maximum
+      Period: 900
+      EvaluationPeriods: 1
+      Threshold: 360
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlarmTopic]
+
+Outputs:
+  ApiUrl:
+    Description: The API base URL for VITE_API_BASE_URL and the cluster's WW_API
+    Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}
+  BucketName:
+    Value: !Ref MediaBucket
+  DeadLetterQueueUrl:
+    Value: !Ref DeadLetterQueue

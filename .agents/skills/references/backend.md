@@ -103,6 +103,18 @@ Rules:
   that rather than in-memory state.
 * `api_jobs` also holds the run-lock leases (`status = 'lock'`, `services/locks.py`) when there is
   no Redis. A new reader of `api_jobs` filters by status or `job_data->>kind`, never takes every row.
+* A third path is being built, off by default: `WORKER_BACKEND=lambda` leaves GPU jobs queued in
+  `api_jobs` with a `job_data.dispatch` record for the REANNZ cluster to lease, and sends the rest to
+  the CPU Lambda function. The cluster runs only the models; ingest writes the rows with the same
+  pipeline code. Contracts and status:
+  [2026-10_aws-reannz-migration](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md).
+  A model call that bypasses `get_speciesnet_service()`, `get_bioclip_service()` or
+  `get_dinov3_service()` breaks that path.
+* On AWS the API sits behind an API Gateway HTTP API: a request must finish within 30 s and a
+  response stay under 6 MB, or the caller gets a 503. Work that can take longer goes through
+  `enqueue_job`, a large result goes to the object store with a link, and uploads arrive as
+  `files_key`. The routes that break this today are in the migration report's "Left" table;
+  don't add another.
 
 Live infrastructure detail: `documentation/resources/cloud-infrastructure.md`. Everything under
 `documentation/development reports/_archive/` (including `v2-architecture-plan.md`) is **frozen

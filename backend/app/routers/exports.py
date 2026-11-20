@@ -4,8 +4,8 @@
 
 POST /api/exports/camtrapdp → starts the CamtrapDP export job (#328), returns {job_id}.
 Poll it with GET /api/jobs/{id}; its result_url is the signed download link.
-Gated by ``FF_CAMTRAPDP_EXPORT_ENABLED``, and needs ``AZURE_STORAGE_CONNECTION_STRING`` for the
-ZIPs: without either, the endpoint answers FEATURE_DISABLED and the website falls back to the
+Gated by ``FF_CAMTRAPDP_EXPORT_ENABLED``, and needs a configured object store for the ZIPs
+(``settings.object_store_configured``): without either, the endpoint answers FEATURE_DISABLED and the website falls back to the
 metadata-only package.
 """
 
@@ -42,7 +42,7 @@ async def start_camtrapdp_export(
     """
     meta = ApiMeta(request_id=getattr(request.state, "request_id", None))
     if not settings.camtrapdp_export_enabled:
-        message = "CamtrapDP export is disabled (FF_CAMTRAPDP_EXPORT_ENABLED, or no AZURE_STORAGE_CONNECTION_STRING for its ZIPs)."
+        message = "CamtrapDP export is disabled (FF_CAMTRAPDP_EXPORT_ENABLED, or no object store for its ZIPs)."
         return ApiResponse(error=ApiError(code="FEATURE_DISABLED", message=message), meta=meta)
 
     project_id = str(body.project_id)

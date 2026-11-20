@@ -170,8 +170,12 @@ class BioCLIPService:
         image_paths: Sequence[str],
         labels: Optional[Sequence[str]] = None,
         rank: str = "species",
+        keys: Optional[Sequence[Any]] = None,
     ) -> list[CropPrediction]:
         """Classify local image (crop) paths off the event loop.
+
+        ``keys`` (``(media_id, bbox)`` per path) is for the precomputed provider of the
+        REANNZ batch (``services/inference_cache.py``); the model itself ignores it.
 
         - ``labels`` given  → constrain to that label set (CustomLabelsClassifier).
         - ``labels`` absent → open Tree-of-Life prediction at ``rank``.
@@ -197,8 +201,13 @@ class BioCLIPService:
 _service: Optional[BioCLIPService] = None
 
 
-def get_bioclip_service() -> BioCLIPService:
-    """Return a process-wide BioCLIPService instance."""
+def get_bioclip_service() -> Any:
+    """Return a process-wide BioCLIPService instance, or the cluster's results while ingest runs one."""
+    from app.services.inference_cache import precomputed_bioclip
+
+    precomputed = precomputed_bioclip()
+    if precomputed is not None:
+        return precomputed
     global _service
     if _service is None:
         _service = BioCLIPService()

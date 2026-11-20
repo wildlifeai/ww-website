@@ -1,0 +1,129 @@
+# Wildlife Watcher on AWS, the account-wide stack (ww-shared): the image registry and the role
+# GitHub Actions deploys with. Each environment is its own AWS account (ww-dev, ww-prod), so
+# this stack is deployed once in each, before that account's environment stack
+# (infra/aws/template.yaml), with the GitHub environment allowed to deploy there:
+#
+#   aws cloudformation deploy --template-file infra/aws/shared.yaml --stack-name ww-shared \
+#     --capabilities CAPABILITY_NAMED_IAM --parameter-overrides GitHubEnvironment=dev \
+#     --profile ww-dev
+#
+# The GPU image is not here: it is public on GHCR (ghcr.io/wildlifeai/ww-backend-gpu), so the
+# cluster pulls it with no credential.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Wildlife Watcher shared AWS resources (ECR, GitHub OIDC deploy role)
+
+Parameters:
+  GitHubRepository:
+    Type: String
+    Default: wildlifeai/ww-website
+  GitHubEnvironment:
+    Type: String
+    AllowedValues: [dev, staging]
+    Description: The deploy workflow's GitHub environment for this account (dev for ww-dev, staging for ww-prod)
+  CreateOidcProvider:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: false when the account already has the token.actions.githubusercontent.com provider
+
+Conditions:
+  MakeProvider: !Equals [!Ref CreateOidcProvider, "true"]
+
+Resources:
+  BackendRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: ww-backend
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      # Replaces the ACR weekly-purge task: keep stable, the ten newest tagged images (dev and
+      # prod together) and nothing untagged for more than a day.
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep the stable rollback anchors",
+                "selection": {"tagStatus": "tagged", "tagPrefixList": ["stable"], "countType": "imageCountMoreThan", "countNumber": 100},
+                "action": {"type": "expire"}
+              },
+              {
+                "rulePriority": 2,
+                "description": "Keep the ten newest deploys",
+                "selection": {"tagStatus": "tagged", "tagPrefixList": ["dev-", "prod-"], "countType": "imageCountMoreThan", "countNumber": 10},
+                "action": {"type": "expire"}
+              },
+              {
+                "rulePriority": 3,
+                "description": "Drop untagged layers after a day",
+                "selection": {"tagStatus": "untagged", "countType": "sinceImagePushed", "countUnit": "days", "countNumber": 1},
+                "action": {"type": "expire"}
+              }
+            ]
+          }
+
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: MakeProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ww-gha-deploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Only this account's GitHub environment, so the prod deploy job cannot assume
+                # the dev account's role, nor the other way round.
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:${GitHubEnvironment}
+      Policies:
+        - PolicyName: ww-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action: [ecr:BatchCheckLayerAvailability, ecr:BatchGetImage, ecr:CompleteLayerUpload, ecr:InitiateLayerUpload, ecr:PutImage, ecr:UploadLayerPart]
+                Resource: !GetAtt BackendRepository.Arn
+              - Effect: Allow
+                Action: [cloudformation:*]
+                Resource:
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/ww-dev/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/ww-prod/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
+              - Effect: Allow
+                Action: [lambda:*, s3:*, sqs:*, sns:*, logs:*, cloudwatch:*, scheduler:*, budgets:*]
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Effect: Allow
+                Action: [iam:CreateRole, iam:DeleteRole, iam:GetRole, iam:PassRole, iam:PutRolePolicy, iam:DeleteRolePolicy, iam:AttachRolePolicy, iam:DetachRolePolicy, iam:TagRole]
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ww-*
+              - Effect: Allow
+                Action: ssm:PutParameter
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/dev/GPU_IMAGE
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/prod/GPU_IMAGE
+
+Outputs:
+  RepositoryUri:
+    Value: !GetAtt BackendRepository.RepositoryUri
+  DeployRoleArn:
+    Description: The AWS_DEPLOY_ROLE_ARN variable of this account's GitHub environment
+    Value: !GetAtt DeployRole.Arn

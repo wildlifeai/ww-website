@@ -347,9 +347,27 @@
             "type": "string"
           },
           "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "file_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Key"
           },
           "model_name": {
             "title": "Model Name",
@@ -362,7 +380,6 @@
           }
         },
         "required": [
-          "file",
           "model_name"
         ],
         "title": "Body_convert_model_api_models_convert_post",
@@ -376,9 +393,27 @@
             "type": "string"
           },
           "file": {
-            "contentMediaType": "application/octet-stream",
-            "title": "File",
-            "type": "string"
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "file_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Key"
           },
           "run_ai": {
             "default": false,
@@ -386,9 +421,6 @@
             "type": "boolean"
           }
         },
-        "required": [
-          "file"
-        ],
         "title": "Body_import_camtrapdp_api_camtrapdp_import_post",
         "type": "object"
       },
@@ -436,11 +468,20 @@
             "title": "Deployment Id"
           },
           "files": {
+            "default": [],
             "items": {
               "contentMediaType": "application/octet-stream",
               "type": "string"
             },
             "title": "Files",
+            "type": "array"
+          },
+          "files_key": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Files Key",
             "type": "array"
           },
           "paths": {
@@ -480,9 +521,6 @@
             "title": "Upload To Drive"
           }
         },
-        "required": [
-          "files"
-        ],
         "title": "Body_parse_exif_api_exif_parse_post",
         "type": "object"
       },
@@ -1479,6 +1517,61 @@
           }
         },
         "title": "ObservationsResponse",
+        "type": "object"
+      },
+      "PresignFile": {
+        "properties": {
+          "content_type": {
+            "default": "application/octet-stream",
+            "maxLength": 127,
+            "title": "Content Type",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "minimum": 1.0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "size"
+        ],
+        "title": "PresignFile",
+        "type": "object"
+      },
+      "PresignRequest": {
+        "properties": {
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/PresignFile"
+            },
+            "maxItems": 500,
+            "minItems": 1,
+            "title": "Files",
+            "type": "array"
+          },
+          "purpose": {
+            "enum": [
+              "photos",
+              "camtrapdp",
+              "model"
+            ],
+            "title": "Purpose",
+            "type": "string"
+          }
+        },
+        "required": [
+          "purpose",
+          "files"
+        ],
+        "title": "PresignRequest",
         "type": "object"
       },
       "PretrainedModelRequest": {
@@ -3175,8 +3268,7 @@
                 "$ref": "#/components/schemas/Body_import_camtrapdp_api_camtrapdp_import_post"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -3695,8 +3787,7 @@
                 "$ref": "#/components/schemas/Body_parse_exif_api_exif_parse_post"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -5714,6 +5805,98 @@
         "summary": "Get Gbf Report",
         "tags": [
           "reports"
+        ]
+      }
+    },
+    "/api/uploads/config": {
+      "get": {
+        "description": "How this server takes uploaded files.",
+        "operationId": "upload_config_api_uploads_config_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Upload Config",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/uploads/presign": {
+      "post": {
+        "description": "One presigned POST per file; send each file to its ``url`` with its ``fields``, then the ``key`` to the endpoint.",
+        "operationId": "presign_api_uploads_presign_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PresignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Presign",
+        "tags": [
+          "uploads"
         ]
       }
     },

@@ -7,15 +7,17 @@ POST /api/camtrapdp/import
 """
 
 import asyncio
+from typing import Optional, cast
 
 import structlog
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.authz import project_creator_org_id
 from app.dependencies import get_current_user, get_privileged_client, get_user_client, require_not_demo
 from app.domain import camtrapdp as domain
 from app.schemas.camtrapdp import CamtrapImportResult
 from app.schemas.common import ApiResponse
+from app.services.incoming import IncomingError, incoming_files
 
 logger = structlog.get_logger()
 
@@ -26,7 +28,8 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 @router.post("/import", response_model=ApiResponse, dependencies=[Depends(require_not_demo)])
 async def import_camtrapdp(
-    file: UploadFile,
+    file: Optional[UploadFile] = File(None),
+    file_key: Optional[str] = Form(None),
     annotation_mode: str = Form("final"),
     run_ai: bool = Form(False),
     user=Depends(get_current_user),
@@ -44,6 +47,14 @@ async def import_camtrapdp(
     the same organisation reuses them.
     """
     # ── Validate upload ────────────────────────────────────────────────
+    # The package in the body, or as a key in S3 (services/incoming.py).
+    try:
+        sent = await incoming_files(user.id, [file] if file else [], [file_key] if file_key else [])
+    except IncomingError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    if len(sent) != 1:
+        raise HTTPException(status_code=400, detail="Send one .zip file.")
+    file = cast(UploadFile, sent[0])  # an UploadFile or services.incoming.IncomingFile
     if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Only .zip files are accepted.")
 
@@ -163,7 +174,7 @@ async def import_camtrapdp(
     if result.pending_drive_uploads:
         from app.config import settings as app_settings
 
-        if not app_settings.GOOGLE_DRIVE_ENABLED:
+        if not app_settings.archive_enabled:
             result.warnings.append(
                 f"{len(result.pending_drive_uploads)} image(s) found in zip but "
                 "Google Drive upload is disabled (GOOGLE_DRIVE_ENABLED=false). "
@@ -172,13 +183,13 @@ async def import_camtrapdp(
         else:
             try:
                 from app.services.google_drive import (
-                    GoogleDriveService,
                     build_deployment_folder_name,
                     sanitize_filename,
                     slugify,
                 )
+                from app.services.object_store import archive_service, archived_path
 
-                drive = GoogleDriveService()
+                drive = archive_service()
 
                 # Build the file list in the format upload_analysis_images expects
                 drive_files = []
@@ -214,7 +225,7 @@ async def import_camtrapdp(
                     if not uf.get("media_id"):
                         continue  # only the CamtrapDP path pre-creates media to patch
                     try:
-                        svc.table("media").update({"file_path": f"gdrive://{uf['file_id']}", "file_public": False}).eq("id", uf["media_id"]).execute()
+                        svc.table("media").update({"file_path": archived_path(uf), "file_public": False}).eq("id", uf["media_id"]).execute()
                         patched += 1
                     except Exception as exc:
                         logger.warning(

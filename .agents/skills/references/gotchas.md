@@ -154,8 +154,9 @@ let a transport error surface as a silent success.
 
 Both Supabase projects are on the Free plan, whose upload limit is 50 MB for every bucket,
 whatever the bucket's own limit says. The CamtrapDP export stored its ZIPs there and failed
-past about 50 photos (#387). A file that can grow, like an export, goes to Azure Blob instead:
-`services/azure_storage.upload_file` streams it in blocks and `read_link` signs a read-only link.
+past about 50 photos (#387). A file that can grow, like an export, goes to the object store
+instead: `services/object_store.upload_export` streams it (Azure Blob today, S3 on AWS) and
+`export_link` signs a read-only link.
 
 ---
 

@@ -181,6 +181,42 @@ def _release_lease(client, name: str, holder: str) -> None:
     client.table(_LEASE_TABLE).delete().eq("id", lease_id(name)).eq("job_data->>holder", holder).execute()
 
 
+# ── A lease held across requests (the REANNZ batch) ───────────────────
+# ``exclusive`` holds a name for one block of code. The cluster holds a batch lease for a
+# whole Slurm job, across many HTTP calls, so it renews and releases by hand. Same rows,
+# same atomic statements; always the database, never Redis, so every process sees it.
+
+
+def acquire_lease(name: str, holder: str, ttl_seconds: float) -> bool:
+    """Take ``name`` for ``holder`` for ``ttl_seconds``; False while another live holder has it."""
+    return _try_lease(_lease_client(), name, holder, ttl_seconds)
+
+
+def renew_lease(name: str, holder: str, ttl_seconds: float) -> bool:
+    """Push the expiry out; False when ``holder`` no longer holds ``name`` (it expired and was taken)."""
+    try:
+        _refresh_lease(_lease_client(), name, holder, ttl_seconds)
+        return True
+    except LeaseLost:
+        return False
+
+
+def release_lease(name: str, holder: str) -> None:
+    """Free ``name`` if ``holder`` still holds it."""
+    _release_lease(_lease_client(), name, holder)
+
+
+def lease_state(name: str) -> str:
+    """``held`` (live), ``expired`` (the row outlived its holder) or ``released`` (no row)."""
+    from app.services.db_utils import rows_of
+
+    rows = rows_of(_lease_client().table(_LEASE_TABLE).select("job_data").eq("id", lease_id(name)).execute())
+    if not rows:
+        return "released"
+    expires = str((rows[0].get("job_data") or {}).get("expires_at") or "")
+    return "held" if expires > _utc_text() else "expired"
+
+
 @contextlib.asynccontextmanager
 async def _db_lock(name: str, *, wait: bool, ttl_seconds: float) -> AsyncIterator[None]:
     client = _lease_client()
