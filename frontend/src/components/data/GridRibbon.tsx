@@ -89,7 +89,7 @@ export function GridRibbon({ pager, view, onSelectAll, bulkBar, filter, group }:
 
           {/* Display controls (what to show) */}
           <span style={RIBBON_SECTION}>
-            <span style={{ display: 'flex', flexShrink: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }} title="Photo shows the full frame; Labels shows each cropped, labelled detection">
+            <span style={{ display: 'flex', flexShrink: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius)', overflow: 'hidden' }} title="Photo shows the full frame; Labels shows each label cropped to its box, or the full frame when it has none">
               {(['photo', 'crop'] as const).map(v => (
                 <button key={v} onClick={() => view.onImage(v)}
                   style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', border: 'none', cursor: 'pointer',
