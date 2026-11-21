@@ -30,7 +30,7 @@ The `ww-website` repository is a multi-service platform consisting of:
 > * `documentation/onboarding/03-DATA-AND-SYNC.md`
 > * `documentation/resources/api-reference.md`
 > * `documentation/resources/deployment-guide.md`
-> * `documentation/resources/cloud-infrastructure.md`: what actually exists in Azure, AWS, Supabase and Cloudflare, and how to sign in to AWS
+> * `documentation/resources/cloud-infrastructure.md`: what actually exists in Azure, AWS, REANNZ, Supabase and Cloudflare, and how to sign in to AWS
 > * `documentation/README.md`: the index; says which docs are **living** vs **frozen history**
 > * `.agents/DESIGN.md`: design system (colors, typography, spacing, component patterns) for any UI work or screen generation
 >
