@@ -1,14 +1,14 @@
 # Google Cloud pilot and migration plan
 
-> **Status:** 🔧 Active. Proposal 2026-09-26, decisions updated 2026-09-30; project `ww-pilot-dev`
-> set up 2026-10-01 (§2, "State"); no code changed. Track 1, the ML-worker pilot, is due **16 October 2026** for OKR G3
-> "Cloud cost per photo processed and stored, measured on a Google Cloud pilot", tracked in
-> [#172](https://github.com/wildlifeai/ww-website/issues/172). Track 2, the
-> full migration, follows the pilot number and credit approval. Prices are USD, read from the
-> official pricing pages on 2026-09-26; NZD uses the ECB reference rate of 2026-09-25,
-> **1 USD = 1.7634 NZD** (via `api.frankfurter.app`). Figures marked *unverified* must not be
-> quoted onward. The Azure estate being replaced is
-> [cloud-infrastructure.md](../../resources/cloud-infrastructure.md).
+> **Status:** 🕰️ Superseded 2026-11-22 by
+> [2026-10_aws-reannz-migration](../2026-10_aws-reannz-migration/README.md) (approach B, ranked first
+> on 31 October 2026). The ML-worker pilot was not run: its issue
+> [#172](https://github.com/wildlifeai/ww-website/issues/172) and its code, PR [#189](https://github.com/wildlifeai/ww-website/pull/189), were closed unmerged, and cost per photo
+> is measured in that report's step 4. The Google Cloud training path (`backend/training/`, the
+> native-training report) still links here, so this file moves to `_archive/` when
+> [#463](https://github.com/wildlifeai/ww-website/issues/463) retires it. Below is the plan as of 2026-10-01, unchanged: prices are USD from the official pricing
+> pages on 2026-09-26, NZD at the ECB rate of 2026-09-25 (**1 USD = 1.7634 NZD**), and figures
+> marked *unverified* must not be quoted onward.
 
 ## 0. Decisions
 
