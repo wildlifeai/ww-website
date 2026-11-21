@@ -41,7 +41,7 @@ Distances are cosine distances between fingerprints in the pgvector store. `k`, 
 
 ## Data
 
-A flag and its outcome need storage, which belongs to ww-backend: a table (`label_checks`, one row per flag) with the observation, the kind of flag, the score, the other species for a look-alike, whether the reference was confirmed or AI, the embedding run and label it was computed from (so a change clears it), who checked it and when, and the outcome (checked or relabelled). Project members read it; anyone who can confirm a label marks it checked. The ww-backend issue is filed once Victor has agreed its shape. Crop files for drawn boxes use the existing `observations.crop_url`. The mixed-group mark is computed from the existing group assignments.
+A flag and its outcome need storage, which belongs to ww-backend: a table (`label_checks`, one row per flag) with the observation, the kind of flag, the score, the other species for a look-alike, whether the reference was confirmed or AI, the embedding run and label it was computed from (so a change clears it), who checked it and when, and the outcome (checked or relabelled). Project members read it; anyone who can confirm a label marks it checked. Filed as [wildlifeai/ww-backend#360](https://github.com/wildlifeai/ww-backend/issues/360). Crop files for drawn boxes use the existing `observations.crop_url`. The mixed-group mark is computed from the existing group assignments.
 
 ## Work
 
