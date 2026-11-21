@@ -78,7 +78,7 @@ const _TERMINAL = ['completed', 'completed_with_errors', 'failed', 'skipped']
 
 /**
  * Collapse the raw PipelineState into the three stages a user actually cares about —
- * Upload → Save to Google Drive → AI analysis — with a plain-language issue summary.
+ * Upload → Save to storage → AI analysis, with a plain-language issue summary.
  * Everything is derived from data the dock already has (uploadedFiles, the drive jobs'
  * summaries, and the AI job's progress); no new backend surface.
  */
@@ -107,7 +107,7 @@ function deriveSteps(state: PipelineState, phase: string): StepsResult {
     progress: total > 0 ? upSettled / total : null,
   }
 
-  // 2 · Save to Google Drive
+  // 2 · Save to storage (Google Drive on Azure, the S3 bucket on AWS)
   const dt = driveJobs.reduce(
     (a, j) => {
       if (j.summary) {
@@ -135,12 +135,12 @@ function deriveSteps(state: PipelineState, phase: string): StepsResult {
   const driveDetail =
     driveStatus === 'pending' ? 'Waiting for upload'
     : dt.failed > 0 ? `${dt.uploaded} saved · ${dt.failed} failed`
-    : driveFailed ? 'Saving to Google Drive failed'
+    : driveFailed ? 'Saving to storage failed'
     : dt.skipped > 0 ? `${dt.uploaded} saved · ${dt.skipped} skipped`
     : driveStatus === 'active' ? `${dt.uploaded} saved so far…`
     : `${dt.uploaded} saved`
   const driveStep: StepView = {
-    key: 'drive', label: 'Saved to Google Drive', detail: driveDetail,
+    key: 'drive', label: 'Saved to storage', detail: driveDetail,
     status: driveStatus, progress: driveStatus === 'active' ? driveProg : null,
   }
 
@@ -169,8 +169,8 @@ function deriveSteps(state: PipelineState, phase: string): StepsResult {
     issue = {
       level: 'error',
       text: dt.failed > 0
-        ? `${dt.failed} photo${dt.failed !== 1 ? 's' : ''} couldn't be saved to Google Drive. See technical details.`
-        : 'Saving to Google Drive failed. See technical details.',
+        ? `${dt.failed} photo${dt.failed !== 1 ? 's' : ''} couldn't be saved to storage. See technical details.`
+        : 'Saving to storage failed. See technical details.',
     }
   } else if (aiFailed) {
     issue = { level: 'error', text: 'AI analysis hit an error on some deployments. Your photos are safe; you can retry from Processing history.' }
@@ -265,8 +265,8 @@ function deriveSectionTitle(state: PipelineState, phase: string): string {
   const jobPhase = activeJob?.currentPhase
 
   switch (jobPhase) {
-    case 'download':     return `Downloading ${state.totalFiles} images from Azure…`
-    case 'drive_upload': return `Uploading ${state.totalFiles} images to Google Drive…`
+    case 'download':     return `Reading ${state.totalFiles} uploaded images…`
+    case 'drive_upload': return `Saving ${state.totalFiles} images to storage…`
     case 'cleanup':      return `Cleaning up temporary files…`
     case 'ai_pipeline':  return `Running AI analysis…`
     default:             return `Processing ${state.totalFiles} images…`
