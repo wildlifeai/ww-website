@@ -79,6 +79,8 @@ How the accounts are laid out and how a person signs in:
   and before adding a resource type, check Auckland offers it:
   `aws cloudformation describe-type --type RESOURCE --type-name <type> --profile ww-dev --region ap-southeast-6`.
   Function URLs (`AWS::Lambda::Url`) and `AWS::Budgets::Budget` are missing there.
+* A changed `/ww/<env>/` parameter reaches a function only at its next cold start
+  (`app/aws_params.py`): redeploy the stack, or wait for idle copies to retire, before testing it.
 * Deploying from a workstation, including the Windows ECR login trap: the "Setting up step 1"
   table in the
   [migration report](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md#setting-up-step-1-and-step-4-by-hand).

@@ -315,7 +315,7 @@ organization's trusted access for AWS Account Management is on (since 2026-11-19
 | Image | `ghcr.io/wildlifeai/ww-backend-gpu:<tag>`, public. The organization allows public packages since 2026-11-21, and `ww-website` has Write on the package | The cluster pulls with no credential; `deploy-aws.yml` pushes new tags |
 | Credentials | Only the lease token, `~/.config/ww/<env>.token`, mode 600; the API keeps its SHA-256 | No database or AWS key reaches the cluster |
 
-On 2026-11-21 the cluster holds `ww-backend-gpu-dev-70edf58.sif` (3.6 GB), the cached weights
+On 2026-11-21 the cluster holds the SIFs for `dev-70edf58` (3.6 GB) and `dev-6bcff97`, the cached weights
 (`hf` 7.3 GB, `kaggle` 0.5 GB), and the dev token and API address. No crontab is set.
 
 ### How to keep REANNZ clean

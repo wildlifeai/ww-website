@@ -269,6 +269,10 @@ A SpeciesNet dump written in the dev Docker image keys its frames `/photos/...`;
 `MSYS_NO_PATHCONV=1`, or MSYS rewrites `/photos` to a path under the Git install, nothing
 matches and every SpeciesNet frame comes back unanswered.
 
+The same rewrite breaks other commands in Git Bash: `aws ssm put-parameter --name /ww/dev/X` fails with
+"must be a fully qualified name", and `docker run --tmpfs /tmp` with "mount path must be absolute".
+Prefix them the same way.
+
 ---
 
 ## GitGuardian flags a test password with a literal prefix
