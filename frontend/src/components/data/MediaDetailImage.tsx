@@ -290,8 +290,9 @@ export function MediaDetailImage({
         cursor: zoom > 1 && !bboxObsId ? (panning ? 'grabbing' : 'grab') : 'default',
       }}
     >
-      {onPrev && <button onClick={onPrev} title="Previous (←)" aria-label="Previous photo" style={{ ...NAV_ARROW, left: 12 }}><ChevronLeft size={26} aria-hidden /></button>}
-      {onNext && <button onClick={onNext} title="Next (→)" aria-label="Next photo" style={{ ...NAV_ARROW, right: 12 }}><ChevronRight size={26} aria-hidden /></button>}
+      {/* Hidden while drawing a box, as the arrow keys are, so they never cover its edges. */}
+      {onPrev && !bboxObsId && <button onClick={onPrev} title="Previous (←)" aria-label="Previous photo" style={{ ...NAV_ARROW, left: 12 }}><ChevronLeft size={26} aria-hidden /></button>}
+      {onNext && !bboxObsId && <button onClick={onNext} title="Next (→)" aria-label="Next photo" style={{ ...NAV_ARROW, right: 12 }}><ChevronRight size={26} aria-hidden /></button>}
 
       {imgUrl ? (
         <div
