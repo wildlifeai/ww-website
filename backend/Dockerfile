@@ -52,8 +52,11 @@ COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.1 /lambda-adapter /opt
 COPY requirements-lambda.txt .
 RUN pip install --no-cache-dir -r requirements-lambda.txt
 # Buffered: API Gateway's HTTP API fronts the api function (no Function URLs in ap-southeast-6)
-# and invokes it without streaming, as the cpu function's job invokes do.
-ENV PORT=8000 \
+# and invokes it without streaming, as the cpu function's job invokes do. Lambda's filesystem is
+# read-only outside /tmp, where numba (UMAP, HDBSCAN) must keep its cache: without it the embed
+# ingest failed with "cannot cache function" (2026-11-21).
+ENV NUMBA_CACHE_DIR=/tmp/numba-cache \
+    PORT=8000 \
     AWS_LWA_PORT=8000 \
     AWS_LWA_READINESS_CHECK_PATH=/health \
     AWS_LWA_INVOKE_MODE=buffered \
@@ -65,7 +68,11 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 # model weights: cluster/reannz/ww_infer.sl mounts the weights Victor cached once and sets
 # HF_HUB_OFFLINE. Published publicly on GHCR (the code is GPL and public already).
 FROM worker AS gpu
-ENV HF_HUB_OFFLINE=1
+# Apptainer starts in the caller's directory, not WORKDIR, so the app package needs PYTHONPATH.
+# The SIF is read-only, so numba (UMAP, HDBSCAN) keeps its cache under /tmp, as on Lambda.
+ENV HF_HUB_OFFLINE=1 \
+    PYTHONPATH=/app \
+    NUMBA_CACHE_DIR=/tmp/numba-cache
 CMD ["python", "-m", "app.jobs.batch_infer", "--help"]
 
 # --- API target (DEPLOYED) — the lean production HTTP API ----------------------

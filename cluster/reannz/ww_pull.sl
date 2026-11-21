@@ -5,20 +5,22 @@
 # rollback to the previous tag needs no pull.
 #SBATCH --account=wildlife03546
 #SBATCH --time=00:45:00
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+# 21 Nov 2026: with 8G and the default /tmp, mksquashfs was OOM-killed on the 3.8 GB image;
+# 32G with unpacking on nobackup (below) built it in 20 minutes.
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
 #SBATCH --output=/nesi/project/wildlife03546/ww/slurm_logs/%x_%j.out
 
 : "${IMAGE:?IMAGE not set}"
 : "${SIF:?SIF not set}"
 echo "$(date -Is) pulling $IMAGE into $SIF"
 
-module purge
-module use /opt/nesi/lmod/mahuika
-module load Apptainer
+# Apptainer is on the system path (its module is retired), so no module is loaded.
 
+# Cache and unpacking both on nobackup, not the compute node's /tmp.
 export APPTAINER_CACHEDIR=/nesi/nobackup/wildlife03546/ww/apptainer-cache
-mkdir -p "$APPTAINER_CACHEDIR" "$(dirname "$SIF")"
+export APPTAINER_TMPDIR=/nesi/nobackup/wildlife03546/ww/apptainer-tmp
+mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR" "$(dirname "$SIF")"
 
 # The image is public on GHCR, so the pull needs no credential.
 apptainer pull --force "$SIF.partial" "docker://$IMAGE"

@@ -407,7 +407,7 @@ export function UploadFlow() {
     })
     const resolvedDeploymentIds = [...new Set(allPending.map((p) => p.deploymentId))]
 
-    // Images always sync to Google Drive (long-term storage is the default).
+    // Images always go to long-term storage (Google Drive on Azure, the S3 bucket on AWS).
     // startUpload copies what it needs before its first await, so the page can
     // drop its staged selection straight away; UploadProvider guards the tab
     // while the batches are still sending.
