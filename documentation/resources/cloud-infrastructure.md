@@ -3,9 +3,9 @@
 > **Status:** 🟢 Living — the authoritative map of every cloud resource the platform uses, what it's
 > for, and how to keep it from drifting into sprawl. Pairs with [deployment-guide](deployment-guide.md)
 > (*how to deploy*); this doc is *what exists and how to maintain it*. **Re-audit quarterly** (see the
-> [review checklist](#periodic-review-checklist)). Last updated: **2026-11-20**.
+> [review checklist](#periodic-review-checklist)). Last updated: **2026-11-21**.
 
-> **In progress, 2026-11-19:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path. The AWS accounts and sign-in exist ([AWS](#aws)) but nothing is deployed there, so everything else below still describes the live estate. Design and status: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md).
+> **In progress, 2026-11-21:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path. A dev stack runs on AWS ([AWS](#aws)) and a first dev batch ran on the cluster ([REANNZ](#reannz)); no site points at either.
 
 > ### ✅ Single-RG AU East (migration complete — 2026-06-30)
 > The org runs **only the `WW-AE` resource group** (`australiaeast`). The old `WW-Website` RG and the three
@@ -14,7 +14,7 @@
 > *(One unrelated soft-deleted vault, `secrets-staging` in `newzealandnorth`, was intentionally left alone —
 > decide separately whether to recover or purge it.)*
 
-The platform spans four providers, and a fifth, AWS, is being set up. Keep this list complete: an unlisted resource is either undocumented
+The platform spans four providers, and two more, AWS and the REANNZ cluster, are being set up. Keep this list complete: an unlisted resource is either undocumented
 or orphaned, and both are bugs.
 
 | Provider | What it hosts |
@@ -23,7 +23,8 @@ or orphaned, and both are bugs.
 | **Supabase** | Postgres + RLS, Auth, Storage (renditions), the system of record — **two projects** (dev / prod) |
 | **Cloudflare** | Frontend (Pages + per-branch previews), DNS for `wildlifewatcher.ai`, CDN |
 | **Google Drive** | Permanent original-image archive (`gdrive://`) |
-| **AWS** | Being set up, nothing live: wildlife.ai's organization, the `ww-dev` account, Identity Center sign-in ([AWS](#aws)) |
+| **AWS** | Being set up, dev only: the `ww-dev` stacks, which no site points at yet ([AWS](#aws)) |
+| **REANNZ** | Being set up, dev trial: GPU batches under Spyfish's project `wildlife03546` until Wildlife Watcher's own is approved ([REANNZ](#reannz)) |
 
 ---
 
@@ -297,6 +298,30 @@ organization's trusted access for AWS Account Management is on (since 2026-11-19
   the console lists only after a day of that account's cost data. Check Billing and Cost
   Management monthly.
 - **Access:** every Identity Center user is someone who still needs access.
+
+---
+
+## REANNZ
+
+> **Dev trial, nothing live (2026-11-21).** The GPU half of the move in
+> [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md):
+> batches on the cluster that lease work from the AWS dev API. How to set it up is in that report.
+
+| Piece | Setting | Why |
+|---|---|---|
+| Project | `wildlife03546`, Spyfish's, for the dev trial only | Wildlife Watcher's own project was applied for on 2026-11-21; the scripts switch to its code once approved |
+| Access | Victor's login, `victorav`, through OnDemand at https://ondemand.nesi.org.nz (Apps, then Mahuika Shell Access; Files to upload). SSH would be `login.hpc.nesi.org.nz` through the jump host `lander.hpc.nesi.org.nz` | REANNZ's rules for AI agents (from 2026-11-01): an agent never logs in on its own, so Victor runs every command |
+| Layout | `/nesi/project/wildlife03546/ww/`: `bin` (the scripts in `cluster/reannz/`), `sif`, `models`, `slurm_logs`, `logs`. Job scratch and the Apptainer cache under `/nesi/nobackup/wildlife03546/ww/` | nobackup deletes files untouched for 90 days |
+| Image | `ghcr.io/wildlifeai/ww-backend-gpu:<tag>`, public. The organization allows public packages since 2026-11-21, and `ww-website` has Write on the package | The cluster pulls with no credential; `deploy-aws.yml` pushes new tags |
+| Credentials | Only the lease token, `~/.config/ww/<env>.token`, mode 600; the API keeps its SHA-256 | No database or AWS key reaches the cluster |
+
+On 2026-11-21 the cluster holds `ww-backend-gpu-dev-70edf58.sif` (3.6 GB), the cached weights
+(`hf` 7.3 GB, `kaggle` 0.5 GB), and the dev token and API address. No crontab is set.
+
+### How to keep REANNZ clean
+- `ww_pull.sl` keeps the two newest SIFs and deletes older ones.
+- Weights are cached once per model version with `ww_cache_models.sh`; re-run it after a model
+  change and delete the old version's folder by hand.
 
 ---
 

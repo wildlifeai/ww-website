@@ -83,6 +83,19 @@ How the accounts are laid out and how a person signs in:
   table in the
   [migration report](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md#setting-up-step-1-and-step-4-by-hand).
 
+## REANNZ cluster access
+
+What exists on the cluster and how Victor reaches it:
+[cloud-infrastructure.md](../../../documentation/resources/cloud-infrastructure.md#reannz).
+
+* An agent never logs in to the cluster: REANNZ's rules for AI agents (from 2026-11-01) allow
+  supervised use only. Victor runs each command in OnDemand; the agent writes the commands and
+  reads what he pastes back, or checks the results through the API and the database.
+* The lease token and `HF_TOKEN` never pass through an agent. `ww_cache_models.sh` prompts for
+  the Hugging Face token itself.
+* `cluster/reannz/` scripts run from copies in the project's `bin/`: a change reaches the cluster
+  only when Victor copies it there, so give him the copy command with the change.
+
 ## Docker trap: a bind-mount source that does not exist
 
 `docker-compose.dev.yml` bind-mounts `./service-account.json` and points
