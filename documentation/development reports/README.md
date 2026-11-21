@@ -76,6 +76,7 @@ Ordered roughly by how likely you are to need them. Descriptions live in the
 
 | Report | Status |
 |---|---|
+| [2026-11_label-checks](2026-11_label-checks.md) | 📋 Proposal, decisions taken 2026-11-21: DINOv3 checks for odd-one-out and look-alike labels, not built; #448, #449, #450 |
 | [2026-10_aws-reannz-migration](2026-10_aws-reannz-migration/README.md) | 🔧 Active, 2026-11-20: approach B (Lambda, S3, REANNZ batches) built behind settings; the `ww-dev` stacks are deployed behind an HTTP API (Auckland has no Function URLs), nothing points at them; the REANNZ project and email next |
 | [2026-10_ui-audit](2026-10_ui-audit/README.md) | 📋 Proposal, decisions taken 2026-10-21: 133 findings across five page groups, nine improvement agents not scheduled yet |
 | [2026-10_e2e-in-ci](2026-10_e2e-in-ci.md) | 🔧 Active, 2026-10-26: the Playwright flows run on each Cloudflare Pages build of `dev`; pull request previews wait on a Cloudflare setting |
