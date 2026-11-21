@@ -7,12 +7,14 @@
 import { Check, Hourglass, ImageOff, Upload } from 'lucide-react'
 import type { InatStates } from '../../hooks/useGridInat'
 import { deriveAnnotationStatus } from '../../lib/annotationStatus'
+import { boxOf } from '../../lib/boxCrop'
 import { arrowTarget, cardClickIntent, cardKeyIntent, circleClickIntent, type CardIntent } from '../../lib/cardSelection'
 import { labelCards, type MediaRecord, type ObservationRecord } from '../../lib/gridMedia'
 import { displayImageUrl } from '../../lib/mediaImageUrl'
 import { isAiLabel, isHumanReviewed, observationLabel, photoVerdict } from '../../lib/observations'
 import { formatCaptureTime } from '../../lib/time'
 import { StatusBadge } from '../ui/StatusBadge'
+import { BoxCropImage } from './BoxCropImage'
 import { INatBadge } from './INatBadge'
 import { ELLIPSIS, IMAGE_AREA, TWO_LINES, cardStyle } from './gridStyles'
 
@@ -197,12 +199,14 @@ function ThumbCard({ m, env }: { m: MediaRecord; env: CardEnv }) {
   )
 }
 
-// Crop view: one card per observation, showing its crop (observations.crop_url), or the full
-// frame when it has none. Selection and open are keyed by media id, as the actions are.
+// Crop view: one card per observation, showing its crop (observations.crop_url), its box cropped
+// on screen when it has a box but no crop file, or the full frame when it has neither. Selection and open are keyed by media id, as the actions are.
 function CropCard({ m, obs, env }: { m: MediaRecord; obs: ObservationRecord; env: CardEnv }) {
   const cropUrl = obs.crop_url || null
-  const imgUrl = cropUrl || displayImageUrl(m, 'thumb')
-  const noCrop = !cropUrl
+  const box = cropUrl ? null : boxOf(obs)
+  const boxUrl = box ? displayImageUrl(m, 'full') : null
+  const imgUrl = cropUrl || (boxUrl ? null : displayImageUrl(m, 'thumb'))
+  const noCrop = !cropUrl && !boxUrl
   // Once a person gave the photo its verdict, each crop shows that verdict, not the AI's.
   const verdict = photoVerdict(m.observations)
   const ruled = !!verdict.labelObs && isHumanReviewed(verdict.labelObs) ? verdict : null
@@ -215,8 +219,10 @@ function CropCard({ m, obs, env }: { m: MediaRecord; obs: ObservationRecord; env
 
   return (
     <div {...cardProps(m, obs.id, env)} style={cardStyle(env.selectedIds.has(m.id), env.openId === m.id)}>
-      <div style={{ ...IMAGE_AREA, backgroundColor: imgUrl ? undefined : 'rgba(0,0,0,0.04)' }}>
-        {imgUrl ? (
+      <div style={{ ...IMAGE_AREA, backgroundColor: imgUrl || boxUrl ? undefined : 'rgba(0,0,0,0.04)' }}>
+        {box && boxUrl ? (
+          <BoxCropImage src={boxUrl} box={box} alt={name || 'crop'} />
+        ) : imgUrl ? (
           <img
             src={imgUrl}
             alt={name || 'crop'}
