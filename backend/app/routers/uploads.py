@@ -33,7 +33,7 @@ def size_cap(purpose: str) -> int:
     """The largest file each upload endpoint takes, in bytes."""
     if purpose == "photos":
         return settings.GOOGLE_DRIVE_MAX_FILE_SIZE_MB * 1024 * 1024
-    return 50 * 1024 * 1024  # CamtrapDP packages (routers/camtrapdp.py) and model files
+    return 50 * 1024 * 1024  # CamtrapDP packages (domain/camtrapdp.py MAX_UPLOAD_BYTES) and model files
 
 
 def safe_name(name: str) -> str:

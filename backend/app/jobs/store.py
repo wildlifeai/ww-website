@@ -564,6 +564,7 @@ async def update_job(
     error: Optional[str] = None,
     message: Optional[str] = None,
     current_phase: Optional[ProgressPhase] = None,
+    result: Optional[dict] = None,
 ) -> None:
     raw = await _get_raw(job_id)
     if not raw:
@@ -583,6 +584,8 @@ async def update_job(
         data["message"] = message
     if current_phase is not None:
         data["current_phase"] = current_phase.value
+    if result is not None:
+        data["result"] = result
 
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
     _memory_store[f"job:{job_id}"] = json.dumps(data)

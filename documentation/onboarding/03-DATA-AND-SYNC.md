@@ -142,6 +142,12 @@ via `jobs/worker.py`. When no Redis is reachable, enqueue logs
 `redis connection error … arq_enqueue_failed_fallback_local` and the job falls back to the
 in-process runner — expected noise in local dev, not a failure.
 
+The jobs in `IN_PROCESS_JOBS` (`backend/app/jobs/dispatch.py`: uploads, the CamtrapDP import and
+export, manifests, model conversion and downloads, batch ingest) run in the API process on Azure
+even with `REDIS_URL` set, so their settings belong on the API, and on AWS they run on the `cpu`
+function. On Azure such a job can be cut off when the API replica scales in (dev scales to zero),
+as uploads and the import already can.
+
 ```
 create_job() → queued → processing → completed
                               └────────→ completed_with_errors | failed

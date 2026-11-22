@@ -634,7 +634,10 @@ az containerapp show \
 **Jobs stuck in `queued` status**
 
 With `REDIS_URL` **unset**, jobs run in-process as asyncio background tasks; with it set, they are
-offloaded to the ARQ worker — so first check *which* process should have run the job. A job stuck in
+offloaded to the ARQ worker, so first check *which* process should have run the job. The jobs in
+`IN_PROCESS_JOBS` (uploads, the CamtrapDP import and export, manifests, model conversion and
+downloads) always run in the API process, where one can be cut off when the replica scales in (dev
+scales to zero), as uploads and the import already can ([03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.md#async-job-system)). A job stuck in
 `queued` on a `REDIS_URL`-configured API usually means the worker isn't running or KEDA never woke it
 (see [GPU Worker](#gpu-worker--scale-to-zero-the-ml-worker)). If a container restarts mid-job, the job
 store's `recover_stuck_jobs()` marks interrupted jobs as `failed` on next boot. Check restart logs:

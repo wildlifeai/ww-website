@@ -35,10 +35,10 @@ def render() -> str:
 def main() -> int:
     current = render()
     if "--check" not in sys.argv:
-        SNAPSHOT.write_text(current)
+        SNAPSHOT.write_text(current, encoding="utf-8", newline="\n")  # LF on Windows too
         print(f"wrote {SNAPSHOT.relative_to(ROOT)} ({len(current)} bytes)")
         return 0
-    on_disk = SNAPSHOT.read_text() if SNAPSHOT.exists() else ""
+    on_disk = SNAPSHOT.read_text(encoding="utf-8") if SNAPSHOT.exists() else ""
     if on_disk == current:
         print("openapi.json is current")
         return 0

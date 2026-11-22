@@ -12,7 +12,7 @@ deterministically (no string parsing) with support for:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -105,6 +105,7 @@ class JobInfo(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = Field(None, description="Last time the job state was modified")
     result_url: Optional[str] = None
+    result: Optional[dict[str, Any]] = Field(None, description="What a finished job produced when it is data, not a file (CamtrapDP import)")
     error: Optional[str] = None
     message: Optional[str] = Field(None, description="Latest human-readable status message")
     current_phase: Optional[ProgressPhase] = Field(None, description="Current pipeline phase (single source of truth)")
