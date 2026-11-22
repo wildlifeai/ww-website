@@ -19,7 +19,7 @@ import contextlib
 import json
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional, TypeVar
 
 import structlog
 
@@ -31,7 +31,7 @@ from app.schemas.job import (
     ProgressPhase,
 )
 from app.services.db_utils import rows_of
-from app.services.supabase_client import create_service_client
+from app.services.supabase_client import create_service_client, is_dropped_connection, reset_service_client
 
 logger = structlog.get_logger()
 
@@ -61,6 +61,35 @@ _HEARTBEAT_INTERVAL_SECONDS = 60
 
 MAX_EVENTS_RETURNED = 50
 
+T = TypeVar("T")
+
+
+def _once_more_if_dropped(call: Callable[[], T], job_id: str, what: str) -> T:
+    """``call()``, and once more on a fresh service client when the connection had dropped.
+
+    The server closes the shared client's connection while a Lambda environment sits frozen
+    between invocations, so the first request after a pause fails (#459). ``call`` builds its
+    request afresh, so a retried write carries the job as it is then.
+    """
+    try:
+        return call()
+    except Exception as exc:
+        if not is_dropped_connection(exc):
+            raise
+        logger.info("supabase_sync_retry", what=what, job_id=job_id, error=str(exc))
+        reset_service_client()
+    return call()
+
+
+def _read_job_data(job_id: str, what: str) -> Optional[dict]:
+    """The job's ``job_data`` as Supabase holds it, or None when it has no row."""
+
+    def _read() -> list:
+        return rows_of(create_service_client().table("api_jobs").select("job_data").eq("id", job_id).execute())
+
+    rows = _once_more_if_dropped(_read, job_id, what)
+    return (rows[0]["job_data"] or {}) if rows else None
+
 
 def _hydrate_from_supabase(job_id: str) -> Optional[str]:
     """Load a job from Supabase into this process's memory store; returns the raw JSON.
@@ -72,17 +101,16 @@ def _hydrate_from_supabase(job_id: str) -> Optional[str]:
     "Processing" banner never cleared. Mirrors the lazy load in :func:`get_job`.
     """
     try:
-        client = create_service_client()
-        resp = client.table("api_jobs").select("job_data").eq("id", job_id).execute()
-        if resp.data:
-            db_data = rows_of(resp)[0]["job_data"] or {}
+        db_data = _read_job_data(job_id, "hydrate")
+        if db_data is not None:
             events = db_data.pop("events", [])
             _memory_events[f"job:{job_id}:events"] = [json.dumps(e) for e in events]
             raw = json.dumps(db_data)
             _memory_store[f"job:{job_id}"] = raw
             return raw
     except Exception as e:
-        logger.debug("job_hydrate_failed", job_id=job_id, error=str(e))
+        # The job now looks missing: update_job skips the update and get_job answers None.
+        logger.warning("job_hydrate_failed", job_id=job_id, error=str(e))
     return None
 
 
@@ -104,11 +132,9 @@ def _refresh_if_newer(job_id: str, local_updated_at: Optional[str]) -> Optional[
     first, then synced), so the strict ISO-timestamp comparison never clobbers in-flight state.
     """
     try:
-        client = create_service_client()
-        resp = client.table("api_jobs").select("job_data").eq("id", job_id).execute()
-        if not resp.data:
+        db_data = _read_job_data(job_id, "refresh")
+        if db_data is None:
             return None
-        db_data = rows_of(resp)[0]["job_data"] or {}
         db_updated = db_data.get("updated_at") or ""
         if local_updated_at and db_updated <= local_updated_at:
             return None  # memory is current (or newer — this process owns the job)
@@ -118,6 +144,7 @@ def _refresh_if_newer(job_id: str, local_updated_at: Optional[str]) -> Optional[
         _memory_store[f"job:{job_id}"] = raw
         return raw
     except Exception as e:
+        # The caller keeps serving its memory copy, so the job does not look missing.
         logger.debug("job_refresh_failed", job_id=job_id, error=str(e))
         return None
 
@@ -130,12 +157,15 @@ async def _sync_to_supabase(job_id: str, *, flush: bool = False) -> None:
     returns and the event loop settles (exactly what stranded ARQ-worker jobs at
     'processing'). Otherwise the write is detached for speed, but tracked in
     ``_pending_sync_tasks`` so it isn't garbage-collected mid-flight.
+
+    A write that meets a dropped connection is retried once on a fresh service client, as the
+    reads in :func:`_hydrate_from_supabase` and :func:`_refresh_if_newer` are.
     """
     key = f"job:{job_id}"
     if key not in _memory_store:
         return
 
-    def _run_sync():
+    def _write() -> None:
         # Snapshot the LATEST memory state at *write* time, not when this sync was
         # scheduled. A detached sync queued mid-run (status 'processing') would
         # otherwise carry that stale snapshot and, if it lands after the awaited
@@ -152,12 +182,18 @@ async def _sync_to_supabase(job_id: str, *, flush: bool = False) -> None:
         # comprehension then iterates our private copy.
         events_raw = list(_memory_events.get(f"{key}:events", []))
         data_json["events"] = [json.loads(e) for e in events_raw]
+        client = create_service_client()
+        status_val = data_json.get("status", "queued")
+        client.table("api_jobs").upsert({"id": job_id, "status": status_val, "job_data": data_json}).execute()
+
+    def _run_sync():
         try:
-            client = create_service_client()
-            status_val = data_json.get("status", "queued")
-            client.table("api_jobs").upsert({"id": job_id, "status": status_val, "job_data": data_json}).execute()
+            _once_more_if_dropped(_write, job_id, "write")
         except Exception as e:
-            logger.debug("supabase_sync_skipped", error=str(e))
+            # An awaited write is a final status or a dispatch record. Lost, it leaves a finished
+            # job looking unfinished until the reaper fails it an hour later, so it is a warning.
+            log = logger.warning if flush else logger.debug
+            log("supabase_sync_skipped", job_id=job_id, error=str(e))
 
     if flush:
         await asyncio.to_thread(_run_sync)

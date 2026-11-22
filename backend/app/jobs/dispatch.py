@@ -104,8 +104,12 @@ async def enqueue_job(name: str, *args, **kwargs) -> str:
         if name in BATCH_JOBS:
             return await _queue_for_batch(name, args, kwargs)
         if settings.CPU_FUNCTION_NAME:
+            from app.jobs.store import flush_pending_syncs
             from app.services.lambda_invoke import invoke_job
 
+            # create_job writes the job's api_jobs row in the background, and the cpu function
+            # looks for that row as soon as it starts. Let the write land before the invoke.
+            await flush_pending_syncs()
             await invoke_job(name, args, {k: v for k, v in kwargs.items() if not k.startswith("_")})
             logger.info("job_invoked_lambda", job=name, function=settings.CPU_FUNCTION_NAME)
             return "lambda"
