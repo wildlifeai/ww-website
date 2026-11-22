@@ -7,12 +7,15 @@ import { useMediaThumbs } from '../hooks/useMediaThumbs'
 import { useDeploymentProject } from '../hooks/useDeploymentProject'
 import { useProjectRoles } from '../hooks/useProjectRoles'
 import { useINat } from '../hooks/useINat'
+import { useJobHistory } from '../hooks/useJobs'
 import { SpeciesPicker, type SpeciesSelection } from '../components/data/SpeciesPicker'
 import { FeatureOff } from '../components/common/FeatureOff'
 import { showUndoToast } from '../components/common/undoToastBus'
 import { isFeatureDisabled } from '../lib/featureFlags'
 import { CLUSTERS_PER_PAGE, MEMBERS_PER_STEP, confirmedText, orderClusters, pageOf } from '../lib/clusterReview'
 import { inatBlocker, inatErrorNotice, inatPublishNotice, type CardNotice } from '../lib/inatPublish'
+import { canStartGrouping, groupingStatusText, pendingGrouping } from '../lib/batchWait'
+import type { JobStatusValue } from '../types/job'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -419,6 +422,50 @@ function ClusterPanel({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// NoBrainRun: no clusters yet. Starts a run, and keeps saying so while one this
+// user started waits or runs, after a refresh too (#460)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// At module scope, so the jobs query key stays the same between renders.
+const RUNNING: JobStatusValue[] = ['queued', 'processing']
+
+function NoBrainRun({ deploymentId, canWrite }: { deploymentId?: string; canWrite: boolean }) {
+  const embed = useEmbedDeployment()
+  const running = useJobHistory(RUNNING)
+  const pending = pendingGrouping(running.data?.pages.flatMap(p => p.jobs) ?? [], deploymentId)
+  const status = groupingStatusText(pending, embed.isSuccess ? embed.data?.job_id : undefined)
+
+  return (
+    <div className="card" style={{ padding: '2rem', textAlign: 'center', maxWidth: 560, margin: '2rem auto' }}>
+      <h3 style={{ marginTop: 0 }}>No Wildlife Brain run yet</h3>
+      {canWrite ? (
+        <>
+          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+            Run DINOv3 embedding and clustering on this deployment to group its photos for review.
+          </p>
+          <button
+            className="btn"
+            disabled={!canStartGrouping(deploymentId, embed.isPending, pending)}
+            onClick={() => deploymentId && embed.mutate(deploymentId)}
+            style={{ backgroundColor: 'var(--primary)' }}
+          >
+            {embed.isPending ? 'Queuing…' : 'Run Wildlife Brain'}
+          </button>
+        </>
+      ) : (
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>This deployment has no clusters yet.</p>
+      )}
+      {status && <p style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>{status}</p>}
+      {embed.isError && (
+        <p style={{ color: 'var(--error)', fontSize: '0.85rem' }}>
+          {embed.error instanceof Error ? embed.error.message : 'Failed to start Wildlife Brain.'}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Page root
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -430,7 +477,6 @@ export function ClusterReviewPage() {
   const roles = useProjectRoles()
   // One iNaturalist status check for the page, not one per cluster.
   const inat = useINat()
-  const embed = useEmbedDeployment()
   const [showConfirmed, setShowConfirmed] = useState(false)
   const [page, setPage] = useState(0)
   // Clusters confirmed during this visit stay in place, showing their result.
@@ -469,40 +515,7 @@ export function ClusterReviewPage() {
     return <div style={{ padding: '2rem', color: 'var(--error)' }}>Could not load clusters: {errorText(clustersQ.error)}</div>
   }
 
-  if (!clustersQ.data?.embedding_run_id) {
-    return (
-      <div className="card" style={{ padding: '2rem', textAlign: 'center', maxWidth: 560, margin: '2rem auto' }}>
-        <h3 style={{ marginTop: 0 }}>No Wildlife Brain run yet</h3>
-        {canWrite ? (
-          <>
-            <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-              Run DINOv3 embedding and clustering on this deployment to group its photos for review.
-            </p>
-            <button
-              className="btn"
-              disabled={embed.isPending || !deployment_id}
-              onClick={() => deployment_id && embed.mutate(deployment_id)}
-              style={{ backgroundColor: 'var(--primary)' }}
-            >
-              {embed.isPending ? 'Queuing…' : 'Run Wildlife Brain'}
-            </button>
-          </>
-        ) : (
-          <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>This deployment has no clusters yet.</p>
-        )}
-        {embed.isSuccess && embed.data?.job_id && (
-          <p style={{ color: 'var(--primary)', fontSize: '0.85rem' }}>
-            Queued (job {embed.data.job_id.slice(0, 8)}). Refresh shortly.
-          </p>
-        )}
-        {embed.isError && (
-          <p style={{ color: 'var(--error)', fontSize: '0.85rem' }}>
-            {embed.error instanceof Error ? embed.error.message : 'Failed to start Wildlife Brain.'}
-          </p>
-        )}
-      </div>
-    )
-  }
+  if (!clustersQ.data?.embedding_run_id) return <NoBrainRun deploymentId={deployment_id} canWrite={canWrite} />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', color: 'var(--text-color)' }}>

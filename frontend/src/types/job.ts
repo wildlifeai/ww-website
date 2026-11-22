@@ -55,6 +55,13 @@ export interface ProgressSummary {
   started_at: string | null
 }
 
+/** Set while a job waits in the queue for the GPU batch on the REANNZ cluster (AWS only, #460). */
+export interface BatchWait {
+  queued_at: string | null
+  /** How long the run usually takes to start, from the batch and cron settings, rounded up by the API. */
+  usual_wait_minutes: number
+}
+
 export interface JobInfo {
   job_id: string
   status: JobStatusValue
@@ -68,6 +75,9 @@ export interface JobInfo {
   summary: ProgressSummary | null
   events: ProgressEvent[]
   event_count: number
+  batch_wait?: BatchWait | null
+  /** The job runs through the GPU batch (AWS): it reports every few minutes, not seconds. */
+  gpu_batch?: boolean
 }
 
 /** Light summary row for the processing-history list (GET /api/jobs). */
@@ -84,6 +94,7 @@ export interface JobSummary {
   created_at: string
   updated_at: string | null
   event_count: number
+  batch_wait?: BatchWait | null
 }
 
 /** One page of GET /api/jobs; `next_before` reads the next page and is null on the last. */
