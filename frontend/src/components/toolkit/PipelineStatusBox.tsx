@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect } from 'react'
 import { Info, TriangleAlert } from 'lucide-react'
-import type { ProgressPhase, ProgressSummary } from '../../types/job'
-import { aiAnalysisStatus } from './pipelineProgress'
+import type { BatchWait, ProgressPhase, ProgressSummary } from '../../types/job'
+import { batchWaitText } from '../../lib/batchWait'
+import { aiAnalysisStatus, aiBatchWait } from './pipelineProgress'
 
 export type LogEntry = {
   ts: number
@@ -20,6 +21,10 @@ export type PipelineJob = {
   currentPhase?: ProgressPhase | null
   summary?: ProgressSummary | null
   eventCount?: number
+  /** Set while the job waits for the GPU batch (AWS); null when it runs at once. */
+  batchWait?: BatchWait | null
+  /** The job runs through the GPU batch (AWS), so it reports every few minutes, not seconds. */
+  gpuBatch?: boolean
 }
 
 export type PipelineState = {
@@ -144,16 +149,19 @@ function deriveSteps(state: PipelineState, phase: string): StepsResult {
     status: driveStatus, progress: driveStatus === 'active' ? driveProg : null,
   }
 
-  // 3 · AI analysis
+  // 3 · AI analysis (on AWS it can first wait for the GPU batch, shown as pending)
   const ai = aiAnalysisStatus(state)
+  const wait = aiBatchWait(state)
   const aiFailed = aiJobs.some((j) => j.status === 'failed')
   let aiStatus: StepStatus
   if (aiJobs.length === 0) aiStatus = done ? 'done' : 'pending'
+  else if (wait) aiStatus = 'pending'
   else if (ai?.active) aiStatus = 'active'
   else if (aiFailed) aiStatus = 'error'
   else aiStatus = 'done'
   const aiDetail =
-    aiStatus === 'pending' ? 'Waiting for upload to finish'
+    wait ? batchWaitText(wait)
+    : aiStatus === 'pending' ? 'Waiting for upload to finish'
     : aiStatus === 'error' ? 'Analysis failed: see the technical details'
     : aiStatus === 'done' ? 'Species identified'
     : 'Detecting animals, then identifying species'
@@ -257,7 +265,7 @@ function deriveSectionTitle(state: PipelineState, phase: string): string {
   // progress (it long outlives the upload, so this is what the user is waiting on).
   const ai = aiAnalysisStatus(state)
   if (ai?.active) {
-    return `Analysing images… ${Math.round(ai.progress * 100)}%`
+    return aiBatchWait(state) ? 'AI analysis queued' : `Analysing images… ${Math.round(ai.progress * 100)}%`
   }
 
   // Processing — use the current phase from the most advanced active job

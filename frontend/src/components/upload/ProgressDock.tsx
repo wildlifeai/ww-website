@@ -17,6 +17,7 @@ import { ArrowRight, Minus, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { PipelineStatusBox } from '../toolkit/PipelineStatusBox'
+import { aiBatchWait } from '../toolkit/pipelineProgress'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -31,10 +32,11 @@ function semaphoreColor(phase: string): string {
   }
 }
 
-function dockLabel(phase: string, totalFiles: number, activeJobPhase?: string | null): string {
+function dockLabel(phase: string, totalFiles: number, activeJobPhase?: string | null, aiWaits = false): string {
   switch (phase) {
     case 'uploading':  return `Uploading ${totalFiles} image${totalFiles !== 1 ? 's' : ''}…`
     case 'processing':
+      if (aiWaits) return 'Waiting for the next GPU run'
       if (activeJobPhase === 'ai_pipeline') return 'Running AI analysis…'
       if (activeJobPhase === 'cleanup')     return 'Cleaning up…'
       return `Syncing ${totalFiles} image${totalFiles !== 1 ? 's' : ''} to Drive…`
@@ -88,7 +90,8 @@ export function ProgressDock() {
   const activeJobPhase = pipelineState.jobs.find(
     (j) => j.status === 'processing' || j.status === 'in_progress',
   )?.currentPhase
-  const label = dockLabel(phase, pipelineState.totalFiles, activeJobPhase)
+  // On AWS the AI job can wait for the GPU batch first (#460).
+  const label = dockLabel(phase, pipelineState.totalFiles, activeJobPhase, !!aiBatchWait(pipelineState))
   const isActive = phase === 'uploading' || phase === 'processing' || phase === 'stalled'
   const isDone = phase === 'completed' || phase === 'failed'
   const hasErrors = pipelineState.jobs.some(

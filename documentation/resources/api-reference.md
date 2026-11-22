@@ -71,7 +71,6 @@ On error:
 - [EXIF Parsing](#exif-parsing)
 - [Uploads](#uploads)
 - [iNaturalist Integration](#inaturalist-integration)
-- [Image Clustering](#image-clustering)
 - [AI Pipeline](#ai-pipeline)
 - [Media Registry](#media-registry)
 - [Deployments](#deployments)
@@ -147,8 +146,8 @@ are readable by any signed-in user, and an API key's jobs are read with `GET /ap
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id |
-| `GET /api/jobs/{job_id}` | Status + `progress`, `current_phase`, ordered `events[]`, `summary` |
+| `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id. Each job carries `batch_wait` as below |
+| `GET /api/jobs/{job_id}` | Status + `progress`, `current_phase`, ordered `events[]`, `summary`. `batch_wait` is `{ queued_at, usual_wait_minutes }` while the job waits in the queue for the GPU batch on the REANNZ cluster (`WORKER_BACKEND=lambda`), and null once it is leased or when it runs at once (Azure). `usual_wait_minutes` is the wait the website states: `BATCH_MAX_WAIT_MINUTES` plus `BATCH_CRON_INTERVAL_MINUTES` (which must match the cluster's crontab), rounded up to whole hours, or to 15 minutes below an hour; 60 and 30 give 120, "usually within 2 hours". `gpu_batch` is true for the whole life of a batch job, which reports every few minutes rather than seconds |
 | `GET /api/jobs/{job_id}/result` | Result of a completed job (`result_url`); `409` if not yet complete |
 
 **Status values:** `queued` → `processing` → `completed` · `completed_with_errors` (some items failed —
@@ -261,21 +260,6 @@ see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 
 ---
 
-## Image Clustering
-
-Near-duplicate detection via perceptual hashing (dHash + BK-tree). No auth. `multipart/form-data`.
-≤1000 images/request. Prefix `/api/clustering`.
-
-> **Legacy** — this is pixel near-duplicate grouping. For semantic DINOv3 clustering (what the
-> Annotations *Group by → Cluster* uses), see [Wildlife Brain](#wildlife-brain--embeddings--clustering).
-
-| Method · Path | Description |
-|---|---|
-| `POST /api/clustering/analyze` | Form `files[]`, `max_hamming?` (0–20, default 10) → clusters + representatives |
-| `POST /api/clustering/analyze/csv` | Same logic; returns a `text/csv` download |
-
----
-
 ## AI Pipeline
 
 Run inference + ecological event/effort computation on a deployment. Gated by `FF_PIPELINE_ENABLED`
@@ -373,10 +357,6 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 > [deployment guide → Vector Store](deployment-guide.md#vector-store--pgvector-supabase).
 > `/api/brain/backup` is now a **no-op** (retained for compatibility): pgvector inherits Supabase PITR, so
 > there is no separate snapshot to take.
-
-> Distinct from [Image Clustering](#image-clustering) (`/api/clustering`), which is the legacy
-> perceptual-hash near-duplicate grouping. `/api/brain` is the semantic DINOv3 clustering the
-> Annotations grid's *Group by → Cluster* uses.
 
 | Method · Path | Description |
 |---|---|

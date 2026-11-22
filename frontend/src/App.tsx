@@ -10,6 +10,7 @@ import { activeNavTab, type NavTabId } from './lib/navTabs'
 import { useAuth } from './hooks/useAuth'
 import { ProjectSelectionProvider } from './hooks/useProjectSelection'
 import { GlobalProjectSelector } from './components/common/GlobalProjectSelector'
+import { RealtimeTabOff } from './components/common/RealtimeTabOff'
 import { useHasRealtimeData } from './hooks/useHasRealtimeData'
 import { useNotifications, type AppNotification } from './hooks/useNotifications'
 import { InatAutoSync } from './components/settings/InatAutoSync'
@@ -250,8 +251,9 @@ function UploadNavButton() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Lifecycle order: prepare (Toolkit), monitor (Realtime), collect (Review), analyse (Insights).
-// Realtime shows only when one of the user's projects has a device that sends or has sent
-// LoRaWAN data (UI audit decision 7, useHasRealtimeData); otherwise it is not in the header.
+// Realtime opens only when one of the user's projects has a device that sends or has sent
+// LoRaWAN data (useHasRealtimeData); otherwise it stays in the header, greyed out, and says why
+// (RealtimeTabOff). This replaces UI audit decision 7, which hid it.
 //
 // The labels are the words the home dashboard's three steps use (upload,
 // review, insights), so the nav and the steps are one vocabulary. The routes
@@ -271,7 +273,6 @@ function Layout({ children }: { children: React.ReactNode }) {
   const { canWriteAny } = useWritableProjects()
   const hasRealtime = useHasRealtimeData()
   const { unreadCount, items: notifications } = useNotifications()
-  const navTabs = USER_TABS.filter(t => t.id !== 'field' || hasRealtime)
 
   // A deep route (a cluster review, a report, the SD card builder) lights its parent tab.
   const activeTab = activeNavTab(location.pathname)
@@ -331,7 +332,9 @@ function Layout({ children }: { children: React.ReactNode }) {
           {/* Tab nav (signed-in only) */}
           {user && (
             <nav style={{ display: 'flex', alignItems: 'stretch', flexShrink: 0 }}>
-              {navTabs.map(({ id, icon: Icon, text, to }) => (
+              {USER_TABS.map(({ id, icon: Icon, text, to }) => id === 'field' && !hasRealtime ? (
+                <RealtimeTabOff key={id} icon={Icon} text={text} style={tabStyle(id)} />
+              ) : (
                 <NavLink key={id} to={to} className="hdr-tab" style={tabStyle(id)} aria-label={text} title={text}>
                   <Icon size={15} aria-hidden="true" />
                   <span className="hdr-text">{text}</span>

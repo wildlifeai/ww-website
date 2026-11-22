@@ -24,7 +24,6 @@ from app.routers import (
     auth,
     brain,
     camtrapdp,
-    clustering,
     deployments,
     exif,
     exports,
@@ -191,7 +190,6 @@ app.include_router(models.router)
 app.include_router(media.router)
 app.include_router(public_api.router)
 app.include_router(inaturalist.router)
-app.include_router(clustering.router)
 app.include_router(uploads.router)
 # The REANNZ batch's lease endpoints: 404 until WORKER_TOKEN_SHA256 is set, not in the OpenAPI document.
 app.include_router(worker.router)

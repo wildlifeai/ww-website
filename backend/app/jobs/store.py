@@ -329,6 +329,37 @@ def batch_reap_decision(status: str, jd: dict, now: Optional[datetime] = None) -
     return "fail", "The GPU cluster job stopped reporting, and so did its retry."
 
 
+def usual_batch_wait_minutes() -> int:
+    """The wait the UI states for the next GPU run: the batch's own wait plus the cron's interval.
+
+    The cluster's cron asks for work every ``BATCH_CRON_INTERVAL_MINUTES``, so a batch that is
+    due can wait that long again. Rounded up to whole hours above an hour, else to 15 minutes:
+    60 + 30 reads "usually within 2 hours".
+    """
+    from app.config import settings  # noqa: PLC0415
+
+    minutes = settings.BATCH_MAX_WAIT_MINUTES + settings.BATCH_CRON_INTERVAL_MINUTES
+    step = 60 if minutes > 60 else 15
+    return -(-minutes // step) * step
+
+
+def on_gpu_batch(jd: dict) -> bool:
+    """The job runs through the REANNZ batch: it reports every few minutes, not seconds."""
+    return (jd.get("dispatch") or {}).get("backend") == "batch"
+
+
+def batch_wait_of(status: Optional[str], jd: dict) -> Optional[dict]:
+    """``{queued_at, usual_wait_minutes}`` while a job waits in the queue for the REANNZ batch, else None.
+
+    The UI says the job waits for the next GPU run (#460). A leased job is ``processing`` and a
+    job on another backend has no batch dispatch record, so both keep their usual wording.
+    """
+    if status != JobStatus.QUEUED.value or not on_gpu_batch(jd):
+        return None
+    queued_at = jd["dispatch"].get("queued_at") or jd.get("created_at")
+    return {"queued_at": queued_at, "usual_wait_minutes": usual_batch_wait_minutes()}
+
+
 def requeued_job_data(jd: dict, message: str) -> dict:
     """``jd`` back in the queue for the next lease, with one attempt used."""
     out = {k: v for k, v in jd.items() if k != "lease"}
@@ -522,6 +553,7 @@ async def list_jobs(
                     "created_at": jd.get("created_at") or row.get("created_at"),
                     "updated_at": jd.get("updated_at") or row.get("updated_at"),
                     "event_count": len(jd.get("events") or []),
+                    "batch_wait": batch_wait_of(row.get("status"), jd),
                 }
             )
         return out, next_before
@@ -586,6 +618,8 @@ async def get_job(job_id: str) -> Optional[JobInfo]:
 
     data["events"] = events
     data["event_count"] = len(mem_events)
+    data["batch_wait"] = batch_wait_of(data.get("status"), data)
+    data["gpu_batch"] = on_gpu_batch(data)
     data.pop("_next_seq", None)
 
     return JobInfo(**data)

@@ -266,6 +266,16 @@ virtual-hosted addressing; create every S3 client through it.
 
 ---
 
+## A form takes at most 1,000 fields
+
+Starlette parses a form with `max_fields=1000` and `max_files=1000` and answers `400` "Too many
+fields" above either, before the route runs. Keys sent by S3 upload (`files_key`) are fields, so
+`/api/exif/parse` by key, with a `paths` field per photo and one option, stops at 499 photos under
+its 500 cap; the website sends 10 a request (checked 22 Nov 2026). Size a key endpoint's cap by
+its fields, not its photos.
+
+---
+
 ## Gemini API key limits
 
 `GEMINI_API_KEY` in the root `.env` is on the free tier: 15 requests per minute and 500 per
