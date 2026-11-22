@@ -126,13 +126,13 @@ registries/→ static config (camera configs, model + embedding registries)
 **Routers** (`/api/*`, registered in `app/main.py`): `auth` (demo session), `admin` (system-admin
 device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `exports`, `reports` (the GBF
 report, answering `FEATURE_DISABLED` without `FF_GBF_REPORT_ENABLED`), `models`, `media`,
-`public_api`, `inaturalist`, `clustering`, and, each behind its feature flag, `camtrapdp`,
+`public_api`, `inaturalist`, and, each behind its feature flag, `camtrapdp`,
 `pipeline`, `brain`
 (embeddings/clusters/UMAP/similarity), `qa` (AI-vs-human agreement), `intelligence`
 (dataset health/alerts).
 
 **Key domain modules**: `exif`, `photo_preprocessing`, `pipeline` (SpeciesNet steps), `events`,
-`clustering`, `wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
+`wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
 `human_verdicts` (cluster confirm and undo, batch review: one human row per photo),
 `intelligence`, `media_registry` / `media_resolver`, `model`, `manifest`, `camtrapdp`, `camtrapdp_export`, `inaturalist`,
 `public_api`, `gbf_report` + `gbif_dataset` (the GBF report and a project's GBIF dataset).

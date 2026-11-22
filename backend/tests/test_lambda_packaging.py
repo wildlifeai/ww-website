@@ -69,6 +69,15 @@ def test_the_api_refuses_to_start_without_its_database_settings():
     settings.require_supabase()  # the test environment has them
 
 
+def test_a_retired_setting_left_in_ssm_or_a_dotenv_is_ignored(monkeypatch, tmp_path):
+    """FF_CLUSTERING_ENABLED went with the image clustering routes (#453); old values must not stop startup."""
+    monkeypatch.setenv("FF_CLUSTERING_ENABLED", "true")
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("FF_CLUSTERING_ENABLED=true\n", encoding="utf-8")
+    loaded = Settings(_env_file=dotenv)
+    assert not hasattr(loaded, "FF_CLUSTERING_ENABLED")
+
+
 # ── /events ──────────────────────────────────────────────────────────
 
 
