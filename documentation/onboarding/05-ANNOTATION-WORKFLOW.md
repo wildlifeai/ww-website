@@ -84,6 +84,12 @@ and the **Actions** menu (`components/data/MediaBulkActions.tsx`): *Label as…*
 photos* (single selection, Wildlife Brain), *Publish to iNaturalist* (or a link to connect it on
 Toolkit; the route and notices are Cluster Review's, `lib/inatPublish.ts`), *Remove photos* (soft
 delete with Undo), *Run AI again* and, for organisation managers, *Create species ID model…*.
+*Run AI again* runs SpeciesNet (with the crop step), BioCLIP or both on the selected photos as one
+`ai_run` job (`lib/runAiAgain.ts`, `POST /api/media/run-selected`), then the Gemini presence check
+and the evidence fusion consensus where their flags are on, as an upload's run would, so the
+consensus reflects the new labels; the processing banner follows it
+like any AI job and the grid reloads when it ends. It is refused, in the error toast, while an AI job
+is queued or running on one of the photos' deployments, an upload's included.
 *Label as…* gives each photo one human row, updating the one it has,
 and leaves AI rows as the model wrote them (`lib/humanVerdict.ts`, decision 2 of the
 [UI audit](../development%20reports/2026-10_ui-audit/README.md)); its toast offers Undo, and a

@@ -113,7 +113,10 @@ Rules:
   pipeline code. Contracts and status:
   [2026-10_aws-reannz-migration](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md).
   A model call that bypasses `get_speciesnet_service()`, `get_bioclip_service()` or
-  `get_dinov3_service()` breaks that path.
+  `get_dinov3_service()` breaks that path. A batch job's arguments are read again from its
+  dispatch record by the lease (`domain/batch_lease.py`) and by ingest (`jobs/ingest.py`): an
+  argument added to `annotate_deployments_job` that those two do not read is silently dropped on
+  AWS (`AnnotateRun.of_dispatch` in `jobs/pipeline_run.py` reads its `pipeline` for both).
 * On AWS the API sits behind an API Gateway HTTP API: a request must finish within 30 s and a
   response stay under 6 MB, or the caller gets a 503. Work that can take longer goes through
   `enqueue_job`, a large result goes to the object store with a link, a small one (counts,

@@ -28,7 +28,7 @@ const STATUS_META: Record<JobStatusValue, { icon: LucideIcon; label: string; col
 }
 
 const KIND_ICON: Record<string, LucideIcon> = {
-  upload: Upload, ai_pipeline: Bot, ai_embed: Brain, ai_reprocess: RefreshCw,
+  upload: Upload, ai_pipeline: Bot, ai_run: Bot, ai_embed: Brain, ai_reprocess: RefreshCw,
   active_learning: Target, export: Package, maintenance: Wrench, model_train: Dna, model_upload: Cpu,
   media_prep: Image, camtrapdp_import: Package,
 }
