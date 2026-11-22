@@ -53,7 +53,9 @@ Rules:
 * A route whose feature flag is off answers HTTP 200 with `FEATURE_DISABLED`, which `apiClient`
   throws. Show a link to a flagged page (Dataset Health, UMAP, Cluster Review) only when
   `useFeatureEnabled(feature, id)` is true: one cached probe per feature, not one per row
-  (`lib/featureFlags.ts`, UI audit decision 6).
+  (`lib/featureFlags.ts`, UI audit decision 6). The probe can take seconds on Lambda, so a place
+  that should not jump when it answers (the grid's Review tab) reads `useFeatureState`, which
+  keeps "not known yet" apart, and shows a placeholder until it is true.
 * A route that raises `HTTPException` (every `/api/inat` route) reaches `apiClient` as code
   `UNKNOWN` with the `detail` as its message, and the status is lost, so match the message
   (`lib/inatOff.ts`, `inatErrorNotice` in `lib/inatPublish.ts`).

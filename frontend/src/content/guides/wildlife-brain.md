@@ -22,7 +22,7 @@ Importantly, it does **not** name species — that's the Cloud AI's job. The Wil
 
 ## How to run it
 
-Open the **Clusters** page for a deployment and choose **🧠 Run Wildlife Brain**. It processes in the background (you can keep working and track it in **Processing history**); when it finishes, your clusters, the map, and *find similar* are ready. You can also turn it on at upload time with the **Run AI analysis + Wildlife Brain** option.
+On **Media**, pick one deployment in the **Filter** tab, then open the **Review** tab and choose **Run Wildlife Brain** (once it has run, the same place offers **Review clusters** and **UMAP**). It processes in the background (you can keep working and track it in **Processing history**); when it finishes, your clusters, the map, and *find similar* are ready. You can also turn it on at upload time with the **Run AI analysis + Wildlife Brain** option.
 
 > The Wildlife Brain needs images that are already on the website, so run it after your photos have uploaded and the Cloud AI has processed them.
 

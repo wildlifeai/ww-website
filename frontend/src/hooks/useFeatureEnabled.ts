@@ -14,6 +14,14 @@ import { FEATURE_PROBES, probeFeature, type Feature } from '../lib/featureFlags'
  * a link on every row makes one request, not one per row.
  */
 export function useFeatureEnabled(feature: Feature, scopeId?: string | null): boolean {
+  return useFeatureState(feature, scopeId) === true
+}
+
+/**
+ * The same answer with "not known yet" kept apart: undefined until the probe answers. For an
+ * entry point that is on by default and should show at once, hidden only once known off.
+ */
+export function useFeatureState(feature: Feature, scopeId?: string | null): boolean | undefined {
   const { data } = useQuery({
     queryKey: ['feature', feature],
     queryFn: () => probeFeature(() => apiClient.get(FEATURE_PROBES[feature](scopeId as string))),
@@ -21,5 +29,5 @@ export function useFeatureEnabled(feature: Feature, scopeId?: string | null): bo
     // A flag changes only when the backend is redeployed.
     staleTime: 30 * 60_000,
   })
-  return data === true
+  return data
 }
