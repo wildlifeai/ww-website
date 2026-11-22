@@ -4008,7 +4008,7 @@
     },
     "/api/inat/publish": {
       "post": {
-        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (a photo whose label is not an\nanimal, or that shows a person), uploads each photo through the backend proxy\n(bypassing browser CORS), and records the mapping in inat_observations /\ninat_observation_media for status tracking.\n\nStarts no photo after about two minutes, inside the ingress timeout, and returns the photos\nit did not reach as ``remaining_media_ids``: send those again to carry on, the rest of a\nburst joining the observation it started (``useINat().publish`` does this).\n\nOnly photos in projects the caller can change (project_member or above) are published: the\nothers are left out, and ``403`` when that is all of them.",
+        "description": "Publish selected Wildlife Watcher media to the user's iNaturalist account.\n\nConsolidates the selection into temporal-burst observations (one iNat\nobservation per encounter), drops by-catch (a photo whose label is not an\nanimal, or that shows a person), uploads each photo through the backend proxy\n(bypassing browser CORS), and records the mapping in inat_observations /\ninat_observation_media for status tracking.\n\nStarts no photo after about 15 seconds, and gives each iNaturalist step at most 10, so it\nanswers inside API Gateway's 30 s on AWS. Returns the photos it did not reach as\n``remaining_media_ids``: send those again to carry on, the rest of a burst joining the\nobservation it started (``useINat().publish`` does this).\n\nOnly photos in projects the caller can change (project_member or above) are published: the\nothers are left out, and ``403`` when that is all of them.",
         "operationId": "publish_to_inat_api_inat_publish_post",
         "parameters": [
           {
@@ -4100,7 +4100,7 @@
     },
     "/api/inat/sync": {
       "post": {
-        "description": "Pull community identifications from iNaturalist back into Wildlife Watcher.\n\nPolls the public iNat API for the taxon + quality_grade of this user's\npublished observations, updates the inat_observations sync state (drives the\nthumbnail badge), and writes the community taxon back into WW observations as\nsource_type='consensus'. A scheduled job can call the same domain function\nwith no user filter to sync everyone.",
+        "description": "Start pulling community identifications from iNaturalist back into Wildlife Watcher.\n\nAnswers ``{job_id}`` at once: follow it with ``GET /api/jobs/{id}``, whose ``message``\nreports progress and, once completed, the counts. The job (``jobs/inat_sync.py``) polls the\npublic iNat API for the taxon + quality_grade of this user's published observations,\nupdates the inat_observations sync state (drives the thumbnail badge), and writes the\ncommunity taxon back into WW observations as source_type='consensus'. A scheduled job can\ncall the same domain function with no user filter to sync everyone.",
         "operationId": "sync_inat_api_inat_sync_post",
         "parameters": [
           {
@@ -4295,7 +4295,7 @@
     },
     "/api/jobs": {
       "get": {
-        "description": "List the authenticated user's processing jobs, newest first, a page at a time.\n\nPowers the avatar-menu \"Processing history\" view so a user can see whether a\npast upload / AI run finished or failed after the live dock has gone away.\nScoped to the caller: only jobs stamped with their ``user_id`` are returned.\n``next_before`` reads the next page and is null on the last one.",
+        "description": "List the authenticated user's processing jobs, newest first, a page at a time.\n\nPowers the avatar-menu \"Processing history\" view so a user can see whether a\npast upload / AI run finished or failed after the live dock has gone away.\nScoped to the caller: only jobs stamped with their ``user_id`` are returned. Without\n``kind`` it leaves out the iNaturalist sync that runs at each sign-in\n(``store.UNLISTED_KINDS``); ``GET /api/jobs/{id}`` still answers for it.\n``next_before`` reads the next page and is null on the last one.",
         "operationId": "list_user_jobs_api_jobs_get",
         "parameters": [
           {

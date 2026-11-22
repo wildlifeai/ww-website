@@ -54,6 +54,7 @@ IN_PROCESS_JOBS = frozenset(
         "download_github_pretrained_job",
         "ingest_results_part_job",
         "finalize_batch_job",
+        "sync_inat_job",
     }
 )
 

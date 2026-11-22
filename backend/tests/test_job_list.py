@@ -98,3 +98,26 @@ def test_cursor_is_utc_to_the_microsecond():
     assert store.job_cursor({"id": "j", "created_at": "2026-10-20T04:00:00+00:00"}) == "2026-10-20T04:00:00.000000Z|j"
     assert store.job_cursor({"id": "j", "created_at": "2026-10-20T17:00:00.5+13:00"}) == "2026-10-20T04:00:00.500000Z|j"
     assert store.job_cursor({"id": "j", "created_at": None}) is None
+
+
+def test_the_sign_in_inat_sync_is_left_out_of_the_lists_but_answers_by_id(monkeypatch):
+    """Processing history and the grid's job reads show the jobs a person started; the sync that
+    runs at each sign-in (#455) is read only by id, by the Settings panel that follows it."""
+    sync = _job(_uuid(2), "2026-10-20T02:00:00+00:00", status="processing", kind="inat_sync")
+    sync["job_data"]["job_id"] = _uuid(2)
+    no_kind = _job(_uuid(3), "2026-10-20T03:00:00+00:00")
+    del no_kind["job_data"]["kind"]
+    rows = [_job(_uuid(1), "2026-10-20T01:00:00+00:00"), sync, no_kind]
+    monkeypatch.setattr(store, "create_service_client", FakeDB({"api_jobs": rows}).client)
+    store._memory_store.pop(f"job:{_uuid(2)}", None)
+    app = FastAPI()
+    app.include_router(jobs.router)
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="u1", email="u@ww.ai")
+    client = TestClient(app)
+
+    assert _pages(client, []) == [[_uuid(3), _uuid(1)]]
+    assert _pages(client, [("limit", 1)]) == [[_uuid(3)], [_uuid(1)]]
+    assert _pages(client, [("status", "processing")]) == [[]]
+    assert _pages(client, [("kind", "inat_sync")]) == [[_uuid(2)]]
+    r = client.get(f"/api/jobs/{_uuid(2)}")
+    assert r.status_code == 200 and r.json()["data"]["status"] == "processing"

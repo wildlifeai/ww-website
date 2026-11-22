@@ -291,11 +291,12 @@ frontend needs nothing: it asks `/api/inat/status`.
    person, *Publish to iNaturalist*: one observation per encounter, location obscured, the two
    skipped, and the grid's dove badge on the published ones.
 3. Publish 100 or more photos of one deployment: the network tab shows several
-   `POST /api/inat/publish`, each under 4 minutes, then one notice; no encounter is split into two
-   observations on iNaturalist.
+   `POST /api/inat/publish`, each under 30 seconds, while the button counts the photos reached,
+   then one notice; no encounter is split into two observations on iNaturalist.
 4. Publish the same selection again: every photo is skipped as already on iNaturalist.
-5. Settings, *Sync now*: the badge follows the quality grade. No identification comes back
-   ([what happens today](../development%20reports/inaturalist-integration.md#what-happens-today-checked-25-oct-2026-123)).
+5. Settings, *Sync now*: `POST /api/inat/sync` answers a job id at once, the panel shows its
+   progress and then the counts, and the badge follows the quality grade. No identification
+   comes back ([what happens today](../development%20reports/inaturalist-integration.md#what-happens-today-checked-25-oct-2026-123)).
 6. Delete the test observations on iNaturalist.
 
 Before production, check the three tables exist there (read-only):

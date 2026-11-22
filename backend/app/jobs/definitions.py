@@ -15,6 +15,7 @@ from typing import Any
 
 import structlog
 
+from app.jobs.inat_sync import sync_inat_job
 from app.jobs.store import (
     complete_phase,
     create_job,
@@ -1998,4 +1999,5 @@ JOBS = [
     embed_deployments_job,
     ingest_results_part_job,
     finalize_batch_job,
+    sync_inat_job,
 ]
