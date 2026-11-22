@@ -17,10 +17,10 @@ from app.authz import assert_write, require_deployment_access, require_media_acc
 from app.config import settings
 from app.dependencies import get_current_user, get_user_client, require_not_demo
 from app.domain.media_registry import resolve_url, with_resolved_urls
-from app.domain.media_resolver import resolve_media
+from app.domain.media_resolver import serve_media
 from app.domain.soft_delete import now_iso, restore_media_as_user, soft_delete_media_as_user
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
-from app.services import object_store, supabase_client
+from app.services import supabase_client
 from app.services.db_utils import row_of, rows_of
 
 router = APIRouter(prefix="/api/media", tags=["media"])
@@ -59,15 +59,12 @@ async def get_media_image(
 
     file_path = row.get("file_path", "")
 
-    # An original in S3 goes to the browser straight from the bucket on a short presigned
-    # URL, so the API never proxies (or, on Lambda, size-limits) the bytes.
-    if file_path.startswith("s3://") and settings.OBJECT_STORE_BACKEND == "s3":
-        bucket, key = object_store.parse_s3_path(file_path)
-        url = object_store.presign_get(key, bucket=bucket)
-        return RedirectResponse(url, status_code=307, headers={"Cache-Control": "private, max-age=60"})
-
-    resolved = await resolve_media(file_path, size=size)
-    if not resolved:
+    # On S3 an original in the bucket, or one too large for Lambda's answer, goes to the
+    # browser on a short presigned URL, so the API never proxies (or size-limits) the bytes.
+    served = await serve_media(file_path, size=size)
+    if served and served.url:
+        return RedirectResponse(served.url, status_code=307, headers={"Cache-Control": "private, max-age=60"})
+    if not served:
         raise HTTPException(
             status_code=404,
             detail={
@@ -81,12 +78,11 @@ async def get_media_image(
             },
         )
 
-    image_bytes, content_type = resolved
     # Thumbnails cache longer (10min), full-res shorter (5min) since they're on-demand
     cache_ttl = 600 if size == "thumb" else 300
     return Response(
-        content=image_bytes,
-        media_type=content_type,
+        content=served.data,
+        media_type=served.content_type,
         headers={"Cache-Control": f"private, max-age={cache_ttl}"},
     )
 

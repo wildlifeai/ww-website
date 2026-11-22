@@ -13,6 +13,7 @@ import asyncio
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from postgrest import CountMethod
 
 from app.authz import (
     WRITE_REFUSED,
@@ -48,6 +49,12 @@ from app.services.supabase_client import create_service_client
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/brain", tags=["brain"])
+
+# On Lambda an answer must stay under 6 MB and finish within 30 s. A photo costs about 45 bytes
+# of the clusters/multi answer (70 in #457's reckoning, which reaches 6 MB near 90,000), so
+# 50,000 stays under 3.5 MB either way and takes 50 reads of 1,000 rows. The cap goes once the
+# grid asks only for its page's clusters (#474).
+MULTI_CLUSTER_MAX_PHOTOS = 50_000
 
 
 def _disabled(req_id):
@@ -138,6 +145,7 @@ async def multi_clusters(request: Request, body: MultiClusterRequest, user=Depen
     Returns clusters from each deployment's latest completed embedding run,
     grouped by model variant (ViT-H vs ViT-S are separate vector spaces).
     Optionally filters member media by cluster_confidence >= min_confidence.
+    On Lambda, a selection over ``MULTI_CLUSTER_MAX_PHOTOS`` photos answers ``TOO_MANY_PHOTOS``.
     """
     req_id = getattr(request.state, "request_id", None)
     if not settings.FF_WILDLIFE_BRAIN_ENABLED:
@@ -153,6 +161,19 @@ async def multi_clusters(request: Request, body: MultiClusterRequest, user=Depen
         return ApiResponse(data={"clusters": [], "media_clusters": {}, "outlier_media_ids": [], "model_groups": []}, meta=ApiMeta(request_id=req_id))
 
     svc = create_service_client()
+
+    def _members_query(columns: str, count: CountMethod | None = None):
+        query = svc.table("media_embeddings").select(columns, count=count).in_("deployment_id", body.deployment_ids)
+        if body.min_confidence > 0:
+            query = query.gte("cluster_confidence", body.min_confidence)
+        return query
+
+    if settings.WW_LAMBDA_ROLE:
+        photos = await asyncio.to_thread(lambda: _members_query("media_id", CountMethod.exact).limit(1).execute().count or 0)
+        if photos > MULTI_CLUSTER_MAX_PHOTOS:
+            message = f"Grouping by cluster covers up to {MULTI_CLUSTER_MAX_PHOTOS:,} photos; this selection has {photos:,}."
+            message += " Choose fewer deployments."
+            return ApiResponse(error=ApiError(code="TOO_MANY_PHOTOS", message=message), meta=ApiMeta(request_id=req_id))
 
     def _fetch():
         # 1. Get the latest completed embedding run per deployment.
@@ -180,17 +201,7 @@ async def multi_clusters(request: Request, body: MultiClusterRequest, user=Depen
         clusters = rows_of(clusters_resp)
 
         # 3. Fetch member media per cluster (with optional confidence filter), every page.
-        def _members_query():
-            query = (
-                svc.table("media_embeddings")
-                .select("media_id, cluster_id, deployment_id, cluster_confidence, is_outlier")
-                .in_("deployment_id", body.deployment_ids)
-            )
-            if body.min_confidence > 0:
-                query = query.gte("cluster_confidence", body.min_confidence)
-            return query.order("media_id")
-
-        members = read_all(_members_query)
+        members = read_all(lambda: _members_query("media_id, cluster_id, deployment_id, cluster_confidence, is_outlier").order("media_id"))
 
         # 4. Group by model variant (cross-variant is not meaningful).
         run_model = {r["id"]: r.get("model_name", "unknown") for r in latest_runs}

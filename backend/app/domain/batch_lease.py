@@ -19,7 +19,16 @@ State lives where no stale copy can overwrite it:
 
 The cluster never gets a database credential and never fetches a URL a user could have
 written: originals in S3 come as presigned GETs, everything else through
-``/api/worker/lease/{id}/media/{media_id}``, which resolves through the SSRF-guarded resolver.
+``/api/worker/lease/{id}/media/{media_id}``, which resolves through the SSRF-guarded resolver
+and, on S3, redirects to a copy when the original is too large for Lambda's answer.
+
+A cluster that asks for a ``paged`` lease gets each job's ``items_total`` instead of its
+``items`` and reads them a part at a time from :func:`items_page`, signed just before use: at
+1.5 to 3 KB a presigned URL, a job of 2,000 to 4,000 photos (a job goes whole into a lease)
+passes Lambda's 6 MB answer, and a URL signed at claim can expire before a late part of a long
+job is downloaded. The photos of a paged job are kept at ``results/{lease}/{job}/_items.json``,
+because the job's own query would no longer return the photos ingest has already annotated. A
+cluster that does not ask gets today's manifest.
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ from typing import Any, Optional
 import structlog
 
 from app.config import settings
+from app.domain.media_resolver import ServedMedia, serve_media
 from app.jobs.store import batch_lease_name, patch_job_data
 from app.schemas.job import JobStatus
 from app.services import object_store
@@ -47,6 +57,9 @@ logger = structlog.get_logger()
 SECONDS_PER_PHOTO_BUDGET = 3
 PART_UPLOAD_TTL_SECONDS = 900
 PART_CONTENT_TYPE = "application/gzip"
+# Photos in one items page. A presigned item is 1.5 to 3 KB, most of it the Lambda role's
+# session token, so a page stays at 3 MB at most, half of Lambda's 6 MB answer.
+ITEMS_PAGE_MAX = 1000
 
 
 class LeaseError(Exception):
@@ -70,6 +83,10 @@ def done_key(lease_id: str, job_id: str) -> str:
 
 def finalized_key(lease_id: str, job_id: str) -> str:
     return f"{object_store.RESULTS_PREFIX}{lease_id}/{job_id}/_finalized"
+
+
+def items_key(lease_id: str, job_id: str) -> str:
+    return f"{object_store.RESULTS_PREFIX}{lease_id}/{job_id}/_items.json"
 
 
 # ── reading the queue ────────────────────────────────────────────────
@@ -184,6 +201,13 @@ def _crop_item(lease_id: str, crop: dict) -> dict:
     return item
 
 
+def _items(lease_id: str, kind: Optional[str], sources: list[dict]) -> list[dict]:
+    """The manifest items of a job's photos (``_annotate_work``, ``_embed_work``), URLs signed now."""
+    if kind == "embed":
+        return [_crop_item(lease_id, s) for s in sources]
+    return [_media_item(lease_id, s) for s in sources]
+
+
 def _annotate_config() -> dict:
     """The settings the cluster's models need, as ``run_pipeline`` would use them for an upload run."""
     from app.domain.pipeline import DetectionCutoffs
@@ -196,8 +220,8 @@ def _annotate_config() -> dict:
     return config
 
 
-async def _annotate_work(lease_id: str, dispatch: dict) -> Optional[dict]:
-    """The photos and models of one annotate job, or None when the pipeline has nothing to run."""
+async def _annotate_work(dispatch: dict) -> Optional[dict]:
+    """The photos (``sources``) and models of one annotate job, or None when the pipeline has nothing to run."""
     from app.domain.pipeline import fetch_pipeline_media
     from app.jobs.definitions import build_pipeline_steps
     from app.schemas.pipeline import PipelineStepType
@@ -212,31 +236,32 @@ async def _annotate_work(lease_id: str, dispatch: dict) -> Optional[dict]:
     force = bool(kwargs.get("force", args[2] if len(args) > 2 else False))
     media_ids = kwargs.get("media_ids", args[3] if len(args) > 3 else None)
     svc = create_service_client()
-    items: list[dict] = []
+    sources: list[dict] = []
     for dep in _job_deployments(dispatch):
         media = await asyncio.to_thread(fetch_pipeline_media, svc, dep, steps, force=force, media_ids=media_ids)
-        items.extend(_media_item(lease_id, m) for m in media)
-    return {"models": {"speciesnet": speciesnet, "bioclip": bioclip}, "config": _annotate_config(), "items": items}
+        sources.extend({"id": m["id"], "deployment_id": m.get("deployment_id"), "file_path": m.get("file_path")} for m in media)
+    return {"models": {"speciesnet": speciesnet, "bioclip": bioclip}, "config": _annotate_config(), "sources": sources}
 
 
-async def _embed_work(lease_id: str, dispatch: dict) -> dict:
-    """The hero crops of one embed job: DINOv3 embeds the same bytes the website stored."""
+async def _embed_work(dispatch: dict) -> dict:
+    """The hero crops (``sources``) of one embed job: DINOv3 embeds the same bytes the website stored."""
     from app.domain.wildlife_brain import _fetch_crops
 
     args = dispatch.get("args") or []
     model = (dispatch.get("kwargs") or {}).get("model_name") or (args[1] if len(args) > 1 else None) or settings.EMBEDDING_DEFAULT_MODEL
-    items: list[dict] = []
+    sources: list[dict] = []
     for dep in _job_deployments(dispatch):
-        items.extend(_crop_item(lease_id, c) for c in await _fetch_crops(dep))
-    return {"models": {"dinov3": model}, "config": {}, "items": items}
+        sources.extend({"id": c["id"], "deployment_id": c.get("deployment_id"), "crop_url": c.get("crop_url")} for c in await _fetch_crops(dep))
+    return {"models": {"dinov3": model}, "config": {}, "sources": sources}
 
 
-async def claim(max_photos: Optional[int] = None, slurm_job_id: str = "") -> Optional[dict]:
+async def claim(max_photos: Optional[int] = None, slurm_job_id: str = "", paged: bool = False) -> Optional[dict]:
     """Lease queued batch jobs to the cluster, oldest first, up to ``max_photos`` photos.
 
     Returns the manifest, or None when nothing is ready. A job always goes whole into one
     lease (parts split it), so a lease may run over ``max_photos`` by one job. A job with
-    nothing left to run is completed on the spot.
+    nothing left to run is completed on the spot. ``paged``: each job carries ``items_total``
+    and its photos come from :func:`items_page`; otherwise they are inline as ``items``.
     """
     from app.services.locks import acquire_lease, exclusive, release_lease
 
@@ -257,30 +282,37 @@ async def claim(max_photos: Optional[int] = None, slurm_job_id: str = "") -> Opt
             if total >= limit:
                 break
             dispatch = (row.get("job_data") or {}).get("dispatch") or {}
+            kind = dispatch.get("kind")
             try:
-                work = await (_embed_work(lease_id, dispatch) if dispatch.get("kind") == "embed" else _annotate_work(lease_id, dispatch))
+                work = await (_embed_work(dispatch) if kind == "embed" else _annotate_work(dispatch))
             except Exception as exc:  # noqa: BLE001 - one bad job must not block the queue
                 logger.error("batch_claim_job_failed", job_id=row["id"], error=str(exc))
                 await patch_job_data(row["id"], {"error": f"Could not prepare the GPU batch: {exc}"}, status=JobStatus.FAILED)
                 continue
-            if not work or not work["items"]:
+            if not work or not work["sources"]:
                 await _complete_empty(row["id"], dispatch)
                 continue
+            sources = work.pop("sources")
+            if paged:
+                await object_store.put_object(items_key(lease_id, row["id"]), json.dumps(sources).encode("utf-8"), "application/json")
+                work["items_total"] = len(sources)
+            else:
+                work["items"] = _items(lease_id, kind, sources)
             await patch_job_data(
                 row["id"],
                 {
                     "lease": {"id": lease_id, "leased_at": now.isoformat(), "slurm_job_id": slurm_job_id},
-                    "message": f"Running on the GPU cluster ({len(work['items'])} photos)",
+                    "message": f"Running on the GPU cluster ({len(sources)} photos)",
                     "progress": 0.05,
                 },
                 status=JobStatus.PROCESSING,
             )
-            jobs.append({"job_id": row["id"], "kind": dispatch.get("kind"), **work})
-            total += len(work["items"])
+            jobs.append({"job_id": row["id"], "kind": kind, **work})
+            total += len(sources)
         if not jobs:
             await asyncio.to_thread(release_lease, name, lease_id)
             return None
-    logger.info("batch_leased", lease_id=lease_id, jobs=len(jobs), photos=total, slurm_job_id=slurm_job_id)
+    logger.info("batch_leased", lease_id=lease_id, jobs=len(jobs), photos=total, slurm_job_id=slurm_job_id, paged=paged)
     return {
         "lease_id": lease_id,
         "contract": INFERENCE_CONTRACT,
@@ -339,6 +371,18 @@ async def heartbeat(lease_id: str, done: int = 0, total: int = 0) -> dict:
     return {"cancel": False, "expires_at": (_now() + timedelta(seconds=ttl)).isoformat()}
 
 
+async def items_page(lease_id: str, job_id: str, offset: int = 0, limit: int = ITEMS_PAGE_MAX) -> dict:
+    """Photos ``offset`` onwards of a paged job, at most ``limit`` (and :data:`ITEMS_PAGE_MAX`), URLs signed now."""
+    row = await _require_job(lease_id, job_id)
+    found = await object_store.get_object(items_key(lease_id, job_id))
+    if not found:
+        raise LeaseError(f"job {job_id} of lease {lease_id} was not leased in pages")
+    sources = json.loads(found[0])
+    page = sources[offset : offset + min(limit, ITEMS_PAGE_MAX)]
+    kind = ((row.get("job_data") or {}).get("dispatch") or {}).get("kind")
+    return {"items": _items(lease_id, kind, page), "offset": offset, "total": len(sources)}
+
+
 async def part_target(lease_id: str, job_id: str, part: int) -> dict:
     """Where the cluster PUTs one results part: S3 directly, or the API on other backends."""
     await _require_job(lease_id, job_id)
@@ -390,10 +434,8 @@ async def finish(lease_id: str, reports: list[dict]) -> None:
     logger.info("batch_lease_finished", lease_id=lease_id, jobs=len(reports))
 
 
-async def media_bytes(lease_id: str, media_id: str, crop: bool = False) -> Optional[tuple[bytes, str]]:
-    """One original (or hero crop) of a leased job, through the SSRF-guarded resolver."""
-    from app.domain.media_resolver import resolve_media
-
+async def media_served(lease_id: str, media_id: str, crop: bool = False) -> Optional[ServedMedia]:
+    """One original (or hero crop) of a leased job, through the SSRF-guarded resolver: its bytes, or a link on S3."""
     deployments: set[str] = set()
     for row in await _lease_jobs(lease_id):
         deployments.update(_job_deployments((row.get("job_data") or {}).get("dispatch") or {}))
@@ -414,4 +456,4 @@ async def media_bytes(lease_id: str, media_id: str, crop: bool = False) -> Optio
         if isinstance(assets, list):
             assets = assets[0] if assets else None
         source = (assets or {}).get("animal_crop_url")
-    return await resolve_media(str(source or ""), size="full") if source else None
+    return await serve_media(str(source or ""), size="full") if source else None

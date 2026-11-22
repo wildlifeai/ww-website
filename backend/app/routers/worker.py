@@ -15,8 +15,8 @@ import hashlib
 import hmac
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from app.config import settings
@@ -43,6 +43,8 @@ router = APIRouter(prefix="/api/worker", tags=["worker"], include_in_schema=Fals
 class LeaseRequest(BaseModel):
     max_photos: Optional[int] = Field(None, ge=1)
     slurm_job_id: str = ""
+    # The photos come a part at a time from GET /lease/{id}/items/{job}; false (an older image) keeps them inline.
+    paged: bool = False
 
 
 class HeartbeatRequest(BaseModel):
@@ -78,8 +80,17 @@ async def pending():
 @router.post("/lease")
 async def lease(body: LeaseRequest):
     """Take queued work. ``{"lease_id": null}`` when there is none."""
-    manifest = await batch_lease.claim(body.max_photos, body.slurm_job_id)
+    manifest = await batch_lease.claim(body.max_photos, body.slurm_job_id, paged=body.paged)
     return manifest or {"lease_id": None}
+
+
+@router.get("/lease/{lease_id}/items/{job_id}")
+async def items(lease_id: str, job_id: str, offset: int = Query(0, ge=0), limit: int = Query(batch_lease.ITEMS_PAGE_MAX, ge=1)):
+    """Photos ``offset`` onwards of a paged job, with URLs signed now; ``limit`` is capped at 1,000."""
+    try:
+        return await batch_lease.items_page(lease_id, job_id, offset, limit)
+    except batch_lease.LeaseError as exc:
+        raise _lease_error(exc) from exc
 
 
 @router.post("/lease/{lease_id}/heartbeat")
@@ -131,12 +142,13 @@ async def done(lease_id: str, body: DoneRequest):
 
 @router.get("/lease/{lease_id}/media/{media_id}")
 async def media(lease_id: str, media_id: str, crop: bool = False):
-    """One leased original or hero crop, for originals that are not in S3."""
+    """One leased original or hero crop, for originals that are not in S3; a redirect when it is too large to answer."""
     try:
-        found = await batch_lease.media_bytes(lease_id, media_id, crop=crop)
+        found = await batch_lease.media_served(lease_id, media_id, crop=crop)
     except batch_lease.LeaseError as exc:
         raise _lease_error(exc) from exc
     if not found:
         raise HTTPException(status_code=404, detail="Media not resolvable")
-    data, content_type = found
-    return Response(content=data, media_type=content_type)
+    if found.url:
+        return RedirectResponse(found.url, status_code=307)
+    return Response(content=found.data, media_type=found.content_type)

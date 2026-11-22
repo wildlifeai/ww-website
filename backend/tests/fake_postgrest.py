@@ -14,7 +14,7 @@ rows they wrote, as supabase-py asks for by default. Like PostgREST, a read retu
 A column the table does not have fails the test, so a query naming a column that is not in
 ww-backend's schema is caught here and not in production. ``COLUMNS`` lists the columns of
 each table the API reads, from ww-backend dev's supabase/schema.sql (10 Oct 2026; the cluster
-and observation provenance columns 25 Oct 2026).
+and observation provenance columns 25 Oct 2026; ``embedding_runs`` 22 Nov 2026).
 """
 
 from __future__ import annotations
@@ -74,6 +74,7 @@ COLUMNS = {
         "cluster_id",
     },
     "media_embeddings": {"media_id", "deployment_id", "embedding_run_id", "cluster_id", "cluster_confidence", "is_outlier", "created_at"},
+    "embedding_runs": {"id", "deployment_id", "model_name", "status", "created_at"},
     "cluster_assignments": {
         "id",
         "deployment_id",

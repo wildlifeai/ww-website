@@ -113,8 +113,10 @@ Rules:
 * On AWS the API sits behind an API Gateway HTTP API: a request must finish within 30 s and a
   response stay under 6 MB, or the caller gets a 503. Work that can take longer goes through
   `enqueue_job`, a large result goes to the object store with a link, and uploads arrive as
-  `files_key`. The routes that break this today are in the migration report's "Left" table;
-  don't add another.
+  `files_key`. An image goes out through `domain/media_resolver.serve_media`, which turns an
+  original Lambda cannot answer into a redirect; a list that grows with the photos is paged or
+  capped (the cluster's `items` pages, `clusters/multi`). The routes that break this today are in
+  the migration report's "Left" table; don't add another.
 * On Lambda a task left running in the process (`enqueue_local_job`, `asyncio.create_task`)
   stops when the invocation returns, so the job never finishes and the reaper fails it an hour
   later. Code that can run there dispatches through `enqueue_job`, which invokes the `cpu`

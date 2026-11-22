@@ -162,11 +162,12 @@ async def test_precomputed_dinov3_checks_ids_and_dimensions():
 
 
 class FakeApi:
-    """The lease endpoints in memory, one lease of one annotate job."""
+    """The lease endpoints in memory, one lease of one annotate job; ``paged_items`` answers the items pages."""
 
-    def __init__(self, manifest: dict):
+    def __init__(self, manifest: dict, paged_items: list[dict] | None = None):
         self.manifest, self.parts, self.calls = manifest, {}, []
         self.served = False
+        self.paged_items = paged_items or []
 
     async def post(self, path: str, body: dict) -> dict:
         self.calls.append((path, body))
@@ -178,6 +179,11 @@ class FakeApi:
         if path.endswith("/part"):
             return {"method": "PUT", "path": f"/parts/{body['job_id']}/{body['part']}", "headers": {}}
         return {}
+
+    async def get(self, path: str, params: dict) -> dict:
+        self.calls.append((path, params))
+        start = params["offset"]
+        return {"items": self.paged_items[start : start + params["limit"]], "offset": start, "total": len(self.paged_items)}
 
     async def fetch(self, item: dict) -> bytes:
         if item["media_id"] not in PHOTOS:
@@ -218,6 +224,59 @@ async def test_the_cluster_job_uploads_parts_reports_failures_and_stops_when_the
     first = inference_cache.decode_part(api.parts[f"/parts/{JOB}/1"])
     assert all(r["speciesnet"] and len(r["bioclip"]) == 2 for r in first.records)
     assert not list((tmp_path / "work").iterdir())  # the photos are cleaned up after each part
+
+
+async def test_the_cluster_job_asks_for_pages_and_reads_each_part_just_before_it(tmp_path):
+    """#457: the photos of a paged job come a part at a time, so their URLs are signed just before use."""
+    items = [{"media_id": m, "deployment_id": DEP, "path": f"/media/{m}"} for m in PHOTOS] + [
+        {"media_id": "gone", "deployment_id": DEP, "path": "/x"}
+    ]
+    manifest = _manifest([])
+    job = manifest["jobs"][0]
+    del job["items"]
+    job["items_total"] = len(items)
+    api = FakeApi(manifest, paged_items=items)
+    assert await batch_infer.run(api, tmp_path / "work", FAKES) == 1  # pyright: ignore[reportArgumentType]
+
+    assert api.calls[0] == ("/api/worker/lease", {"slurm_job_id": "", "paged": True})
+    paths = [p for p, _ in api.calls]
+    page_path = f"/api/worker/lease/{LEASE}/items/{JOB}"
+    assert [b for p, b in api.calls if p == page_path] == [{"offset": 0, "limit": 2}, {"offset": 2, "limit": 2}]
+    second_page = len(paths) - 1 - paths[::-1].index(page_path)
+    assert paths.index(f"/api/worker/lease/{LEASE}/part/complete") < second_page
+    done = [b for p, b in api.calls if p.endswith("/done")][0]
+    assert done == {"jobs": [{"job_id": JOB, "parts_total": 2, "failed_media": ["gone"]}]}
+
+
+async def test_fetch_follows_the_apis_redirect_without_the_token():
+    """An original too large for the API's answer comes from a presigned copy; the token stays with the API."""
+    import httpx
+
+    seen: list[tuple] = []
+
+    def api_side(request: httpx.Request) -> httpx.Response:
+        seen.append(("api", request.url.path, request.url.params.get("offset"), request.headers.get("authorization")))
+        if request.url.path.endswith("/items/j1"):
+            return httpx.Response(200, json={"items": [], "offset": 4, "total": 4})
+        return httpx.Response(307, headers={"location": "https://s3.example/buffer/media/abc?sig=1"})
+
+    def plain_side(request: httpx.Request) -> httpx.Response:
+        seen.append(("plain", str(request.url), request.headers.get("authorization")))
+        return httpx.Response(200, content=b"big-jpeg")
+
+    authed = httpx.AsyncClient(base_url="https://api.example", headers={"Authorization": "Bearer t"}, transport=httpx.MockTransport(api_side))
+    plain = httpx.AsyncClient(transport=httpx.MockTransport(plain_side))
+    api = batch_infer.Api("https://api.example", "t", authed=authed, plain=plain)
+    try:
+        assert await api.fetch({"media_id": "m1", "path": "/api/worker/lease/L/media/m1"}) == b"big-jpeg"
+        assert (await api.get("/api/worker/lease/L/items/j1", {"offset": 4, "limit": 2}))["total"] == 4
+    finally:
+        await api.aclose()
+    assert seen == [
+        ("api", "/api/worker/lease/L/media/m1", None, "Bearer t"),
+        ("plain", "https://s3.example/buffer/media/abc?sig=1", None),
+        ("api", "/api/worker/lease/L/items/j1", "4", "Bearer t"),
+    ]
 
 
 # ── parity: in-process models versus the cluster's part ──────────────
