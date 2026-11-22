@@ -22,6 +22,7 @@ import { registerLocalPreviews } from '../lib/localPreviewStore'
 import { derivePhase, type UploadPhase } from '../lib/uploadPhase'
 import { orderFilesBySession, planBatches } from '../lib/uploadPlanning'
 import type { PipelineState, PipelineJob, LogEntry } from '../components/toolkit/PipelineStatusBox'
+import { jobChanged } from '../components/toolkit/pipelineProgress'
 
 // Re-exported for existing consumers; implementations live in lib/ so they
 // can be unit-tested without React or the API client.
@@ -213,6 +214,8 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                 currentPhase: j.current_phase ?? job.currentPhase,
                 summary: j.summary ?? job.summary,
                 eventCount: j.event_count ?? job.eventCount ?? 0,
+                batchWait: j.batch_wait ?? null,
+                gpuBatch: !!j.gpu_batch,
                 // Transient — consumed below, stripped before storing in state
                 _events: j.events ?? [],
               } as PipelineJob & { _events: unknown[] }
@@ -234,14 +237,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const next = updates[i] as any
 
-          if (
-            prev.status !== next.status ||
-            prev.progress !== next.progress ||
-            prev.message !== next.message ||
-            (next.eventCount ?? 0) > (prev.eventCount ?? 0)
-          ) {
-            changed = true
-          }
+          if (jobChanged(prev, next)) changed = true
 
           // Structured event consumption (seq-based de-dup)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

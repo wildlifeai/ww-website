@@ -107,4 +107,14 @@ describe('derivePhase', () => {
       ),
     ).toBe('stalled')
   })
+
+  it('never stalls on a job of the GPU batch, which reports every few minutes (#460)', () => {
+    const silent = { totalFiles: 20, uploadedFiles: 20, lastUpdateTs: Date.now() - 10 * 60_000 }
+    const wait = { queued_at: '2026-11-22T01:00:00+00:00', usual_wait_minutes: 120 }
+    const waiting = { ...job('queued', 0), gpuBatch: true, batchWait: wait }
+    const onCluster = { ...job('processing', 0), gpuBatch: true }
+    expect(derivePhase(state({ ...silent, jobs: [job('completed'), waiting] }))).toBe('processing')
+    expect(derivePhase(state({ ...silent, jobs: [job('completed'), onCluster] }))).toBe('processing')
+    expect(derivePhase(state({ ...silent, jobs: [job('completed'), job('processing', 0)] }))).toBe('stalled')
+  })
 })

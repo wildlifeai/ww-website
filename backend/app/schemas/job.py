@@ -94,6 +94,15 @@ class ProgressSummary(BaseModel):
     started_at: Optional[datetime] = None
 
 
+class BatchWait(BaseModel):
+    """A job waiting in ``api_jobs`` for the REANNZ GPU batch (``WORKER_BACKEND=lambda``)."""
+
+    queued_at: Optional[datetime] = Field(None, description="When the job joined the queue (``job_data.dispatch.queued_at``)")
+    usual_wait_minutes: int = Field(
+        description="The wait the UI states: BATCH_MAX_WAIT_MINUTES plus BATCH_CRON_INTERVAL_MINUTES, rounded up (hours, or 15 minutes below an hour)"
+    )
+
+
 class JobInfo(BaseModel):
     """Public representation of a job's full state."""
 
@@ -112,6 +121,8 @@ class JobInfo(BaseModel):
     summary: Optional[ProgressSummary] = Field(None, description="Aggregate progress counters")
     events: list[ProgressEvent] = Field(default_factory=list, description="Recent progress events (last N)")
     event_count: int = Field(0, description="Total number of events ever emitted")
+    batch_wait: Optional[BatchWait] = Field(None, description="Set while the job waits for the GPU batch; null once it runs, and on Azure")
+    gpu_batch: bool = Field(False, description="The job runs through the REANNZ GPU batch, so it reports every few minutes, not seconds")
 
 
 class JobCreateResponse(BaseModel):

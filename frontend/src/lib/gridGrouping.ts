@@ -2,15 +2,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Group by on the review grid. Groups split the photos on the page, so a grouping that would
-// scatter 100 photos across 100 headers is not offered (UI audit 02 #9), and the species, sex and
-// life stage of a photo come from its verdict, the row its card shows (#10, lib/observations).
+// scatter 100 photos across 100 headers is not offered (UI audit 02 #9), nor one that leaves them
+// all in a single group, and the species, sex and life stage of a photo come from its verdict,
+// the row its card shows (#10, lib/observations).
 import { photoVerdict, type PresenceFields } from './observations'
 
-export type GroupBy = 'none' | 'cluster' | 'species' | 'sex' | 'life_stage' | 'annotation_type' | 'deployment' | 'model' | 'annotator'
+export type GroupBy =
+  | 'none' | 'cluster' | 'species' | 'sex' | 'life_stage' | 'annotation_type' | 'project' | 'deployment' | 'model' | 'annotator'
 
 export const GROUP_LABELS: Record<GroupBy, string> = {
   none: 'None', cluster: 'Cluster', species: 'Species', sex: 'Sex', life_stage: 'Life stage',
-  annotation_type: 'Annotation type', deployment: 'Deployment', model: 'AI model', annotator: 'Annotator',
+  annotation_type: 'Annotation type', project: 'Project', deployment: 'Deployment', model: 'AI model', annotator: 'Annotator',
 }
 
 /** Above this many deployments in view, a 100-photo page splits into groups of one or two. */
@@ -26,9 +28,44 @@ export function groupingAvailable(groupBy: GroupBy, deploymentCount: number): bo
   return true
 }
 
-/** The groupings to offer, in menu order. */
-export function availableGroupings(deploymentCount: number): GroupBy[] {
-  return (Object.keys(GROUP_LABELS) as GroupBy[]).filter(g => g !== 'none' && groupingAvailable(g, deploymentCount))
+/** The names the project and deployment groupings show, keyed by deployment id. */
+export interface GroupNames {
+  deployments: ReadonlyMap<string, string>
+  projects: ReadonlyMap<string, string>
+}
+
+export interface GroupablePhoto {
+  deployment_id: string
+  observations: readonly GroupableObservation[]
+}
+
+/**
+ * The groupings to offer, in menu order: those the deployments in view allow and that split the
+ * page's photos into at least two groups, so sex is not offered when no photo has one. Clusters
+ * are offered on the deployment alone, since their groups load only once chosen. While the page
+ * has no photos yet, nothing is ruled out, so a chosen grouping survives the page change.
+ */
+export function availableGroupings(deploymentCount: number, photos: readonly GroupablePhoto[], names: GroupNames): GroupBy[] {
+  return (Object.keys(GROUP_LABELS) as GroupBy[]).filter(g => g !== 'none' && groupingAvailable(g, deploymentCount)
+    && (g === 'cluster' || photos.length === 0 || splitsIntoGroups(photos, p => photoGroupKey(g, p, names))))
+}
+
+/** Whether the items fall into at least two groups. */
+export function splitsIntoGroups<T>(items: readonly T[], keyOf: (item: T) => string): boolean {
+  let first: string | undefined
+  for (const item of items) {
+    const key = keyOf(item)
+    if (first === undefined) first = key
+    else if (key !== first) return true
+  }
+  return false
+}
+
+/** The group a photo falls in, for every grouping but clusters. */
+export function photoGroupKey(groupBy: GroupBy, photo: GroupablePhoto, names: GroupNames): string {
+  if (groupBy === 'deployment') return names.deployments.get(photo.deployment_id) || photo.deployment_id.slice(0, 8)
+  if (groupBy === 'project') return names.projects.get(photo.deployment_id) || '(Unknown project)'
+  return observationGroupKey(groupBy, photo.observations)
 }
 
 export interface GroupableObservation extends PresenceFields {

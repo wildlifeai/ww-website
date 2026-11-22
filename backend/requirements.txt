@@ -19,8 +19,8 @@ azure-storage-blob>=12.31.0      # Azure Blob Storage
 boto3>=1.40.0                    # Amazon S3 (services/object_store.py) and Lambda invokes; OBJECT_STORE_BACKEND=s3
 aiohttp>=3.9.0                   # Async transport for Azure Storage
 timezonefinder>=6.5.0            # GPS coordinates → timezone lookup
-Pillow>=10.0.0                   # Image processing for clustering (dHash, sharpness)
-numpy>=1.24                      # Numerical ops for perceptual hashing
+Pillow>=10.0.0                   # Thumbnails, crops and the motion ROI (services/image_processing.py)
+numpy>=1.24                      # Motion ROI and Wildlife Brain vector maths
 google-genai>=2.25.0             # Gemini API SDK for the animal-presence step (services/gemini_presence.py); light, no torch
 arq>=0.25                        # ARQ queue CLIENT — the API enqueues GPU jobs to Redis; the
 #                                  worker (requirements-ml.txt) executes them. Lightweight (redis dep only).

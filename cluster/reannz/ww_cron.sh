@@ -6,6 +6,9 @@
 #
 #   */30 * * * * /nesi/project/wildlife03546/ww/bin/ww_cron.sh prod >> /nesi/project/wildlife03546/ww/logs/cron-prod.log 2>&1
 #
+# The interval must match the API's BATCH_CRON_INTERVAL_MINUTES (default 30): the website adds it
+# to BATCH_MAX_WAIT_MINUTES when it tells people how long AI and grouping usually wait.
+#
 # Reads, per environment, from ~/.config/ww/ (mode 700, files 600, the home directory rather
 # than the project directory, which other project members can read):
 #   <env>.token   the lease token; the API keeps only its SHA-256 (WORKER_TOKEN_SHA256)
