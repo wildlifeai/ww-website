@@ -42,6 +42,11 @@ logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/exif", tags=["exif"])
 
+# On Lambda a request has 30 s, and keys are read from S3, parsed and buffered one photo after
+# another. 25 photos of up to 5 MB (#457) keep that well inside the limit with a cold start,
+# and stay 2.5 times the 10 the frontend sends per call (UploadContext BATCH_SIZE).
+LAMBDA_MAX_IMAGES_PER_REQUEST = 25
+
 # Regex to extract the 8-char deployment prefix from the SD card folder path
 # e.g.  MEDIA/655BC4E5/IMAGES.000/file.JPG  →  655BC4E5
 _FOLDER_DEP_RE = re.compile(r"MEDIA[/\\]([A-Fa-f0-9]{8})[/\\]", re.IGNORECASE)
@@ -170,6 +175,25 @@ async def parse_exif(
     MAX_ANON_IMAGES = 50
     MAX_AUTH_IMAGES = settings.MAX_UPLOAD_IMAGES_PER_REQUEST
     user = await get_optional_user(authorization)
+
+    # Counted before any key is read, so an oversized request is refused at once.
+    cap = MAX_ANON_IMAGES if not user else MAX_AUTH_IMAGES
+    if settings.WW_LAMBDA_ROLE:
+        cap = min(cap, LAMBDA_MAX_IMAGES_PER_REQUEST)
+    sent = len(files) + len(files_key)
+    if sent > cap:
+        who = "Unauthenticated users" if not user else "Each upload request"
+        suffix = " Please log in to raise this limit." if not user and cap == MAX_ANON_IMAGES else " Split the upload into smaller batches."
+        return JSONResponse(
+            status_code=403,
+            content={
+                "error": {
+                    "code": "IMAGE_LIMIT_EXCEEDED",
+                    "message": (f"{who} can submit up to {cap} images per request. You sent {sent}.{suffix}"),
+                }
+            },
+        )
+
     # Files sent straight to S3 arrive as keys (services/incoming.py), after any in the body.
     try:
         files = await incoming_files(getattr(user, "id", None) if user else None, files, files_key)
@@ -187,20 +211,6 @@ async def parse_exif(
                 "error": {
                     "code": "EMAIL_NOT_CONFIRMED",
                     "message": "Please confirm your email address before uploading images.",
-                }
-            },
-        )
-
-    cap = MAX_ANON_IMAGES if not user else MAX_AUTH_IMAGES
-    if len(files) > cap:
-        who = "Unauthenticated users" if not user else "Each upload request"
-        suffix = " Please log in to raise this limit." if not user else " Split the upload into smaller batches."
-        return JSONResponse(
-            status_code=403,
-            content={
-                "error": {
-                    "code": "IMAGE_LIMIT_EXCEEDED",
-                    "message": (f"{who} can submit up to {cap} images per request. You sent {len(files)}.{suffix}"),
                 }
             },
         )

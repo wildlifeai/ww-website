@@ -254,6 +254,49 @@ async def test_image_route_proxies_s3_bytes_when_the_backend_is_azure(monkeypatc
         data={"file_path": "s3://b/k.jpg"}
     )
     monkeypatch.setattr(media_router.supabase_client, "create_anon_client", lambda: anon)
-    monkeypatch.setattr(media_router, "resolve_media", AsyncMock(return_value=(b"jpeg", "image/jpeg")))
+    monkeypatch.setattr("app.domain.media_resolver.resolve_media", AsyncMock(return_value=(b"jpeg", "image/jpeg")))
     resp = await media_router.get_media_image("m1", size="full", user=SimpleNamespace(id="u1"))
     assert resp.status_code == 200 and resp.body == b"jpeg"
+
+
+# ── originals too large for Lambda's answer (#457) ───────────────────
+
+BIG = b"\xff\xd8" + b"x" * (5 * 1024 * 1024)  # a 5 MB Drive original
+
+
+async def test_a_large_drive_original_is_served_from_a_copy_in_the_bucket(s3, monkeypatch):
+    from app.domain import media_resolver
+
+    monkeypatch.setattr(media_resolver, "resolve_media", AsyncMock(return_value=(BIG, "image/jpeg")))
+    key = media_resolver.staged_key("gdrive://abc", "full")
+    assert key.startswith("buffer/media/") and "abc" not in key
+    s3.add_response("put_object", {}, {"Bucket": "ww-test-media", "Key": key, "Body": BIG, "ContentType": "image/jpeg", "Metadata": {}})
+    served = await media_resolver.serve_media("gdrive://abc")
+    s3.assert_no_pending_responses()
+    assert served and not served.data and key in served.url and "X-Amz-Expires=300" in served.url
+
+
+async def test_a_small_original_and_any_original_off_s3_are_answered_inline(s3, monkeypatch):
+    from app.domain import media_resolver
+
+    monkeypatch.setattr(media_resolver, "resolve_media", AsyncMock(return_value=(b"jpeg", "image/jpeg")))
+    assert await media_resolver.serve_media("gdrive://abc") == media_resolver.ServedMedia(data=b"jpeg", content_type="image/jpeg")
+    monkeypatch.setattr(settings, "OBJECT_STORE_BACKEND", "azure")  # Azure has no 6 MB answer: unchanged
+    monkeypatch.setattr(media_resolver, "resolve_media", AsyncMock(return_value=(BIG, "image/jpeg")))
+    served = await media_resolver.serve_media("gdrive://abc")
+    assert served and served.data == BIG and not served.url
+    s3.assert_no_pending_responses()
+
+
+async def test_image_route_redirects_a_large_drive_original(monkeypatch):
+    from app.domain.media_resolver import ServedMedia
+    from app.routers import media as media_router
+
+    anon = MagicMock()
+    anon.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
+        data={"file_path": "gdrive://abc"}
+    )
+    monkeypatch.setattr(media_router.supabase_client, "create_anon_client", lambda: anon)
+    monkeypatch.setattr(media_router, "serve_media", AsyncMock(return_value=ServedMedia(url="https://s3/buffer/media/k?sig")))
+    resp = await media_router.get_media_image("m1", size="full", user=SimpleNamespace(id="u1"))
+    assert resp.status_code == 307 and resp.headers["location"] == "https://s3/buffer/media/k?sig"

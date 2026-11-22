@@ -2255,7 +2255,7 @@
     },
     "/api/brain/clusters/multi": {
       "post": {
-        "description": "Aggregate clusters across multiple deployments.\n\nReturns clusters from each deployment's latest completed embedding run,\ngrouped by model variant (ViT-H vs ViT-S are separate vector spaces).\nOptionally filters member media by cluster_confidence >= min_confidence.",
+        "description": "Aggregate clusters across multiple deployments.\n\nReturns clusters from each deployment's latest completed embedding run,\ngrouped by model variant (ViT-H vs ViT-S are separate vector spaces).\nOptionally filters member media by cluster_confidence >= min_confidence.\nOn Lambda, a selection over ``MULTI_CLUSTER_MAX_PHOTOS`` photos answers ``TOO_MANY_PHOTOS``.",
         "operationId": "multi_clusters_api_brain_clusters_multi_post",
         "parameters": [
           {

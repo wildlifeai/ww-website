@@ -453,7 +453,7 @@ def lease_env(monkeypatch):
 
 
 async def test_the_lease_runs_the_models_with_the_jobs_settings(lease_env):
-    work = await batch_lease._annotate_work(LEASE, _dispatch())
+    work = await batch_lease._annotate_work(_dispatch())
 
     assert work["models"] == {"speciesnet": True, "bioclip": True}
     config = work["config"]
@@ -466,15 +466,15 @@ async def test_the_lease_runs_the_models_with_the_jobs_settings(lease_env):
 async def test_the_lease_sends_only_the_selected_photos(lease_env):
     dispatch = {**_dispatch(SELECTED), "args": [[DEP, DEP_B], "u1", False, ["m1", "m2", "m3"]]}
 
-    work = await batch_lease._annotate_work(LEASE, dispatch)
+    work = await batch_lease._annotate_work(dispatch)
 
     assert [kw["media_ids"] for _steps, kw in lease_env] == [["m1", "m2", "m3"], ["m1", "m2", "m3"]]
     assert all(kw["only_unannotated"] is False for _steps, kw in lease_env)
-    assert len(work["items"]) == 2 and batch_lease._estimate_photos(dispatch) == 3
+    assert len(work["sources"]) == 2 and batch_lease._estimate_photos(dispatch) == 3
 
 
 async def test_an_upload_lease_is_unchanged(lease_env):
-    work = await batch_lease._annotate_work(LEASE, _dispatch(None))
+    work = await batch_lease._annotate_work(_dispatch(None))
 
     assert work["models"] == {"speciesnet": True, "bioclip": False}
     assert work["config"]["confidence_threshold"] == 0.2 and work["config"]["bioclip_labels"] is None

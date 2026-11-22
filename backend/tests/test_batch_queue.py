@@ -18,6 +18,8 @@ from app.domain import batch_lease
 from app.jobs import dispatch, store
 from app.services import lambda_invoke, locks, object_store
 
+REAL_PRESIGN_GET = object_store.presign_get
+
 TOKEN = "cluster-token-for-tests"
 TOKEN_SHA = hashlib.sha256(TOKEN.encode()).hexdigest()
 JOB = "a0000000-0000-4000-8000-000000000001"
@@ -339,6 +341,7 @@ async def test_claim_builds_a_manifest_and_marks_the_job_processing(leasing):
     assert s3_item["url"].startswith("https://s3/ww-test-media/originals/p/d/h.jpg")
     # Never a raw user-writable URL: everything not in S3 goes through the API's resolver.
     assert drive_item == {"media_id": "m-drive", "deployment_id": DEP, "path": f"/api/worker/lease/{lease_id}/media/m-drive"}
+    assert "items_total" not in job  # a cluster that does not ask for pages gets today's manifest
     (job_id, patch, status), *_ = leasing
     assert job_id == JOB and status == store.JobStatus.PROCESSING and patch["lease"]["id"] == lease_id
     assert patch["lease"]["slurm_job_id"] == "12345"
@@ -356,16 +359,87 @@ async def test_claim_returns_none_when_the_queue_is_empty(monkeypatch):
     assert await batch_lease.claim() is None
 
 
+# A Lambda role's session token, about as long as AWS issues, goes into every presigned GET.
+SESSION_TOKEN = "IQoJb3JpZ2luX2VjE" + "A" * 1100
+LAMBDA_ANSWER_MAX = 6 * 1024 * 1024
+
+
+def _lambda_answer_bytes(payload) -> int:
+    """Bytes of a JSON answer once the Lambda Web Adapter wraps it as a string, quotes escaped."""
+    return len(json.dumps(json.dumps(payload, separators=(",", ":"))))
+
+
+@pytest.fixture
+def lambda_presign(monkeypatch):
+    """presign_get as on Lambda: a real SigV4 URL from temporary credentials, offline."""
+    monkeypatch.setattr(object_store, "presign_get", REAL_PRESIGN_GET)
+    client = object_store.new_s3_client(
+        region_name="ap-southeast-6", aws_access_key_id="ASIATESTKEY", aws_secret_access_key="testing", aws_session_token=SESSION_TOKEN
+    )
+    object_store.set_s3_client(client)
+    yield
+    object_store.set_s3_client(None)
+
+
+def _leased_as(lease_id: str) -> list[dict]:
+    return [{"id": JOB, "status": "processing", "job_data": {"lease": {"id": lease_id}, "dispatch": _queued_row()["job_data"]["dispatch"]}}]
+
+
+async def test_a_3000_photo_lease_fits_lambdas_answer_when_paged(leasing, lambda_presign, monkeypatch, tmp_path):
+    """#457: the manifest names the job's size only; each page of signed URLs stays far under 6 MB."""
+    media = [
+        {"id": f"m{n:05d}", "deployment_id": DEP, "file_path": f"s3://ww-test-media/originals/p/{DEP}/{n:064x}.jpg", "file_name": "x.jpg"}
+        for n in range(3000)
+    ]
+    monkeypatch.setattr("app.domain.pipeline.fetch_pipeline_media", lambda svc, dep, steps, **kw: media)
+    monkeypatch.setattr(settings, "OBJECT_STORE_BACKEND", "local")
+    monkeypatch.setattr(settings, "LOCAL_OBJECT_STORE_DIR", str(tmp_path))
+
+    manifest = await batch_lease.claim(paged=True)
+    (job,) = manifest["jobs"]
+    assert "items" not in job and job["items_total"] == 3000
+    assert _lambda_answer_bytes(manifest) < 10_000
+    (_, patch, _), *_ = leasing
+    assert patch["message"] == "Running on the GPU cluster (3000 photos)"
+
+    monkeypatch.setattr(batch_lease, "_lease_rows", _leased_as)
+    seen: list[str] = []
+    offset = 0
+    while offset < job["items_total"]:
+        page = await batch_lease.items_page(manifest["lease_id"], JOB, offset, limit=5000)
+        assert page["total"] == 3000 and len(page["items"]) == batch_lease.ITEMS_PAGE_MAX
+        assert _lambda_answer_bytes(page) < LAMBDA_ANSWER_MAX / 2
+        assert "X-Amz-Security-Token" in page["items"][0]["url"]
+        seen.extend(i["media_id"] for i in page["items"])
+        offset += len(page["items"])
+    assert seen == [m["id"] for m in media]
+
+
+async def test_items_page_needs_a_paged_job_of_the_lease(leased, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "OBJECT_STORE_BACKEND", "local")
+    monkeypatch.setattr(settings, "LOCAL_OBJECT_STORE_DIR", str(tmp_path))
+    with pytest.raises(batch_lease.LeaseError):
+        await batch_lease.items_page("L1", JOB)  # leased with the photos inline
+    with pytest.raises(batch_lease.LeaseError):
+        await batch_lease.items_page("L1", "someone-elses-job")
+    await object_store.put_object(
+        batch_lease.items_key("L1", JOB), json.dumps([{"id": "m1", "deployment_id": DEP, "file_path": "gdrive://a"}]).encode()
+    )
+    page = await batch_lease.items_page("L1", JOB, 0, 10)
+    assert page == {"items": [{"media_id": "m1", "deployment_id": DEP, "path": "/api/worker/lease/L1/media/m1"}], "offset": 0, "total": 1}
+
+
 async def test_embed_leases_hand_out_public_crops_and_proxy_the_rest(monkeypatch):
     crops = [
         {"id": "m1", "deployment_id": DEP, "crop_url": f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/public/media-renditions/c1.jpg"},
         {"id": "m2", "deployment_id": DEP, "crop_url": "https://example.org/c2.jpg"},
     ]
     monkeypatch.setattr("app.domain.wildlife_brain._fetch_crops", AsyncMock(return_value=crops))
-    work = await batch_lease._embed_work("L1", {"name": "embed_deployment_job", "args": [DEP, None]})
+    work = await batch_lease._embed_work({"name": "embed_deployment_job", "args": [DEP, None]})
     assert work["models"] == {"dinov3": settings.EMBEDDING_DEFAULT_MODEL}
-    assert work["items"][0]["url"].endswith("/c1.jpg")
-    assert work["items"][1] == {"media_id": "m2", "deployment_id": DEP, "path": "/api/worker/lease/L1/media/m2?crop=1"}
+    items = batch_lease._items("L1", "embed", work["sources"])
+    assert items[0]["url"].endswith("/c1.jpg")
+    assert items[1] == {"media_id": "m2", "deployment_id": DEP, "path": "/api/worker/lease/L1/media/m2?crop=1"}
 
 
 @pytest.fixture
@@ -424,7 +498,7 @@ async def test_media_bytes_refuses_media_outside_the_leased_deployments(leased, 
     )
     monkeypatch.setattr(batch_lease, "create_service_client", lambda: client)
     with pytest.raises(batch_lease.LeaseError):
-        await batch_lease.media_bytes("L1", "m1")
+        await batch_lease.media_served("L1", "m1")
 
 
 async def test_heartbeat_renews_or_cancels(leased, monkeypatch):
@@ -479,3 +553,47 @@ def test_lease_route_maps_an_empty_queue_and_lease_errors(monkeypatch):
     auth = {"Authorization": f"Bearer {TOKEN}"}
     assert client.post("/api/worker/lease", json={}, headers=auth).json() == {"lease_id": None}
     assert client.post("/api/worker/lease/L1/part", json={"job_id": JOB, "part": 1}, headers=auth).status_code == 409
+
+
+def test_lease_route_asks_for_pages_only_when_the_cluster_does(monkeypatch):
+    from app.main import app
+
+    monkeypatch.setattr(settings, "WORKER_TOKEN_SHA256", TOKEN_SHA)
+    claim = AsyncMock(return_value=None)
+    monkeypatch.setattr(batch_lease, "claim", claim)
+    client = TestClient(app)
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    client.post("/api/worker/lease", json={"slurm_job_id": "7"}, headers=auth)  # an image from before paging
+    client.post("/api/worker/lease", json={"slurm_job_id": "8", "paged": True}, headers=auth)
+    assert [c.kwargs["paged"] for c in claim.await_args_list] == [False, True]
+
+
+def test_items_route_serves_pages_and_maps_lease_errors(monkeypatch):
+    from app.main import app
+
+    monkeypatch.setattr(settings, "WORKER_TOKEN_SHA256", TOKEN_SHA)
+    page = AsyncMock(return_value={"items": [], "offset": 500, "total": 600})
+    monkeypatch.setattr(batch_lease, "items_page", page)
+    client = TestClient(app)
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    resp = client.get(f"/api/worker/lease/L1/items/{JOB}", params={"offset": 500, "limit": 500}, headers=auth)
+    assert resp.json() == {"items": [], "offset": 500, "total": 600}
+    page.assert_awaited_once_with("L1", JOB, 500, 500)
+    page.side_effect = batch_lease.LeaseError("gone")
+    assert client.get(f"/api/worker/lease/L1/items/{JOB}", headers=auth).status_code == 409
+
+
+def test_lease_media_route_redirects_a_large_original_and_answers_a_small_one(monkeypatch):
+    from app.domain.media_resolver import ServedMedia
+    from app.main import app
+
+    monkeypatch.setattr(settings, "WORKER_TOKEN_SHA256", TOKEN_SHA)
+    served = AsyncMock(return_value=ServedMedia(url="https://s3/buffer/media/abc?sig"))
+    monkeypatch.setattr(batch_lease, "media_served", served)
+    client = TestClient(app)
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    big = client.get("/api/worker/lease/L1/media/m1", headers=auth, follow_redirects=False)
+    assert big.status_code == 307 and big.headers["location"] == "https://s3/buffer/media/abc?sig"
+    served.return_value = ServedMedia(data=b"jpeg", content_type="image/jpeg")
+    small = client.get("/api/worker/lease/L1/media/m1", headers=auth)
+    assert small.status_code == 200 and small.content == b"jpeg"

@@ -15,11 +15,16 @@ Supported providers (extensible via ``RESOLVERS`` dict):
 
 To add a new provider, implement an async function matching the
 ``Resolver`` signature and register it in the ``RESOLVERS`` dict.
+
+A route that hands an image to a client goes through :func:`serve_media`, which turns
+what Lambda cannot answer into a link.
 """
 
 import asyncio
+import hashlib
 import ipaddress
 import socket
+from dataclasses import dataclass
 from typing import Callable, Coroutine, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -27,6 +32,12 @@ import httpx
 import structlog
 
 logger = structlog.get_logger()
+
+# Lambda answers at most 6 MB and base64-encodes a binary body, so a body above about 4.5 MB
+# cannot be returned there. 4 MiB encodes to 5.6 MB, which leaves room for the headers.
+INLINE_MAX_BYTES = 4 * 1024 * 1024
+# A copy served by link expires with the upload buffer, a day later (infra/aws/template.yaml).
+STAGED_PREFIX = "buffer/media/"
 
 
 async def _is_safe_public_url(url: str) -> bool:
@@ -203,3 +214,44 @@ async def resolve_media(file_path: str, size: ImageSize = "full") -> Optional[Tu
     # No matching prefix — unresolvable local path
     logger.debug("media_resolve_no_provider", file_path=file_path)
     return None
+
+
+@dataclass(frozen=True)
+class ServedMedia:
+    """How a route answers for one image: its bytes, or a short-lived link to redirect to."""
+
+    data: bytes = b""
+    content_type: str = "image/jpeg"
+    url: str = ""
+
+
+def staged_key(file_path: str, size: ImageSize) -> str:
+    """Where a copy too large to answer inline goes: one key per source and size, so a repeat overwrites it."""
+    return f"{STAGED_PREFIX}{hashlib.sha256(f'{size}|{file_path}'.encode('utf-8')).hexdigest()}"
+
+
+async def serve_media(file_path: str, size: ImageSize = "full") -> Optional[ServedMedia]:
+    """The image at ``file_path`` as a route should answer it, or None when it cannot be resolved.
+
+    With the S3 object store (AWS) an ``s3://`` original is a presigned GET, and any other
+    original over :data:`INLINE_MAX_BYTES` (a Drive file, a public URL) is copied under
+    ``buffer/media/`` and handed out the same way: the link carries no Drive credential and
+    the bytes never pass through Lambda's answer. Other backends answer the bytes, as before.
+    """
+    from app.config import settings
+    from app.services import object_store
+
+    on_s3 = settings.OBJECT_STORE_BACKEND == "s3"
+    if on_s3 and file_path.startswith("s3://"):
+        bucket, key = object_store.parse_s3_path(file_path)
+        return ServedMedia(url=object_store.presign_get(key, bucket=bucket))
+    resolved = await resolve_media(file_path, size=size)
+    if not resolved:
+        return None
+    data, content_type = resolved
+    if on_s3 and len(data) > INLINE_MAX_BYTES:
+        key = staged_key(file_path, size)
+        await object_store.put_object(key, data, content_type)
+        logger.info("media_served_by_link", bytes=len(data), key=key)
+        return ServedMedia(url=object_store.presign_get(key))
+    return ServedMedia(data=data, content_type=content_type)

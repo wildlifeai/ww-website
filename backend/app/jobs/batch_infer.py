@@ -7,8 +7,11 @@
 Run by ``cluster/reannz/ww_infer.sl`` inside the GPU image (Apptainer). It needs no database,
 no feature flags and no AWS key: the lease manifest says which models to run on which photos,
 originals come from presigned URLs or through the API, and results go up as parts that the
-API's ingest step (``jobs/ingest.py``) turns into rows. It leases again until the API has
-nothing left, then exits 0. A crash leaves the lease to expire; the reaper requeues the jobs.
+API's ingest step (``jobs/ingest.py``) turns into rows. It asks for a paged lease and reads each
+part's photos just before it fetches them (``domain/batch_lease.items_page``); an API from
+before paging answers with the photos inline, and those are used as they are. It leases again
+until the API has nothing left, then exits 0. A crash leaves the lease to expire; the reaper
+requeues the jobs.
 
 Per photo the job records the SpeciesNet prediction, a BioCLIP label for every crop the
 pipeline will make (the boxes ``build_speciesnet_observations`` keeps, or the whole frame
@@ -68,9 +71,23 @@ class Api:
         resp.raise_for_status()
         return resp.json()
 
+    async def get(self, path: str, params: dict) -> dict:
+        resp = await self.authed.get(path, params=params)
+        resp.raise_for_status()
+        return resp.json()
+
     async def fetch(self, item: dict) -> bytes:
-        """One photo or crop: a presigned or public URL without the token, an API path with it."""
-        resp = await (self.plain.get(item["url"]) if item.get("url") else self.authed.get(item["path"]))
+        """One photo or crop: a presigned or public URL without the token, an API path with it.
+
+        The API redirects to a presigned copy when an original is too large for its answer;
+        the copy is fetched without the token, which goes to the API only.
+        """
+        if item.get("url"):
+            resp = await self.plain.get(item["url"])
+        else:
+            resp = await self.authed.get(item["path"])
+            if resp.is_redirect:
+                resp = await self.plain.get(resp.headers["location"])
         resp.raise_for_status()
         return resp.content
 
@@ -227,15 +244,32 @@ async def _heartbeats(api: Api, lease_id: str, every: float, progress: Progress)
             logger.warning("batch_heartbeat_failed", lease_id=lease_id, error=str(exc))
 
 
+def job_size(job: dict) -> int:
+    """Photos in a leased job: its inline ``items``, or the ``items_total`` of a paged one."""
+    return len(job["items"]) if "items" in job else int(job.get("items_total") or 0)
+
+
+async def part_items(api: Api, lease_id: str, job: dict, start: int, size: int) -> list[dict]:
+    """The photos of the part that starts at ``start``: inline, or a page signed by the API now."""
+    if "items" in job:
+        return list(job["items"][start : start + size])
+    page = await api.get(f"/api/worker/lease/{lease_id}/items/{job['job_id']}", {"offset": start, "limit": size})
+    return list(page.get("items") or [])
+
+
 async def run_job(api: Api, lease_id: str, job: dict, work: Path, models: Models, part_size: int, progress: Progress) -> dict:
     """All parts of one leased job; returns its report for ``done``."""
-    items = list(job.get("items") or [])
+    total = job_size(job)
     failed_media: list[str] = []
     parts = 0
-    for start in range(0, len(items), part_size):
+    start = 0
+    while start < total:
         if progress.cancelled:
             break
-        chunk = items[start : start + part_size]
+        chunk = await part_items(api, lease_id, job, start, part_size)
+        if not chunk:
+            break
+        start += len(chunk)
         fetched, failed = await download(api, chunk, work)
         records = await (infer_embed(fetched, job, models) if job.get("kind") == "embed" else infer_annotate(fetched, job, models, work))
         failed_media.extend(f["media_id"] for f in failed)
@@ -256,7 +290,7 @@ async def run_job(api: Api, lease_id: str, job: dict, work: Path, models: Models
 
 async def run_lease(api: Api, manifest: dict, work: Path, models: Models) -> None:
     lease_id = manifest["lease_id"]
-    progress = Progress(total=sum(len(j.get("items") or []) for j in manifest.get("jobs") or []))
+    progress = Progress(total=sum(job_size(j) for j in manifest.get("jobs") or []))
     beat = asyncio.create_task(_heartbeats(api, lease_id, float(manifest.get("heartbeat_seconds") or 300), progress))
     try:
         reports = [
@@ -275,7 +309,7 @@ async def run(api: Api, work: Path, models: Optional[Models] = None, max_leases:
     work.mkdir(parents=True, exist_ok=True)
     leases = 0
     while not max_leases or leases < max_leases:
-        manifest = await api.post("/api/worker/lease", {"slurm_job_id": os.environ.get("SLURM_JOB_ID", "")})
+        manifest = await api.post("/api/worker/lease", {"slurm_job_id": os.environ.get("SLURM_JOB_ID", ""), "paged": True})
         if not manifest.get("lease_id"):
             break
         logger.info("batch_lease_taken", lease_id=manifest["lease_id"], jobs=len(manifest.get("jobs") or []))
