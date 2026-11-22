@@ -105,13 +105,22 @@ those milliseconds can still race.
 sees what the first one wrote. The lock spans processes and has a renewed 10-minute TTL: a Redis key
 when `REDIS_URL` is set, otherwise a lease row in `api_jobs` (`status = 'lock'`, #323), which also
 covers Cloud Run job executions. When Redis or Supabase is unreachable it is an in-process lock only;
-the module docstring has the exact guarantee. `POST /api/pipeline/run` does not wait: it returns
-`PIPELINE_BUSY`.
+the module docstring has the exact guarantee.
 The upload job joins a **queued** `ai_pipeline` job on the deployment (under a lock, so chunks that
 arrive together make one); the job stays queued while it is deferred and while it waits for the
 lock, and turns `processing` only when it reads its media. A deployment whose job is already
 `processing` gets one follow-up job, which later chunks join. A follow-up's wait counts toward the
 ARQ `job_timeout` (1 hour).
+`POST /api/pipeline/run` and the grid's *Run AI again* (`POST /api/media/run-selected`, the
+selected photos only) answer at once with a job of kind `ai_run`: `annotate_deployments_job` with
+the request's steps and settings as its `pipeline` argument and the photos as its `media_ids`
+(`jobs/pipeline_run.py`, #452), so on AWS it waits for the REANNZ batch, whose lease and ingest
+read the same settings. After the steps the request picks, the run adds the other steps an
+upload's run builds from the flags (`build_pipeline_steps`: Gemini presence and evidence fusion,
+never media prep), evidence fusion last, so a re-run photo ends with an uploaded photo's rows; they
+are resolved when the job is queued and ride in its `pipeline` argument. Each answers `PIPELINE_BUSY` while an `ai_pipeline` or `ai_run` job is
+queued or running on one of its deployments, and an upload never joins an `ai_run` job, whose steps
+may not be the upload's.
 
 > **History:** the earlier `MegaDetectorStep`, `SpeciesNetClassifierStub`, and `EmptyFrameStep`
 > placeholders were **removed** — the SpeciesNet ensemble subsumes detection, classification, and

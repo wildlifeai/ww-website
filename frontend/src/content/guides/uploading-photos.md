@@ -26,4 +26,4 @@ With many sessions, **Assign all** puts every undecided session into one deploym
 
 ## After you press Upload
 
-Your original photos are kept in long-term storage, and **Run AI analysis after upload** (on by default, off for CamtrapDP) runs species detection and identification. With it off, the photos still get their thumbnails but no labels; run the AI on them later from Media. The site opens **Media** on the uploaded deployments while a panel in the corner tracks the upload. Keep the tab open until every photo is sent. **Processing history**, in the account menu, keeps each job's log.
+Your original photos are kept in long-term storage, and **Run AI analysis after upload** (on by default, off for CamtrapDP) runs species detection and identification. With it off, the photos still get their thumbnails but no labels; run the AI on them later from Media: select them, then **Actions**, **Run AI again**. The site opens **Media** on the uploaded deployments while a panel in the corner tracks the upload. Keep the tab open until every photo is sent. **Processing history**, in the account menu, keeps each job's log.

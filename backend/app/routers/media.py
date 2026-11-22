@@ -9,19 +9,25 @@ GET /api/media/{media_id}/image?size=full  → full resolution (detail panel)
 import asyncio
 from typing import Literal
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from app.authz import assert_write, require_deployment_access, require_media_access
+from app.authz import WRITE_REFUSED, require_deployment_access, require_media_access, writable_media_ids
 from app.config import settings
-from app.dependencies import get_current_user, get_user_client, require_not_demo
+from app.dependencies import get_current_user, get_user_client, get_verified_user, require_not_demo
 from app.domain.media_registry import resolve_url, with_resolved_urls
 from app.domain.media_resolver import resolve_media
+from app.domain.pipeline import PipelineBusyError
 from app.domain.soft_delete import now_iso, restore_media_as_user, soft_delete_media_as_user
+from app.jobs.pipeline_run import start_selected_run
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
+from app.schemas.pipeline import PipelineStepType
 from app.services import object_store, supabase_client
 from app.services.db_utils import row_of, rows_of
+
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -242,10 +248,10 @@ async def batch_restore_media(
 
 
 class RunSelectedRequest(BaseModel):
-    """Queue a pipeline run for specific media IDs."""
+    """Queue an AI run on selected photos (the grid's *Run AI again*)."""
 
     media_ids: list[str] = Field(..., max_length=200)
-    steps: list[str] = Field(default=["speciesnet"], description="Pipeline step types to run")
+    steps: list[PipelineStepType] = Field(default=[PipelineStepType.SPECIESNET], min_length=1, description="Pipeline steps to run, in order")
     confidence_threshold: float = Field(0.2, ge=0.0, le=1.0)
 
 
@@ -253,45 +259,47 @@ class RunSelectedRequest(BaseModel):
 async def run_pipeline_selected(
     request: Request,
     body: RunSelectedRequest,
-    user=Depends(get_current_user),
-    user_client=Depends(get_user_client),
+    user=Depends(get_verified_user),
 ):
-    """Queue a pipeline run for specific media IDs (not the full deployment).
+    """Queue an AI run on the selected photos and answer with its job.
 
-    Looks up the deployment_id from the first media record, then runs the
-    pipeline with a media_ids filter. The lookup runs as the requesting user
-    so RLS limits it to media in their own projects; the caller must be able to change that
-    deployment's project (project_member or above, ``403`` otherwise).
+    The photos may span deployments: one ``ai_run`` job covers them all and runs the steps on
+    those photos only. Photos in projects the caller cannot change are left out (``403`` when
+    that is all of them). ``PIPELINE_BUSY`` while an AI job is queued or running on any of their
+    deployments. On AWS the job waits for the next REANNZ GPU batch.
     """
     req_id = getattr(request.state, "request_id", None)
+    if not settings.FF_PIPELINE_ENABLED:
+        return ApiResponse(
+            error=ApiError(code="FEATURE_DISABLED", message="The AI pipeline is disabled (FF_PIPELINE_ENABLED)."),
+            meta=ApiMeta(request_id=req_id),
+        )
     if not body.media_ids:
         return ApiResponse(
             error=ApiError(code="VALIDATION_ERROR", message="media_ids cannot be empty."),
             meta=ApiMeta(request_id=req_id),
         )
+    # Object-level authz: the run writes with the service role, so only photos the caller may change.
+    media_ids = await writable_media_ids(user.id, body.media_ids)
+    if not media_ids:
+        raise HTTPException(status_code=403, detail=WRITE_REFUSED)
 
-    def _lookup():
-        resp = user_client.table("media").select("deployment_id").in_("id", body.media_ids[:1]).limit(1).execute()
-        return rows_of(resp)[0]["deployment_id"] if resp.data else None
-
-    deployment_id = await asyncio.to_thread(_lookup)
-    if not deployment_id:
+    try:
+        job_id, deployment_ids = await start_selected_run(media_ids, user.id, body.steps, body.confidence_threshold)
+    except PipelineBusyError as e:
         return ApiResponse(
-            error=ApiError(code="NOT_FOUND", message="No media found for the given IDs."),
+            error=ApiError(code="PIPELINE_BUSY", message=f"{e}. Try again when it finishes.", retryable=True),
             meta=ApiMeta(request_id=req_id),
         )
-    await assert_write(user.id, deployment_id=deployment_id)
-
-    # TODO: run_pipeline_job does not exist in app/jobs/definitions.py yet —
-    # enqueueing it raised at runtime. Surface NOT_IMPLEMENTED honestly until
-    # the per-media pipeline job lands, then restore:
-    #   job_id = await create_job()
-    #   await enqueue_job("run_pipeline_job", job_id, deployment_id,
-    #                     body.steps, body.confidence_threshold, body.media_ids)
+    except ValueError as e:
+        return ApiResponse(error=ApiError(code="INVALID_REQUEST", message=str(e)), meta=ApiMeta(request_id=req_id))
+    except Exception as e:
+        logger.error("run_selected_error", error=str(e), photos=len(media_ids))
+        return ApiResponse(
+            error=ApiError(code="PIPELINE_ERROR", message=f"Could not queue the AI run: {e}", retryable=True),
+            meta=ApiMeta(request_id=req_id),
+        )
     return ApiResponse(
-        error=ApiError(
-            code="NOT_IMPLEMENTED",
-            message="Running the pipeline on selected media is not available yet.",
-        ),
+        data={"job_id": job_id, "status": "queued", "deployment_ids": deployment_ids, "media_count": len(media_ids)},
         meta=ApiMeta(request_id=req_id),
     )

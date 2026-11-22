@@ -3,7 +3,7 @@
 """AI pipeline and event clustering router — thin HTTP layer.
 
 Provides endpoints for:
-- Running AI inference pipelines on deployments
+- Queueing AI inference pipeline runs on deployments, as jobs
 - Clustering observations into ecological events
 - Computing deployment effort statistics
 
@@ -18,7 +18,8 @@ from fastapi import APIRouter, Depends, Request
 from app.authz import assert_write, require_deployment_access, require_deployment_write
 from app.dependencies import get_current_user, get_privileged_client, get_verified_user, require_not_demo
 from app.domain.events import cluster_deployment_events, compute_deployment_effort
-from app.domain.pipeline import PipelineBusyError, run_pipeline
+from app.domain.pipeline import PipelineBusyError
+from app.jobs.pipeline_run import start_pipeline_run
 from app.middleware.rate_limit import limiter
 from app.schemas.common import ApiError, ApiMeta, ApiResponse
 from app.schemas.pipeline import ClusterEventsRequest, PipelineRunRequest
@@ -38,11 +39,11 @@ async def run_inference_pipeline(
     body: PipelineRunRequest,
     user=Depends(get_verified_user),
 ):
-    """Run an AI inference pipeline on a deployment.
+    """Queue an AI inference pipeline run on a deployment and answer with its job.
 
-    Executes the specified pipeline steps (e.g. media prep, SpeciesNet)
-    on all media in the target deployment. Results are written to the
-    observations table with source_type='ai'.
+    The job runs the given steps (e.g. media prep, SpeciesNet) on the deployment's media
+    and writes observations with source_type='ai'; follow it with ``GET /api/jobs/{id}``.
+    On AWS it waits for the next REANNZ GPU batch.
 
     Requires authentication.
     """
@@ -52,18 +53,9 @@ async def run_inference_pipeline(
     await assert_write(user.id, deployment_id=body.deployment_id)
 
     try:
-        result = await run_pipeline(
-            deployment_id=body.deployment_id,
-            steps=body.steps,
-            confidence_threshold=body.confidence_threshold,
-            config=body.config,
-            user_id=user.id,
-            only_unannotated=body.only_unannotated,
-            # A request must not hang behind a run that can take an hour: say it is busy.
-            wait=False,
-        )
+        job_id = await start_pipeline_run(body, user.id)
         return ApiResponse(
-            data=result.model_dump(),
+            data={"job_id": job_id, "status": "queued", "deployment_id": body.deployment_id},
             meta=ApiMeta(request_id=req_id),
         )
     except PipelineBusyError as e:
@@ -81,7 +73,7 @@ async def run_inference_pipeline(
         return ApiResponse(
             error=ApiError(
                 code="PIPELINE_ERROR",
-                message=f"Pipeline execution failed: {e}",
+                message=f"Could not queue the pipeline run: {e}",
                 retryable=True,
             ),
             meta=ApiMeta(request_id=req_id),
