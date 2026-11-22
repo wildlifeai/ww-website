@@ -43,9 +43,10 @@ src/
 
 Defined as `USER_TABS` in `App.tsx`. The active tab is highlighted, so pages no longer repeat
 their own title, and a deep route lights its parent tab (`lib/navTabs.ts`). Lifecycle order:
-**prepare → collect → analyse**. The 📡 **Realtime** tab appears only when one of the user's
+**prepare → collect → analyse**. The 📡 **Realtime** tab opens only when one of the user's
 projects has a device that sends or has sent LoRaWAN data, at least one `lorawan_messages` row the
-user can read (`hooks/useHasRealtimeData.ts`, UI audit decision 7). Below 900 px the tabs show
+user can read (`hooks/useHasRealtimeData.ts`); before that it shows greyed out, and hovering or
+clicking it says why and links the LoRaWAN guide (`components/common/RealtimeTabOff.tsx`). Below 900 px the tabs show
 their icon only. Write controls (the header Upload button, Home's upload step, Toolkit's Prepare
 SD card) hide for a user who can write to no project (`hooks/useWritableProjects.ts`).
 
@@ -88,7 +89,7 @@ password) or uses Forgot password.
 | `/review/:id` | `ReviewQueuePage` | Retired Review Queue: redirects to `/annotations?deployment=:id` |
 | `/umap/:id` | `UmapExplorerPage` | Embedding-space map of a deployment; a click opens that photo in the grid |
 | `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project), behind `FF_INTELLIGENCE_ENABLED`. Links to a flagged page show only when `useFeatureEnabled` says the feature answers |
-| `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history, filtered by status in the read, 50 at a time ("Load more"); `?job=<id>` opens that job's row |
+| `/processing` | `ProcessingHistoryPage` | Upload & pipeline job history, filtered by status in the read, 50 at a time ("Load more"), without the sign-in iNaturalist sync; `?job=<id>` opens that job's row |
 | `/notifications` | `NotificationsPage` | Notification inbox, read **direct from Supabase** via `useNotifications` (there is no `/api/notifications` router), filtered in the query and paged with "Load more"; the unread count (a server-side count) drives the nav badge. Delivery/email config (`EMAIL_PROVIDER`, `RESEND_API_KEY`, …): [deployment-guide](../resources/deployment-guide.md#full-pipeline-config-checklist-per-subsystem) |
 | `/settings` | `SettingsPage` | Projects (a row opens its settings in a slide-over), the account (change password) and integrations (iNaturalist, organisation API keys) |
 | `/admin/usage` | `AdminUsagePage` | Per-user usage limits (platform admin) |
@@ -126,13 +127,13 @@ registries/→ static config (camera configs, model + embedding registries)
 **Routers** (`/api/*`, registered in `app/main.py`): `auth` (demo session), `admin` (system-admin
 device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `exports`, `reports` (the GBF
 report, answering `FEATURE_DISABLED` without `FF_GBF_REPORT_ENABLED`), `models`, `media`,
-`public_api`, `inaturalist`, `clustering`, and, each behind its feature flag, `camtrapdp`,
+`public_api`, `inaturalist`, and, each behind its feature flag, `camtrapdp`,
 `pipeline`, `brain`
 (embeddings/clusters/UMAP/similarity), `qa` (AI-vs-human agreement), `intelligence`
 (dataset health/alerts).
 
 **Key domain modules**: `exif`, `photo_preprocessing`, `pipeline` (SpeciesNet steps), `events`,
-`clustering`, `wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
+`wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
 `human_verdicts` (cluster confirm and undo, batch review: one human row per photo),
 `intelligence`, `media_registry` / `media_resolver`, `model`, `manifest`, `camtrapdp`, `camtrapdp_export`, `inaturalist`,
 `public_api`, `gbf_report` + `gbif_dataset` (the GBF report and a project's GBIF dataset).

@@ -103,7 +103,7 @@ describe('uploads straight to S3', () => {
   it('leaves other requests alone', async () => {
     const d = deps('s3')
     const fd = form()
-    expect(await prepareUpload('/api/clustering/analyze', fd, d)).toBe(fd)
+    expect(await prepareUpload('/api/pipeline/run', fd, d)).toBe(fd)
     expect(d.getConfig).not.toHaveBeenCalled()
   })
 

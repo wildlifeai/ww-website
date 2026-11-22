@@ -71,7 +71,6 @@ On error:
 - [EXIF Parsing](#exif-parsing)
 - [Uploads](#uploads)
 - [iNaturalist Integration](#inaturalist-integration)
-- [Image Clustering](#image-clustering)
 - [AI Pipeline](#ai-pipeline)
 - [Media Registry](#media-registry)
 - [Deployments](#deployments)
@@ -147,8 +146,8 @@ are readable by any signed-in user, and an API key's jobs are read with `GET /ap
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id |
-| `GET /api/jobs/{job_id}` | Status + `progress`, `current_phase`, ordered `events[]`, `summary` |
+| `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id. Each job carries `batch_wait` as below. Without `kind` it leaves out the iNaturalist sync that runs at each sign-in (`inat_sync`, `store.UNLISTED_KINDS`), which `GET /api/jobs/{job_id}` still answers |
+| `GET /api/jobs/{job_id}` | Status + `progress`, `current_phase`, ordered `events[]`, `summary`. `batch_wait` is `{ queued_at, usual_wait_minutes }` while the job waits in the queue for the GPU batch on the REANNZ cluster (`WORKER_BACKEND=lambda`), and null once it is leased or when it runs at once (Azure). `usual_wait_minutes` is the wait the website states: `BATCH_MAX_WAIT_MINUTES` plus `BATCH_CRON_INTERVAL_MINUTES` (which must match the cluster's crontab), rounded up to whole hours, or to 15 minutes below an hour; 60 and 30 give 120, "usually within 2 hours". `gpu_batch` is true for the whole life of a batch job, which reports every few minutes rather than seconds |
 | `GET /api/jobs/{job_id}/result` | Result of a completed job (`result_url`); `409` if not yet complete |
 
 **Status values:** `queued` → `processing` → `completed` · `completed_with_errors` (some items failed —
@@ -251,28 +250,13 @@ see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 | `POST /api/inat/observations` | JWT | Create an observation — body `{ species_guess, latitude, longitude, observed_on, geoprivacy?, … }` |
 | `GET /api/inat/observations/{observation_id}/status` | None | Identification status for one observation |
 | `POST /api/inat/observations/poll` | JWT | Batch status for ≤200 observation ids (`{ observation_ids: [...] }`) |
-| `POST /api/inat/publish` | JWT · write | Only photos in projects the caller can **write** to are published, `403` when that is none of them. **Publish WW media to iNat**: consolidates bursts by temporal gap, leaves out a photo whose card label is not an animal or that any row says shows a person, proxy-uploads photos. Body `{ media_ids, gap_seconds?, geoprivacy? }` (default `obscured`) → `observations_created`, `photos_uploaded`, `skipped_*`, `errors`, `remaining_media_ids`. It starts no photo after about two minutes, inside the ingress timeout, and hands back the photos it did not reach: send them again (`useINat().publish` does) and a burst carries on in the observation it started. A burst holding a photo the caller already published joins that photo's observation |
-| `POST /api/inat/sync` | JWT | **Pull community IDs back**: polls `quality_grade` and the community taxon of the caller's published observations, updates `sync_status` (the badge), and is meant to write the community taxon into WW as `source_type='consensus'` observations. Today the community taxon is never read, so only `sync_status` changes and nothing is written ([what happens today](../development%20reports/inaturalist-integration.md#what-happens-today-checked-25-oct-2026-123)) → `checked`, `updated`, `research`, `disagreement`, `observations_written` |
+| `POST /api/inat/publish` | JWT · write | Only photos in projects the caller can **write** to are published, `403` when that is none of them. **Publish WW media to iNat**: consolidates bursts by temporal gap, leaves out a photo whose card label is not an animal or that any row says shows a person, proxy-uploads photos. Body `{ media_ids, gap_seconds?, geoprivacy? }` (default `obscured`) → `observations_created`, `photos_uploaded`, `skipped_*`, `errors`, `remaining_media_ids`. It starts no photo after about 15 s and gives each iNaturalist step (an observation, or one photo's read and upload) at most 10 s, none past 25 s, so it answers inside API Gateway's 30 s on AWS; a step that runs out counts as failed. It hands back the photos it did not reach: send them again (`useINat().publish` does, showing the photos reached after each round) and a burst carries on in the observation it started. A burst holding a photo the caller already published joins that photo's observation |
+| `POST /api/inat/sync` | JWT | Starts `sync_inat_job` and returns `{ job_id }`; poll `GET /api/jobs/{id}`, whose `message` gives the progress and, once `completed`, the counts. On AWS the job runs on the `cpu` function, elsewhere in the API process. **Pull community IDs back**: polls `quality_grade` and the community taxon of the caller's published observations, updates `sync_status` (the badge), and is meant to write the community taxon into WW as `source_type='consensus'` observations. Today the community taxon is never read, so only `sync_status` changes and nothing is written ([what happens today](../development%20reports/inaturalist-integration.md#what-happens-today-checked-25-oct-2026-123)). The job ends with `Synced <updated> of <checked>: <research> research grade, <disagreement> disagreement, <observations_written> community IDs written.` |
 | `GET /api/inat/taxa/search` | JWT | iNat taxa autocomplete — backs the `SpeciesPicker` alongside the local `taxa` table |
 | `POST /api/inat/taxa` | JWT | Register an iNat taxon + its lineage locally, returning a real `taxon_id` |
 
 > Publish/sync design detail: [inaturalist-integration](../development%20reports/inaturalist-integration.md).
 > The picker flow is in [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md#speciespicker-taxon-validation).
-
----
-
-## Image Clustering
-
-Near-duplicate detection via perceptual hashing (dHash + BK-tree). No auth. `multipart/form-data`.
-≤1000 images/request. Prefix `/api/clustering`.
-
-> **Legacy** — this is pixel near-duplicate grouping. For semantic DINOv3 clustering (what the
-> Annotations *Group by → Cluster* uses), see [Wildlife Brain](#wildlife-brain--embeddings--clustering).
-
-| Method · Path | Description |
-|---|---|
-| `POST /api/clustering/analyze` | Form `files[]`, `max_hamming?` (0–20, default 10) → clusters + representatives |
-| `POST /api/clustering/analyze/csv` | Same logic; returns a `text/csv` download |
 
 ---
 
@@ -373,10 +357,6 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 > [deployment guide → Vector Store](deployment-guide.md#vector-store--pgvector-supabase).
 > `/api/brain/backup` is now a **no-op** (retained for compatibility): pgvector inherits Supabase PITR, so
 > there is no separate snapshot to take.
-
-> Distinct from [Image Clustering](#image-clustering) (`/api/clustering`), which is the legacy
-> perceptual-hash near-duplicate grouping. `/api/brain` is the semantic DINOv3 clustering the
-> Annotations grid's *Group by → Cluster* uses.
 
 | Method · Path | Description |
 |---|---|

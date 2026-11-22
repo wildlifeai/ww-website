@@ -64,7 +64,6 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 |------|---------|----------|
 | `FF_INAT_ENABLED` | `false` | iNaturalist endpoints |
 | `FF_ML_ENABLED` | `false` | ML-assisted classification — **must** be true or `build_pipeline_steps()` returns `[]` |
-| `FF_CLUSTERING_ENABLED` | `false` | ⚠️ **Declared but not wired** — nothing reads it; `/api/clustering` (legacy perceptual-hash) is registered unconditionally in `main.py`. Either gate the router or drop the flag |
 | `FF_PUBLIC_API_ENABLED` | `false` | Public data API (`/api/v1/*`) |
 | `FF_CAMTRAPDP_IMPORT_ENABLED` | `true` | CamtrapDP package import |
 | `FF_CAMTRAPDP_EXPORT_ENABLED` | `true` | CamtrapDP export with the original photos (`POST /api/exports/camtrapdp`); needs `AZURE_STORAGE_CONNECTION_STRING` for its ZIPs, which go to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`); the job writes them, so set these and `CAMTRAPDP_EXPORT_MAX_BYTES` on the **worker** too |

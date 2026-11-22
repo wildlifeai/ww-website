@@ -293,6 +293,37 @@ def batch_reap_decision(status: str, jd: dict, now: Optional[datetime] = None) -
     return "fail", "The GPU cluster job stopped reporting, and so did its retry."
 
 
+def usual_batch_wait_minutes() -> int:
+    """The wait the UI states for the next GPU run: the batch's own wait plus the cron's interval.
+
+    The cluster's cron asks for work every ``BATCH_CRON_INTERVAL_MINUTES``, so a batch that is
+    due can wait that long again. Rounded up to whole hours above an hour, else to 15 minutes:
+    60 + 30 reads "usually within 2 hours".
+    """
+    from app.config import settings  # noqa: PLC0415
+
+    minutes = settings.BATCH_MAX_WAIT_MINUTES + settings.BATCH_CRON_INTERVAL_MINUTES
+    step = 60 if minutes > 60 else 15
+    return -(-minutes // step) * step
+
+
+def on_gpu_batch(jd: dict) -> bool:
+    """The job runs through the REANNZ batch: it reports every few minutes, not seconds."""
+    return (jd.get("dispatch") or {}).get("backend") == "batch"
+
+
+def batch_wait_of(status: Optional[str], jd: dict) -> Optional[dict]:
+    """``{queued_at, usual_wait_minutes}`` while a job waits in the queue for the REANNZ batch, else None.
+
+    The UI says the job waits for the next GPU run (#460). A leased job is ``processing`` and a
+    job on another backend has no batch dispatch record, so both keep their usual wording.
+    """
+    if status != JobStatus.QUEUED.value or not on_gpu_batch(jd):
+        return None
+    queued_at = jd["dispatch"].get("queued_at") or jd.get("created_at")
+    return {"queued_at": queued_at, "usual_wait_minutes": usual_batch_wait_minutes()}
+
+
 def requeued_job_data(jd: dict, message: str) -> dict:
     """``jd`` back in the queue for the next lease, with one attempt used."""
     out = {k: v for k, v in jd.items() if k != "lease"}
@@ -439,6 +470,14 @@ def job_cursor(row: dict) -> Optional[str]:
     return f"{at.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z|{row['id']}"
 
 
+# Kinds a person does not start from a page, left out of every job list unless asked for by
+# ``kind``: the iNaturalist sync that runs at each sign-in (``jobs/inat_sync.py``, #455). The
+# page that starts one follows it by id, which still answers.
+UNLISTED_KINDS = ("inat_sync",)
+# PostgREST ``or`` body for the rest: a job with no kind is listed too, which a plain ``neq`` drops.
+_LISTED_KINDS = "job_data->>kind.is.null,and(" + ",".join(f"job_data->>kind.neq.{k}" for k in UNLISTED_KINDS) + ")"
+
+
 async def list_jobs(
     user_id: str,
     limit: int = 50,
@@ -452,9 +491,9 @@ async def list_jobs(
     Scoped by ``job_data->>user_id`` because ``api_jobs`` has no owner column.
     Returns light summaries (no event lists) for the processing-history view;
     callers fetch full events per job via :func:`get_job`. ``statuses`` and ``kind``
-    narrow the read; ``before`` (a :func:`job_cursor`, matching ``JOB_CURSOR_PATTERN``)
-    starts after that job, by created time with ties broken on id. The cursor is None on
-    the last page.
+    narrow the read; without ``kind`` the :data:`UNLISTED_KINDS` are left out. ``before`` (a
+    :func:`job_cursor`, matching ``JOB_CURSOR_PATTERN``) starts after that job, by created
+    time with ties broken on id. The cursor is None on the last page.
     """
 
     def _run() -> tuple[List[dict], Optional[str]]:
@@ -464,6 +503,8 @@ async def list_jobs(
             q = q.in_("status", statuses)
         if kind:
             q = q.eq("job_data->>kind", kind)
+        else:
+            q = q.or_(_LISTED_KINDS)
         if before:
             at, job_id = before.split("|")
             q = q.or_(f"created_at.lt.{at},and(created_at.eq.{at},id.lt.{job_id})")
@@ -486,6 +527,7 @@ async def list_jobs(
                     "created_at": jd.get("created_at") or row.get("created_at"),
                     "updated_at": jd.get("updated_at") or row.get("updated_at"),
                     "event_count": len(jd.get("events") or []),
+                    "batch_wait": batch_wait_of(row.get("status"), jd),
                 }
             )
         return out, next_before
@@ -551,6 +593,8 @@ async def get_job(job_id: str) -> Optional[JobInfo]:
 
     data["events"] = events
     data["event_count"] = len(mem_events)
+    data["batch_wait"] = batch_wait_of(data.get("status"), data)
+    data["gpu_batch"] = on_gpu_batch(data)
     data.pop("_next_seq", None)
 
     return JobInfo(**data)

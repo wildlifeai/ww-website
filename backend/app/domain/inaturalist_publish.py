@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
@@ -99,10 +100,33 @@ def _best_species(burst: List[dict]) -> Optional[str]:
 
 # ── Orchestrator ─────────────────────────────────────────────────────
 
-# A request stops starting photos after this many seconds and hands the rest back
-# (``remaining_media_ids``) for the caller to send again. Container Apps ends a request at
-# about 240 s and one photo upload can take a minute, so this leaves room for the last one.
-PUBLISH_BUDGET_SECONDS = 120.0
+# A request starts no observation or photo after PUBLISH_BUDGET_SECONDS and hands the rest back
+# (``remaining_media_ids``) for the caller to send again. Each iNaturalist step, creating an
+# observation or reading and uploading one photo, gives up after INAT_STEP_TIMEOUT_SECONDS and
+# never runs past the budget plus that timeout, and a step that gives up counts as failed. So
+# every iNaturalist call ends within 25 s, inside API Gateway's 30 s on AWS with room for the
+# writes (#455).
+PUBLISH_BUDGET_SECONDS = 15.0
+INAT_STEP_TIMEOUT_SECONDS = 10.0
+
+
+@dataclass
+class _Budget:
+    """When a publish request stops starting steps, and how long its next step may take."""
+
+    clock: Callable[[], float]
+    ends: float
+    step: float = INAT_STEP_TIMEOUT_SECONDS
+
+    def time_up(self) -> bool:
+        return self.clock() >= self.ends
+
+    def step_timeout(self) -> float:
+        """The step's own timeout, shortened so that no step runs past ``ends + step``."""
+        return max(0.0, min(self.step, self.ends + self.step - self.clock()))
+
+
+_NO_LIMIT = _Budget(time.monotonic, float("inf"))
 
 
 def _one(embed: Any) -> Optional[dict]:
@@ -119,6 +143,7 @@ async def publish_media_to_inat(
     geoprivacy: str = "obscured",
     budget_seconds: float = PUBLISH_BUDGET_SECONDS,
     clock: Callable[[], float] = time.monotonic,
+    step_timeout: float = INAT_STEP_TIMEOUT_SECONDS,
 ) -> Dict[str, Any]:
     """Consolidate selected WW media into iNaturalist observations and upload them.
 
@@ -128,15 +153,18 @@ async def publish_media_to_inat(
       one iNat observation carrying all its photos. A burst that holds a photo this
       user already published joins that photo's observation instead of starting one.
     - Records the mapping in inat_observations + inat_observation_media.
-    - Starts no photo once ``budget_seconds`` have passed (after the first) and returns
-      the photos it did not reach as ``remaining_media_ids``, with the published photos
-      of a burst it stopped part way through, so that sending them again carries on.
+    - Starts no burst or photo once ``budget_seconds`` have passed (counted from the call,
+      the reads included), bar the first burst and the first photo of each burst it starts,
+      and returns the photos it did not reach as ``remaining_media_ids``, with the published
+      photos of a burst it stopped part way through, so that sending them again carries on.
+    - Gives each iNaturalist step ``step_timeout`` seconds, cut short so that none runs past
+      ``budget_seconds + step_timeout``; a step that runs out counts as failed.
     """
+    budget = _Budget(clock, clock() + budget_seconds, step_timeout)
     token = await get_user_token(user_id)
     if not token:
         raise INatDomainError("Not connected to iNaturalist")
 
-    deadline = clock() + budget_seconds
     svc = create_service_client()
 
     def _load():
@@ -218,14 +246,11 @@ async def publish_media_to_inat(
             continue
         work.extend((dep, burst) for burst in _cluster_bursts(dep_media, gap_seconds) if any("_label" in m for m in burst))
 
-    def time_up() -> bool:
-        return clock() >= deadline
-
     for i, (dep, burst) in enumerate(work):
-        if i > 0 and time_up():
+        if i > 0 and budget.time_up():
             result["remaining_media_ids"] = [m["id"] for _, b in work[i:] for m in b]
             break
-        handed_back = await _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result, time_up)
+        handed_back = await _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result, budget)
         if handed_back:
             result["remaining_media_ids"] = handed_back + [m["id"] for _, b in work[i + 1 :] for m in b]
             break
@@ -239,25 +264,29 @@ async def publish_media_to_inat(
     return result
 
 
-async def _create_inat_observation(svc, user_id, dep, photos, geoprivacy, result) -> Optional[Dict[str, Any]]:
-    """Create the iNat observation for a burst and record it; None (an error counted) on failure."""
+async def _create_inat_observation(svc, user_id, dep, photos, geoprivacy, result, timeout: float) -> Optional[Dict[str, Any]]:
+    """Create the iNat observation for a burst and record it; None (an error counted) on failure,
+    a create that takes longer than ``timeout`` seconds included."""
     species = _best_species(photos)
     times = [t for m in photos if (t := _parse_ts(m.get("timestamp"))) is not None]
     observed_on = min(times).date().isoformat() if times else ""
     site = dep.get("location_name") or dep.get("name") or "a Wildlife Watcher deployment"
 
     try:
-        obs = await create_observation(
-            user_id=user_id,
-            species_guess=species or "",
-            latitude=dep["latitude"],
-            longitude=dep["longitude"],
-            observed_on=observed_on,
-            description=f"Camera-trap encounter from {site}, uploaded via Wildlife Watcher.",
-            geoprivacy=geoprivacy,
+        obs = await asyncio.wait_for(
+            create_observation(
+                user_id=user_id,
+                species_guess=species or "",
+                latitude=dep["latitude"],
+                longitude=dep["longitude"],
+                observed_on=observed_on,
+                description=f"Camera-trap encounter from {site}, uploaded via Wildlife Watcher.",
+                geoprivacy=geoprivacy,
+            ),
+            timeout,
         )
-    except INatDomainError as exc:
-        logger.error("inat_publish_create_failed", deployment=dep.get("id"), error=str(exc))
+    except (INatDomainError, TimeoutError) as exc:
+        logger.error("inat_publish_create_failed", deployment=dep.get("id"), error=str(exc) or type(exc).__name__)
         result["errors"] += 1
         return None
 
@@ -306,18 +335,33 @@ async def _create_inat_observation(svc, user_id, dep, photos, geoprivacy, result
     return {"row_id": row["id"], "inat_observation_id": inat_id, "inat_uri": inat_uri, "species_guess": species}
 
 
-async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result, time_up: Callable[[], bool] = lambda: False) -> List[str]:
+async def _read_and_upload(user_id: str, inat_id: int, m: dict) -> Optional[Any]:
+    """Read one photo's original and attach it to the iNat observation; None when it cannot be read."""
+    resolved = await resolve_media(m["file_path"], size="full")
+    if not resolved:
+        return None
+    data, _ct = resolved
+    return await upload_observation_photo(
+        user_id=user_id,
+        observation_id=inat_id,
+        photo_bytes=data,
+        filename=m["id"],  # WW media id as original_filename for sync reconciliation
+    )
+
+
+async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result, budget: _Budget = _NO_LIMIT) -> List[str]:
     """Upload a burst's photos to one iNat observation: the one a published photo of the burst
     is in (``_anchor``), else a new one.
 
-    Stops before a photo once ``time_up()`` (never before the first) and returns the burst's
-    photos to send again: the ones on iNaturalist, so the rest join their observation, and the
-    ones not tried. A failed photo is not sent again. Returns [] when it got through.
+    Stops before a photo once ``budget.time_up()`` (never before the first) and returns the
+    burst's photos to send again: the ones on iNaturalist, so the rest join their observation,
+    and the ones not tried. Each step gets ``budget.step_timeout()``. A failed photo, one that
+    ran out of time included, is not sent again. Returns [] when it got through.
     """
     photos = [m for m in burst if "_label" in m]
     target = next((m["_anchor"] for m in burst if "_anchor" in m), None)
     if target is None:
-        target = await _create_inat_observation(svc, user_id, dep, photos, geoprivacy, result)
+        target = await _create_inat_observation(svc, user_id, dep, photos, geoprivacy, result, budget.step_timeout())
         if target is None:
             return []
     row_id, inat_id = target["row_id"], target["inat_observation_id"]
@@ -326,21 +370,14 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result, time_
     photo_errors = 0
     tried = 0
     for m in photos:
-        if tried and time_up():
+        if tried and budget.time_up():
             break
         tried += 1
         try:
-            resolved = await resolve_media(m["file_path"], size="full")
-            if not resolved:
+            photo = await asyncio.wait_for(_read_and_upload(user_id, inat_id, m), budget.step_timeout())
+            if photo is None:
                 photo_errors += 1
                 continue
-            data, _ct = resolved
-            photo = await upload_observation_photo(
-                user_id=user_id,
-                observation_id=inat_id,
-                photo_bytes=data,
-                filename=m["id"],  # WW media id as original_filename for sync reconciliation
-            )
 
             def _link(photo=photo, m=m):
                 svc.table("inat_observation_media").insert(
@@ -356,7 +393,7 @@ async def _publish_one_burst(svc, user_id, dep, burst, geoprivacy, result, time_
             on_inat.append(m["id"])
             result["photos_uploaded"] += 1
         except Exception as exc:  # noqa: BLE001 — per-photo isolation
-            logger.warning("inat_publish_photo_failed", media_id=m.get("id"), error=str(exc))
+            logger.warning("inat_publish_photo_failed", media_id=m.get("id"), error=str(exc) or type(exc).__name__)
             photo_errors += 1
 
     if photo_errors:

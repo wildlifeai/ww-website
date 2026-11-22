@@ -4,14 +4,21 @@
  * Home for "Sync now": pulls community IDs back into Wildlife Watcher for every linked
  * observation. This replaces the old per-grid "Sync iNaturalist IDs" bulk action; sync also runs
  * automatically on login (see InatAutoSync). IntegrationsSection decides whether it shows.
+ * The sync is a job (lib/inatSync.ts): the panel follows it with useJob.
  */
 import { useState } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { useJob } from '../../hooks/useJob'
 import type { useINat } from '../../hooks/useINat'
+import { inatSyncRunning, inatSyncText } from '../../lib/inatSync'
 
 export function InaturalistPanel({ inat }: { inat: ReturnType<typeof useINat> }) {
-  const [busy, setBusy] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [syncJobId, setSyncJobId] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
+  const { data: syncJob } = useJob(syncJobId)
+  const busy = starting || (!!syncJobId && inatSyncRunning(syncJob))
+  const status = msg ?? (syncJobId ? inatSyncText(syncJob) : null)
 
   // The server refuses to connect without its iNaturalist settings; say why instead of nothing.
   const connect = async () => {
@@ -25,18 +32,15 @@ export function InaturalistPanel({ inat }: { inat: ReturnType<typeof useINat> })
 
   const syncAll = async () => {
     if (busy) return
-    setBusy(true)
+    setStarting(true)
     setMsg(null)
+    setSyncJobId(null)
     try {
-      const r = await inat.sync()
-      setMsg(
-        `Synced ${r.updated} of ${r.checked}: ${r.research} research grade, ` +
-        `${r.disagreement} disagreement, ${r.observations_written} community IDs written.`,
-      )
+      setSyncJobId(await inat.sync())
     } catch (e) {
       setMsg((e as Error)?.message ?? 'Sync failed.')
     } finally {
-      setBusy(false)
+      setStarting(false)
     }
   }
 
@@ -70,7 +74,7 @@ export function InaturalistPanel({ inat }: { inat: ReturnType<typeof useINat> })
         )}
       </div>
 
-      {msg && <p role="status" style={{ fontSize: '0.78rem', marginBottom: 0, marginTop: '0.75rem' }}>{msg}</p>}
+      {status && <p role="status" style={{ fontSize: '0.78rem', marginBottom: 0, marginTop: '0.75rem' }}>{status}</p>}
     </div>
   )
 }

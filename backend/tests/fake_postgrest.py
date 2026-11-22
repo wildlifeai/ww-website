@@ -373,8 +373,9 @@ def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
     if actual is None:
         return False
     actual, value = _instants(actual, value)
-    if op == "eq":
-        return actual == value if isinstance(actual, datetime) else str(actual) == str(value)
+    if op in ("eq", "neq"):  # NULL is neither equal nor unequal, so neq drops it too (above)
+        same = actual == value if isinstance(actual, datetime) else str(actual) == str(value)
+        return same if op == "eq" else not same
     return {"gte": actual >= value, "lte": actual <= value, "gt": actual > value, "lt": actual < value}[op]
 
 

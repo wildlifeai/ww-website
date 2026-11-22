@@ -179,8 +179,8 @@ animal crop ──DINOv3──▶ media_embeddings ──HDBSCAN──▶ cluste
   [deployment guide](../resources/deployment-guide.md#wildlife-brain-on-a-deployed-worker).
 - **Clustering**: HDBSCAN groups visually similar crops; outliers flagged. The Annotations grid's
   **Group by → Cluster** reads the `media_id → cluster_id` map from `POST /api/brain/clusters/multi`;
-  clusters are confirmed in `ClusterReviewPage` (`/clusters/:id`), which bulk-writes labels with
-  cluster provenance. For small deployments the HDBSCAN `min_cluster_size` is scaled down to the
+  clusters are confirmed in `ClusterReviewPage` (`/clusters/:id`, reached from the grid's
+  **Review** tab with one deployment in view), which bulk-writes labels with cluster provenance. For small deployments the HDBSCAN `min_cluster_size` is scaled down to the
   dataset (`prepare_cluster_input` / `cluster_hdbscan`) so they still form real clusters instead of
   collapsing into one group.
 - **Active learning**: `get_review_queue()` ranks media by `active_learning_score` (novelty =
