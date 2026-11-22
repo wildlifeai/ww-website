@@ -21,6 +21,7 @@ import requests
 from app.routers import exif as exif_router
 from app.services import google_drive
 from app.services.google_drive import DriveTransientError, GoogleDriveService
+from app.services.supabase_client import is_dropped_connection
 
 
 def _service_without_credentials() -> GoogleDriveService:
@@ -110,9 +111,9 @@ class TestDriveUploadRetry:
 
 class TestEnqueueRetry:
     def test_transient_transport_errors_are_recognised(self):
-        assert exif_router._is_transient_transport_error(httpx.RemoteProtocolError("Server disconnected"))
-        assert exif_router._is_transient_transport_error(RuntimeError("<ConnectionTerminated error_code:1, last_stream_id:33>"))
-        assert not exif_router._is_transient_transport_error(ValueError("bad deployment id"))
+        assert is_dropped_connection(httpx.RemoteProtocolError("Server disconnected"))
+        assert is_dropped_connection(RuntimeError("<ConnectionTerminated error_code:1, last_stream_id:33>"))
+        assert not is_dropped_connection(ValueError("bad deployment id"))
 
     async def test_retries_once_with_a_fresh_client(self, monkeypatch):
         attempts = []

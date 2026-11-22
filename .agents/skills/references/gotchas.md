@@ -102,6 +102,20 @@ CamtrapDP import gives the deployment its own placeholder device.
 
 ---
 
+## A composite foreign key with ON DELETE SET NULL nulls `deployment_id` too
+
+`observations` points at `observation_events` and at `media`, and `observation_events` at
+`media`, through two-column keys that include `deployment_id`, with `ON DELETE SET NULL`. That
+sets every column of the key to NULL, `deployment_id` included, which is NOT NULL, so deleting an
+event or a photo that still has rows pointing at it fails the whole delete with `23502`. Clear
+the link first: `cluster_deployment_events` sets `observation_event_id` to NULL on the
+deployment's observations before it deletes the old events, which until then made every second
+clustering of a deployment fail (#458, 22 Nov 2026, checked on a local Postgres 17).
+[ww-backend#361](https://github.com/wildlifeai/ww-backend/issues/361) changes the three keys to
+`ON DELETE SET NULL (column)`, which keeps `deployment_id`; keep the unlink until it is on every tier.
+
+---
+
 ## supabase-py types rows as any JSON value
 
 postgrest types `response.data` as a list of any JSON value (None, a string, a list, ...), so
@@ -144,9 +158,13 @@ Detection built in step 1 of the person-detection runbook disappeared this way).
 `services/supabase_client.py`). A request handler and a background job (the Drive upload job
 runs in-process on the dev image) share that connection. When the server drops it, both see
 `ConnectionTerminated` at once. On 2026-09-05 that cost an upload batch its Drive job while the
-request still returned 200. Callers on that path retry once after `reset_service_client()`
-(`routers/exif.py`); do the same for any new call that runs beside a background job, and never
-let a transport error surface as a silent success.
+request still returned 200. On Lambda the server closes it while the environment sits frozen, so
+the first request after a pause fails with `Server disconnected` (AWS dev, 2026-11-20: 17 job
+status writes skipped in one upload test). Callers that can safely repeat a call catch
+`is_dropped_connection(exc)` (`services/supabase_client.py`), call `reset_service_client()` and
+retry once, as the Drive job enqueue (`routers/exif.py`) and the job store's reads and writes
+(`jobs/store.py`) do. Do the same for any new call that runs beside a background job or on
+Lambda, and never let a transport error surface as a silent success.
 
 ---
 

@@ -123,7 +123,9 @@ Rules:
 * On Lambda a task left running in the process (`enqueue_local_job`, `asyncio.create_task`)
   stops when the invocation returns, so the job never finishes and the reaper fails it an hour
   later. Code that can run there dispatches through `enqueue_job`, which invokes the `cpu`
-  function; `start_thumbnail_backfill` shows the branch.
+  function; `start_thumbnail_backfill` shows the branch. `enqueue_job` lets `create_job`'s
+  background write of the `api_jobs` row land before the invoke, so a route never waits for the
+  row itself.
 * A new light job (no ML) also goes in `dispatch.IN_PROCESS_JOBS`, or on Azure, with `REDIS_URL`
   set, `enqueue_job` sends it to the ARQ worker and cold-starts the GPU for it (`sync_inat_job`,
   #455). Under `WORKER_BACKEND=lambda` the list does not matter: every non-batch job goes to `cpu`.

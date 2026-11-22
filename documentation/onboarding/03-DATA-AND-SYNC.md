@@ -162,7 +162,9 @@ create_job() → queued → processing → completed
 | `failed` | error — details in `error` |
 
 - **Persistence**: in-memory dict (fast path) + async sync to the Supabase `api_jobs` table (durable).
-- **Crash recovery**: on boot, any `processing` jobs in Supabase are marked `failed`.
+- **Stale jobs**: a `queued` or `processing` job with no update for an hour is marked `failed` by
+  `reap_stale_jobs` (`jobs/store.py`), every 15 minutes from the API on Azure and from the scheduled
+  tick on Lambda. A job waiting for the REANNZ batch keeps its own limits. Nothing is failed at boot.
 - **Frontend**: polls `GET /api/jobs/{id}` (~2s); responses carry ordered `events[]` for incremental
   UI updates. The global `UploadContext` keeps progress alive across navigation via `ProgressDock`.
 
