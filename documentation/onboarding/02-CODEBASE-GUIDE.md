@@ -32,7 +32,7 @@ src/
 │   ├── toolkit/            # GenerateManifest, UploadModel, PipelineStatusBox
 │   └── common/             # nav/shared bits
 ├── contexts/UploadContext.tsx  # global upload store (survives navigation)
-├── hooks/                  # useAuth, useJob, useBrain, useIntelligence, usePipeline, …
+├── hooks/                  # useAuth, useJob, useBrain, useIntelligence, useGridBulkActions, …
 ├── lib/                    # apiClient (fetch + Supabase JWT), observations (provenance helpers),
 │                           #   projectMembers (membership + invitation RPCs)
 ├── config/supabase.ts      # Supabase client init

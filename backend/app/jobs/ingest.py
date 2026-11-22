@@ -86,11 +86,12 @@ async def ingest_results_part(lease_id: str, job_id: str, part: int) -> str:
 async def _ingest_annotate(job_id: str, dispatch: dict, results: inference_cache.ResultsPart) -> None:
     from app.domain.edge_reflection import reflect_edge_deployment
     from app.domain.pipeline import run_pipeline
-    from app.jobs.definitions import build_pipeline_steps
+    from app.jobs.pipeline_run import AnnotateRun
 
     _deployments, user_id, force = _annotate_args(dispatch)
-    steps = build_pipeline_steps()
-    if not steps:
+    # The steps and settings the lease ran the models for (batch_lease._annotate_work).
+    run = AnnotateRun.of_dispatch(dispatch)
+    if not run.steps:
         return
     groups = results.by_deployment()
     with inference_cache.use(results):
@@ -98,7 +99,7 @@ async def _ingest_annotate(job_id: str, dispatch: dict, results: inference_cache
             for n, (deployment_id, media_ids) in enumerate(groups.items()):
                 # As auto_annotate_deployments: the camera's own scores first, best-effort.
                 await reflect_edge_deployment(deployment_id)
-                await run_pipeline(deployment_id=deployment_id, steps=steps, user_id=user_id, force=force, media_ids=media_ids)
+                await run_pipeline(deployment_id=deployment_id, user_id=user_id, force=force, media_ids=media_ids, **run.run_kwargs())
                 await update_job(job_id, message=f"Writing results, deployment {n + 1} of {len(groups)}")
 
 

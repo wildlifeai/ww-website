@@ -5,7 +5,7 @@
 import type { GridBulkActions } from '../../hooks/useGridBulkActions'
 import type { MediaRecord } from '../../lib/gridMedia'
 import { labelledSpecies } from '../../lib/speciesSuggestions'
-import { DeleteConfirmModal, AiModelPickerModal, PipelineLogModal } from './BulkActionModals'
+import { DeleteConfirmModal, AiModelPickerModal } from './BulkActionModals'
 import { BulkLabelModal } from './BulkLabelModal'
 import { TrainModelModal } from './TrainModelModal'
 
@@ -22,7 +22,6 @@ interface Props {
 export function GridBulkDialogs({ bulk, selectedIds, visible, media, deployments }: Props) {
   const selected = visible.filter(m => selectedIds.has(m.id))
   const projectOf = new Map(deployments.map(d => [d.id, d.project_id]))
-  const last = bulk.pipelineLogs?.[bulk.pipelineLogs.length - 1]
   return (
     <>
       {bulk.dialog === 'delete' && (
@@ -53,13 +52,6 @@ export function GridBulkDialogs({ bulk, selectedIds, visible, media, deployments
         const projectIds = [...new Set(deployments.filter(d => depIds.has(d.id)).map(d => d.project_id))]
         return <TrainModelModal media={rows} projectIds={projectIds} onClose={bulk.closeDialog} />
       })()}
-      {bulk.pipelineLogs !== null && (
-        <PipelineLogModal
-          isRunning={bulk.pipelineLogs.length > 0 && !last?.startsWith('✓') && !last?.startsWith('⚠')}
-          logs={bulk.pipelineLogs}
-          onClose={bulk.closeLogs}
-        />
-      )}
     </>
   )
 }

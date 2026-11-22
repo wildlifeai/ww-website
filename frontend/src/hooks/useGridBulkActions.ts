@@ -5,6 +5,7 @@
 // find similar, publish to iNaturalist, remove, run AI, train) and which of its dialogs is open.
 // The grid only lets people select photos in projects they can write to (decision 1).
 import { useState, type Dispatch, type SetStateAction } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import type { User } from '@supabase/supabase-js'
 import type { BulkAction } from '../components/data/MediaBulkActions'
 import type { SpeciesSelection } from '../components/data/SpeciesPicker'
@@ -14,6 +15,7 @@ import { apiClient } from '../lib/apiClient'
 import type { MediaRecord } from '../lib/gridMedia'
 import { writeVerdicts, type VerdictLabel } from '../lib/humanVerdict'
 import { mediaDeleteOutcome, type MediaDeleteResponse } from '../lib/mediaDelete'
+import { aiRunQueued, startAiRun } from '../lib/runAiAgain'
 
 export type BulkDialog = 'delete' | 'ai' | 'label' | 'train'
 
@@ -37,7 +39,7 @@ interface Args {
 export function useGridBulkActions(a: Args) {
   const [dialog, setDialog] = useState<BulkDialog | null>(null)
   const [labelBusy, setLabelBusy] = useState(false)
-  const [pipelineLogs, setPipelineLogs] = useState<string[] | null>(null)
+  const queryClient = useQueryClient()
 
   const onAction = (action: BulkAction) => {
     if (action === 'similar') {
@@ -79,18 +81,16 @@ export function useGridBulkActions(a: Args) {
     }
   }
 
+  // Run AI again: one ai_run job for the selected photos. The processing banner reads the job list,
+  // so read it now rather than at its next idle poll; a refusal (an AI job already on one of their
+  // deployments) shows in the error toast.
   const runAi = async (models: string[]) => {
-    const ids = Array.from(a.selectedIds)
-    setPipelineLogs([`Starting AI pipeline for ${ids.length} images with models: ${models.join(', ')}…`])
     try {
-      // Through apiClient: the API's own origin and the session token. A bare relative fetch went
-      // to the site, not the API, and carried no token.
-      const res = await apiClient.post('/api/media/run-selected', { media_ids: ids, steps: models }) as {
-        data?: { job_id?: string }
-      }
-      setPipelineLogs(prev => [...(prev || []), `Job queued: ${res.data?.job_id ?? 'unknown'}`])
+      const photos = await startAiRun([...a.selectedIds], models, apiClient.post)
+      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      showUndoToast({ message: aiRunQueued(photos) })
     } catch (e) {
-      setPipelineLogs(prev => [...(prev || []), `Error: ${e instanceof Error ? e.message : 'unknown'}`])
+      showErrorToast(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -135,7 +135,6 @@ export function useGridBulkActions(a: Args) {
 
   return {
     dialog, closeDialog: () => setDialog(null), onAction, deleteSelected, runAi, label, labelBusy,
-    pipelineLogs, closeLogs: () => setPipelineLogs(null),
   }
 }
 

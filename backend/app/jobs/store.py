@@ -497,8 +497,8 @@ async def list_jobs(
         return [], None
 
 
-async def find_active_ai_jobs() -> List[dict]:
-    """Queued and processing ``ai_pipeline`` jobs → ``[{job_id, status, deployment_ids}]`` (from Supabase).
+async def find_active_ai_jobs(kind: str = "ai_pipeline") -> List[dict]:
+    """Queued and processing jobs of ``kind`` → ``[{job_id, status, deployment_ids}]`` (from Supabase).
 
     Used to coalesce the upload flow's AI fan-out: a chunked upload (N batches) previously
     enqueued N annotate jobs for the *same* deployment, each paying the model's fixed
@@ -506,6 +506,7 @@ async def find_active_ai_jobs() -> List[dict]:
     media only once it holds the deployment (it turns 'processing' at that moment), so it
     will include the images just registered. A deployment covered only by a
     **processing** job gets one follow-up job, which every later chunk then reuses (#284).
+    ``POST /api/pipeline/run`` also reads its own kind, ``ai_run`` (``jobs/pipeline_run.py``).
     """
 
     def _run() -> List[dict]:
@@ -514,7 +515,7 @@ async def find_active_ai_jobs() -> List[dict]:
             client.table("api_jobs")
             .select("id, status, job_data")
             .in_("status", [JobStatus.QUEUED.value, JobStatus.PROCESSING.value])
-            .eq("job_data->>kind", "ai_pipeline")
+            .eq("job_data->>kind", kind)
             .execute()
         )
         out = []

@@ -467,31 +467,3 @@ async def test_the_ai_job_turns_processing_only_once_it_holds_a_deployment(monke
     await definitions.annotate_deployments_job("job", [DEP, DEP_B])
 
     assert events == ["run 284", JobStatus.PROCESSING.value, "flushed", "run 285", JobStatus.COMPLETED.value]
-
-
-# ── /api/pipeline/run says busy instead of hanging ───────────────────
-
-
-async def test_pipeline_route_reports_a_busy_deployment(monkeypatch):
-    from types import SimpleNamespace
-
-    from app.routers import pipeline as route
-    from app.schemas.pipeline import PipelineRunRequest
-
-    seen: dict = {}
-
-    async def busy(**kwargs):
-        seen.update(kwargs)
-        raise PipelineBusyError(kwargs["deployment_id"])
-
-    async def allowed(*_a, **_k):
-        return None
-
-    monkeypatch.setattr(route, "run_pipeline", busy)
-    monkeypatch.setattr(route, "assert_write", allowed)
-    # The undecorated handler: the router is flag-gated out of the test app and the limiter needs a real request.
-    handler = route.run_inference_pipeline.__wrapped__
-    response = await handler(SimpleNamespace(state=SimpleNamespace(request_id="r")), PipelineRunRequest(deployment_id=DEP), SimpleNamespace(id="u"))
-
-    assert seen["wait"] is False
-    assert response.error.code == "PIPELINE_BUSY" and response.error.retryable is True

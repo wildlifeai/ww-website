@@ -1519,6 +1519,20 @@
         "title": "ObservationsResponse",
         "type": "object"
       },
+      "PipelineStepType": {
+        "description": "Supported pipeline step types.",
+        "enum": [
+          "media_prep",
+          "gemini_presence",
+          "speciesnet",
+          "animal_crop",
+          "bioclip",
+          "evidence_fusion",
+          "custom"
+        ],
+        "title": "PipelineStepType",
+        "type": "string"
+      },
       "PresignFile": {
         "properties": {
           "content_type": {
@@ -1837,7 +1851,7 @@
         "type": "object"
       },
       "RunSelectedRequest": {
-        "description": "Queue a pipeline run for specific media IDs.",
+        "description": "Queue an AI run on selected photos (the grid's *Run AI again*).",
         "properties": {
           "confidence_threshold": {
             "default": 0.2,
@@ -1858,10 +1872,11 @@
             "default": [
               "speciesnet"
             ],
-            "description": "Pipeline step types to run",
+            "description": "Pipeline steps to run, in order",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/PipelineStepType"
             },
+            "minItems": 1,
             "title": "Steps",
             "type": "array"
           }
@@ -4884,7 +4899,7 @@
     },
     "/api/media/run-selected": {
       "post": {
-        "description": "Queue a pipeline run for specific media IDs (not the full deployment).\n\nLooks up the deployment_id from the first media record, then runs the\npipeline with a media_ids filter. The lookup runs as the requesting user\nso RLS limits it to media in their own projects; the caller must be able to change that\ndeployment's project (project_member or above, ``403`` otherwise).",
+        "description": "Queue an AI run on the selected photos and answer with its job.\n\nThe photos may span deployments: one ``ai_run`` job covers them all and runs the steps on\nthose photos only. Photos in projects the caller cannot change are left out (``403`` when\nthat is all of them). ``PIPELINE_BUSY`` while an AI job is queued or running on any of their\ndeployments. On AWS the job waits for the next REANNZ GPU batch.",
         "operationId": "run_pipeline_selected_api_media_run_selected_post",
         "parameters": [
           {

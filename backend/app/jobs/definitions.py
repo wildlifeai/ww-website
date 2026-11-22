@@ -877,13 +877,20 @@ def build_pipeline_steps() -> list:
 
 
 async def auto_annotate_deployments(
-    deployment_ids: list[str], user_id: str | None = None, job_id: str | None = None, force: bool = False, media_ids: list[str] | None = None
-) -> None:
+    deployment_ids: list[str],
+    user_id: str | None = None,
+    job_id: str | None = None,
+    force: bool = False,
+    media_ids: list[str] | None = None,
+    pipeline: dict | None = None,
+) -> dict[str, str]:
     """Run the AI annotation pipeline on freshly-uploaded deployments (best-effort).
 
     Enqueued (fire-and-forget) by the upload job after media is registered, so species
     observations populate the Annotations grid without a manual trigger. Step set is
-    built from the enabled feature flags; failures are logged, never raised.
+    built from the enabled feature flags, or is ``pipeline``'s (``POST /api/pipeline/run``,
+    ``jobs/pipeline_run.py``); failures are logged and returned as ``{deployment: error}``,
+    never raised.
 
     ``run_pipeline`` scopes itself to unannotated media (idempotency guard), so re-runs
     on an already-annotated deployment are cheap no-ops. When ``job_id`` is given, progress is
@@ -892,10 +899,13 @@ async def auto_annotate_deployments(
     deployment finishes (and the stale-job reaper sees a heartbeat).
     """
     from app.domain.pipeline import run_pipeline
+    from app.jobs.pipeline_run import AnnotateRun
 
-    steps = build_pipeline_steps()
+    run = AnnotateRun.of(pipeline)
+    steps = run.steps
+    failed: dict[str, str] = {}
     if not steps:
-        return
+        return failed
 
     # Drop unresolved folder prefixes (e.g. "00000000") — they're not real deployments.
     deployment_ids = [d for d in deployment_ids if _is_uuid(d)]
@@ -963,13 +973,13 @@ async def auto_annotate_deployments(
                 await reflect_edge_deployment(dep_id)
                 await run_pipeline(
                     deployment_id=dep_id,
-                    steps=steps,
                     user_id=user_id,
                     on_step=_on_step if job_id else None,
                     on_progress=_on_progress if job_id else None,
                     on_start=_on_start,
                     force=force,
                     media_ids=media_ids,
+                    **run.run_kwargs(),
                 )
                 await emit_detection_notifications(dep_id)
                 # Chain DINOv3 embedding + clustering so "Group by Cluster" has data
@@ -979,8 +989,10 @@ async def auto_annotate_deployments(
                 logger.info("auto_annotate_complete", deployment_id=dep_id)
             except Exception as exc:
                 logger.warning("auto_annotate_failed", deployment_id=dep_id, error=str(exc))
+                failed[dep_id] = str(exc)
             if job_id:
                 await update_job(job_id, progress=(i + 1) / total if total else 1.0)
+    return failed
 
 
 async def auto_embed_deployment(deployment_id: str, user_id: str | None = None) -> None:
@@ -1018,7 +1030,12 @@ async def auto_embed_deployment(deployment_id: str, user_id: str | None = None) 
 
 
 async def annotate_deployments_job(
-    job_id: str, deployment_ids: list[str], user_id: str | None = None, force: bool = False, media_ids: list[str] | None = None
+    job_id: str,
+    deployment_ids: list[str],
+    user_id: str | None = None,
+    force: bool = False,
+    media_ids: list[str] | None = None,
+    pipeline: dict | None = None,
 ) -> None:
     """Registered (ARQ-routable) AI job: annotate + embed a set of deployments.
 
@@ -1026,15 +1043,27 @@ async def annotate_deployments_job(
     set the upload job enqueues this and it runs on the GPU ``embedding-worker`` (the
     heavy ML image); with no Redis it falls back to running in-process. Either way it
     reports status to ``job_id`` so it appears in the user's Processing history.
+    ``POST /api/pipeline/run`` enqueues it too, with its own steps and settings as the
+    ``pipeline`` keyword (``jobs/pipeline_run.py``).
 
     The actual work (``run_pipeline`` per deployment + detection notifications + DINOv3
     embed/cluster) lives in :func:`auto_annotate_deployments`; this is the thin
     job-status wrapper around it. The job stays 'queued' until ``run_pipeline`` holds
-    its first deployment, which then marks it 'processing'.
+    its first deployment, which then marks it 'processing'. A deployment whose run
+    failed ends the job ``completed_with_errors`` with that error.
     """
     try:
-        await auto_annotate_deployments(deployment_ids, user_id=user_id, job_id=job_id, force=force, media_ids=media_ids)
-        await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message="AI analysis complete")
+        failed = await auto_annotate_deployments(deployment_ids, user_id=user_id, job_id=job_id, force=force, media_ids=media_ids, pipeline=pipeline)
+        if failed:
+            await update_job(
+                job_id,
+                status=JobStatus.COMPLETED_WITH_ERRORS,
+                progress=1.0,
+                message=f"AI analysis failed on {len(failed)} deployment(s)",
+                error=next(iter(failed.values())),
+            )
+        else:
+            await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message="AI analysis complete")
     except Exception as exc:
         logger.warning("annotate_deployments_job_failed", job_id=job_id, error=str(exc))
         await update_job(job_id, status=JobStatus.FAILED, error=str(exc))

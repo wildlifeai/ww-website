@@ -29,7 +29,7 @@ import json
 import math
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import structlog
 
@@ -40,6 +40,9 @@ from app.services import object_store
 from app.services.db_utils import rows_of
 from app.services.inference_cache import INFERENCE_CONTRACT
 from app.services.supabase_client import create_service_client
+
+if TYPE_CHECKING:
+    from app.jobs.pipeline_run import AnnotateRun
 
 logger = structlog.get_logger()
 
@@ -184,25 +187,27 @@ def _crop_item(lease_id: str, crop: dict) -> dict:
     return item
 
 
-def _annotate_config() -> dict:
-    """The settings the cluster's models need, as ``run_pipeline`` would use them for an upload run."""
+def _annotate_config(run: AnnotateRun) -> dict:
+    """The settings the cluster's models need, as ``run_pipeline`` will use them for ``run`` at ingest."""
     from app.domain.pipeline import DetectionCutoffs
 
-    config: dict[str, Any] = {"confidence_threshold": 0.2}
-    config.update(DetectionCutoffs.from_config(config).as_config())
+    config: dict[str, Any] = {"confidence_threshold": run.confidence_threshold}
+    config.update(DetectionCutoffs.from_config(run.config).as_config())
     config["per_detection"] = settings.FF_PER_CROP_CLASSIFY_ENABLED
-    config["bioclip_rank"] = settings.BIOCLIP_RANK
-    config["bioclip_labels"] = None
+    config["bioclip_rank"] = run.config.get("bioclip_rank", settings.BIOCLIP_RANK)
+    config["bioclip_labels"] = run.config.get("bioclip_labels")
     return config
 
 
 async def _annotate_work(lease_id: str, dispatch: dict) -> Optional[dict]:
     """The photos and models of one annotate job, or None when the pipeline has nothing to run."""
     from app.domain.pipeline import fetch_pipeline_media
-    from app.jobs.definitions import build_pipeline_steps
+    from app.jobs.pipeline_run import AnnotateRun
     from app.schemas.pipeline import PipelineStepType
 
-    steps = build_pipeline_steps()
+    # The job's own steps and settings (POST /api/pipeline/run), or the flags' for an upload.
+    run = AnnotateRun.of_dispatch(dispatch)
+    steps = run.steps
     speciesnet = PipelineStepType.SPECIESNET in steps
     bioclip = PipelineStepType.BIOCLIP in steps and settings.FF_BIOCLIP_ENABLED
     if not steps:
@@ -214,9 +219,11 @@ async def _annotate_work(lease_id: str, dispatch: dict) -> Optional[dict]:
     svc = create_service_client()
     items: list[dict] = []
     for dep in _job_deployments(dispatch):
-        media = await asyncio.to_thread(fetch_pipeline_media, svc, dep, steps, force=force, media_ids=media_ids)
+        media = await asyncio.to_thread(
+            fetch_pipeline_media, svc, dep, steps, only_unannotated=run.only_unannotated, force=force, media_ids=media_ids
+        )
         items.extend(_media_item(lease_id, m) for m in media)
-    return {"models": {"speciesnet": speciesnet, "bioclip": bioclip}, "config": _annotate_config(), "items": items}
+    return {"models": {"speciesnet": speciesnet, "bioclip": bioclip}, "config": _annotate_config(run), "items": items}
 
 
 async def _embed_work(lease_id: str, dispatch: dict) -> dict:

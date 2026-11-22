@@ -3,11 +3,12 @@
 //
 // BulkActionModals — guardrail modals for media bulk actions.
 //  - Delete confirmation
-//  - AI model picker + pipeline log
+//  - AI model picker (Run AI again, lib/runAiAgain.ts)
 //  - iNat connect prompt (if not connected)
 //  - iNat upload progress
 
 import { useState } from 'react'
+import { AI_MODELS } from '../../lib/runAiAgain'
 import { Modal } from '../ui/Modal'
 
 // ── Delete confirmation ─────────────────────────────────────────────────────
@@ -78,19 +79,6 @@ export function DeleteConfirmModal({ mediaIds, fileNames, onConfirm, onClose }: 
 
 // ── AI model picker ─────────────────────────────────────────────────────────
 
-export interface AiModelChoice {
-  id: string
-  label: string
-  description: string
-  checked: boolean
-}
-
-const DEFAULT_MODELS: AiModelChoice[] = [
-  { id: 'speciesnet', label: 'SpeciesNet', description: 'Detector + species classifier', checked: true },
-  { id: 'bioclip',    label: 'BioCLIP',    description: 'Zero-shot secondary classifier', checked: false },
-  { id: 'dinov3',     label: 'DINOv3',     description: 'Embedding + clustering',         checked: false },
-]
-
 interface AiPickerProps {
   count: number
   onRun: (models: string[]) => void
@@ -98,12 +86,11 @@ interface AiPickerProps {
 }
 
 export function AiModelPickerModal({ count, onRun, onClose }: AiPickerProps) {
-  const [models, setModels] = useState(DEFAULT_MODELS)
+  const [chosen, setChosen] = useState<readonly string[]>(['speciesnet'])
 
-  const toggle = (id: string) => setModels(prev =>
-    prev.map(m => m.id === id ? { ...m, checked: !m.checked } : m)
-  )
+  const toggle = (id: string) => setChosen(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id])
 
+  const models = AI_MODELS.map(m => ({ ...m, checked: chosen.includes(m.id) }))
   const selected = models.filter(m => m.checked).map(m => m.id)
 
   return (
@@ -140,7 +127,7 @@ export function AiModelPickerModal({ count, onRun, onClose }: AiPickerProps) {
         </div>
 
         <p style={{ fontSize: '0.75rem', opacity: 0.6, marginBottom: '0.75rem' }}>
-          ⓘ Existing AI labels will be preserved; new observations will be added alongside them.
+          ⓘ Existing labels stay. A model skips the photos it has already analysed and any photo with a human label.
         </p>
 
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem' }}>
@@ -151,40 +138,6 @@ export function AiModelPickerModal({ count, onRun, onClose }: AiPickerProps) {
             disabled={selected.length === 0}
           >
             🧠 Run AI ({selected.length} model{selected.length !== 1 ? 's' : ''})
-          </button>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-// ── AI Pipeline Log Modal ───────────────────────────────────────────────────
-
-interface PipelineLogProps {
-  isRunning: boolean
-  logs: string[]
-  onClose: () => void
-}
-
-export function PipelineLogModal({ isRunning, logs, onClose }: PipelineLogProps) {
-  return (
-    <Modal open={true} onClose={onClose} title={isRunning ? '🧠 AI Pipeline Running' : '🧠 AI Pipeline Complete'}>
-      <div style={{ fontSize: '0.8125rem' }}>
-        <div style={{
-          maxHeight: 300, overflowY: 'auto', marginBottom: '0.75rem',
-          padding: '0.5rem', fontFamily: 'monospace', fontSize: '0.75rem',
-          backgroundColor: 'rgba(0,0,0,0.03)', borderRadius: 'var(--radius)',
-          border: '1px solid var(--border)',
-        }}>
-          {logs.length === 0 && <span style={{ opacity: 0.5 }}>Waiting for pipeline to start…</span>}
-          {logs.map((line, i) => (
-            <div key={i} style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{line}</div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="btn" onClick={onClose}>
-            {isRunning ? 'Close (runs in background)' : 'Close'}
           </button>
         </div>
       </div>
