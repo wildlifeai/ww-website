@@ -13,14 +13,14 @@ we published (tracked in inat_observations), then:
 Reconciliation uses the stored mapping (inat_observation_id -> our row -> media
 via inat_observation_media), so no scraping or original_filename guesswork is
 needed. Runs with the service role (bypasses RLS) — intended to be triggered by
-POST /api/inat/sync or a scheduled job.
+POST /api/inat/sync, which runs it as ``sync_inat_job`` (``jobs/inat_sync.py``), or a scheduled job.
 """
 
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import structlog
 
@@ -45,12 +45,17 @@ def _derive_status(quality_grade: Optional[str], community: Optional[str], guess
     return "uploaded"  # casual / unknown — still on iNat, no consensus yet
 
 
-async def sync_inat_identifications(user_id: Optional[str] = None, limit: int = 200) -> Dict[str, Any]:
+async def sync_inat_identifications(
+    user_id: Optional[str] = None,
+    limit: int = 200,
+    progress: Optional[Callable[[int, int], Awaitable[None]]] = None,
+) -> Dict[str, Any]:
     """Poll iNat for community IDs and reconcile them into Wildlife Watcher.
 
     Args:
         user_id: limit to one user's published observations (None = all users).
         limit: max iNat observations to poll in this run (batch cap is 200).
+        progress: awaited with (done, total) before each observation, for the job's progress.
     """
     svc = create_service_client()
 
@@ -81,7 +86,9 @@ async def sync_inat_identifications(user_id: Optional[str] = None, limit: int = 
     poll_by_id = {p["id"]: p for p in polled}
     now = datetime.now(timezone.utc).isoformat()
 
-    for r in rows:
+    for done, r in enumerate(rows):
+        if progress:
+            await progress(done, len(rows))
         p = poll_by_id.get(r["inat_observation_id"])
         if not p:
             continue

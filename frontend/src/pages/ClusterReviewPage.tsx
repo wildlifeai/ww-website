@@ -162,8 +162,10 @@ function ClusterPanel({
   const confirm = useConfirmCluster(deploymentId)
   const unconfirm = useUnconfirmCluster(deploymentId)
   const review = useBulkReview(deploymentId)
-  // No query cache holds iNaturalist state, so publishing is a plain call, not a mutation.
-  const [publishing, setPublishing] = useState(false)
+  // No query cache holds iNaturalist state, so publishing is a plain call, not a mutation. The
+  // button's label while it runs, with the photos reached after each round; null when idle.
+  const [publishLabel, setPublishLabel] = useState<string | null>(null)
+  const publishing = publishLabel !== null
   // Offered once the status check has answered and iNaturalist is switched on.
   const canPublish = canWrite && inat.enabled && inat.connected !== null
   const publishBlocker = inatBlocker({ connected: inat.connected, hasLocation, selected: selected.size })
@@ -229,15 +231,16 @@ function ClusterPanel({
   const runPublish = async () => {
     if (selected.size === 0 || publishBlocker || publishing) return
     setNotice(null)
-    setPublishing(true)
+    setPublishLabel('Publishing…')
     try {
-      setNotice(inatPublishNotice(await inat.publish([...selected])))
+      const onProgress = (reached: number, total: number) => setPublishLabel(`Publishing ${reached} of ${total}…`)
+      setNotice(inatPublishNotice(await inat.publish([...selected], { onProgress })))
       setMode('idle')
       setSelected(new Set())
     } catch (err) {
       setNotice(inatErrorNotice(err))
     } finally {
-      setPublishing(false)
+      setPublishLabel(null)
     }
   }
 
@@ -405,7 +408,7 @@ function ClusterPanel({
                     onClick={runPublish}
                     style={{ fontSize: '0.8125rem', backgroundColor: 'var(--primary)' }}
                   >
-                    {publishing ? 'Publishing…' : 'Publish'}
+                    {publishLabel ?? 'Publish'}
                   </button>
                 </>
               )}

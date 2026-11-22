@@ -32,7 +32,8 @@ function InatAutoSyncFor({ user }: { user: User }) {
     if (sessionStorage.getItem(key)) { ran.current = true; return }
     ran.current = true
     sessionStorage.setItem(key, '1')
-    // Best-effort; failures are silent (the Settings button surfaces errors).
+    // Starts the sync job without following it. Best-effort; failures are silent (the Settings
+    // button surfaces errors).
     inat.sync().catch(() => {})
   }, [user, inat.connected, inat])
 
