@@ -43,9 +43,10 @@ src/
 
 Defined as `USER_TABS` in `App.tsx`. The active tab is highlighted, so pages no longer repeat
 their own title, and a deep route lights its parent tab (`lib/navTabs.ts`). Lifecycle order:
-**prepare → collect → analyse**. The 📡 **Realtime** tab appears only when one of the user's
+**prepare → collect → analyse**. The 📡 **Realtime** tab opens only when one of the user's
 projects has a device that sends or has sent LoRaWAN data, at least one `lorawan_messages` row the
-user can read (`hooks/useHasRealtimeData.ts`, UI audit decision 7). Below 900 px the tabs show
+user can read (`hooks/useHasRealtimeData.ts`); before that it shows greyed out, and hovering or
+clicking it says why and links the LoRaWAN guide (`components/common/RealtimeTabOff.tsx`). Below 900 px the tabs show
 their icon only. Write controls (the header Upload button, Home's upload step, Toolkit's Prepare
 SD card) hide for a user who can write to no project (`hooks/useWritableProjects.ts`).
 

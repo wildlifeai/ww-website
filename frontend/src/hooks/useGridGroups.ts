@@ -3,10 +3,11 @@
 //
 // useGridGroups: the review grid's Group by. Groups split the page (lib/gridGrouping); cluster
 // groups come from the multi-cluster API, fetched only while grouped by cluster, and the groups
-// the reviewer collapsed are kept for the current grouping.
+// the reviewer collapsed are kept for the current grouping. It also reports whether the one
+// deployment in view has a Wildlife Brain run, for the Review tab.
 import { useMemo, useState } from 'react'
 import type { MediaRecord } from '../lib/gridMedia'
-import { availableGroupings, groupInOrder, observationGroupKey, type GroupBy } from '../lib/gridGrouping'
+import { availableGroupings, groupInOrder, photoGroupKey, type GroupBy, type GroupNames } from '../lib/gridGrouping'
 import { useClusters, useMultiClusters } from './useBrain'
 
 const NONE: ReadonlySet<string> = new Set()
@@ -18,18 +19,25 @@ interface Args {
   choice: GroupBy
   deploymentIds: string[]
   deploymentNames: ReadonlyMap<string, string>
+  /** Each deployment's project name, keyed by deployment id. */
+  projectNames: ReadonlyMap<string, string>
   brainOn: boolean
   clusterThreshold: number
 }
 
-export function useGridGroups({ cards, choice, deploymentIds, deploymentNames, brainOn, clusterThreshold }: Args) {
-  const options = availableGroupings(deploymentIds.length).filter(g => g !== 'cluster' || brainOn)
+export function useGridGroups({ cards, choice, deploymentIds, deploymentNames, projectNames, brainOn, clusterThreshold }: Args) {
+  const names = useMemo<GroupNames>(() => ({ deployments: deploymentNames, projects: projectNames }), [deploymentNames, projectNames])
+  const options = useMemo(
+    () => availableGroupings(deploymentIds.length, cards, names).filter(g => g !== 'cluster' || brainOn),
+    [deploymentIds.length, cards, names, brainOn],
+  )
   const groupBy: GroupBy = options.includes(choice) ? choice : 'none'
   const singleDeployment = deploymentIds.length === 1 ? deploymentIds[0] : null
 
   const clustersQ = useMultiClusters(groupBy === 'cluster' ? deploymentIds : [], clusterThreshold)
-  // Review clusters and UMAP need an embedding run on the deployment.
-  const clusterRun = useClusters(groupBy === 'cluster' && singleDeployment ? singleDeployment : undefined)
+  // The Review tab offers Review clusters and UMAP once the deployment has an embedding run,
+  // and Run Wildlife Brain before (one row per cluster, so the read is small).
+  const clusterRun = useClusters(brainOn && singleDeployment ? singleDeployment : undefined)
 
   // Map a cluster group's display label → its confirm-able row id, so the group
   // header can offer "label all" (only for unconfirmed clusters). Mirrors the
@@ -66,10 +74,9 @@ export function useGridGroups({ cards, choice, deploymentIds, deploymentNames, b
         if (cid == null) return 'Not yet clustered'
         return clusterNames.get(cid) ?? `Cluster ${cid}`
       }
-      if (groupBy === 'deployment') return deploymentNames.get(m.deployment_id) || m.deployment_id.slice(0, 8)
-      return observationGroupKey(groupBy, m.observations)
+      return photoGroupKey(groupBy, m, names)
     })
-  }, [cards, groupBy, deploymentNames, clustersQ.data])
+  }, [cards, groupBy, names, clustersQ.data])
 
   // Groups the reviewer collapsed, for the current grouping.
   const [collapsedAt, setCollapsedAt] = useState<{ groupBy: GroupBy; labels: ReadonlySet<string> }>({ groupBy: 'none', labels: NONE })
@@ -85,5 +92,6 @@ export function useGridGroups({ cards, choice, deploymentIds, deploymentNames, b
     options, groupBy, groups, clusterByLabel, collapsed, setCollapsed, toggleCollapsed,
     clustersLoading: clustersQ.isLoading,
     embeddingRunId: clusterRun.data?.embedding_run_id ?? null,
+    embeddingRunLoading: clusterRun.isLoading,
   }
 }
