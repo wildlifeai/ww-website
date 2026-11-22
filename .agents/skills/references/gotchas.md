@@ -158,9 +158,13 @@ Detection built in step 1 of the person-detection runbook disappeared this way).
 `services/supabase_client.py`). A request handler and a background job (the Drive upload job
 runs in-process on the dev image) share that connection. When the server drops it, both see
 `ConnectionTerminated` at once. On 2026-09-05 that cost an upload batch its Drive job while the
-request still returned 200. Callers on that path retry once after `reset_service_client()`
-(`routers/exif.py`); do the same for any new call that runs beside a background job, and never
-let a transport error surface as a silent success.
+request still returned 200. On Lambda the server closes it while the environment sits frozen, so
+the first request after a pause fails with `Server disconnected` (AWS dev, 2026-11-20: 17 job
+status writes skipped in one upload test). Callers that can safely repeat a call catch
+`is_dropped_connection(exc)` (`services/supabase_client.py`), call `reset_service_client()` and
+retry once, as the Drive job enqueue (`routers/exif.py`) and the job store's reads and writes
+(`jobs/store.py`) do. Do the same for any new call that runs beside a background job or on
+Lambda, and never let a transport error surface as a silent success.
 
 ---
 

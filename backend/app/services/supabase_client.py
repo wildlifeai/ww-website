@@ -10,6 +10,7 @@ Three flavours:
 
 from typing import Optional
 
+import httpx
 from supabase import Client, create_client
 
 from app.config import settings
@@ -58,3 +59,17 @@ def reset_service_client() -> None:
     """
     global _service_client
     _service_client = None
+
+
+def is_dropped_connection(exc: BaseException) -> bool:
+    """A dropped or protocol-broken connection to Supabase, worth one retry on a fresh client.
+
+    The server closes the shared client's connection when it sits idle, as it does while a Lambda
+    environment is frozen between invocations, and the next request on it fails with
+    ``Server disconnected`` (AWS dev, 2026-11-20). A request handler and a background job sharing
+    it both see ``ConnectionTerminated`` at once; on the 2026-09-05 bench run that cost a whole
+    upload batch its Drive job while the response still read 200.
+    """
+    if isinstance(exc, (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError, httpx.ConnectError)):
+        return True
+    return "ConnectionTerminated" in repr(exc)

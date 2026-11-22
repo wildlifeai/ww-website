@@ -118,7 +118,9 @@ Rules:
 * On Lambda a task left running in the process (`enqueue_local_job`, `asyncio.create_task`)
   stops when the invocation returns, so the job never finishes and the reaper fails it an hour
   later. Code that can run there dispatches through `enqueue_job`, which invokes the `cpu`
-  function; `start_thumbnail_backfill` shows the branch.
+  function; `start_thumbnail_backfill` shows the branch. `enqueue_job` lets `create_job`'s
+  background write of the `api_jobs` row land before the invoke, so a route never waits for the
+  row itself.
 
 Live infrastructure detail: `documentation/resources/cloud-infrastructure.md`. Everything under
 `documentation/development reports/_archive/` (including `v2-architecture-plan.md`) is **frozen
