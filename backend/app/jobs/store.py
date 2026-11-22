@@ -506,6 +506,14 @@ def job_cursor(row: dict) -> Optional[str]:
     return f"{at.strftime('%Y-%m-%dT%H:%M:%S.%f')}Z|{row['id']}"
 
 
+# Kinds a person does not start from a page, left out of every job list unless asked for by
+# ``kind``: the iNaturalist sync that runs at each sign-in (``jobs/inat_sync.py``, #455). The
+# page that starts one follows it by id, which still answers.
+UNLISTED_KINDS = ("inat_sync",)
+# PostgREST ``or`` body for the rest: a job with no kind is listed too, which a plain ``neq`` drops.
+_LISTED_KINDS = "job_data->>kind.is.null,and(" + ",".join(f"job_data->>kind.neq.{k}" for k in UNLISTED_KINDS) + ")"
+
+
 async def list_jobs(
     user_id: str,
     limit: int = 50,
@@ -519,9 +527,9 @@ async def list_jobs(
     Scoped by ``job_data->>user_id`` because ``api_jobs`` has no owner column.
     Returns light summaries (no event lists) for the processing-history view;
     callers fetch full events per job via :func:`get_job`. ``statuses`` and ``kind``
-    narrow the read; ``before`` (a :func:`job_cursor`, matching ``JOB_CURSOR_PATTERN``)
-    starts after that job, by created time with ties broken on id. The cursor is None on
-    the last page.
+    narrow the read; without ``kind`` the :data:`UNLISTED_KINDS` are left out. ``before`` (a
+    :func:`job_cursor`, matching ``JOB_CURSOR_PATTERN``) starts after that job, by created
+    time with ties broken on id. The cursor is None on the last page.
     """
 
     def _run() -> tuple[List[dict], Optional[str]]:
@@ -531,6 +539,8 @@ async def list_jobs(
             q = q.in_("status", statuses)
         if kind:
             q = q.eq("job_data->>kind", kind)
+        else:
+            q = q.or_(_LISTED_KINDS)
         if before:
             at, job_id = before.split("|")
             q = q.or_(f"created_at.lt.{at},and(created_at.eq.{at},id.lt.{job_id})")

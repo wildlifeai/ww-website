@@ -1,11 +1,12 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// POST /api/inat/publish answers inside the request timeout: it starts no photo after about two
-// minutes and hands back the ones it did not reach as `remaining_media_ids`
+// POST /api/inat/publish answers inside API Gateway's 30 s: it starts no photo after about 15 s
+// and hands back the ones it did not reach as `remaining_media_ids`
 // (backend/app/domain/inaturalist_publish.py). useINat().publish sends those again, round after
-// round, and answers once with the rounds added up. Kept apart from lib/inatPublish.ts: useINat
-// runs on every signed-in page, so what it imports lands in the first load.
+// round, reports how far it has got after each, and answers once with the rounds added up. Kept
+// apart from lib/inatPublish.ts: useINat runs on every signed-in page, so what it imports lands
+// in the first load.
 
 /** The answer of POST /api/inat/publish. */
 export interface INatPublishResult {
@@ -25,6 +26,12 @@ export interface INatPublishResult {
   remaining_media_ids?: string[]
 }
 
+/**
+ * Called after each round with the photos reached so far (published, skipped or failed) and the
+ * selection's size. A round hands back nothing it was not given, so `reached` never goes down.
+ */
+export type PublishProgress = (reached: number, total: number) => void
+
 const didWork = (r: INatPublishResult) =>
   r.observations_created + r.photos_uploaded + r.errors > 0 || r.observations.some(o => (o.photo_errors ?? 0) > 0)
 
@@ -37,11 +44,15 @@ const didWork = (r: INatPublishResult) =>
 export async function publishInRounds(
   post: (mediaIds: string[]) => Promise<INatPublishResult>,
   mediaIds: string[],
+  onProgress?: PublishProgress,
 ): Promise<INatPublishResult> {
+  const report = (r: INatPublishResult) => onProgress?.(mediaIds.length - (r.remaining_media_ids?.length ?? 0), mediaIds.length)
   let last = await post(mediaIds)
   let total = last
+  report(last)
   for (let round = 1; round < mediaIds.length && (last.remaining_media_ids?.length ?? 0) > 0 && didWork(last); round++) {
     last = await post(last.remaining_media_ids ?? [])
+    report(last)
     total = {
       ...total,
       observations_created: total.observations_created + last.observations_created,

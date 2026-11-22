@@ -121,6 +121,9 @@ Rules:
   function; `start_thumbnail_backfill` shows the branch. `enqueue_job` lets `create_job`'s
   background write of the `api_jobs` row land before the invoke, so a route never waits for the
   row itself.
+* A new light job (no ML) also goes in `dispatch.IN_PROCESS_JOBS`, or on Azure, with `REDIS_URL`
+  set, `enqueue_job` sends it to the ARQ worker and cold-starts the GPU for it (`sync_inat_job`,
+  #455). Under `WORKER_BACKEND=lambda` the list does not matter: every non-batch job goes to `cpu`.
 
 Live infrastructure detail: `documentation/resources/cloud-infrastructure.md`. Everything under
 `documentation/development reports/_archive/` (including `v2-architecture-plan.md`) is **frozen

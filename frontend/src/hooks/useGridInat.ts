@@ -56,7 +56,8 @@ export function useGridInat({ media, flash, showCardNotice, onPublished }: Args)
     setBusy(true)
     flash('info', 'Publishing to iNaturalist…', false)
     try {
-      showCardNotice(inatPublishNotice(await inat.publish(ids)))
+      const onProgress = (reached: number, total: number) => flash('info', `Publishing to iNaturalist, ${reached} of ${total} photos…`, false)
+      showCardNotice(inatPublishNotice(await inat.publish(ids, { onProgress })))
       onPublished()
       await loadInatStates(media.map(m => m.id))
     } catch (e) {
