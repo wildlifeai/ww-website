@@ -30,7 +30,7 @@ const STATUS_META: Record<JobStatusValue, { icon: LucideIcon; label: string; col
 const KIND_ICON: Record<string, LucideIcon> = {
   upload: Upload, ai_pipeline: Bot, ai_embed: Brain, ai_reprocess: RefreshCw,
   active_learning: Target, export: Package, maintenance: Wrench, model_train: Dna, model_upload: Cpu,
-  media_prep: Image,
+  media_prep: Image, camtrapdp_import: Package,
 }
 
 const CONTROL_STYLE: React.CSSProperties = {
@@ -113,7 +113,7 @@ function JobRow({ job, defaultOpen }: { job: JobSummary; defaultOpen: boolean })
           )}
           {isLoading && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Loading log…</div>}
           {detail && detail.events.length === 0 && !job.error && !detail.result_url && (
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>No log lines recorded for this job.</div>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{detail.message || 'No log lines recorded for this job.'}</div>
           )}
           {detail && detail.events.length > 0 && (
             <div style={{

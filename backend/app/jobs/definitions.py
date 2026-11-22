@@ -626,6 +626,15 @@ async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: d
     await _notify_export_ready(job_id, sel.project_id, msg)
 
 
+async def import_camtrapdp_job(
+    job_id: str, package_key: str, filename: str, user_id: str, org_id: str, annotation_mode: str = "final", run_ai: bool = False
+):
+    """Import an uploaded CamtrapDP package into a new project (#454): ``jobs/camtrapdp_import.py``."""
+    from app.jobs.camtrapdp_import import run_import
+
+    await run_import(job_id, package_key, filename, user_id, org_id, annotation_mode, run_ai)
+
+
 async def _notify_export_ready(job_id: str, project_id: str, body: str) -> None:
     """In-app notification for the export's owner, pointing at Processing history (best-effort)."""
     job = await get_job(job_id)
@@ -1975,6 +1984,7 @@ JOBS = [
     train_species_brain_job,
     generate_manifest_job,
     export_camtrapdp_originals_job,
+    import_camtrapdp_job,
     download_pretrained_job,
     download_github_pretrained_job,
     upload_drive_images_job,

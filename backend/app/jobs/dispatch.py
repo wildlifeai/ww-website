@@ -41,10 +41,13 @@ BATCH_JOBS: dict[str, str] = {
 }
 
 # Jobs that run in the API process today, whatever REDIS_URL says. Under
-# WORKER_BACKEND=lambda every job that is not a batch job goes to CPU_FUNCTION_NAME.
+# WORKER_BACKEND=lambda every job that is not a batch job goes to CPU_FUNCTION_NAME. On Azure
+# one of these can be cut off when the API replica scales in (dev scales to zero).
 IN_PROCESS_JOBS = frozenset(
     {
         "upload_drive_images_job",
+        "import_camtrapdp_job",
+        "export_camtrapdp_originals_job",
         "generate_manifest_job",
         "convert_model_job",
         "download_pretrained_job",

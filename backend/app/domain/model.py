@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from app.config import settings
+from app.domain import zip_limits
 from app.registries.model_registry import get_model_config
 from app.services.db_utils import rows_of
 from app.services.http_client import download_url_content
@@ -347,14 +348,23 @@ async def convert_uploaded_model(zip_content: bytes, filename: str) -> Tuple[byt
     with tempfile.TemporaryDirectory() as temp_dir:
         base_path = Path(temp_dir)
 
-        # 1. Save and extract uploaded ZIP
-        uploaded_zip_path = base_path / filename
+        # 1. Save and extract uploaded ZIP. A fixed name: the uploaded file name comes from the
+        # client and could point outside the temporary directory.
+        uploaded_zip_path = base_path / "upload.zip"
         uploaded_zip_path.write_bytes(zip_content)
 
         work_dir = base_path / "work" / container_name
         work_dir.mkdir(parents=True, exist_ok=True)
 
         with zipfile.ZipFile(uploaded_zip_path, "r") as z:
+            # The input limits (domain/zip_limits.py), before anything is written. extractall
+            # itself drops drive letters, leading slashes and ".." from member names.
+            try:
+                zip_limits.check_members(
+                    z.infolist(), what="model ZIP", max_members=zip_limits.MODEL_MAX_MEMBERS, max_total_bytes=zip_limits.MODEL_MAX_TOTAL_BYTES
+                )
+            except zip_limits.ZipLimitError as exc:
+                raise ModelDomainError(str(exc)) from exc
             z.extractall(work_dir)
 
         vars_h_path = work_dir / "model-parameters" / "model_variables.h"

@@ -17,10 +17,11 @@
  * this component's state, so leaving the page (or reloading it) drops the
  * staged selection; a beforeunload guard warns before that happens.
  *
- * CamtrapDP import is a single synchronous API call; its progress is shown
- * inline and the selection stays until the result is confirmed.
+ * CamtrapDP import sends the package and follows the import job it starts
+ * (useCamtrapImport); its progress is shown inline, the job carries on if the
+ * page is left, and the selection stays until the result is confirmed.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -41,34 +42,8 @@ import { fetchDeploymentsInProjects } from '../../lib/uploadTargets'
 import { useUploadStore, type UploadDeployment, type PendingUpload } from '../../contexts/UploadContext'
 import { useProjectSelection } from '../../hooks/useProjectSelection'
 import { PROJECT_ROLES_KEY, useProjectRoles } from '../../hooks/useProjectRoles'
+import { useCamtrapImport } from '../../hooks/useCamtrapImport'
 import './upload.css'
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface CamtrapImportResult {
-  project_id: string
-  deployments_imported: number
-  media_imported: number
-  observations_imported: number
-  warnings: string[]
-  /** Set when run_ai enqueued a SpeciesNet + Wildlife Brain job for the bundled images. */
-  ai_job_id?: string | null
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CamtrapDP staged-progress labels
-// ─────────────────────────────────────────────────────────────────────────────
-
-const CAMTRAP_STAGES: { label: string; pct: number; after: number }[] = [
-  { label: 'Uploading package…', pct: 10, after: 500 },
-  { label: 'Parsing deployments…', pct: 25, after: 3000 },
-  { label: 'Registering taxa via iNat…', pct: 45, after: 8000 },
-  { label: 'Importing media records…', pct: 65, after: 15000 },
-  { label: 'Importing observations…', pct: 80, after: 22000 },
-  { label: 'Finalising import…', pct: 92, after: 30000 },
-]
 
 /** What happens to each line of the breakdown, in the user's terms. */
 const STATUS_TEXT: Record<ResolutionStatus, string> = {
@@ -160,12 +135,16 @@ export function UploadFlow() {
   // to show collided with the existing row (409).
   const listSettled = targetsReady && (writableIds.length === 0 || (deploymentsQuery.data !== undefined && !deploymentsQuery.isFetching))
 
-  // CamtrapDP import state
-  const [camtrapImporting, setCamtrapImporting] = useState(false)
-  const [camtrapResult, setCamtrapResult] = useState<CamtrapImportResult | null>(null)
-  const [camtrapError, setCamtrapError] = useState<string | null>(null)
-  const [camtrapElapsed, setCamtrapElapsed] = useState(0)
-  const [camtrapStage, setCamtrapStage] = useState(0)
+  // CamtrapDP import: the import created a project, its admin role included, so refresh the
+  // picker and the roles once it is done.
+  const onImported = useCallback(() => {
+    reloadProjects()
+    void queryClient.invalidateQueries({ queryKey: [PROJECT_ROLES_KEY] })
+  }, [reloadProjects, queryClient])
+  const camtrap = useCamtrapImport(onImported)
+  const camtrapImporting = camtrap.sending || camtrap.running
+  const camtrapResult = camtrap.result
+  const camtrapError = camtrap.error
   const [showAllWarnings, setShowAllWarnings] = useState(false)
   // CamtrapDP data usually arrives labelled, so AI is opt-in there.
   const [camtrapRunAi, setCamtrapRunAi] = useState(false)
@@ -174,27 +153,15 @@ export function UploadFlow() {
 
   // ── Guard the staged selection against an accidental reload / tab close ───
   // Only while something would actually be lost: staged images not yet handed
-  // to startUpload, or a ZIP whose import has not finished.
-  const staged = files.length > 0 || camtrapImporting || (zipFile !== null && camtrapResult === null)
+  // to startUpload, a ZIP still being sent, or one with no import running or done.
+  // A running import job carries on without the page.
+  const staged = files.length > 0 || camtrap.sending || (zipFile !== null && !camtrap.running && camtrapResult === null)
   useEffect(() => {
     if (!staged) return
     const warn = (e: BeforeUnloadEvent) => { e.preventDefault() }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [staged])
-
-  // ── CamtrapDP stage timer ──────────────────────────────────────────────────
-  // handleCamtrapImport resets the stage and the clock before it starts one.
-  useEffect(() => {
-    if (!camtrapImporting) return
-    const start = Date.now()
-    const ticker = setInterval(
-      () => setCamtrapElapsed(Math.floor((Date.now() - start) / 1000)),
-      1000,
-    )
-    const timers = CAMTRAP_STAGES.map((s, i) => setTimeout(() => setCamtrapStage(i), s.after))
-    return () => { clearInterval(ticker); timers.forEach(clearTimeout) }
-  }, [camtrapImporting])
 
   const clearSelection = () => {
     selectionRef.current += 1
@@ -207,8 +174,7 @@ export function UploadFlow() {
     setSelectionError(null)
     setClaimVerdicts({})
     setShowAllRows(false)
-    setCamtrapResult(null)
-    setCamtrapError(null)
+    camtrap.reset()
     setShowTriage(false)
   }
 
@@ -304,35 +270,8 @@ export function UploadFlow() {
     e.target.value = ''
   }
 
-  const handleCamtrapImport = async () => {
-    if (!zipFile) return
-    setCamtrapStage(0)
-    setCamtrapElapsed(0)
-    setCamtrapImporting(true)
-    setCamtrapError(null)
-    setCamtrapResult(null)
-    try {
-      const form = new FormData()
-      form.append('file', zipFile)
-      form.append('run_ai', String(camtrapRunAi))
-      const res = await apiClient.upload('/api/camtrapdp/import', form) as {
-        data: CamtrapImportResult
-      }
-      setCamtrapResult(res.data)
-      // The import created a project, its admin role included: refresh the picker and the roles.
-      reloadProjects()
-      void queryClient.invalidateQueries({ queryKey: [PROJECT_ROLES_KEY] })
-    } catch (err: unknown) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const e = err as any
-      const msg =
-        e?.response?.data?.detail ??
-        e?.response?.data?.error?.message ??
-        (e instanceof Error ? e.message : String(e))
-      setCamtrapError(msg)
-    } finally {
-      setCamtrapImporting(false)
-    }
+  const handleCamtrapImport = () => {
+    if (zipFile) void camtrap.start(zipFile, camtrapRunAi)
   }
 
   const uploadMode: 'idle' | 'images' | 'camtrapdp' =
@@ -680,23 +619,26 @@ export function UploadFlow() {
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                 <span style={{ fontSize: '0.8125rem', fontWeight: 500 }}>
-                  {CAMTRAP_STAGES[camtrapStage]?.label ?? 'Importing…'}
+                  {camtrap.sending ? 'Sending the package…' : camtrap.message ?? 'Starting the import…'}
                 </span>
                 <span className="upload-muted" style={{ fontSize: '0.75rem', fontVariantNumeric: 'tabular-nums' }}>
-                  {camtrapElapsed}s
+                  {Math.round(camtrap.progress * 100)}%
                 </span>
               </div>
               <div style={{ height: 6, backgroundColor: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
                 <div style={{
                   height: '100%',
-                  width: `${CAMTRAP_STAGES[camtrapStage]?.pct ?? 10}%`,
+                  width: `${Math.max(5, Math.round(camtrap.progress * 100))}%`,
                   borderRadius: 3,
                   transition: 'width 1.2s ease',
                   backgroundImage: 'linear-gradient(90deg, var(--primary), #66bb6a)',
                 }} />
               </div>
               <p className="upload-muted" style={{ fontSize: '0.75rem', margin: '0.5rem 0 0 0' }}>
-                Large packages can take 30 to 60 s. Please keep this tab open.
+                {camtrap.sending
+                  ? 'Keep this tab open until the package is sent.'
+                  : <>The import carries on if you leave this page. Follow it in{' '}
+                    <Link to="/processing" style={{ color: 'var(--primary)' }}>Processing history</Link>.</>}
               </p>
             </div>
           )}
