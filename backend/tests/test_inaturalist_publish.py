@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for publishing bursts to iNaturalist (app/domain/inaturalist_publish.py)."""
 
+import asyncio
 from unittest.mock import MagicMock
 
 from app.domain import inaturalist_publish as pub
@@ -140,7 +141,7 @@ async def test_publish_uses_each_photos_current_label(monkeypatch):
 
     published: list[tuple[list[str], str | None]] = []
 
-    async def publish_one_burst(_svc, _user_id, _dep, burst, _geoprivacy, _result, _time_up):
+    async def publish_one_burst(_svc, _user_id, _dep, burst, _geoprivacy, _result, _budget):
         published.append(([m["id"] for m in burst], pub._best_species(burst)))
         return []
 
@@ -257,8 +258,8 @@ def _fake_inat(monkeypatch, db: _Db, seconds_per_photo: float) -> dict:
 
 
 async def test_a_long_publish_hands_back_the_rest_and_carries_on_in_the_same_observation(monkeypatch):
-    """A publish stops starting photos after its budget, inside the ingress timeout, and hands back
-    what it did not reach. Sent again, the rest of a burst joins the observation it started (#123)."""
+    """A publish stops starting photos after its budget, inside API Gateway's 30 s, and hands back
+    what it did not reach. Sent again, the rest of a burst joins the observation it started (#123, #455)."""
     media = [
         _photo("a1", "2026-04-12T10:00:00Z"),
         _photo("a2", "2026-04-12T10:00:10Z"),
@@ -266,17 +267,18 @@ async def test_a_long_publish_hands_back_the_rest_and_carries_on_in_the_same_obs
         _photo("b1", "2026-04-12T11:00:00Z"),
     ]
     db = _Db(media, [_obs(m["id"], "animal", "Rattus rattus", "ai", T0) for m in media])
-    calls = _fake_inat(monkeypatch, db, seconds_per_photo=70)
+    calls = _fake_inat(monkeypatch, db, seconds_per_photo=8)
 
     def clock():
         return calls["now"]
 
-    first = await pub.publish_media_to_inat("u1", ["a1", "a2", "a3", "b1"], budget_seconds=120, clock=clock)
+    # The default budget, 15 s: a1 ends at 8 s, a2 starts before 15 s and ends at 16 s, a3 waits.
+    first = await pub.publish_media_to_inat("u1", ["a1", "a2", "a3", "b1"], clock=clock)
 
     assert (first["observations_created"], first["photos_uploaded"]) == (1, 2)
     assert sorted(first["remaining_media_ids"]) == ["a1", "a2", "a3", "b1"]
 
-    second = await pub.publish_media_to_inat("u1", first["remaining_media_ids"], budget_seconds=120, clock=clock)
+    second = await pub.publish_media_to_inat("u1", first["remaining_media_ids"], clock=clock)
 
     assert (second["observations_created"], second["photos_uploaded"]) == (1, 2)
     assert second["skipped_already_published"] == 2
@@ -329,3 +331,75 @@ async def test_a_failed_photo_is_not_handed_back(monkeypatch):
 
     assert result["remaining_media_ids"] == ["a2", "a3"]
     assert result["observations"][0]["photo_errors"] == 1
+
+
+def test_no_step_runs_past_the_budget_plus_its_timeout():
+    """Every iNaturalist call of a request ends within 25 s, inside API Gateway's 30 s (#455)."""
+    assert pub.PUBLISH_BUDGET_SECONDS + pub.INAT_STEP_TIMEOUT_SECONDS <= 25
+    now = {"t": 0.0}
+    budget = pub._Budget(lambda: now["t"], ends=15.0, step=10.0)
+    expected = {0.0: 10.0, 14.0: 10.0, 15.0: 10.0, 20.0: 5.0, 25.0: 0.0, 40.0: 0.0}
+    for t, timeout in expected.items():
+        now["t"] = t
+        assert budget.step_timeout() == timeout
+        assert budget.time_up() == (t >= 15.0)
+
+
+async def test_the_budget_counts_from_the_call(monkeypatch):
+    """A slow start (the token read) uses up the budget: the request still tries one photo."""
+    media = [_photo("a1", "2026-04-12T10:00:00Z"), _photo("a2", "2026-04-12T10:00:10Z")]
+    db = _Db(media, [_obs(m["id"], "animal", "Rattus rattus", "ai", T0) for m in media])
+    calls = _fake_inat(monkeypatch, db, seconds_per_photo=1)
+
+    async def slow_token(_user_id):
+        calls["now"] += 20
+        return {"api_token": "jwt"}
+
+    monkeypatch.setattr(pub, "get_user_token", slow_token)
+
+    result = await pub.publish_media_to_inat("u1", ["a1", "a2"], clock=lambda: calls["now"])
+
+    assert result["photos_uploaded"] == 1
+    assert sorted(result["remaining_media_ids"]) == ["a1", "a2"]
+
+
+async def test_a_photo_that_hangs_is_cut_off_counted_failed_and_not_handed_back(monkeypatch):
+    media = [_photo("a1", "2026-04-12T10:00:00Z"), _photo("a2", "2026-04-12T10:00:10Z"), _photo("a3", "2026-04-12T10:00:20Z")]
+    db = _Db(media, [_obs(m["id"], "animal", "Rattus rattus", "ai", T0) for m in media])
+    _fake_inat(monkeypatch, db, seconds_per_photo=0)
+    upload = pub.upload_observation_photo
+
+    async def hangs_on_a1(**kwargs):
+        if kwargs["filename"] == "a1":
+            await asyncio.sleep(30)
+        return await upload(**kwargs)
+
+    monkeypatch.setattr(pub, "upload_observation_photo", hangs_on_a1)
+
+    result = await pub.publish_media_to_inat("u1", ["a1", "a2", "a3"], step_timeout=0.05)
+
+    assert result["observations"][0]["photo_errors"] == 1
+    assert (result["photos_uploaded"], result["remaining_media_ids"]) == (2, [])
+    assert [link["media_id"] for link in db.links] == ["a2", "a3"]
+
+
+async def test_an_observation_create_that_hangs_is_cut_off_and_the_next_burst_goes_on(monkeypatch):
+    media = [_photo("a1", "2026-04-12T10:00:00Z"), _photo("b1", "2026-04-12T11:00:00Z")]
+    db = _Db(media, [_obs(m["id"], "animal", "Rattus rattus", "ai", T0) for m in media])
+    calls = _fake_inat(monkeypatch, db, seconds_per_photo=0)
+    create = pub.create_observation
+    creates = {"n": 0}
+
+    async def hangs_first(**kwargs):
+        creates["n"] += 1
+        if creates["n"] == 1:
+            await asyncio.sleep(30)
+        return await create(**kwargs)
+
+    monkeypatch.setattr(pub, "create_observation", hangs_first)
+
+    result = await pub.publish_media_to_inat("u1", ["a1", "b1"], step_timeout=0.05)
+
+    assert (result["errors"], result["observations_created"], result["photos_uploaded"]) == (1, 1, 1)
+    assert calls["uploaded"] == [(101, "b1")]
+    assert result["remaining_media_ids"] == []

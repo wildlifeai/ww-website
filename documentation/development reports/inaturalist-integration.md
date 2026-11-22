@@ -88,14 +88,18 @@ exposed at **`POST /api/inat/publish`**.
 Returns a summary: `observations_created`, `photos_uploaded`, `skipped_bycatch`,
 `skipped_already_published`, `errors`, a per-observation list, and `remaining_media_ids`.
 
-6. **Rounds** (#123): a request starts no photo after `PUBLISH_BUDGET_SECONDS` (120 s; the Container
-   Apps ingress ends a request at about 240 s and one upload can take a minute) and hands back the
-   photos it did not reach, with the published photos of a burst it stopped in, so step 3 puts the
-   rest into the same observation. `useINat().publish` sends them again until none are left and
-   answers once (`lib/inatPublishRounds.ts`). Chosen over a job (`enqueue_job`): with `REDIS_URL`
-   set a job runs on the GPU worker, which would cold-start a T4 for uploads and need the
-   iNaturalist secrets there, and the jobs dock is built for uploads. A tab closed between rounds
-   leaves the rest unpublished; publishing the same selection again carries on.
+6. **Rounds** (#123, #455): a request starts no burst or photo after `PUBLISH_BUDGET_SECONDS`
+   (15 s, counted from the call) and hands back the photos it did not reach, with the published
+   photos of a burst it stopped in, so step 3 puts the rest into the same observation. Each
+   iNaturalist step, an observation or one photo's read and upload, gets
+   `INAT_STEP_TIMEOUT_SECONDS` (10 s) and never runs past 25 s; a step that runs out counts as
+   failed and is not handed back. So a request answers inside API Gateway's 30 s on AWS.
+   `useINat().publish` sends the rest again until none are left, reports the photos reached after
+   each round (the grid's notice, Cluster Review's button), and answers once
+   (`lib/inatPublishRounds.ts`). Chosen over a job (`enqueue_job`): the job would need the user's
+   iNaturalist token on the `cpu` function or, on Azure with `REDIS_URL` set, on the GPU worker,
+   which would also cold-start a T4 for uploads. A tab closed between rounds leaves the rest
+   unpublished; publishing the same selection again carries on.
 
 > **Privacy / by-catch:** a photo showing a person, or labelled anything but an animal, is never
 > uploaded; default geoprivacy is `obscured`.
@@ -126,9 +130,13 @@ thumbnail toggles selection (green ✓) instead of opening the modal.
 
 ## 6. Sync-back (Phase 4)
 
-`domain/inaturalist_sync.py → sync_inat_identifications(user_id=None, limit=200)` exposed at
-**`POST /api/inat/sync`** (current user); the same function with no user filter is what a scheduled
-job calls for everyone.
+`domain/inaturalist_sync.py → sync_inat_identifications(user_id=None, limit=200)`, run for the
+current user by `sync_inat_job` (`jobs/inat_sync.py`), which **`POST /api/inat/sync`** starts and
+answers with `{ job_id }` (#455): 200 observations, each an update and a few reads and writes, can
+outrun API Gateway's 30 s. On AWS the job runs on the `cpu` function, elsewhere in the API process
+(`IN_PROCESS_JOBS`), never on the GPU worker. It reads iNaturalist's public API only, so it carries
+the user's id and no token. The same function with no user filter is what a scheduled job calls
+for everyone.
 
 1. Load non-terminal `inat_observations`; **batch-poll the public iNat API** for `quality_grade`
    + `community_taxon` (reconciled via the stored mapping — no scraping / `original_filename` needed).
@@ -140,16 +148,20 @@ job calls for everyone.
    resolving `taxon_id` from the local `taxa` table. **Idempotent** (updates the existing consensus row
    rather than duplicating). Runs under the service role (RLS-bypassing; the schema grants it).
 
-Returns `checked`, `updated`, `research`, `disagreement`, `observations_written`.
+The job's `message` gives the progress (`Checked n of m observations…`) and ends with `checked`,
+`updated`, `research`, `disagreement` and `observations_written` in a sentence, which Settings
+shows (`lib/inatSync.ts`).
 
 ### What happens today (checked 25 Oct 2026, #123)
 
 The round trip stops at the badge: no identification from iNaturalist reaches `observations`.
 
 - **When it runs.** `InatAutoSync` (mounted in `App.tsx`) calls `POST /api/inat/sync` once per
-  browser session for a signed-in user whose `/api/inat/status` says connected; Settings,
-  Integrations, *Sync now* calls it on demand. Nothing is scheduled: no worker cron, nothing at API
-  startup. Each call covers the caller's own observations only.
+  browser session for a signed-in user whose `/api/inat/status` says connected, and does not follow
+  the job; Settings, Integrations, *Sync now* calls it on demand and follows the job by id. The
+  `inat_sync` jobs are left out of Processing history and every other `GET /api/jobs` list
+  (`store.UNLISTED_KINDS`). Nothing is scheduled: no worker cron, nothing at API startup. Each
+  call covers the caller's own observations only.
 - **What it reads.** Up to 200 of the caller's rows in `uploaded`, `needs_id`, `research` or
   `disagreement`, in no order, so past 200 which ones are polled is arbitrary. A row marked `failed`
   (any of its photos failed to upload) is never polled again.
@@ -179,6 +191,7 @@ no person labelled the photo, and later pipeline runs would skip those photos.
 | Domain | `…/domain/inaturalist.py` | create/upload/poll helpers (pre-existing) |
 | Domain | `…/domain/inaturalist_publish.py` | publish orchestrator (Phase 2) |
 | Domain | `…/domain/inaturalist_sync.py` | sync-back (Phase 4) |
+| Job | `…/jobs/inat_sync.py` | sync-back as a job, which `/sync` starts (#455) |
 | API | `…/routers/inaturalist.py` | `/publish`, `/sync` (+ existing auth/observation routes) |
 | Frontend | `…/hooks/useINat.ts` | status / connect / publish / sync |
 | Frontend | `…/components/data/INatBadge.tsx` | dove badge |

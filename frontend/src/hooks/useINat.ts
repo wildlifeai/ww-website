@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { apiClient } from '../lib/apiClient'
 import { isInatOff } from '../lib/inatOff'
-import { publishInRounds, type INatPublishResult } from '../lib/inatPublishRounds'
+import { publishInRounds, type INatPublishResult, type PublishProgress } from '../lib/inatPublishRounds'
 
 export type { INatPublishResult }
 
@@ -13,7 +13,9 @@ export type { INatPublishResult }
  * - `enabled`: false when FF_INAT_ENABLED is off (the status route answers 404 "not enabled")
  * - `connect()`: starts the OAuth flow (redirects to iNaturalist)
  * - `publish(mediaIds, opts)`: POST /api/inat/publish (burst-consolidated upload), in rounds
- *   until every photo is reached (lib/inatPublishRounds.ts), answering once for them all
+ *   until every photo is reached (lib/inatPublishRounds.ts), `opts.onProgress` after each,
+ *   answering once for them all
+ * - `sync()`: POST /api/inat/sync starts a job and answers with its id; follow it with useJob
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,20 +60,18 @@ export function useINat() {
 
   const publish = useCallback(async (
     mediaIds: string[],
-    opts?: { gap_seconds?: number; geoprivacy?: string },
+    opts?: { gap_seconds?: number; geoprivacy?: string; onProgress?: PublishProgress },
   ): Promise<INatPublishResult> => {
     return publishInRounds(async ids => unwrap(await apiClient.post('/api/inat/publish', {
       media_ids: ids,
       gap_seconds: opts?.gap_seconds ?? 60,
       geoprivacy: opts?.geoprivacy ?? 'obscured',
-    })), mediaIds)
+    })), mediaIds, opts?.onProgress)
   }, [])
 
-  // Pull community identifications from iNat back into WW (updates badges).
-  const sync = useCallback(async (): Promise<{
-    checked: number; updated: number; research: number; disagreement: number; observations_written: number
-  }> => {
-    return unwrap(await apiClient.post('/api/inat/sync'))
+  // Pull community identifications from iNat back into WW (updates badges): the job's id.
+  const sync = useCallback(async (): Promise<string> => {
+    return unwrap(await apiClient.post('/api/inat/sync')).job_id
   }, [])
 
   return { connected, username, enabled, connect, setToken, disconnect, publish, sync, refresh }
