@@ -69,6 +69,8 @@ export interface JobInfo {
   created_at: string
   updated_at: string | null
   result_url: string | null
+  /** What a finished job produced when it is data, not a file (the CamtrapDP import's counts). */
+  result?: Record<string, unknown> | null
   error: string | null
   message: string | null
   current_phase: ProgressPhase | null

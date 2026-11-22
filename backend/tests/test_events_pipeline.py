@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Tests for the domain/events.py temporal clustering logic.
 
-Tests the pure algorithmic functions without needing a Supabase connection.
+The pure algorithmic functions, and ``cluster_deployment_events`` end to end on
+``tests/fake_postgrest.FakeDB``.
 """
 
 import uuid
@@ -10,11 +11,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from app.domain import events as events_domain
 from app.domain.events import (
     _build_event_row,
     _cluster_temporal,
     _group_observations_by_species,
+    cluster_deployment_events,
 )
+from tests.fake_postgrest import FakeDB
 
 # ── Test Data Helpers ────────────────────────────────────────────────
 
@@ -190,6 +194,136 @@ class TestBuildEventRow:
         row = _build_event_row(cluster, "dep-001", None)
         # Should be a valid UUID string
         uuid.UUID(row["id"])
+
+
+# ── cluster_deployment_events on FakeDB (#458) ───────────────────────
+
+DEP = "dep-1"
+OLD_EVENT = "old-event"
+
+
+class _Deployment:
+    """Media and observation rows for one deployment, and the events they should form."""
+
+    def __init__(self):
+        self.media: list[dict] = []
+        self.observations: list[dict] = []
+        self.expected: set[frozenset[str]] = set()
+
+    def add(self, ts: datetime, taxon: str | None, deployment_id: str = DEP, **extra) -> str:
+        n = len(self.observations) + 1
+        media_id, obs_id = f"m-{n:05d}", f"o-{n:05d}"
+        self.media.append({"id": media_id, "deployment_id": deployment_id, "timestamp": ts.isoformat()})
+        row = {"id": obs_id, "deployment_id": deployment_id, "media_id": media_id, "taxon_id": taxon, "confidence": 0.5}
+        self.observations.append({**row, "created_at": ts.isoformat(), "deleted_at": None, "observation_event_id": None, **extra})
+        return obs_id
+
+    def event(self, start: datetime, taxon: str | None, frames: int, every: timedelta) -> None:
+        """One expected event: ``frames`` photos of ``taxon``, ``every`` apart."""
+        self.expected.add(frozenset(self.add(start + i * every, taxon) for i in range(frames)))
+
+    def db(self) -> FakeDB:
+        return FakeDB(
+            {
+                "media": self.media,
+                "observations": self.observations,
+                "observation_events": [
+                    {"id": OLD_EVENT, "deployment_id": DEP},
+                    {"id": "other-event", "deployment_id": "dep-2"},
+                ],
+                "annotation_runs": [],
+            }
+        )
+
+
+def _linked(db: FakeDB) -> dict[str | None, set[str]]:
+    """The deployment's live observations, grouped by the event they point at."""
+    groups: dict[str | None, set[str]] = {}
+    for o in db.rows("observations"):
+        if o["deployment_id"] == DEP and o["deleted_at"] is None:
+            groups.setdefault(o["observation_event_id"], set()).add(o["id"])
+    return groups
+
+
+async def test_cluster_events_reads_and_links_every_observation(monkeypatch):
+    """1,100 observations, more than one PostgREST read returns, all end up in the right event.
+
+    Before #458 only the first 1,000 were read, so 100 had no event and the events were built
+    from part of the data.
+    """
+    dep = _Deployment()
+    day = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    dep.event(day, "kiwi", 250, timedelta(minutes=1))  # one event, three link updates of 100 ids
+    for burst in range(60):  # 60 bursts of 10 frames, two hours apart
+        dep.event(day + timedelta(hours=2 * burst), "possum", 10, timedelta(seconds=10))
+    for frame in range(250):  # blanks 45 minutes apart, each its own event
+        dep.event(day + timedelta(minutes=45 * frame), None, 1, timedelta(0))
+    # The state an earlier run left: three observations on an old event, one of them since deleted,
+    # and another deployment's event that must survive.
+    for row in dep.observations[:2]:
+        row["observation_event_id"] = OLD_EVENT
+    dep.add(day, "kiwi", deleted_at=day.isoformat(), observation_event_id=OLD_EVENT)
+    dep.add(day, "kiwi", deployment_id="dep-2", observation_event_id="other-event")
+    db = dep.db()
+    monkeypatch.setattr(events_domain, "create_service_client", db.client)
+
+    result = await cluster_deployment_events(DEP, gap_minutes=30)
+
+    assert result.observations_linked == 1100
+    assert result.events_created == len(dep.expected) == 311
+    groups = _linked(db)
+    assert None not in groups
+    assert {frozenset(ids) for ids in groups.values()} == dep.expected
+    events = {e["id"]: e for e in db.rows("observation_events")}
+    assert all(events[event_id]["media_count"] == len(ids) for event_id, ids in groups.items())
+    # The old event is gone and nothing points at it, so the delete cannot trip the foreign key;
+    # the other deployment keeps its event.
+    assert OLD_EVENT not in events
+    assert all(o["observation_event_id"] != OLD_EVENT for o in db.rows("observations"))
+    assert events["other-event"]["deployment_id"] == "dep-2"
+    assert next(o for o in db.rows("observations") if o["deployment_id"] == "dep-2")["observation_event_id"] == "other-event"
+    # Every update names at most 100 observation ids, so its URL stays short.
+    assert max(w.rows for w in db.writes if w.table == "observations" and w.mode == "update") <= 100
+
+
+async def test_cluster_events_links_several_events_at_once(monkeypatch):
+    """The link updates overlap, up to the concurrency limit, and the result is the same."""
+    import threading
+    import time
+
+    from tests.fake_postgrest import Query
+
+    dep = _Deployment()
+    day = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for frame in range(40):
+        dep.event(day + timedelta(hours=frame), "kiwi", 1, timedelta(0))
+    db = dep.db()
+    lock = threading.Lock()
+    in_flight = peak = 0
+
+    class SlowUpdate(Query):
+        def execute(self):
+            nonlocal in_flight, peak
+            if self.mode != "update" or "id" not in {path for path, _, _ in self.filters}:
+                return super().execute()
+            with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            time.sleep(0.01)
+            try:
+                return super().execute()
+            finally:
+                with lock:
+                    in_flight -= 1
+
+    monkeypatch.setattr(db, "table", lambda name: SlowUpdate(db, name))
+    monkeypatch.setattr(events_domain, "create_service_client", db.client)
+
+    result = await cluster_deployment_events(DEP, gap_minutes=30)
+
+    assert result.events_created == 40
+    assert {frozenset(ids) for ids in _linked(db).values()} == dep.expected
+    assert 1 < peak <= events_domain._LINK_CONCURRENCY
 
 
 # ── Schema validation tests ──────────────────────────────────────────

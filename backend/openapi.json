@@ -3219,7 +3219,7 @@
     },
     "/api/camtrapdp/import": {
       "post": {
-        "description": "Import a CamtrapDP v1.0 ZIP package.\n\nCreates a new project, placeholder devices for each unique cameraID,\nand inserts all deployments, media, and observations from the package.\n\nThe authenticated user becomes project admin of the new project.\nPlaceholder devices are named '[imported] <cameraID>'; a re-import by\nthe same organisation reuses them.",
+        "description": "Start importing a CamtrapDP v1.0 ZIP package; answers ``{job_id}``.\n\nThe job creates a new project, placeholder devices for each unique cameraID,\nand inserts all deployments, media, and observations from the package. Once it\nis complete, ``GET /api/jobs/{job_id}`` carries the counts, the warnings and any\n``ai_job_id`` in ``result``.\n\nThe authenticated user becomes project admin of the new project.\nPlaceholder devices are named '[imported] <cameraID>'; a re-import by\nthe same organisation reuses them.",
         "operationId": "import_camtrapdp_api_camtrapdp_import_post",
         "parameters": [
           {
