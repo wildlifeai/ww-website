@@ -14,21 +14,31 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Optional
 
 import structlog
-from postgrest import CountMethod
+from postgrest import CountMethod, ReturnMethod
 
 from app.schemas.pipeline import (
     ClusterEventsResult,
     DeploymentEffortSummary,
     ObservationEventSummary,
 )
-from app.services.db_utils import row_of, rows_of
+from app.services.db_utils import read_all, row_of, rows_of
 from app.services.supabase_client import create_service_client
 
 logger = structlog.get_logger()
+
+# Observation ids per link update. 100 UUIDs keep the URL near 3.7 KB, under the proxy's
+# request-line limit; one event can hold thousands of photos.
+_LINK_CHUNK = 100
+
+# Link updates in flight at once. An update sets one event id, so a deployment with hundreds of
+# events needs hundreds of requests, and one after another they can outrun the 30 s cap of the
+# AWS HTTP API (#458).
+_LINK_CONCURRENCY = 8
 
 
 # ── Temporal Clustering ──────────────────────────────────────────────
@@ -132,6 +142,14 @@ def _build_event_row(
     }
 
 
+def _link_chunks(obs_to_event: dict[str, str]) -> list[tuple[str, list[str]]]:
+    """The link updates to make: (event id, observation ids), at most ``_LINK_CHUNK`` ids each."""
+    event_to_obs: dict[str, list[str]] = defaultdict(list)
+    for obs_id, event_id in obs_to_event.items():
+        event_to_obs[event_id].append(obs_id)
+    return [(event_id, ids[i : i + _LINK_CHUNK]) for event_id, ids in event_to_obs.items() for i in range(0, len(ids), _LINK_CHUNK)]
+
+
 async def cluster_deployment_events(
     deployment_id: str,
     gap_minutes: int = 30,
@@ -158,17 +176,20 @@ async def cluster_deployment_events(
     """
     svc = create_service_client()
 
-    # 1. Fetch observations with media timestamps
+    # 1. Fetch observations with media timestamps, every page: a deployment can hold more than
+    # PostgREST's 1,000 rows a read (#458). The id breaks created_at ties so pages neither skip
+    # nor repeat a row.
     def _fetch():
-        resp = (
-            svc.table("observations")
-            .select("id, deployment_id, media_id, taxon_id, scientific_name, confidence, created_at, media!inner(timestamp)")
-            .eq("deployment_id", deployment_id)
-            .is_("deleted_at", "null")
-            .order("created_at")
-            .execute()
+        return read_all(
+            lambda: (
+                svc.table("observations")
+                .select("id, deployment_id, media_id, taxon_id, scientific_name, confidence, created_at, media!inner(timestamp)")
+                .eq("deployment_id", deployment_id)
+                .is_("deleted_at", "null")
+                .order("created_at")
+                .order("id")
+            )
         )
-        return rows_of(resp)
 
     raw_obs = await asyncio.to_thread(_fetch)
 
@@ -208,7 +229,16 @@ async def cluster_deployment_events(
 
     # 4. Clear existing events for this deployment, then insert new ones
     def _write_events():
-        # Delete existing events (cascade will unlink observations)
+        # Unlink the old events first. fk_observations_event is ON DELETE SET NULL on
+        # (observation_event_id, deployment_id), so deleting an event that still has observations
+        # would null their deployment_id too, and its NOT NULL fails the whole delete.
+        (
+            svc.table("observations")
+            .update({"observation_event_id": None}, returning=ReturnMethod.minimal)
+            .eq("deployment_id", deployment_id)
+            .not_.is_("observation_event_id", "null")
+            .execute()
+        )
         svc.table("observation_events").delete().eq("deployment_id", deployment_id).execute()
 
         # Bulk insert new events (chunked)
@@ -217,15 +247,15 @@ async def cluster_deployment_events(
             batch = all_events[i : i + chunk_size]
             svc.table("observation_events").insert(batch).execute()
 
-        # Link observations to their events — grouped so each event is one bulk
-        # UPDATE rather than one query per observation.
-        from collections import defaultdict
+        # Link observations to their events: one update per event and chunk of ids, several in
+        # flight at once. Each observation is in exactly one chunk, so the order they land in
+        # does not change which event an observation gets.
+        def _link(chunk: tuple[str, list[str]]) -> None:
+            event_id, obs_ids = chunk
+            svc.table("observations").update({"observation_event_id": event_id}, returning=ReturnMethod.minimal).in_("id", obs_ids).execute()
 
-        event_to_obs: dict[str, list[str]] = defaultdict(list)
-        for obs_id, event_id in obs_to_event.items():
-            event_to_obs[event_id].append(obs_id)
-        for event_id, obs_ids in event_to_obs.items():
-            svc.table("observations").update({"observation_event_id": event_id}).in_("id", obs_ids).execute()
+        with ThreadPoolExecutor(max_workers=_LINK_CONCURRENCY) as pool:
+            list(pool.map(_link, _link_chunks(obs_to_event)))
 
     await asyncio.to_thread(_write_events)
 
