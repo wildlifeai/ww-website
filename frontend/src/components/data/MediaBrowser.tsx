@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useDeploymentFilterOptions } from '../../hooks/useDeploymentFilterOptions'
-import { useFeatureEnabled } from '../../hooks/useFeatureEnabled'
+import { useFeatureEnabled, useFeatureState } from '../../hooks/useFeatureEnabled'
 import { useGridBulkActions } from '../../hooks/useGridBulkActions'
 import { useGridFilterOptions } from '../../hooks/useGridFilterOptions'
 import { useGridFilterState } from '../../hooks/useGridFilterState'
@@ -20,6 +20,7 @@ import { useGridSelection } from '../../hooks/useGridSelection'
 import { useGridThumbnails } from '../../hooks/useGridThumbnails'
 import { useGridViewer } from '../../hooks/useGridViewer'
 import { useProjectRoles } from '../../hooks/useProjectRoles'
+import { useProjectSelection } from '../../hooks/useProjectSelection'
 import { useSimilarMedia } from '../../hooks/useSimilarMedia'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUploadStore } from '../../contexts/UploadContext'
@@ -60,6 +61,12 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   const tzByDeployment = useMemo(() => new Map(deployments.map(d => [d.id, d.timezone ?? null])), [deployments])
   const projectByDeployment = useMemo(() => new Map(deployments.map(d => [d.id, d.project_id])), [deployments])
   const deploymentNames = useMemo(() => new Map(deployments.map(d => [d.id, d.location_name || d.id.slice(0, 8)])), [deployments])
+  const { projects } = useProjectSelection()
+  // Each deployment's project name, for Group by project.
+  const projectNames = useMemo(() => {
+    const names = new Map(projects.map(p => [p.id, p.name]))
+    return new Map(deployments.map(d => [d.id, names.get(d.project_id) ?? '']))
+  }, [deployments, projects])
   const deploymentOptions = useDeploymentFilterOptions(deployments)
   const { isActive: uploadActive, pendingUploads, pendingSince } = useUploadStore()
   const { notice, flash, flashError, showCardNotice, dismiss } = useGridNotice()
@@ -80,7 +87,10 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   const singleDeployment = activeDeploymentIds.length === 1 ? activeDeploymentIds[0] : null
   // Clusters, UMAP and the active-learning order exist only where their backend flag is on
   // (decision 6); the flags are global, so any deployment in view can be asked.
-  const brainOn = useFeatureEnabled('brain', activeDeploymentIds[0] ?? null)
+  // The Brain is on by default (#344), so the Review tab offers it before the check answers and
+  // drops it only once the check says it is off.
+  const brainState = useFeatureState('brain', activeDeploymentIds[0] ?? null)
+  const brainOn = brainState === true
   const reviewOrderOn = useFeatureEnabled('activeLearning', activeDeploymentIds[0] ?? null)
   const filterOptions = useGridFilterOptions(activeDeploymentIds, f.wantSpeciesOptions || f.draft !== null)
   // "Needs review first": the retired Review Queue's order (decision 6), a sort of the media
@@ -134,7 +144,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
     setMedia: grid.setMedia, setSimilar: similar.setRecords, setTotalCount: grid.setTotalCount,
     onFindSimilar: similar.setSimilarToId, onPublish: inat.publish,
   })
-  const groups = useGridGroups({ cards, choice: groupChoice, deploymentIds: activeDeploymentIds, deploymentNames, brainOn, clusterThreshold })
+  const groups = useGridGroups({ cards, choice: groupChoice, deploymentIds: activeDeploymentIds, deploymentNames, projectNames, brainOn, clusterThreshold })
 
   // After a cluster is bulk-confirmed: refresh the cluster assignments (relabels
   // the group) and reload media so the new observations show on the thumbnails.
@@ -195,7 +205,11 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
           speciesOptions: (filterOptions.data?.species ?? []).map(o => o.value), optionsLoading: filterOptions.isFetching,
           advancedCount: advancedFilterCount(f.filters), onAdvanced: () => f.setDraft(f.filters),
           onClearAdvanced: () => f.setFilters(clearedAdvanced),
+        }}
+        review={{
           order: reviewOrderOn ? { value: f.orderBy, onChange: f.setOrderBy } : null,
+          brain: brainState === false ? null
+            : { singleDeployment, embeddingRunId: groups.embeddingRunId, loading: brainState === undefined || groups.embeddingRunLoading },
         }}
         group={{
           groupBy: groups.groupBy, options: groups.options, onGroupBy: setGroupChoice,
@@ -203,7 +217,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
           collapsed: groups.collapsed, onCollapsed: groups.setCollapsed,
           deploymentCount: activeDeploymentIds.length, singleDeployment, brainOn,
           clusterThreshold, onClusterThreshold: setClusterThreshold,
-          clustersLoading: groups.clustersLoading, embeddingRunId: groups.embeddingRunId,
+          clustersLoading: groups.clustersLoading,
         }}
       />
 

@@ -135,9 +135,11 @@ function tabStyle(active: boolean): React.CSSProperties {
 
 export function Ribbon({ tabs, activeTabId, defaultTabId, onTabChange, brandLabel, status, aside, subBar, sticky, stickyTop = 56 }: RibbonProps) {
   const [internal, setInternal] = useState(defaultTabId ?? tabs[0]?.id)
-  const active = activeTabId ?? internal
   const setActive = (id: string) => { onTabChange?.(id); if (activeTabId === undefined) setInternal(id) }
-  const current = tabs.find(t => t.id === active) ?? tabs[0]
+  // A default tab that is not offered yet (it appears once a feature check answers) shows the
+  // first tab until it is, then opens itself.
+  const current = tabs.find(t => t.id === (activeTabId ?? internal)) ?? tabs[0]
+  const active = current?.id
   const hasBody = (current?.groups.length ?? 0) > 0 || aside != null
 
   // Clicking the active tab collapses/expands the filter row; clicking another
