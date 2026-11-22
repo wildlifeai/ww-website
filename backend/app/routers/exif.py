@@ -21,7 +21,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-import httpx
 import structlog
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
@@ -37,7 +36,7 @@ from app.schemas.common import ApiMeta, ApiResponse
 from app.services.db_utils import rows_of
 from app.services.incoming import IncomingError, incoming_files
 from app.services.object_store import store_blob
-from app.services.supabase_client import create_service_client, reset_service_client
+from app.services.supabase_client import create_service_client, is_dropped_connection, reset_service_client
 
 logger = structlog.get_logger()
 
@@ -370,20 +369,6 @@ async def parse_exif(
     )
 
 
-def _is_transient_transport_error(exc: BaseException) -> bool:
-    """A dropped or protocol-broken HTTP connection to Supabase, worth one retry.
-
-    The shared service client keeps a single HTTP/2 connection; when the server
-    closes it, the request handler and a background Drive job sharing it both
-    see ``ConnectionTerminated``. On the 2026-09-05 bench run that cost a whole
-    batch its Drive job (and so its media rows) while the response still read
-    200 with ``drive_upload.status = "error"``.
-    """
-    if isinstance(exc, (httpx.RemoteProtocolError, httpx.ReadError, httpx.WriteError, httpx.ConnectError)):
-        return True
-    return "ConnectionTerminated" in repr(exc)
-
-
 async def _enqueue_drive_upload_with_retry(**kwargs) -> dict:
     """Enqueue the Drive job, retrying once with a fresh Supabase client after a
     transient transport error. Re-running is safe: a second Azure buffer copy is
@@ -391,7 +376,7 @@ async def _enqueue_drive_upload_with_retry(**kwargs) -> dict:
     try:
         return await _enqueue_drive_upload(**kwargs)
     except Exception as exc:
-        if not _is_transient_transport_error(exc):
+        if not is_dropped_connection(exc):
             raise
         logger.warning("drive_enqueue_retry", error=str(exc))
         reset_service_client()

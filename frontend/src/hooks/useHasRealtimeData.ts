@@ -1,14 +1,15 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// useHasRealtimeData: drives the conditional Realtime nav tab (UI audit decision 7). The tab shows
-// only when a device in one of the user's projects sends or has sent LoRaWAN data, meaning at
-// least one lorawan_messages row the user can read. RLS lets a user read a message through its
-// deployment's project (has_project_role, project_viewer), so one limit-1 read answers it.
+// useHasRealtimeData: whether the Realtime nav tab opens (otherwise it shows greyed out,
+// RealtimeTabOff). It opens when a device in one of the user's projects sends or has sent
+// LoRaWAN data, meaning at least one lorawan_messages row the user can read. RLS lets a user read
+// a message through its deployment's project (has_project_role, project_viewer), so one limit-1
+// read answers it.
 //
 // It asks about every project the user can read, not the header selection, so the tab does not
-// come and go as projects are ticked. The last answer seeds the next page load, so a returning
-// user sees the tab at once; the read then confirms or removes it.
+// change as projects are ticked. The last answer seeds the next page load, so a returning user
+// finds the tab open at once; the read then confirms or greys it.
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from './useAuth'
 import { useProjectSelection } from './useProjectSelection'

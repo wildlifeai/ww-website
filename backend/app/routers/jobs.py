@@ -32,7 +32,9 @@ async def list_user_jobs(
 
     Powers the avatar-menu "Processing history" view so a user can see whether a
     past upload / AI run finished or failed after the live dock has gone away.
-    Scoped to the caller: only jobs stamped with their ``user_id`` are returned.
+    Scoped to the caller: only jobs stamped with their ``user_id`` are returned. Without
+    ``kind`` it leaves out the iNaturalist sync that runs at each sign-in
+    (``store.UNLISTED_KINDS``); ``GET /api/jobs/{id}`` still answers for it.
     ``next_before`` reads the next page and is null on the last one.
     """
     jobs, next_before = await list_jobs(user.id, limit=limit, statuses=[s.value for s in status or []], kind=kind, before=before)

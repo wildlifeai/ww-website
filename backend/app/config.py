@@ -49,7 +49,6 @@ class Settings(BaseSettings):
     # ── Feature Flags ────────────────────────────────────────────────
     FF_INAT_ENABLED: bool = Field(False)
     FF_ML_ENABLED: bool = Field(False)
-    FF_CLUSTERING_ENABLED: bool = Field(False)
     FF_PUBLIC_API_ENABLED: bool = Field(False, description="Enable the public API (/api/v1/*) and its key management")
     PUBLIC_API_RATE_LIMIT_PER_MINUTE: int = Field(60, ge=1, description="Calls a minute one API key may make to the /api/v1 data endpoints")
     FF_CAMTRAPDP_IMPORT_ENABLED: bool = Field(True, description="Enable CamtrapDP package import endpoint")
@@ -312,6 +311,9 @@ class Settings(BaseSettings):
     GPU_IMAGE: str = Field("", description="GPU image the cluster should run (ghcr.io/...:<sha>), returned by /api/worker/pending")
     BATCH_MIN_PHOTOS: int = Field(100, ge=1, description="Submit a cluster job once this many photos are queued...")
     BATCH_MAX_WAIT_MINUTES: int = Field(60, ge=0, description="...or once the oldest queued batch job is this old")
+    BATCH_CRON_INTERVAL_MINUTES: int = Field(
+        30, ge=0, description="How often the REANNZ cron asks for work, added to the wait the UI states; must match ww_cron.sh's crontab"
+    )
     BATCH_MAX_QUEUE_HOURS: int = Field(24, ge=1, description="The reaper spares a queued batch job this long, instead of 60 minutes")
     BATCH_LEASE_MINUTES: int = Field(30, ge=5, description="A lease with no heartbeat for this long is requeued, then failed")
     BATCH_MAX_ATTEMPTS: int = Field(2, ge=1, description="Leases a batch job may expire through before it is failed")

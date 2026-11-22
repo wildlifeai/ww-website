@@ -25,14 +25,18 @@ CamtrapDP ZIP (uploaded or downloaded)
         ├─ devices      (placeholder per unique cameraID)
         ├─ deployments  (CamtrapDP alignment fields + timezone from GPS)
         ├─ media        (public http(s) URLs stored as-is; zip-embedded images
-        │                queued for Google Drive upload → file_path patched to gdrive://<id>)
+        │                archived (Drive, or S3 on AWS) → file_path patched to gdrive://<id> or s3://)
         └─ observations (species IDs + classification provenance, mode-aware)
 ```
 
-The HTTP entrypoint is `POST /api/camtrapdp/import` (multipart: `file` = the `.zip`,
-`annotation_mode` = `final` (default) | `unprocessed`, `run_ai` = `false` (default) | `true`).
+The HTTP entrypoint is `POST /api/camtrapdp/import` (multipart: `file` = the `.zip`, or `file_key`
+on an S3-backed server, `annotation_mode` = `final` (default) | `unprocessed`, `run_ai` = `false`
+(default) | `true`). It keeps the package in the object store and answers a job; everything in the
+diagram runs in that job, `backend/app/jobs/camtrapdp_import.py` (#454), whose `result` carries the
+counts and warnings. `parse_zip` first checks the package against the input limits in
+`backend/app/domain/zip_limits.py` (listed in the [API reference](api-reference.md#camtrapdp-import)).
 `run_ai=true` additionally runs SpeciesNet + Wildlife Brain over the image-backed imported deployments
-and returns an `ai_job_id`. The importing user's **primary organisation** (first `user_roles` org
+and sets `ai_job_id`. The importing user's **primary organisation** (first `user_roles` org
 membership) owns the new project.
 
 ### Automated Taxa Registration

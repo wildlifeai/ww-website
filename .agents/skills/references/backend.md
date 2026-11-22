@@ -99,6 +99,10 @@ Rules:
 * Heavy ML (SpeciesNet, BioCLIP, DINOv3) belongs in the worker, the lean `--target api` image has no
   ML deps, so importing torch at API module scope breaks production.
 * Feature flags gating ML must be set on the **worker**, not just the API.
+* The jobs in `IN_PROCESS_JOBS` (`jobs/dispatch.py`: uploads, the CamtrapDP import and export,
+  manifests, model conversion and downloads, batch ingest) run in the API process on Azure whatever
+  `REDIS_URL` says, so their settings belong on the API. Such a job can be cut off when the API
+  replica scales in (dev scales to zero), as uploads and the import already can.
 * Status is mirrored to Supabase `api_jobs`, so `/api/jobs/{id}` polling works cross-process. Rely on
   that rather than in-memory state.
 * `api_jobs` also holds the run-lock leases (`status = 'lock'`, `services/locks.py`) when there is
@@ -112,15 +116,22 @@ Rules:
   `get_dinov3_service()` breaks that path.
 * On AWS the API sits behind an API Gateway HTTP API: a request must finish within 30 s and a
   response stay under 6 MB, or the caller gets a 503. Work that can take longer goes through
-  `enqueue_job`, a large result goes to the object store with a link, and uploads arrive as
-  `files_key`. An image goes out through `domain/media_resolver.serve_media`, which turns an
+  `enqueue_job`, a large result goes to the object store with a link, a small one (counts,
+  warnings) on the job itself (`update_job(result=...)`, read as `JobInfo.result`), and uploads
+  arrive as `files_key`; a job reads an upload from the object store, never from the request.
+  An image goes out through `domain/media_resolver.serve_media`, which turns an
   original Lambda cannot answer into a redirect; a list that grows with the photos is paged or
   capped (the cluster's `items` pages, `clusters/multi`). The routes that break this today are in
   the migration report's "Left" table; don't add another.
 * On Lambda a task left running in the process (`enqueue_local_job`, `asyncio.create_task`)
   stops when the invocation returns, so the job never finishes and the reaper fails it an hour
   later. Code that can run there dispatches through `enqueue_job`, which invokes the `cpu`
-  function; `start_thumbnail_backfill` shows the branch.
+  function; `start_thumbnail_backfill` shows the branch. `enqueue_job` lets `create_job`'s
+  background write of the `api_jobs` row land before the invoke, so a route never waits for the
+  row itself.
+* A new light job (no ML) also goes in `dispatch.IN_PROCESS_JOBS`, or on Azure, with `REDIS_URL`
+  set, `enqueue_job` sends it to the ARQ worker and cold-starts the GPU for it (`sync_inat_job`,
+  #455). Under `WORKER_BACKEND=lambda` the list does not matter: every non-batch job goes to `cpu`.
 
 Live infrastructure detail: `documentation/resources/cloud-infrastructure.md`. Everything under
 `documentation/development reports/_archive/` (including `v2-architecture-plan.md`) is **frozen
@@ -139,6 +150,10 @@ Never:
 * Bypass authentication dependencies
 
 Frontend code must only use anonymous or authenticated user tokens.
+
+An uploaded ZIP is checked against `domain/zip_limits.py` (`check_members`, `check_size`) before
+any member is read or extracted, as the CamtrapDP import and the model upload do: the upload cap
+bounds the compressed size only.
 
 ## Access checks on service-role routes
 

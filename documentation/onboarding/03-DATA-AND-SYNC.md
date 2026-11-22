@@ -142,6 +142,12 @@ via `jobs/worker.py`. When no Redis is reachable, enqueue logs
 `redis connection error … arq_enqueue_failed_fallback_local` and the job falls back to the
 in-process runner — expected noise in local dev, not a failure.
 
+The jobs in `IN_PROCESS_JOBS` (`backend/app/jobs/dispatch.py`: uploads, the CamtrapDP import and
+export, manifests, model conversion and downloads, batch ingest) run in the API process on Azure
+even with `REDIS_URL` set, so their settings belong on the API, and on AWS they run on the `cpu`
+function. On Azure such a job can be cut off when the API replica scales in (dev scales to zero),
+as uploads and the import already can.
+
 ```
 create_job() → queued → processing → completed
                               └────────→ completed_with_errors | failed
@@ -156,7 +162,9 @@ create_job() → queued → processing → completed
 | `failed` | error — details in `error` |
 
 - **Persistence**: in-memory dict (fast path) + async sync to the Supabase `api_jobs` table (durable).
-- **Crash recovery**: on boot, any `processing` jobs in Supabase are marked `failed`.
+- **Stale jobs**: a `queued` or `processing` job with no update for an hour is marked `failed` by
+  `reap_stale_jobs` (`jobs/store.py`), every 15 minutes from the API on Azure and from the scheduled
+  tick on Lambda. A job waiting for the REANNZ batch keeps its own limits. Nothing is failed at boot.
 - **Frontend**: polls `GET /api/jobs/{id}` (~2s); responses carry ordered `events[]` for incremental
   UI updates. The global `UploadContext` keeps progress alive across navigation via `ProgressDock`.
 

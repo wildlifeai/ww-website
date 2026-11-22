@@ -33,7 +33,7 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | Runtime | Python 3.11+ | |
 | Validation | `pydantic` (+ `pydantic-settings`) | request/response models + env validation |
 | DB client | `supabase` (supabase-py) | service-role + per-request user clients |
-| Jobs | `arq` worker + in-process `asyncio` fallback | `REDIS_URL` set → jobs offload to the ARQ worker; unset → in-process. Cloud dev runs the worker; local dev runs in-process |
+| Jobs | `arq` worker + in-process `asyncio` fallback | `REDIS_URL` set → jobs offload to the ARQ worker, except the `IN_PROCESS_JOBS` ([03-DATA-AND-SYNC](./03-DATA-AND-SYNC.md#async-job-system)); unset → in-process. Cloud dev runs the worker; local dev runs in-process |
 | Storage | `azure-storage-blob`, Google Drive API | temp buffer + permanent archive |
 | HTTP | `httpx` + `tenacity` | retrying external calls |
 | AI | SpeciesNet, DINOv3 (Wildlife Brain), `ethos-u-vela` | inference, embeddings, model conversion |
@@ -64,10 +64,9 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 |------|---------|----------|
 | `FF_INAT_ENABLED` | `false` | iNaturalist endpoints |
 | `FF_ML_ENABLED` | `false` | ML-assisted classification — **must** be true or `build_pipeline_steps()` returns `[]` |
-| `FF_CLUSTERING_ENABLED` | `false` | ⚠️ **Declared but not wired** — nothing reads it; `/api/clustering` (legacy perceptual-hash) is registered unconditionally in `main.py`. Either gate the router or drop the flag |
 | `FF_PUBLIC_API_ENABLED` | `false` | Public data API (`/api/v1/*`) |
 | `FF_CAMTRAPDP_IMPORT_ENABLED` | `true` | CamtrapDP package import |
-| `FF_CAMTRAPDP_EXPORT_ENABLED` | `true` | CamtrapDP export with the original photos (`POST /api/exports/camtrapdp`); needs `AZURE_STORAGE_CONNECTION_STRING` for its ZIPs, which go to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`); the job writes them, so set these and `CAMTRAPDP_EXPORT_MAX_BYTES` on the **worker** too |
+| `FF_CAMTRAPDP_EXPORT_ENABLED` | `true` | CamtrapDP export with the original photos (`POST /api/exports/camtrapdp`); on Azure it needs `AZURE_STORAGE_CONNECTION_STRING` for its ZIPs, which go to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`), and the job runs in the API process (`IN_PROCESS_JOBS`), so these and `CAMTRAPDP_EXPORT_MAX_BYTES` belong on the API; on AWS the ZIPs go to `exports/` in the bucket and the job runs on the `cpu` function, which reads the same `/ww/<env>/` parameters in SSM |
 | `FF_PIPELINE_ENABLED` | `false` | AI pipeline inference endpoints |
 | `FF_GBF_REPORT_ENABLED` | `false` | The GBF contribution report (`GET /api/reports/gbf`) |
 | `FF_SPECIESNET_ENABLED` | `false` | SpeciesNet detector+classifier step |

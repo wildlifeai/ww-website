@@ -80,7 +80,7 @@ Using `pytest` + the Supabase client, you can authenticate as each test user and
 | Unassigned user sees no projects | `hemi@ww.org` | `supabase.from('projects').select()` | Returns empty list |
 | Upload Model blocked for non-managers | `rata@ww.org` | `POST /api/models/convert` | Returns `403` |
 | Project delete blocked for members and org managers | `rata@ww.org`, `kowhai@ww.org` | `DELETE /api/projects/{id}` on a project they can see | Returns `403` (only a project admin or `ww_admin`); a project they cannot see is `404` |
-| CamtrapDP import succeeds for any authenticated user | `ngaio@ww.org` | `POST /api/camtrapdp/import` | Returns `200` with valid ZIP |
+| CamtrapDP import succeeds for any authenticated user | `ngaio@ww.org` | `POST /api/camtrapdp/import` | Returns `200` with a `job_id` for a valid ZIP, and the job completes |
 
 **Implementation approach:**
 

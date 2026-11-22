@@ -3,7 +3,7 @@
 """An in-memory stand-in for the PostgREST calls the public API makes, for scoping tests.
 
 It evaluates ``select`` with embeds (``name!inner(...)``, nested), filters on the table or on
-an embed (``projects.organisation_id``), ``or_`` on the table, ``order`` (also
+an embed (``projects.organisation_id``), ``or_`` and ``not_`` on the table, ``order`` (also
 ``foreign_table``), ``range``, ``limit`` and ``count="exact"``, as PostgREST does for these
 cases: a filter on an embed trims that embed, and drops the parent row only when the embed is
 ``!inner``. Two timestamps with a zone compare as instants, as ``timestamptz`` does. ``update``
@@ -14,7 +14,8 @@ rows they wrote, as supabase-py asks for by default. Like PostgREST, a read retu
 A column the table does not have fails the test, so a query naming a column that is not in
 ww-backend's schema is caught here and not in production. ``COLUMNS`` lists the columns of
 each table the API reads, from ww-backend dev's supabase/schema.sql (10 Oct 2026; the cluster
-and observation provenance columns 25 Oct 2026; ``embedding_runs`` 22 Nov 2026).
+and observation provenance columns 25 Oct 2026; ``embedding_runs``, observation_events and
+annotation_runs 22 Nov 2026).
 """
 
 from __future__ import annotations
@@ -72,7 +73,27 @@ COLUMNS = {
         "confidence",
         "embedding_run_id",
         "cluster_id",
+        "observation_event_id",
     },
+    "observation_events": {
+        "id",
+        "deployment_id",
+        "taxon_id",
+        "start_time",
+        "end_time",
+        "event_duration_seconds",
+        "media_count",
+        "primary_media_id",
+        "review_status",
+        "confidence",
+        "empty_event_score",
+        "trigger_type",
+        "created_by",
+        "validated_by",
+        "deleted_at",
+        "created_at",
+    },
+    "annotation_runs": {"id", "deployment_id", "run_type", "model_id", "config", "started_at", "completed_at", "observation_count", "created_by"},
     "media_embeddings": {"media_id", "deployment_id", "embedding_run_id", "cluster_id", "cluster_confidence", "is_outlier", "created_at"},
     "embedding_runs": {"id", "deployment_id", "model_name", "status", "created_at"},
     "cluster_assignments": {
@@ -105,6 +126,7 @@ RELATIONS = {
     ("devices", "deployments"): ("deployments", "id", "device_id", False),
     ("media", "deployments"): ("deployments", "deployment_id", "id", True),
     ("media", "observations"): ("observations", "id", "media_id", False),
+    ("observations", "media"): ("media", "media_id", "id", True),
     ("lorawan_messages", "deployments"): ("deployments", "deployment_id", "id", True),
     ("lorawan_messages", "lorawan_parsed_messages"): ("lorawan_parsed_messages", "id", "lorawan_message_id", False),
 }
@@ -158,6 +180,7 @@ class Query:
         self.orders: dict[str, list[tuple[str, bool, Optional[bool]]]] = {}
         self.offset, self.limit_n = 0, None
         self.mode, self.payload = "select", None
+        self.negate_next = False
 
     # ── builders ──
     def select(self, columns: str = "*", count: Optional[str] = None):
@@ -165,7 +188,7 @@ class Query:
         self.count = count == "exact"
         return self
 
-    def update(self, payload: dict):
+    def update(self, payload: dict, *, returning: Any = None):
         self.mode, self.payload = "update", payload
         return self
 
@@ -181,7 +204,15 @@ class Query:
         self.mode = "delete"
         return self
 
+    @property
+    def not_(self):
+        """Negates the next filter, as postgrest-py's ``not_`` does."""
+        self.negate_next = True
+        return self
+
     def _filter(self, path: str, op: str, value: Any):
+        if self.negate_next:
+            op, self.negate_next = f"not.{op}", False
         self.filters.append((path, op, value))
         return self
 
@@ -361,6 +392,8 @@ def _instants(actual: Any, value: Any) -> tuple[Any, Any]:
 
 
 def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
+    if op.startswith("not."):
+        return not _test(row, table, column, op[4:], value)
     if "->>" in column:  # job_data->>user_id
         col, key = column.split("->>")
         actual = (row.get(col) or {}).get(key)
@@ -374,8 +407,9 @@ def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
     if actual is None:
         return False
     actual, value = _instants(actual, value)
-    if op == "eq":
-        return actual == value if isinstance(actual, datetime) else str(actual) == str(value)
+    if op in ("eq", "neq"):  # NULL is neither equal nor unequal, so neq drops it too (above)
+        same = actual == value if isinstance(actual, datetime) else str(actual) == str(value)
+        return same if op == "eq" else not same
     return {"gte": actual >= value, "lte": actual <= value, "gt": actual > value, "lt": actual < value}[op]
 
 

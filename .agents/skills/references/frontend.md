@@ -53,7 +53,9 @@ Rules:
 * A route whose feature flag is off answers HTTP 200 with `FEATURE_DISABLED`, which `apiClient`
   throws. Show a link to a flagged page (Dataset Health, UMAP, Cluster Review) only when
   `useFeatureEnabled(feature, id)` is true: one cached probe per feature, not one per row
-  (`lib/featureFlags.ts`, UI audit decision 6).
+  (`lib/featureFlags.ts`, UI audit decision 6). The probe can take seconds on Lambda, so a place
+  that should not jump when it answers (the grid's Review tab) reads `useFeatureState`, which
+  keeps "not known yet" apart, and shows a placeholder until it is true.
 * A route that raises `HTTPException` (every `/api/inat` route) reaches `apiClient` as code
   `UNKNOWN` with the `detail` as its message, and the status is lost, so match the message
   (`lib/inatOff.ts`, `inatErrorNotice` in `lib/inatPublish.ts`).
@@ -61,6 +63,14 @@ Rules:
   only each guide's frontmatter (the `ww-guide-meta` plugin in `vite.config.ts`, `?meta`), and
   `GuideDetailPage` loads the text. Don't import a guide's markdown anywhere eager, or every
   guide lands in the 190 kB first-load budget again (about 1.3 kB brotlied for a 4 KB guide).
+* On AWS a GPU job (AI analysis, grouping) stays `queued` until a REANNZ batch leases it, and
+  the job API sets `batch_wait` meanwhile, with the wait to state (`usual_wait_minutes`, from
+  `BATCH_MAX_WAIT_MINUTES` and `BATCH_CRON_INTERVAL_MINUTES`): word it with `batchWaitText`
+  (`lib/batchWait.ts`), never as a run at 0% or a hard-coded hour (#460). A batch job
+  (`gpu_batch`) reports every few minutes, so the dock's 15 s stall rule skips it. The upload
+  dock keeps a polled job only when `jobChanged` (`components/toolkit/pipelineProgress.ts`)
+  counts a change, so a new job field the dock shows must count there, or a job whose status
+  stays `queued` never shows it.
 * React Doctor fails a PR that introduces any warning (`react-doctor.yml`, `blocking: warning`,
   scope `changed`). Check before pushing, from `frontend/`:
   `npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes`. Rules

@@ -36,6 +36,18 @@ describe('publishInRounds', () => {
     expect(r.observations).toHaveLength(3)
   })
 
+  it('reports the photos reached after each round', async () => {
+    const post = vi.fn()
+      .mockResolvedValueOnce(answer({ photos_uploaded: 2, remaining_media_ids: ['a3', 'a4', 'a5'] }))
+      .mockResolvedValueOnce(answer({ photos_uploaded: 2, remaining_media_ids: ['a5'] }))
+      .mockResolvedValueOnce(answer({ photos_uploaded: 1 }))
+    const onProgress = vi.fn()
+
+    await publishInRounds(post, ['a1', 'a2', 'a3', 'a4', 'a5'], onProgress)
+
+    expect(onProgress.mock.calls).toEqual([[2, 5], [4, 5], [5, 5]])
+  })
+
   it('makes one call when the first round gets through', async () => {
     const post = vi.fn().mockResolvedValue(answer({ observations_created: 1, photos_uploaded: 1 }))
     await publishInRounds(post, ['a1'])

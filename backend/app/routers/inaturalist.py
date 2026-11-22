@@ -36,7 +36,8 @@ from app.domain.inaturalist import (
     get_observation_status,
 )
 from app.domain.inaturalist_publish import publish_media_to_inat
-from app.domain.inaturalist_sync import sync_inat_identifications
+from app.jobs.dispatch import enqueue_job
+from app.jobs.store import create_job
 from app.schemas.common import ApiMeta, ApiResponse
 from app.schemas.inaturalist import (
     INatAddTaxonBody,
@@ -46,6 +47,7 @@ from app.schemas.inaturalist import (
     INatObservationStatus,
     INatPublishRequest,
 )
+from app.schemas.job import JobCreateResponse
 from app.services.inat_oauth import (
     INAT_API_BASE,
     INatOAuthError,
@@ -295,9 +297,10 @@ async def publish_to_inat(
     (bypassing browser CORS), and records the mapping in inat_observations /
     inat_observation_media for status tracking.
 
-    Starts no photo after about two minutes, inside the ingress timeout, and returns the photos
-    it did not reach as ``remaining_media_ids``: send those again to carry on, the rest of a
-    burst joining the observation it started (``useINat().publish`` does this).
+    Starts no photo after about 15 seconds, and gives each iNaturalist step at most 10, so it
+    answers inside API Gateway's 30 s on AWS. Returns the photos it did not reach as
+    ``remaining_media_ids``: send those again to carry on, the rest of a burst joining the
+    observation it started (``useINat().publish`` does this).
 
     Only photos in projects the caller can change (project_member or above) are published: the
     others are left out, and ``403`` when that is all of them.
@@ -329,19 +332,21 @@ async def sync_inat(
     request: Request,
     user=Depends(get_current_user),
 ):
-    """Pull community identifications from iNaturalist back into Wildlife Watcher.
+    """Start pulling community identifications from iNaturalist back into Wildlife Watcher.
 
-    Polls the public iNat API for the taxon + quality_grade of this user's
-    published observations, updates the inat_observations sync state (drives the
-    thumbnail badge), and writes the community taxon back into WW observations as
-    source_type='consensus'. A scheduled job can call the same domain function
-    with no user filter to sync everyone.
+    Answers ``{job_id}`` at once: follow it with ``GET /api/jobs/{id}``, whose ``message``
+    reports progress and, once completed, the counts. The job (``jobs/inat_sync.py``) polls the
+    public iNat API for the taxon + quality_grade of this user's published observations,
+    updates the inat_observations sync state (drives the thumbnail badge), and writes the
+    community taxon back into WW observations as source_type='consensus'. A scheduled job can
+    call the same domain function with no user filter to sync everyone.
     """
     _check_feature()
 
-    result = await sync_inat_identifications(user_id=user.id)
+    job_id = await create_job(user_id=user.id, kind="inat_sync", label="iNaturalist sync")
+    await enqueue_job("sync_inat_job", job_id, user.id)
     return ApiResponse(
-        data=result,
+        data=JobCreateResponse(job_id=job_id).model_dump(),
         meta=ApiMeta(request_id=getattr(request.state, "request_id", None)),
     )
 

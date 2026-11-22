@@ -12,7 +12,7 @@ deterministically (no string parsing) with support for:
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -94,6 +94,15 @@ class ProgressSummary(BaseModel):
     started_at: Optional[datetime] = None
 
 
+class BatchWait(BaseModel):
+    """A job waiting in ``api_jobs`` for the REANNZ GPU batch (``WORKER_BACKEND=lambda``)."""
+
+    queued_at: Optional[datetime] = Field(None, description="When the job joined the queue (``job_data.dispatch.queued_at``)")
+    usual_wait_minutes: int = Field(
+        description="The wait the UI states: BATCH_MAX_WAIT_MINUTES plus BATCH_CRON_INTERVAL_MINUTES, rounded up (hours, or 15 minutes below an hour)"
+    )
+
+
 class JobInfo(BaseModel):
     """Public representation of a job's full state."""
 
@@ -105,12 +114,15 @@ class JobInfo(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: Optional[datetime] = Field(None, description="Last time the job state was modified")
     result_url: Optional[str] = None
+    result: Optional[dict[str, Any]] = Field(None, description="What a finished job produced when it is data, not a file (CamtrapDP import)")
     error: Optional[str] = None
     message: Optional[str] = Field(None, description="Latest human-readable status message")
     current_phase: Optional[ProgressPhase] = Field(None, description="Current pipeline phase (single source of truth)")
     summary: Optional[ProgressSummary] = Field(None, description="Aggregate progress counters")
     events: list[ProgressEvent] = Field(default_factory=list, description="Recent progress events (last N)")
     event_count: int = Field(0, description="Total number of events ever emitted")
+    batch_wait: Optional[BatchWait] = Field(None, description="Set while the job waits for the GPU batch; null once it runs, and on Azure")
+    gpu_batch: bool = Field(False, description="The job runs through the REANNZ GPU batch, so it reports every few minutes, not seconds")
 
 
 class JobCreateResponse(BaseModel):

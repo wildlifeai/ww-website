@@ -9,7 +9,8 @@
 import { Link } from 'react-router-dom'
 import { Camera, Cpu } from 'lucide-react'
 import { useUploadStore } from '../../contexts/UploadContext'
-import { aiAnalysisStatus } from '../toolkit/pipelineProgress'
+import { batchWaitText } from '../../lib/batchWait'
+import { aiAnalysisStatus, aiBatchWait } from '../toolkit/pipelineProgress'
 import { Banner, BannerProgress } from '../ui/Banner'
 
 export function LiveInsightsBanner() {
@@ -23,21 +24,23 @@ export function LiveInsightsBanner() {
   const failed = phase === 'failed'
 
   // % of images classified by the AI: the analysis job's aggregate progress once it has
-  // started. Before that (still uploading or queued) there is no AI job yet: "queued".
-  const aiStarted = !!ai || done
+  // started. Before that (still uploading, or on AWS waiting for the GPU batch): "queued".
+  const wait = aiBatchWait(pipelineState)
+  const aiStarted = (!!ai && !wait) || done
   const pct = done ? 100 : ai ? Math.round(ai.progress * 100) : 0
 
   const annotationsLink = uploadedDeploymentIds.length === 1
     ? `/annotations?deployment=${uploadedDeploymentIds[0]}`
     : '/annotations'
 
+  const queued = wait ? `${batchWaitText(wait)}.` : 'AI analysis queued.'
   const headline = failed
     ? 'AI analysis failed for this upload. See the upload logs.'
     : done
       ? 'AI analysis complete: every photo is classified.'
       : aiStarted
         ? `Live results, based on ${pct}% of photos classified by the AI. Numbers are predictions until reviewed.`
-        : 'AI analysis queued. Results appear here as photos are classified.'
+        : `${queued} Results appear here as photos are classified.`
 
   return (
     <Banner

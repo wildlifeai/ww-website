@@ -45,8 +45,10 @@ export function derivePhase(state: PipelineState): UploadPhase {
   // Only files still unaccounted for (neither uploaded nor failed) mean "uploading"
   if (state.uploadedFiles + failed < state.totalFiles) return 'uploading'
 
+  // A job on the GPU batch (AWS) reports every few minutes, waiting or running on the cluster,
+  // so 15 s of silence is normal for it; the backend requeues a run that stops reporting (#460).
   const idleMs = Date.now() - state.lastUpdateTs
-  if (idleMs > 15_000 && state.jobs.some((j) => j.status === 'processing')) return 'stalled'
+  if (idleMs > 15_000 && state.jobs.some((j) => j.status === 'processing' && !j.gpuBatch)) return 'stalled'
 
   if (state.jobs.length > 0) return 'processing'
   return 'idle'

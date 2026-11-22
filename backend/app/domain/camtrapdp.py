@@ -16,11 +16,16 @@ from typing import Optional
 
 import structlog
 
+from app.domain import zip_limits
 from app.domain.open_deployments import is_open_deployment_conflict
 from app.domain.photo_preprocessing import resolve_timezone
 from app.schemas.camtrapdp import CamtrapImportResult, PendingDriveUpload
 
 logger = structlog.get_logger()
+
+# The largest package the import takes, as the presigned POST's cap in routers/uploads.py. The
+# job reads the package into memory (parse_zip), so a larger limit means streaming it to disk.
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 
 # ─────────────────────────────────────────────────────────────────────────────
 # In-memory parsed representation
@@ -43,16 +48,22 @@ class CamtrapPackage:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".mp4", ".avi", ".mov", ".webm"}
+_CSVS = ("deployments.csv", "media.csv", "observations.csv")
+
+
 def parse_zip(zip_bytes: bytes) -> CamtrapPackage:
     """
     Unzip a CamtrapDP package in-memory and parse all CSVs.
-    Raises ValueError for invalid packages.
+    Raises ValueError for invalid packages, and ``zip_limits.ZipLimitError`` (a ValueError) for
+    one over the input limits in ``domain/zip_limits.py``, checked before any member is read.
     """
     try:
         zf = zipfile.ZipFile(io.BytesIO(zip_bytes))
     except zipfile.BadZipFile as exc:
         raise ValueError("Uploaded file is not a valid ZIP archive.") from exc
 
+    infos = zf.infolist()
     names = zf.namelist()
 
     # Locate datapackage.json (may be at root or inside a folder)
@@ -60,22 +71,44 @@ def parse_zip(zip_bytes: bytes) -> CamtrapPackage:
     if not dp_path:
         raise ValueError("No datapackage.json found in the ZIP. Is this a CamtrapDP package?")
 
-    metadata = json.loads(zf.read(dp_path).decode("utf-8"))
-
     # Determine base directory (in case files are inside a folder)
     base = dp_path.replace("datapackage.json", "")
 
-    def read_csv(filename: str) -> list[dict]:
+    def csv_path(filename: str) -> Optional[str]:
+        # At the base, else anywhere (without the subfolder)
         path = base + filename
-        if path not in names:
-            # Try without subfolder
-            flat = next((n for n in names if n.endswith(filename)), None)
-            if not flat:
-                return []
-            path = flat
+        return path if path in names else next((n for n in names if n.endswith(filename)), None)
+
+    csv_paths = {f: csv_path(f) for f in _CSVS}
+    media = [i for i in infos if "." in i.filename and f".{i.filename.rsplit('.', 1)[-1].lower()}" in _IMAGE_EXTS]
+
+    # The input limits, on the declared sizes, before anything is read
+    zip_limits.check_members(
+        infos, what="package", max_members=zip_limits.CAMTRAPDP_MAX_MEMBERS, max_total_bytes=zip_limits.CAMTRAPDP_MAX_TOTAL_BYTES
+    )
+    zip_limits.check_size(zf.getinfo(dp_path), zip_limits.CAMTRAPDP_MAX_DATAPACKAGE_BYTES, "datapackage.json")
+    for filename, path in csv_paths.items():
+        if path:
+            zip_limits.check_size(zf.getinfo(path), zip_limits.CAMTRAPDP_MAX_CSV_BYTES, filename)
+    for info in media:
+        zip_limits.check_size(info, zip_limits.CAMTRAPDP_MAX_MEDIA_BYTES, f"'{info.filename}'")
+
+    metadata = json.loads(zf.read(dp_path).decode("utf-8"))
+    rows_left = zip_limits.CAMTRAPDP_MAX_ROWS
+
+    def read_csv(filename: str) -> list[dict]:
+        nonlocal rows_left
+        path = csv_paths[filename]
+        if not path:
+            return []
         content = zf.read(path).decode("utf-8-sig")  # strip BOM if present
-        reader = csv.DictReader(io.StringIO(content))
-        return [row for row in reader]
+        rows: list[dict] = []
+        for row in csv.DictReader(io.StringIO(content)):
+            if len(rows) >= rows_left:
+                raise zip_limits.ZipLimitError(f"The package's CSVs hold more than {zip_limits.CAMTRAPDP_MAX_ROWS:,} rows, the limit.")
+            rows.append(row)
+        rows_left -= len(rows)
+        return rows
 
     pkg = CamtrapPackage(metadata=metadata)
     pkg.deployments = read_csv("deployments.csv")
@@ -83,14 +116,11 @@ def parse_zip(zip_bytes: bytes) -> CamtrapPackage:
     pkg.observations = read_csv("observations.csv")
 
     # Collect image/video files physically embedded in the zip
-    _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".mp4", ".avi", ".mov", ".webm"}
-    for name in names:
-        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-        if f".{ext}" in _IMAGE_EXTS:
-            data = zf.read(name)
-            pkg.zip_files[name] = data
-            # Also index by basename so relative paths like 'media/foo.jpg' resolve
-            pkg.zip_files[name.split("/")[-1]] = data
+    for info in media:
+        data = zf.read(info)
+        pkg.zip_files[info.filename] = data
+        # Also index by basename so relative paths like 'media/foo.jpg' resolve
+        pkg.zip_files[info.filename.split("/")[-1]] = data
 
     if not pkg.deployments:
         pkg.warnings.append("deployments.csv is empty or missing.")
