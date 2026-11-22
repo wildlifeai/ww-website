@@ -71,7 +71,6 @@ On error:
 - [EXIF Parsing](#exif-parsing)
 - [Uploads](#uploads)
 - [iNaturalist Integration](#inaturalist-integration)
-- [Image Clustering](#image-clustering)
 - [AI Pipeline](#ai-pipeline)
 - [Media Registry](#media-registry)
 - [Deployments](#deployments)
@@ -261,21 +260,6 @@ see [05-ANNOTATION-WORKFLOW](../onboarding/05-ANNOTATION-WORKFLOW.md).
 
 ---
 
-## Image Clustering
-
-Near-duplicate detection via perceptual hashing (dHash + BK-tree). No auth. `multipart/form-data`.
-≤1000 images/request. Prefix `/api/clustering`.
-
-> **Legacy** — this is pixel near-duplicate grouping. For semantic DINOv3 clustering (what the
-> Annotations *Group by → Cluster* uses), see [Wildlife Brain](#wildlife-brain--embeddings--clustering).
-
-| Method · Path | Description |
-|---|---|
-| `POST /api/clustering/analyze` | Form `files[]`, `max_hamming?` (0–20, default 10) → clusters + representatives |
-| `POST /api/clustering/analyze/csv` | Same logic; returns a `text/csv` download |
-
----
-
 ## AI Pipeline
 
 Run inference + ecological event/effort computation on a deployment. Gated by `FF_PIPELINE_ENABLED`
@@ -373,10 +357,6 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 > [deployment guide → Vector Store](deployment-guide.md#vector-store--pgvector-supabase).
 > `/api/brain/backup` is now a **no-op** (retained for compatibility): pgvector inherits Supabase PITR, so
 > there is no separate snapshot to take.
-
-> Distinct from [Image Clustering](#image-clustering) (`/api/clustering`), which is the legacy
-> perceptual-hash near-duplicate grouping. `/api/brain` is the semantic DINOv3 clustering the
-> Annotations grid's *Group by → Cluster* uses.
 
 | Method · Path | Description |
 |---|---|
