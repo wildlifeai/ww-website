@@ -30,7 +30,8 @@ const AI_OFF = 'The AI pipeline is turned off on this server.'
 
 /** The pipeline steps for the chosen models, in pipeline order. */
 export function aiRunSteps(models: readonly string[]): string[] {
-  return AI_MODELS.filter(m => models.includes(m.id)).flatMap(m => m.steps)
+  const chosen = new Set(models)
+  return AI_MODELS.filter(m => chosen.has(m.id)).flatMap(m => m.steps)
 }
 
 /** The toast once the run is queued. */
