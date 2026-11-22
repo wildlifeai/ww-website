@@ -19,10 +19,12 @@ iNaturalist, groups, viewer) and the components `components/data/Grid*.tsx`.
 - **Ribbon body** — grouped categories, each with controls and a small caption.
 - **Dialog launcher** — the ⤢ corner arrow opens advanced settings (Word's group launcher).
 
-Annotations ribbon: a **Filter** tab (Deployment, Species, and an *Advanced filters* dialog for
-status, type, annotator, AI model, sex, life stage, date range and time of day, applied on
-*Apply*; with the active-learning flag on, an *Order* choice, *Needs review first*) and a
-**Group** tab (Group by, Collapse all). The menu bar's status slot holds the pager ("1–100 of N"
+Annotations ribbon, in tab order: a **Review** tab, open first (with the active-learning flag on,
+an *Order* choice, *Needs review first*; the Wildlife Brain's *Review clusters* and *UMAP* for the
+one deployment in view once it has an embedding run, *Run Wildlife Brain* before, and a hint to
+pick one deployment otherwise), a **Filter** tab (Deployment, Species, and an *Advanced filters*
+dialog for status, type, annotator, AI model, sex, life stage, date range and time of day, applied
+on *Apply*) and a **Group** tab (Group by, Collapse all). The menu bar's status slot holds the pager ("1–100 of N"
 with Prev and Next), the Photo / Labels toggle, the thumbnail size and *All on page*. Insights uses its four sub-tabs (Projects · Deployments · Map · Reports) as the menu bar.
 
 ### The grid
@@ -37,8 +39,10 @@ query by the photo's active-learning score on `media_embeddings`, highest first,
 score last, then newest first (`gridSortPlan`, #337). *Time of day* reads `media.local_hour`, the
 capture hour in the deployment's zone (UTC when it has none) that ww-backend keeps (#335): day is
 06:00 to 18:00 (`DAY_START_HOUR` in `lib/time.ts`), and a photo with no capture time is neither.
-Groups split the page: grouping by deployment is offered for 2 to 12 deployments, by cluster for
-one (`lib/gridGrouping.ts`), and grouping is not remembered between visits. Each card shows the
+Groups split the page: a grouping is offered only when it splits the page's photos into at least
+two groups (no *Sex* when no photo has one, no *Project* with one project), grouping by deployment
+for 2 to 12 deployments and by cluster for one (`lib/gridGrouping.ts`), and grouping is not
+remembered between visits. Each card shows the
 photo's verdict (`photoVerdict`, common name first) with one confidence and a **StatusBadge**
 derived from `review_status` (`lib/observations.ts`):
 

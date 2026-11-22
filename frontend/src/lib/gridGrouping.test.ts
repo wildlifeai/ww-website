@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  availableGroupings, DEPLOYMENT_GROUP_LIMIT, groupingAvailable, groupInOrder, observationGroupKey, type GroupableObservation,
+  availableGroupings, DEPLOYMENT_GROUP_LIMIT, groupingAvailable, groupInOrder, observationGroupKey, photoGroupKey, splitsIntoGroups,
+  type GroupableObservation, type GroupNames,
 } from './gridGrouping'
 
 const ai = (scientific_name: string, extra: Partial<GroupableObservation> = {}): GroupableObservation =>
@@ -18,8 +19,50 @@ describe('groupingAvailable', () => {
     expect(groupingAvailable('deployment', 1)).toBe(false)
     expect(groupingAvailable('deployment', DEPLOYMENT_GROUP_LIMIT)).toBe(true)
     expect(groupingAvailable('deployment', DEPLOYMENT_GROUP_LIMIT + 1)).toBe(false)
-    expect(availableGroupings(100)).not.toContain('deployment')
-    expect(availableGroupings(100)).toContain('species')
+    expect(availableGroupings(100, [], NAMES)).not.toContain('deployment')
+    expect(availableGroupings(100, [], NAMES)).toContain('species')
+  })
+})
+
+const NAMES: GroupNames = {
+  deployments: new Map([['d1', 'Ridge'], ['d2', 'Stream'], ['d3', 'Hut']]),
+  projects: new Map([['d1', 'Weta'], ['d2', 'Weta'], ['d3', 'Kiwi']]),
+}
+
+describe('availableGroupings on a page of photos', () => {
+  it('offers only the groupings that split the page into two or more groups', () => {
+    const photos = [
+      { deployment_id: 'd1', observations: [human('Deinacrida', { sex: 'female' })] },
+      { deployment_id: 'd2', observations: [human('Rattus rattus')] },
+    ]
+    const offered = availableGroupings(2, photos, NAMES)
+    expect(offered).toEqual(expect.arrayContaining(['species', 'sex', 'deployment']))
+    // Neither photo has a life stage, a box, or an AI row, and both projects are Weta.
+    expect(offered).not.toContain('life_stage')
+    expect(offered).not.toContain('annotation_type')
+    expect(offered).not.toContain('model')
+    expect(offered).not.toContain('project')
+  })
+
+  it('offers projects when the page holds photos from two of them', () => {
+    const photos = [
+      { deployment_id: 'd1', observations: [] },
+      { deployment_id: 'd3', observations: [] },
+    ]
+    expect(availableGroupings(2, photos, NAMES)).toContain('project')
+    expect(photoGroupKey('project', photos[1], NAMES)).toBe('Kiwi')
+  })
+
+  it('still offers clusters for one deployment, whose groups load only once chosen', () => {
+    expect(availableGroupings(1, [{ deployment_id: 'd1', observations: [] }], NAMES)).toEqual(['cluster'])
+  })
+})
+
+describe('splitsIntoGroups', () => {
+  it('needs two different keys', () => {
+    expect(splitsIntoGroups([], (x: string) => x)).toBe(false)
+    expect(splitsIntoGroups(['a', 'a'], x => x)).toBe(false)
+    expect(splitsIntoGroups(['a', 'a', 'b'], x => x)).toBe(true)
   })
 })
 
