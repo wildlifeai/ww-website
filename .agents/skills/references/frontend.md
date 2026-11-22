@@ -61,6 +61,14 @@ Rules:
   only each guide's frontmatter (the `ww-guide-meta` plugin in `vite.config.ts`, `?meta`), and
   `GuideDetailPage` loads the text. Don't import a guide's markdown anywhere eager, or every
   guide lands in the 190 kB first-load budget again (about 1.3 kB brotlied for a 4 KB guide).
+* On AWS a GPU job (AI analysis, grouping) stays `queued` until a REANNZ batch leases it, and
+  the job API sets `batch_wait` meanwhile, with the wait to state (`usual_wait_minutes`, from
+  `BATCH_MAX_WAIT_MINUTES` and `BATCH_CRON_INTERVAL_MINUTES`): word it with `batchWaitText`
+  (`lib/batchWait.ts`), never as a run at 0% or a hard-coded hour (#460). A batch job
+  (`gpu_batch`) reports every few minutes, so the dock's 15 s stall rule skips it. The upload
+  dock keeps a polled job only when `jobChanged` (`components/toolkit/pipelineProgress.ts`)
+  counts a change, so a new job field the dock shows must count there, or a job whose status
+  stays `queued` never shows it.
 * React Doctor fails a PR that introduces any warning (`react-doctor.yml`, `blocking: warning`,
   scope `changed`). Check before pushing, from `frontend/`:
   `npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes`. Rules
