@@ -6,9 +6,6 @@ Pipeline: animal crops → DINOv3 1280-d embeddings → UMAP (2D persisted, 50D 
 clustering) → HDBSCAN clusters → purity scoring → vector upsert (pgvector) + Supabase write
 (media_embeddings, cluster_assignments, embedding_runs).
 
-Distinct from ``domain/clustering.py`` (perceptual-hash near-duplicate detection
-for iNaturalist) — this is semantic, embedding-based species grouping.
-
 Layering: orchestration here; DINOv3 / clustering libs live in services
 and are imported lazily. The summary + purity helpers are pure (numpy only) and
 unit-tested without torch/hdbscan/umap.

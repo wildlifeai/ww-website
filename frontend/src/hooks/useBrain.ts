@@ -139,11 +139,15 @@ export function useMultiClusters(deploymentIds: string[], minConfidence = 0) {
 }
 
 export function useEmbedDeployment() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: async (deploymentId: string) => {
       const r = (await apiClient.post(`/api/brain/embed/${deploymentId}`, { mode: 'server' })) as any
       return r.data as { job_id: string; status: string }
     },
+    // The Clusters page reads the new job from the jobs list (a GPU batch wait, #460): stay
+    // pending until the list has it, so the page never shows the wrong line first.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['jobs'] }),
   })
 }
 
