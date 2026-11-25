@@ -7,6 +7,8 @@
 # GitHub environments dev and staging; AWS_BUCKET_DEV / AWS_BUCKET_PROD and AWS_ALARM_EMAIL are
 # repository variables. No secrets: GitHub OIDC assumes the deploy role, and GITHUB_TOKEN pushes
 # the GPU image. GitHub dispatches it only once this file is on main, the default branch.
+# Actions are pinned to commit SHAs, the tag in the comment, because this workflow holds AWS
+# deploy rights and package write; Dependabot bumps the SHA and the comment together.
 # Design: documentation/development reports/2026-10_aws-reannz-migration/README.md
 name: Deploy Backend to AWS
 
@@ -23,7 +25,6 @@ on:
 permissions:
   contents: read
   id-token: write
-  packages: write
 
 concurrency:
   group: deploy-aws-${{ github.event.inputs.target }}
@@ -36,11 +37,16 @@ jobs:
     if: vars.AWS_DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.target == 'prod' && 'staging' || 'dev' }}
+    # Only this job pushes to GHCR, so only it may write packages.
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
     outputs:
       image: ${{ steps.tag.outputs.image }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - id: tag
@@ -49,7 +55,7 @@ jobs:
         run: |
           docker build --target gpu -t "${{ steps.tag.outputs.image }}" backend
           docker push "${{ steps.tag.outputs.image }}"
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -68,17 +74,17 @@ jobs:
       TARGET: ${{ github.event.inputs.target }}
       IMAGE: ${{ vars.ECR_REGISTRY }}/ww-backend:${{ github.event.inputs.target }}-${{ github.sha }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-      - uses: aws-actions/amazon-ecr-login@v2
+      - uses: aws-actions/amazon-ecr-login@7290e214a610b32bc0eef81748948b6d466a8783 # v2.2.0
       - name: Build and push the Lambda image
         run: |
           docker build --target lambda -t "$IMAGE" backend
           docker push "$IMAGE"
-      - uses: aws-actions/setup-sam@v2
+      - uses: aws-actions/setup-sam@341eee193f458fa5aae5d52c94b0c5cf3a1c5a52 # v3
         with:
           use-installer: true
       - name: Deploy the stack
