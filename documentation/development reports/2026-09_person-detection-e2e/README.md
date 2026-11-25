@@ -1,6 +1,9 @@
 # Person detection, end to end
 
-> **Status:** 🔧 Active. Steps 1 to 3 done on dev and real hardware, 2026-09-05. Step 4 ran
+> **Status:** 🔧 Active, not scheduled. 2026-11-26: [#140](https://github.com/wildlifeai/ww-website/issues/140)
+> and [#135](https://github.com/wildlifeai/ww-website/issues/135) are closed and edge reflection
+> types a person class as `human`; a step 4 rerun that ends in a Camera AI row is still to do, with
+> no issue. Steps 1 to 3 done on dev and real hardware, 2026-09-05. Step 4 ran
 > the same day with a second capture set and got as far as media rows and Cloud AI labels,
 > but **no Camera AI row**: the deployment's project points at the *seeded* Person Detection
 > (`1V1`), whose `label_map` is `{}`, so `reflect_edge_deployment` skips the deployment
@@ -119,7 +122,8 @@ what a person class should assert (`observationType: human` rather than a taxon)
 [#135](https://github.com/wildlifeai/ww-website/issues/135). `edge_reflection` accepts a
 `None` taxon and writes `scientific_name`, the same as the seeded Rat Detection, so this does
 not block the run. It does mean the edge observation will carry `observation_type: animal`
-for a human until #135's `edge_reflection.py:97` fix lands.
+for a human until #135's `edge_reflection.py:97` fix lands. (2026-11-26: #135 is closed; a class
+saved as a type gives a `human` row, `backend/app/domain/edge_reflection.py`.)
 
 ### Step 2 — point a project at the model, transfer to the device
 
@@ -172,7 +176,7 @@ What each failure looks like, and where to look:
 | `UserComment` absent or logits only | firmware side; `USE_PERCENTAGE` or the contract in [#189](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/issues/189) | device console, EXIF of a raw frame |
 | `UserComment` has `'': NN%` | old one-line labels file still on the card | step 2.4 |
 | `UserComment` fine, no edge observation | `projects.model_id` unset, or `label_map` empty, or flag off | step 2.1; `edge_reflect_skipped` in backend logs |
-| edge row present, `observation_type: animal` | expected until #135 | nothing to do here |
+| edge row present, `observation_type: animal` | the person class is saved as a taxon (before #135 every edge row was `animal`) | re-save the class as a type in the label mapper |
 
 ## 5. Step 4, first run (2026-09-05)
 

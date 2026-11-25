@@ -1,7 +1,8 @@
 # Spec — ARQ GPU Worker infrastructure (Wildlife Watcher AI pipeline)
 
-> **Status:** ✅ **SHIPPED (dev, 2026-07-03)** — retained as the original **design spec / history**,
-> not as an operating procedure. The dev worker `ww-embedding-worker-dev` runs on a **serverless T4 GPU**
+> **Status:** ✅ **Shipped**, dev 2026-07-03 and production 2026-07-26 (`ww-embedding-worker`); retained
+> as the original **design spec / history**, not as an operating procedure. The AWS migration retires
+> it at its step 8 ([2026-10_aws-reannz-migration](2026-10_aws-reannz-migration/README.md)). The dev worker `ww-embedding-worker-dev` runs on a **serverless T4 GPU**
 > (`gpu-t4` = `Consumption-GPU-NC8as-T4` profile on `ww-env`, `cuda`, scale-to-zero).
 >
 > **Read the live docs first — parts of this spec were overridden during the build** (§3 Redis and §7
@@ -15,7 +16,7 @@
 classify, DINOv3 embeddings) off the lean API. This is the **infrastructure prerequisite** for (a)
 turning on AI species detection on the dev/prod backends at all — today both container apps run the
 lean `--target api` image with **no ML deps** — and (b) the per-detection classifier in
-[per-crop-classification-spec.md](per-crop-classification-spec.md), which is blocked on this worker.
+[per-crop-classification-spec.md](_archive/per-crop-classification-spec.md), which this worker unblocked (shipped).
 
 ## Design at a glance
 
@@ -415,7 +416,7 @@ optimisation you earn once the pipeline is observable and self-healing**, not a 
    the staging-scoped resources (`ww-embedding-worker`, `ww-redis`, Standard-tier Redis). **Scale-to-zero
    is a post-rollout cost optimisation** (§12), not part of first cut-over.
 
-**Dependency:** [per-crop-classification-spec.md](per-crop-classification-spec.md) (BioCLIP per crop)
+**Dependency:** [per-crop-classification-spec.md](_archive/per-crop-classification-spec.md) (BioCLIP per crop)
 is **blocked on this worker** — its `classify_crops` step is a GPU job. Ship this infra first, confirm
 SpeciesNet + BioCLIP + DINOv3 run on the worker, then land the per-crop change behind
 `FF_PER_CROP_CLASSIFY_ENABLED`.

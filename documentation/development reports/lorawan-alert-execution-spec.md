@@ -1,21 +1,26 @@
 # LoRaWAN Device-Alert Execution Spec
 
-> **Status:** 📋 Active spec — implementation not started. The *alert logic* (modes,
-> ownership split, fair-use) is designed in
-> [dual-layer-ai-architecture-proposal §3](./dual-layer-ai-architecture-proposal.md);
-> the schema (`device_alert_rules`) has landed (ww-backend `dual_ai_v0`). This doc is
-> the concrete **build breakdown** across the four repos — the "alerting doc pair" that
-> §3 marked *to create*. Gated behind the firmware `USE_PERCENTAGE` fix (see
-> [dual-ai-production-rollout §4](../resources/dual-ai-production-rollout.md)).
+> **Status:** ⚠️ Needs a redesign, 2026-11-26, not scheduled. Do not build it as written.
+> It was written for the WW500's old LoRaWAN messages. The firmware in
+> [ww-hardware#81](https://github.com/wildlifeai/ww-hardware/pull/81) replaces them with one
+> tag-value message of counts and health
+> ([payload description](https://github.com/wildlifeai/ww-hardware/blob/7a7e8c9546ccd895160a6422b7bfcb6ef7814794/_Documentation/development%20reports/2026-11-06_lorawanPing/WW500_LoRaWAN_payloads.md)),
+> with no model identity, class index or score, and passes settings from a downlink on FPort 3
+> to the AI processor, which may change how alert rules reach the camera. The *alert logic*
+> (modes, ownership split, fair-use) is designed in
+> [dual-layer-ai-architecture-proposal §3](./dual-layer-ai-architecture-proposal.md); the
+> schema (`device_alert_rules`) has landed (ww-backend `dual_ai_v0`).
 
 Repos: **website** (`ww-website`), **backend** (`ww-backend`), **Himax firmware**
 (`Seeed_Grove_Vision_AI_Module_V2`), **Nordic firmware** (`ww-hardware`).
 
 ## What exists today
 
-- **Design:** proposal §3 — three modes (`instant` / `digest` / `backoff`), the
+- **Design:** proposal §3: three modes (`instant` / `digest` / `backoff`), the
   Nordic-owns-alert-logic split, LoRaWAN fair-use (confirmed instant, unconfirmed
-  digest), and the legacy TrapNZ payload that must keep working.
+  digest). The legacy TrapNZ payload it kept goes with ww-hardware#81, which is not
+  released (the field firmware still sends it); trap.nz forwarding moves to the backend's `lorawan-ingest`
+  ([ww-backend#373](https://github.com/wildlifeai/ww-backend/issues/373)).
 - **Schema:** `device_alert_rules` (per-project): `model_family_id`, `label`,
   `mode`, `threshold_pct` (1–100), `digest_send_utc`, `backoff_steps_min[]`,
   `clear_window_min`, `enabled`. RLS: project members read, admins manage; service
@@ -44,9 +49,10 @@ SD manifest (a new `ALERTS.TXT`, or an OP-code range in `CONFIG.TXT` — Nordic-
 format, coordinate). At compile time:
 - resolve `label` → the model's **output class index** (via `ai_models.label_map` /
   `detection_capabilities` order — the same index the device uses);
-- convert `threshold_pct` → **device logit units** using the model's output
-  quantization (OP 16 is a logit 0–127, *not* a percent — see the AI-ARCHITECTURE
-  "contracts" table);
+- keep `threshold_pct` a percent: OP 16 is a percent from 0 to 100 with
+  [Seeed PR 289](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/pull/289),
+  as [ww-mobile-app#524](https://github.com/wildlifeai/ww-mobile-app/pull/524) writes it
+  (see the AI-ARCHITECTURE "contracts" table);
 - emit `mode`, `digest_send_utc`, `backoff_steps_min[]`, `clear_window_min` verbatim.
 - Validate: reject a rule whose `label` isn't a `role='target'` label in the deployed
   version's `label_map` (the schema notes this is enforced here, not by FK).
@@ -61,16 +67,18 @@ The nRF52832 reads the alert block and runs the state machine per rule:
   successive alert while the target persists; reset the sequence after
   `clear_window_min` with no qualifying detection.
 
-Extend the uplink payload beyond the legacy TrapNZ counters to carry
-**(model identity, class_index, score, mode)** for the alert — keep the legacy
-heartbeat/sprung frames working (TrapNZ integration).
+Extend the uplink payload to carry **(model identity, class_index, score, mode)** for
+the alert. The payload is now the tag-value message of ww-hardware#81, counts and
+health only. The legacy heartbeat/sprung frames go with ww-hardware#81, which is not released:
+`lorawan-ingest` still decodes the 0x50 ping report of the firmware in the field. trap.nz
+forwarding moves to `lorawan-ingest` ([ww-backend#373](https://github.com/wildlifeai/ww-backend/issues/373)).
 
 ### 3. Forward (class_index, score) over I2C (Himax firmware, Seeed repo)
 Today the Himax forwards only OP counters to the Nordic. Add a small I2C message so
 that, per positive inference, it reports **(class_index, score)** — the input the
 Nordic needs to evaluate rules. The message-type enums must stay in lockstep across
-the two firmware repos. **Depends on `USE_PERCENTAGE`** (branch
-`feat/exif-confidence-enable`) since that's what computes the per-class score.
+the two firmware repos. The per-class score it needs is computed: `USE_PERCENTAGE` is on in
+the firmware's `main` since 2026-07-08 (Seeed commit `fb66bafd`).
 
 ### 4. Decode the uplink → alerts (ww-backend)
 Extend the LoRaWAN webhook decoder to recognise the new alert frame, resolve
@@ -82,8 +90,10 @@ review (retrospective per-rule precision).
 
 ## Sequencing & dependencies
 
-1. **Firmware `USE_PERCENTAGE`** ships first (piece 3 needs the score; nothing edge
-   works without it).
+1. **Op 16 as a percent**
+   ([Seeed PR 289](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/pull/289), open)
+   lands first, so a rule's `threshold_pct` and the camera's threshold mean the same thing.
+   `USE_PERCENTAGE`, which piece 3's score needs, is on in firmware `main` since 2026-07-08.
 2. **I2C message contract** agreed across Himax + Nordic repos (pieces 2 ↔ 3).
 3. **Manifest compile** (1) + **decoder** (4) can be built in parallel on the website/
    backend side against a mocked frame, then integrated once the firmware emits real

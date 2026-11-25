@@ -1,7 +1,10 @@
 # Decoupled upload pipeline — durable media rows, resumable backup, dedup & integrity
 
-> **Status:** 📋 Proposal — **nothing here is implemented**. Dated 2026-07-26; ww-backend (schema) +
-> ww-website (ingest, sweeper, UI).
+> **Status:** 📋 Proposal, not scheduled (2026-11-26): **nothing here is implemented**, and it needs a
+> decision. Dated 2026-07-26; ww-backend (schema) + ww-website (ingest, sweeper, UI). It assumes Drive
+> and Azure Blob: under the AWS migration's approach B
+> ([2026-10_aws-reannz-migration](2026-10_aws-reannz-migration/README.md)) uploads go to S3 through
+> presigned POSTs and the archive is S3, so its starting point changes.
 **Motivating incidents:** production uploads silently discarded for weeks
 (`GOOGLE_DRIVE_ENABLED` unset → `media` table empty, newest job 10 Jun);
 unassigned photos silently dropped (fixed by triage, PR #99); false-success
