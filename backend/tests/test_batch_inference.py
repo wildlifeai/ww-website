@@ -346,7 +346,7 @@ def photos_on_disk(monkeypatch):
     from app.domain.media_registry import CROP_PADDING
     from app.services import image_processing as imgproc
 
-    async def resolve_media(path, size="full"):
+    async def resolve_media(path, size="full", media=None):
         if path.startswith("crop://"):
             mid, box = path[len("crop://") :].split("|")
             return imgproc.crop_bbox(PHOTOS[mid], tuple(json.loads(box)), CROP_PADDING), "image/jpeg"

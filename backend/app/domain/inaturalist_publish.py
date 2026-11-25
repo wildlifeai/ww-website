@@ -26,7 +26,7 @@ from app.domain.inaturalist import (
     create_observation,
     upload_observation_photo,
 )
-from app.domain.media_resolver import resolve_media
+from app.domain.media_resolver import MediaRef, resolve_media
 from app.domain.public_api import photo_verdict
 from app.services.db_utils import read_all, rows_of
 from app.services.inat_oauth import get_user_token
@@ -337,7 +337,7 @@ async def _create_inat_observation(svc, user_id, dep, photos, geoprivacy, result
 
 async def _read_and_upload(user_id: str, inat_id: int, m: dict) -> Optional[Any]:
     """Read one photo's original and attach it to the iNat observation; None when it cannot be read."""
-    resolved = await resolve_media(m["file_path"], size="full")
+    resolved = await resolve_media(m["file_path"], size="full", media=MediaRef.of(m))
     if not resolved:
         return None
     data, _ct = resolved

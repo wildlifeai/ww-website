@@ -113,14 +113,14 @@ async def prepare_media_assets(media_row: dict) -> dict:
 
     Returns the patch written (empty dict if the original could not be resolved).
     """
-    from app.domain.media_resolver import resolve_media
+    from app.domain.media_resolver import MediaRef, resolve_media
     from app.services import image_processing as imgproc
     from app.services.storage import upload_rendition
 
     media_id = media_row["id"]
     deployment_id = media_row["deployment_id"]
 
-    resolved = await resolve_media(media_row.get("file_path", ""), size="full")
+    resolved = await resolve_media(media_row.get("file_path", ""), size="full", media=MediaRef(media_id, deployment_id))
     if not resolved:
         logger.warning("media_prep_unresolvable", media_id=media_id)
         return {}
@@ -186,7 +186,7 @@ async def generate_observation_crops(media_id: str) -> Optional[str]:
     Returns the hero crop URL, or ``None`` when there's nothing to crop, so the
     pipeline can tell which frames were handled (and fall back to motion ROI).
     """
-    from app.domain.media_resolver import resolve_media
+    from app.domain.media_resolver import MediaRef, resolve_media
     from app.services import image_processing as imgproc
     from app.services.storage import upload_rendition
     from app.services.supabase_client import create_service_client
@@ -211,7 +211,7 @@ async def generate_observation_crops(media_id: str) -> Optional[str]:
     if not media_row or not obs_rows:
         return None
 
-    resolved = await resolve_media(media_row["file_path"], size="full")
+    resolved = await resolve_media(media_row["file_path"], size="full", media=MediaRef.of(media_row))
     if not resolved:
         return None
     data, _content_type = resolved
@@ -276,7 +276,7 @@ async def generate_motion_roi_crops(
 
     from PIL import Image
 
-    from app.domain.media_resolver import resolve_media
+    from app.domain.media_resolver import MediaRef, resolve_media
     from app.domain.motion_roi import compute_motion_roi_per_frame
     from app.services import image_processing as imgproc
     from app.services.storage import upload_rendition
@@ -293,7 +293,7 @@ async def generate_motion_roi_crops(
         for m in burst:
             data = img = None
             try:
-                resolved = await resolve_media(m["file_path"], size="full")
+                resolved = await resolve_media(m["file_path"], size="full", media=MediaRef.of(m))
                 if resolved:
                     data = resolved[0]
                     img = await asyncio.to_thread(lambda d=data: Image.open(BytesIO(d)).convert("RGB"))

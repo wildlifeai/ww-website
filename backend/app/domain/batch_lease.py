@@ -18,9 +18,10 @@ State lives where no stale copy can overwrite it:
   ``_finalized`` once the job is complete (``jobs/ingest.py``).
 
 The cluster never gets a database credential and never fetches a URL a user could have
-written: originals in S3 come as presigned GETs, everything else through
-``/api/worker/lease/{id}/media/{media_id}``, which resolves through the SSRF-guarded resolver
-and, on S3, redirects to a copy when the original is too large for Lambda's answer.
+written: an original in its own S3 folder (``media_resolver.in_own_folder``) comes as a
+presigned GET, everything else through ``/api/worker/lease/{id}/media/{media_id}``, which
+resolves through the SSRF-guarded resolver and, on S3, redirects to a copy when the original
+is too large for Lambda's answer.
 
 A cluster that asks for a ``paged`` lease gets each job's ``items_total`` instead of its
 ``items`` and reads them a part at a time from :func:`items_page`, signed just before use: at
@@ -43,7 +44,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import structlog
 
 from app.config import settings
-from app.domain.media_resolver import ServedMedia, serve_media
+from app.domain.media_resolver import MediaRef, ServedMedia, in_own_folder, original_projects, serve_media
 from app.jobs.store import batch_lease_name, patch_job_data
 from app.schemas.job import JobStatus
 from app.services import object_store
@@ -179,11 +180,14 @@ async def pending_summary() -> dict:
 # ── building a lease ─────────────────────────────────────────────────
 
 
-def _media_item(lease_id: str, media: dict) -> dict:
-    """Where the cluster fetches one original: a presigned GET for S3, else the API."""
+def _media_item(lease_id: str, media: dict, projects: dict[str, frozenset[str]]) -> dict:
+    """Where the cluster fetches one original: a presigned GET for an S3 original in its own
+    folder (``projects``: :func:`original_projects`), else the API, which answers any other
+    ``s3://`` path as a missing original."""
     item = {"media_id": media["id"], "deployment_id": media.get("deployment_id")}
     path = str(media.get("file_path") or "")
-    if path.startswith("s3://"):
+    deployment_id = str(media.get("deployment_id") or "")
+    if in_own_folder(path, deployment_id, projects.get(deployment_id, frozenset())):
         bucket, key = object_store.parse_s3_path(path)
         item["url"] = object_store.presign_get(key, settings.BATCH_LEASE_MINUTES * 60, bucket=bucket)
     else:
@@ -204,11 +208,17 @@ def _crop_item(lease_id: str, crop: dict) -> dict:
     return item
 
 
-def _items(lease_id: str, kind: Optional[str], sources: list[dict]) -> list[dict]:
+async def _items(lease_id: str, kind: Optional[str], sources: list[dict]) -> list[dict]:
     """The manifest items of a job's photos (``_annotate_work``, ``_embed_work``), URLs signed now."""
     if kind == "embed":
         return [_crop_item(lease_id, s) for s in sources]
-    return [_media_item(lease_id, s) for s in sources]
+    in_s3 = {str(s.get("deployment_id") or "") for s in sources if str(s.get("file_path") or "").startswith("s3://")}
+    try:
+        projects = await original_projects(in_s3) if in_s3 else {}
+    except Exception as exc:  # noqa: BLE001 - the API route checks each original again
+        logger.warning("batch_lease_folders_unread", lease_id=lease_id, error=str(exc))
+        projects = {}
+    return [_media_item(lease_id, s, projects) for s in sources]
 
 
 def _annotate_config(run: AnnotateRun) -> dict:
@@ -304,7 +314,7 @@ async def claim(max_photos: Optional[int] = None, slurm_job_id: str = "", paged:
                 await object_store.put_object(items_key(lease_id, row["id"]), json.dumps(sources).encode("utf-8"), "application/json")
                 work["items_total"] = len(sources)
             else:
-                work["items"] = _items(lease_id, kind, sources)
+                work["items"] = await _items(lease_id, kind, sources)
             await patch_job_data(
                 row["id"],
                 {
@@ -387,7 +397,7 @@ async def items_page(lease_id: str, job_id: str, offset: int = 0, limit: int = I
     sources = json.loads(found[0])
     page = sources[offset : offset + min(limit, ITEMS_PAGE_MAX)]
     kind = ((row.get("job_data") or {}).get("dispatch") or {}).get("kind")
-    return {"items": _items(lease_id, kind, page), "offset": offset, "total": len(sources)}
+    return {"items": await _items(lease_id, kind, page), "offset": offset, "total": len(sources)}
 
 
 async def part_target(lease_id: str, job_id: str, part: int) -> dict:
@@ -463,4 +473,4 @@ async def media_served(lease_id: str, media_id: str, crop: bool = False) -> Opti
         if isinstance(assets, list):
             assets = assets[0] if assets else None
         source = (assets or {}).get("animal_crop_url")
-    return await serve_media(str(source or ""), size="full") if source else None
+    return await serve_media(str(source or ""), size="full", media=MediaRef.of(media)) if source else None

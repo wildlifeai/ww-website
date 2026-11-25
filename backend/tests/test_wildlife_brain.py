@@ -99,7 +99,10 @@ async def test_resolve_crops_concurrent_preserves_order_and_filters(monkeypatch)
     import app.domain.media_resolver as mr
     from app.domain.wildlife_brain import _resolve_crops_concurrent
 
-    async def fake_resolve(url, size="full"):
+    rows_read = []
+
+    async def fake_resolve(url, size="full", media=None):
+        rows_read.append(media)
         if url == "bad":
             return None  # unresolvable crop → dropped
         return (f"bytes:{url}".encode(), "image/jpeg")
@@ -116,6 +119,8 @@ async def test_resolve_crops_concurrent_preserves_order_and_filters(monkeypatch)
     assert [mid for (mid, _d, _b) in out] == ["m1", "m3"]  # m2 dropped, order kept
     assert [dep for (_m, dep, _b) in out] == ["d1", "d2"]
     assert out[0][2] == b"bytes:u1"
+    # Each crop is read as part of its photo's row.
+    assert sorted(rows_read, key=lambda r: r.id) == [mr.MediaRef("m1", "d1"), mr.MediaRef("m2", "d1"), mr.MediaRef("m3", "d2")]
 
 
 @pytest.mark.parametrize("model_name", [None, ""])

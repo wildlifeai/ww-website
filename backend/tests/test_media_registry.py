@@ -16,6 +16,7 @@ from app.domain.media_registry import (
     resolve_url,
     with_resolved_urls,
 )
+from app.domain.media_resolver import MediaRef
 
 
 def test_thumbnail_prefers_thumbnail_url():
@@ -233,15 +234,17 @@ def _frame_bytes(square=None):
 async def test_generate_motion_roi_crops_writes_for_moving_frames(monkeypatch):
     # A two-frame burst with a moving white square → motion ROI found → crop written.
     rows = [
-        _row("a", "2026-06-15T10:00:00Z"),
-        _row("b", "2026-06-15T10:00:02Z"),
+        {**_row("a", "2026-06-15T10:00:00Z"), "deployment_id": "dep1"},
+        {**_row("b", "2026-06-15T10:00:02Z"), "deployment_id": "dep1"},
     ]
     payloads = {
         "gdrive://a": _frame_bytes(square=(120, 90, 160, 130)),
         "gdrive://b": _frame_bytes(square=(150, 95, 190, 135)),
     }
+    rows_read = []
 
-    async def fake_resolve(file_path, size="full"):
+    async def fake_resolve(file_path, size="full", media=None):
+        rows_read.append(media)
         return payloads[file_path], "image/jpeg"
 
     async def fake_upload(path, data):
@@ -260,6 +263,7 @@ async def test_generate_motion_roi_crops_writes_for_moving_frames(monkeypatch):
 
     assert created == len(upserts) >= 1
     assert all(u["animal_crop_url"].startswith("cdn/crops/dep1/") for u in upserts)
+    assert rows_read == [MediaRef("a", "dep1"), MediaRef("b", "dep1")]  # each frame read as part of its row
 
 
 async def test_generate_motion_roi_crops_skips_existing_crops(monkeypatch):
@@ -269,7 +273,7 @@ async def test_generate_motion_roi_crops_skips_existing_crops(monkeypatch):
         "gdrive://b": _frame_bytes(square=(150, 95, 190, 135)),
     }
 
-    async def fake_resolve(file_path, size="full"):
+    async def fake_resolve(file_path, size="full", media=None):
         return payloads[file_path], "image/jpeg"
 
     async def fake_upload(path, data):
@@ -343,8 +347,10 @@ async def test_generate_observation_crops_one_per_box(monkeypatch):
     crop_updates: dict[str, str] = {}
     uploaded: list[str] = []
     upserts: list[dict] = []
+    rows_read = []
 
-    async def fake_resolve(file_path, size="full"):
+    async def fake_resolve(file_path, size="full", media=None):
+        rows_read.append(media)
         return frame, "image/jpeg"
 
     async def fake_upload(path, data):
@@ -368,6 +374,7 @@ async def test_generate_observation_crops_one_per_box(monkeypatch):
     # Hero (media_assets.animal_crop_url) = highest-confidence crop.
     assert hero == "cdn/crops/dep1/m1/o-hi.jpg"
     assert upserts == [{"media_id": "m1", "animal_crop_url": "cdn/crops/dep1/m1/o-hi.jpg"}]
+    assert rows_read == [MediaRef("m1", "dep1")]  # the frame is read once, as part of its row
 
 
 async def test_generate_observation_crops_no_detections_noops(monkeypatch):
@@ -397,10 +404,11 @@ class _Refused(Exception):
 
 def _prep_fakes(monkeypatch, upload_results):
     """Fake I/O for prepare_media_assets; ``upload_results`` feeds thumbnail uploads in order."""
-    calls = {"upload": 0}
+    calls: dict = {"upload": 0, "rows": []}
     upserts: list[dict] = []
 
-    async def fake_resolve(file_path, size="full"):
+    async def fake_resolve(file_path, size="full", media=None):
+        calls["rows"].append(media)
         return _frame_bytes(), "image/jpeg"
 
     async def fake_upload(path, data):
@@ -429,6 +437,7 @@ async def test_prepare_retries_a_failed_upload(monkeypatch):
 
     assert calls["upload"] == 2
     assert patch["thumbnail_url"] == "cdn/thumbnails/dep1/m1.jpg"
+    assert calls["rows"] == [MediaRef("m1", "dep1")] * 2  # the original is read as part of its row
     assert len(upserts) == 1  # the failed attempt wrote nothing
 
 

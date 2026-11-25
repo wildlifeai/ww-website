@@ -65,14 +65,14 @@ async def _resolve_crops_concurrent(crops: list[dict], *, concurrency: int = 10)
     crop. Replaces a sequential ``await resolve_media`` loop that was very slow for
     large deployments/projects (each resolve is network I/O to Drive / a public URL).
     """
-    from app.domain.media_resolver import resolve_media
+    from app.domain.media_resolver import MediaRef, resolve_media
 
     sem = asyncio.Semaphore(concurrency)
 
     async def _one(c: dict):
         async with sem:
             try:
-                resolved = await resolve_media(c["crop_url"], size="full")
+                resolved = await resolve_media(c["crop_url"], size="full", media=MediaRef.of(c))
             except Exception as exc:  # noqa: BLE001 — one bad crop must not sink the run
                 logger.warning("crop_resolve_failed", media_id=c.get("id"), error=str(exc))
                 return None
