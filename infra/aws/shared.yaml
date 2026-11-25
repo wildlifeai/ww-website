@@ -1,11 +1,12 @@
 # Wildlife Watcher on AWS, the account-wide stack (ww-shared): the image registry and the role
 # GitHub Actions deploys with. Each environment is its own AWS account (ww-dev, ww-prod), so
 # this stack is deployed once in each, before that account's environment stack
-# (infra/aws/template.yaml), with the GitHub environment allowed to deploy there:
+# (infra/aws/template.yaml), with the environment that account holds:
 #
 #   aws cloudformation deploy --template-file infra/aws/shared.yaml --stack-name ww-shared \
-#     --capabilities CAPABILITY_NAMED_IAM --parameter-overrides GitHubEnvironment=dev \
-#     --profile ww-dev
+#     --capabilities CAPABILITY_NAMED_IAM --parameter-overrides Env=dev --profile ww-dev
+#
+# The deploy role cannot change this stack, so every change here is deployed from a workstation.
 #
 # The GPU image is not here: it is public on GHCR (ghcr.io/wildlifeai/ww-backend-gpu), so the
 # cluster pulls it with no credential.
@@ -14,18 +15,26 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: Wildlife Watcher shared AWS resources (ECR, GitHub OIDC deploy role)
 
 Parameters:
+  Env:
+    Type: String
+    AllowedValues: [dev, prod]
+    Description: The environment this account holds; the deploy role can change only stack ww-<Env> and its resources
   GitHubRepository:
     Type: String
     Default: wildlifeai/ww-website
-  GitHubEnvironment:
-    Type: String
-    AllowedValues: [dev, staging]
-    Description: The deploy workflow's GitHub environment for this account (dev for ww-dev, staging for ww-prod)
   CreateOidcProvider:
     Type: String
     AllowedValues: ["true", "false"]
     Default: "true"
     Description: false when the account already has the token.actions.githubusercontent.com provider
+
+Mappings:
+  # The deploy workflow's GitHub environment for each environment: ww-prod deploys from staging.
+  GitHubEnvironment:
+    dev:
+      Name: dev
+    prod:
+      Name: staging
 
 Conditions:
   MakeProvider: !Equals [!Ref CreateOidcProvider, "true"]
@@ -37,6 +46,19 @@ Resources:
       RepositoryName: ww-backend
       ImageScanningConfiguration:
         ScanOnPush: true
+      # Lets Lambda pull the image. Without it, the first function in an account makes Lambda
+      # write this policy as the caller, which would need ecr:SetRepositoryPolicy on the deploy role.
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LambdaECRImageRetrievalPolicy
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: [ecr:BatchGetImage, ecr:GetDownloadUrlForLayer]
+            Condition:
+              StringLike:
+                aws:sourceArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:*
       # Replaces the ACR weekly-purge task: keep stable, the ten newest tagged images (dev and
       # prod together) and nothing untagged for more than a day.
       LifecyclePolicy:
@@ -71,6 +93,11 @@ Resources:
       Url: https://token.actions.githubusercontent.com
       ClientIdList: [sts.amazonaws.com]
 
+  # What .github/workflows/deploy-aws.yml needs, and no more: the image push, sam deploy of
+  # ww-<Env>, and the GPU_IMAGE parameter. sam deploy passes no service role, so CloudFormation
+  # creates, reads and updates each resource in infra/aws/template.yaml with this role's own
+  # rights; a new resource type there needs its actions here first. The calls were read from
+  # CloudTrail for the workstation deploys of 2026-11-20 and 2026-11-21.
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
@@ -85,41 +112,120 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              StringLike:
                 # Only this account's GitHub environment, so the prod deploy job cannot assume
                 # the dev account's role, nor the other way round.
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:${GitHubEnvironment}
+                token.actions.githubusercontent.com:sub: !Sub
+                  - repo:${GitHubRepository}:environment:${Name}
+                  - Name: !FindInMap [GitHubEnvironment, !Ref Env, Name]
       Policies:
         - PolicyName: ww-deploy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Effect: Allow
-                Action: ecr:GetAuthorizationToken
-                Resource: "*"
-              - Effect: Allow
-                Action: [ecr:BatchCheckLayerAvailability, ecr:BatchGetImage, ecr:CompleteLayerUpload, ecr:InitiateLayerUpload, ecr:PutImage, ecr:UploadLayerPart]
-                Resource: !GetAtt BackendRepository.Arn
-              - Effect: Allow
-                Action: [cloudformation:*]
-                Resource:
-                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/ww-dev/*
-                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/ww-prod/*
-                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
-              - Effect: Allow
-                Action: [lambda:*, s3:*, sqs:*, sns:*, logs:*, cloudwatch:*, scheduler:*, budgets:*]
+              # aws-actions/amazon-ecr-login, and reads that IAM cannot narrow to a name.
+              - Sid: UnscopedReads
+                Effect: Allow
+                Action: [ecr:GetAuthorizationToken, cloudwatch:DescribeAlarms, logs:DescribeLogGroups, logs:DescribeIndexPolicies, logs:DescribeResourcePolicies]
                 Resource: "*"
                 Condition:
                   StringEquals:
                     aws:RequestedRegion: !Ref AWS::Region
-              - Effect: Allow
-                Action: [iam:CreateRole, iam:DeleteRole, iam:GetRole, iam:PassRole, iam:PutRolePolicy, iam:DeleteRolePolicy, iam:AttachRolePolicy, iam:DetachRolePolicy, iam:TagRole]
-                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ww-*
-              - Effect: Allow
+              # docker push, and the image reads Lambda makes as the caller when CloudFormation
+              # creates or updates a function.
+              - Sid: Image
+                Effect: Allow
+                Action: [ecr:BatchCheckLayerAvailability, ecr:InitiateLayerUpload, ecr:UploadLayerPart, ecr:CompleteLayerUpload, ecr:PutImage, ecr:BatchGetImage, ecr:GetDownloadUrlForLayer, ecr:GetRepositoryPolicy]
+                Resource: !GetAtt BackendRepository.Arn
+              # sam deploy and the health check.
+              - Sid: Stack
+                Effect: Allow
+                Action: [cloudformation:DescribeStacks, cloudformation:DescribeStackEvents, cloudformation:GetTemplateSummary, cloudformation:CreateChangeSet, cloudformation:DescribeChangeSet, cloudformation:ExecuteChangeSet]
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/ww-${Env}/*
+              - Sid: SamTransform
+                Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
+              # The gpu-image job: the tag the cluster runs.
+              - Sid: GpuImageParameter
+                Effect: Allow
                 Action: ssm:PutParameter
+                Resource: !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/${Env}/GPU_IMAGE
+              # The stack's resources, by type.
+              - Sid: Functions
+                Effect: Allow
+                Action: [lambda:CreateFunction, lambda:DeleteFunction, lambda:UpdateFunctionCode, lambda:UpdateFunctionConfiguration, lambda:PutFunctionConcurrency, lambda:DeleteFunctionConcurrency, lambda:PutFunctionEventInvokeConfig, lambda:UpdateFunctionEventInvokeConfig, lambda:DeleteFunctionEventInvokeConfig, lambda:TagResource, lambda:UntagResource, lambda:ListTags, lambda:Get*]
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:ww-${Env}-*
+              - Sid: HttpApiInvokesApi
+                Effect: Allow
+                Action: [lambda:AddPermission, lambda:RemovePermission]
+                Resource: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:ww-${Env}-*
+                Condition:
+                  StringEquals:
+                    lambda:Principal: apigateway.amazonaws.com
+              # The roles SAM generates for the functions and the tick, named ww-<Env>-<logical id>-<suffix>.
+              # The pattern does not match ww-gha-deploy, so this role cannot change itself.
+              - Sid: FunctionRoles
+                Effect: Allow
+                Action: [iam:CreateRole, iam:DeleteRole, iam:GetRole, iam:TagRole, iam:UntagRole, iam:PutRolePolicy, iam:GetRolePolicy, iam:DeleteRolePolicy, iam:ListRolePolicies, iam:ListAttachedRolePolicies]
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ww-${Env}-*
+              - Sid: FunctionRolesManagedPolicy
+                Effect: Allow
+                Action: [iam:AttachRolePolicy, iam:DetachRolePolicy]
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ww-${Env}-*
+                Condition:
+                  ArnEquals:
+                    iam:PolicyARN: !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+              - Sid: PassFunctionRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/ww-${Env}-*
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: [lambda.amazonaws.com, scheduler.amazonaws.com]
+              # API Gateway creates its service-linked role with the caller's rights at an account's first API.
+              - Sid: ApiGatewayServiceLinkedRole
+                Effect: Allow
+                Action: iam:CreateServiceLinkedRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/ops.apigateway.amazonaws.com/AWSServiceRoleForAPIGateway
+                Condition:
+                  StringEquals:
+                    iam:AWSServiceName: ops.apigateway.amazonaws.com
+              # The HTTP API's ID is generated, so this is every HTTP API in the region; no REST APIs,
+              # domain names or account settings.
+              - Sid: HttpApi
+                Effect: Allow
+                Action: [apigateway:GET, apigateway:POST, apigateway:PUT, apigateway:PATCH, apigateway:DELETE]
                 Resource:
-                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/dev/GPU_IMAGE
-                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/ww/prod/GPU_IMAGE
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/apis/*
+                  - !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}::/tags/*
+              # SAM names the schedule after its logical ID (ApiFunctionTick), not ww-<Env>.
+              - Sid: Tick
+                Effect: Allow
+                Action: [scheduler:CreateSchedule, scheduler:GetSchedule, scheduler:UpdateSchedule, scheduler:DeleteSchedule]
+                Resource: !Sub arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/default/*
+              # The bucket's settings only: no object ARN, so no read or write of the media, and no
+              # DeleteBucket (the template retains it). The name matches AWS_BUCKET_<ENV> in GitHub.
+              - Sid: MediaBucket
+                Effect: Allow
+                Action: [s3:CreateBucket, s3:ListBucket, s3:Get*, s3:ListTagsForResource, s3:PutBucketOwnershipControls, s3:PutBucketPublicAccessBlock, s3:PutEncryptionConfiguration, s3:PutBucketCORS, s3:PutLifecycleConfiguration, s3:PutBucketTagging, s3:TagResource, s3:UntagResource]
+                Resource: !Sub arn:${AWS::Partition}:s3:::wildlifewatcher-${Env}-media
+              - Sid: DeadLetterQueue
+                Effect: Allow
+                Action: [sqs:CreateQueue, sqs:DeleteQueue, sqs:GetQueueUrl, sqs:GetQueueAttributes, sqs:SetQueueAttributes, sqs:ListQueueTags, sqs:TagQueue, sqs:UntagQueue]
+                Resource: !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${AWS::AccountId}:ww-${Env}-*
+              - Sid: AlarmTopic
+                Effect: Allow
+                Action: [sns:CreateTopic, sns:DeleteTopic, sns:GetTopicAttributes, sns:SetTopicAttributes, sns:Subscribe, sns:Unsubscribe, sns:ListSubscriptionsByTopic, sns:GetDataProtectionPolicy, sns:TagResource, sns:UntagResource, sns:ListTagsForResource]
+                Resource: !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:ww-${Env}-*
+              - Sid: Alarms
+                Effect: Allow
+                Action: [cloudwatch:PutMetricAlarm, cloudwatch:DeleteAlarms, cloudwatch:TagResource, cloudwatch:UntagResource, cloudwatch:ListTagsForResource]
+                Resource: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${AWS::AccountId}:alarm:ww-${Env}-*
+              - Sid: LogGroups
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:DeleteLogGroup, logs:PutRetentionPolicy, logs:DeleteRetentionPolicy, logs:GetDataProtectionPolicy, logs:TagResource, logs:UntagResource, logs:ListTagsForResource]
+                Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/ww-${Env}-*
 
 Outputs:
   RepositoryUri:

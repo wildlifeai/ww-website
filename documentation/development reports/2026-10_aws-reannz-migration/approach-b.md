@@ -271,7 +271,7 @@ B submits at most one job per 30-minute tick per environment, and only when the 
 | One pipeline in two runtimes (Apptainer GPU image, Lambda image) joined by a results contract; the parity test and `inference_contract` check are the guard | Redis twice, ARQ, KEDA and its `42P05` and empty-query gotchas, the dual queue, `pg-conn` | `api_jobs` as one jsonb table for status, locks and now leases, read through unindexed `job_data->>` keys (a ww-backend topic for later) |
 | Five lease endpoints and a token to rotate | API-process background jobs that die with an API restart | Training on Google Cloud Run in Singapore; it belongs in a Slurm H100 job like Spyfish's `train_job.sl` |
 | Lambda glue: events router, SSM bootstrap, flush middleware, LWA settings | The browser to API to Blob to Drive double transfer, and the Blob metadata underscore stripping | slowapi limits per Lambda environment, so a key's per-minute limit is approximate |
-| A login-node crontab under one person's REANNZ account | Drive as archive and its service account shared by dev and prod | `clustering/analyze` still multipart, so capped at the Lambda payload limit |
+| A login-node crontab under one person's REANNZ account | Drive as archive and its service account shared by dev and prod | `clustering/analyze` still multipart, so capped at the Lambda payload limit (the route was retired on 2026-11-22, #453) |
 | Training as a tick-driven state machine | "Set AI flags on the ARQ worker or the pipeline no-ops": the job runs what the manifest lists | The GPU image tag published on GHCR, readable by anyone (the code is already public under GPL) |
 | | Re-embedding every crop of a deployment on each upload | |
 | | ACR's SKU floor and purge task; the always-on prod replica | |
