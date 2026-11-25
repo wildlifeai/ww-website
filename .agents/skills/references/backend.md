@@ -59,46 +59,42 @@ Responsibilities:
 * External APIs
 * Supabase
 * Azure
+* AWS: S3 (`object_store.new_s3_client`) and Lambda invoke (`lambda_invoke`)
 * Google Drive
 * Model conversion tools
 
-Never place business logic in routers.
 
-Never import FastAPI inside domain modules.
+## Async job system
 
+`enqueue_job` in `backend/app/jobs/dispatch.py` picks where a job runs and returns which path it
+took:
 
-# 7. Async Job System Rules
+* `WORKER_BACKEND=lambda` (AWS) first: a job in `BATCH_JOBS` (the GPU kinds) stays queued in
+  `api_jobs` with a `job_data.dispatch` record for a REANNZ batch to lease (`"batch"`), and every
+  other job is invoked on the `CPU_FUNCTION_NAME` function (`"lambda"`).
+* Otherwise, with `REDIS_URL` set, a job not in `IN_PROCESS_JOBS` goes to Redis and the ARQ GPU
+  worker (`"arq"`), or runs here if Redis cannot be reached.
+* Everything else runs in this process as an asyncio task (`"local"`).
 
-## Current State
-
-Job dispatch has **two paths**, chosen at runtime by `REDIS_URL` in `backend/app/jobs/dispatch.py`:
-
-```text
-REDIS_URL set             REDIS_URL empty
-Client                    Client
-  ↓                         ↓
-API                       API
-  ↓                         ↓
-Redis queue               in-process asyncio task
-  ↓                         ↓
-ARQ GPU worker            (same process)
-  ↓                         ↓
-Supabase api_jobs  ←──────────┘  (status mirrored either way)
-```
-
-Where each runs, as of 2026-10:
+Where each runs, as of 2026-11-26:
 
 * **Cloud dev**, Redis + the ARQ GPU worker are **live** (`ww-embedding-worker-dev`, serverless T4).
 * **Production** (the staging tier), the same: `ww-redis` + `ww-embedding-worker` since 26 Jul 2026,
   with the pipeline and Wildlife Brain flags on the worker.
+* **AWS `ww-dev`**, `WORKER_BACKEND=lambda`: functions `ww-dev-api` and `ww-dev-cpu`, with
+  GPU batches on the REANNZ cluster under Spyfish's `wildlife03546`. No site points at it yet
+  ([cloud-infrastructure.md](../../../documentation/resources/cloud-infrastructure.md#aws)).
 * **Local**, in-process by default; the ML deps only exist in the `dev` Docker image.
 
 Rules:
 
-* **Both paths must keep working.** Never remove the in-process fallback.
-* Heavy ML (SpeciesNet, BioCLIP, DINOv3) belongs in the worker, the lean `--target api` image has no
-  ML deps, so importing torch at API module scope breaks production.
-* Feature flags gating ML must be set on the **worker**, not just the API.
+* **Every path must keep working.** Never remove the in-process fallback.
+* Heavy ML (SpeciesNet, BioCLIP, DINOv3) runs only on the ARQ worker (`--target worker`,
+  `requirements-ml.txt`) and the REANNZ batch (`--target gpu`). The Azure API image
+  (`--target api`) and the two Lambda functions (`--target lambda`) have no torch, so importing it
+  at module scope in code they load breaks them. A dependency for code the `cpu` function runs
+  goes in `requirements-lambda.txt`, which adds the CPU clustering stack (hdbscan, umap-learn,
+  scikit-learn) to `requirements.txt`.
 * The jobs in `IN_PROCESS_JOBS` (`jobs/dispatch.py`: uploads, the CamtrapDP import and export,
   manifests, model conversion and downloads, batch ingest) run in the API process on Azure whatever
   `REDIS_URL` says, so their settings belong on the API. Such a job can be cut off when the API
@@ -107,10 +103,8 @@ Rules:
   that rather than in-memory state.
 * `api_jobs` also holds the run-lock leases (`status = 'lock'`, `services/locks.py`) when there is
   no Redis. A new reader of `api_jobs` filters by status or `job_data->>kind`, never takes every row.
-* A third path is being built, off by default: `WORKER_BACKEND=lambda` leaves GPU jobs queued in
-  `api_jobs` with a `job_data.dispatch` record for the REANNZ cluster to lease, and sends the rest to
-  the CPU Lambda function. The cluster runs only the models; ingest writes the rows with the same
-  pipeline code. Contracts and status:
+* The AWS path was merged in #442 and is off by default (`WORKER_BACKEND` is `local`). The cluster
+  runs only the models; ingest writes the rows with the same pipeline code. Contracts and status:
   [2026-10_aws-reannz-migration](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md).
   A model call that bypasses `get_speciesnet_service()`, `get_bioclip_service()` or
   `get_dinov3_service()` breaks that path. A batch job's arguments are read again from its
@@ -122,6 +116,9 @@ Rules:
   `enqueue_job`, a large result goes to the object store with a link, a small one (counts,
   warnings) on the job itself (`update_job(result=...)`, read as `JobInfo.result`), and uploads
   arrive as `files_key`; a job reads an upload from the object store, never from the request.
+  Work that must stay in the request stops at a time budget and hands the rest back for the
+  caller to send again, as iNaturalist publish does (`PUBLISH_BUDGET_SECONDS`,
+  `remaining_media_ids`, `domain/inaturalist_publish.py`, #455).
   An image goes out through `domain/media_resolver.serve_media`, which turns an
   original Lambda cannot answer into a redirect; a list that grows with the photos is paged or
   capped (the cluster's `items` pages, `clusters/multi`). The routes that break this today are in
@@ -143,16 +140,9 @@ history**. Read it for *why*, never as a description of current behaviour.
 
 ## Security Invariant
 
-Treat the service-role key as backend-only infrastructure.
-
-Never:
-
-* Expose `SUPABASE_SERVICE_ROLE_KEY` to frontend code
-* Store secrets in source control
-* Use service-role access in browser code
-* Bypass authentication dependencies
-
-Frontend code must only use anonymous or authenticated user tokens.
+The rule for `SUPABASE_SERVICE_ROLE_KEY` and secrets is in
+[AGENTS.md](../../../AGENTS.md#non-negotiables). Frontend code uses only anonymous or
+authenticated user tokens.
 
 An uploaded ZIP is checked against `domain/zip_limits.py` (`check_members`, `check_size`) before
 any member is read or extracted, as the CamtrapDP import and the model upload do: the upload cap
@@ -175,23 +165,9 @@ itself with `app/authz.py` (levels and status codes:
 * Creating a project needs an active organisation role (`project_creator_org_id`).
 
 
-# 6. Feature Flag Rules
+## Feature flags
 
-Experimental or incomplete features should be gated.
-
-When adding a feature that is:
-
-* Experimental
-* Incomplete
-* Environment-specific
-* Under active development
-
-Create a feature flag in:
-
-```text
-backend/app/config.py
-```
-
-and gate registration appropriately.
-
-Do not expose unfinished functionality by default.
+The rule, and where an AI flag must be set, is in [AGENTS.md](../../../AGENTS.md#non-negotiables).
+A flag is an `FF_*` setting in `backend/app/config.py`, off by default for unfinished work, and a
+route whose flag is off answers `FEATURE_DISABLED` instead of running (the website side is in
+[frontend.md](frontend.md)).

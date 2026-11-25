@@ -198,6 +198,15 @@ RESOLVERS: dict[str, tuple[bool, Resolver]] = {
 }
 
 
+def can_resolve(file_path: str) -> bool:
+    """True when :func:`resolve_media` has a provider that reads ``file_path``.
+
+    Asks ``RESOLVERS``, so a caller that skips what cannot be read (the CamtrapDP export) keeps
+    up with a new provider. The ``supabase://`` placeholder reads nothing, so it does not count.
+    """
+    return any(file_path.startswith(prefix) for prefix, (_strip, resolver) in RESOLVERS.items() if resolver is not _resolve_supabase)
+
+
 async def resolve_media(file_path: str, size: ImageSize = "full") -> Optional[Tuple[bytes, str]]:
     """Resolve a file_path to (bytes, content_type) using the appropriate provider.
 
