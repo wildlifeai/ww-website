@@ -334,8 +334,16 @@ def test_the_camera_list_needs_a_live_deployment_in_a_live_project(monkeypatch):
     def cam(n_id, created, org=None, deleted_at=None):
         return {"id": n_id, "name": n_id[-3:], "bluetooth_id": n_id, "organisation_id": org, "deleted_at": deleted_at, "created_at": created}
 
-    def dep(n, device, project, deleted_at=None):
-        return {"id": _id(n), "name": "d", "project_id": project, "device_id": device, "deleted_at": deleted_at, "created_at": "2026-06-01"}
+    def dep(n, device, project, deleted_at=None, ended=None):
+        return {
+            "id": _id(n),
+            "name": "d",
+            "project_id": project,
+            "device_id": device,
+            "deployment_end": ended,
+            "deleted_at": deleted_at,
+            "created_at": "2026-06-01",
+        }
 
     db = FakeDB(
         {
@@ -356,7 +364,7 @@ def test_the_camera_list_needs_a_live_deployment_in_a_live_project(monkeypatch):
             "deployments": [
                 dep(131, twice, live),
                 dep(132, twice, live),
-                dep(133, lent, live),
+                dep(133, lent, live, ended="2026-06-30"),  # an ended deployment still counts
                 dep(134, lent, other),
                 dep(135, dep_deleted, live, deleted_at=GONE),
                 dep(136, in_deleted_project, gone),
