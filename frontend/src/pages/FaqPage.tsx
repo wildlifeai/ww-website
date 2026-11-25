@@ -70,13 +70,13 @@ export function FaqPage() {
             <strong>Camera AI (on the device):</strong> the camera runs a lightweight, highly
             specialised model — your project's <em>Species Brain</em> — that flags your target
             species right in the field, with no internet. Its result is saved inside each photo
-            and shows on the website as a <strong>📟 Camera AI</strong> label.
+            and shows on the website as <strong>Camera AI</strong>.
           </li>
           <li style={{ marginBottom: '0.5rem' }}>
-            <strong>Cloud AI (on the website):</strong> when you upload your media folder, a much
+            <strong>Cloud AI (on the website):</strong> after you upload your media folder, a much
             more powerful model identifies a wide variety of animals and marks empty photos as
-            blank. It acts as an assistant — human confirmation is still required during review to
-            ensure data accuracy.
+            blank, which can take from a few minutes to a few hours. It acts as an assistant: a person
+            still confirms its answers during review to ensure data accuracy.
           </li>
           <li>
             <strong>Wildlife Brain (on the website):</strong> groups visually similar animals so
@@ -87,13 +87,16 @@ export function FaqPage() {
         </ul>
       </FaqItem>
 
-      <FaqItem q="What do the 📟 Camera AI, ☁ Cloud AI and 👤 labels on a photo mean?">
-        Each result on a photo carries a small label showing where it came from:{' '}
-        <strong>📟 Camera AI</strong> — your camera decided it in the field;{' '}
-        <strong>☁ Cloud AI</strong> — the website's model decided it on upload;{' '}
-        <strong>👤 Reviewed</strong> — a person has checked it. A single photo can show more than
-        one. When they disagree, a person decides: human review always wins, then Cloud AI, then
-        Camera AI. See{' '}
+      <FaqItem q="What do the labels on a photo mean?">
+        In the photo grid, a teal badge with a chip icon means an AI labelled the photo, and a
+        green badge with a tick means a person has reviewed it. Open a photo to see where each
+        result came from: <strong>Camera AI</strong> (your camera decided it in the field), the
+        name of a Cloud AI model such as SpeciesNet (the website decided it after upload),{' '}
+        <strong>Consensus</strong> (the website's models weighed together), or the reviewer's
+        email. A single photo can have several. Its label is a person's, once someone has reviewed
+        it. Without one, a Consensus, when there is one, decides whether the photo is empty, and
+        otherwise the label is the first result the website saved. That is usually the Camera
+        AI's, because the website reads it from the photo before the Cloud AI runs. See{' '}
         <Link to="/guides/camera-ai-and-cloud-ai" style={{ color: 'var(--primary)' }}>How the AIs work together</Link>.
       </FaqItem>
 
@@ -174,9 +177,10 @@ export function FaqPage() {
       </FaqItem>
 
       <FaqItem q="What is an organisation?">
-        Every user currently belongs to a single default organisation. As we expand the platform, we will roll out a full
-        organisations feature where users can create their own organisation, manage members, and share AI models and data across
-        projects within that organisation.
+        An organisation groups projects, and its managers can upload AI models for them. Every new account joins the General
+        organisation, and you can belong to more than one: when you do, New project asks which organisation the project goes
+        in. There is no page to create an organisation yet; to set one up for your group, contact us at{' '}
+        <a href="mailto:contact@wildlife.ai" style={{ color: 'var(--primary)' }}>contact@wildlife.ai</a>.
       </FaqItem>
 
       <h3 style={{ marginTop: '2rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>Camera & Hardware</h3>
@@ -195,9 +199,11 @@ export function FaqPage() {
       </FaqItem>
 
       <FaqItem q="Does the camera support LoRaWAN?">
-        LoRaWAN support is rolling out in early access. Cameras send tiny status heartbeats (battery,
-        trigger counts) and instant detection alerts over LoRaWAN — never photos, which stay on the SD card
-        until you collect them or sync with the mobile app. See the{' '}
+        LoRaWAN support is rolling out in early access. Cameras send small check-ins (battery, trigger counts)
+        over LoRaWAN, as often as the mobile app set when you deployed them, and a short message when their AI
+        detects something. They never send photos, which stay on the SD card until you collect them or sync with
+        the mobile app. The website's Realtime page shows each camera's last check-in, battery and
+        detection counts; it does not send a notification for a detection. See the{' '}
         <Link to="/guides/lorawan-in-new-zealand" style={{ color: 'var(--primary)' }}>LoRaWAN in New Zealand guide</Link>{' '}
         for the three ways to get connected.
       </FaqItem>
@@ -259,9 +265,11 @@ export function FaqPage() {
       </FaqItem>
 
       <FaqItem q="Can I upload data from other cameras?">
-        The site currently accepts external data if it is labelled and in <a href="https://camtrap-dp.tdwg.org/" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>CamtrapDP format</a>.
-        We are actively building support for uploading unlabelled footage from other cameras — users will be able to
-        upload their images and manually add the missing metadata (location, species, timestamps) through the web interface.
+        Yes. On Upload, drop in a folder of JPEG photos from any camera, or a{' '}
+        <a href="https://camtrap-dp.tdwg.org/" target="_blank" rel="noreferrer" style={{ color: 'var(--primary)' }}>CamtrapDP</a>{' '}
+        package (.zip) from another camera-trap tool. Photos with no Wildlife Watcher deployment information are grouped
+        into capture sessions, and for each session you choose a deployment, create a new one, or skip it. See{' '}
+        <Link to="/guides/uploading-photos" style={{ color: 'var(--primary)' }}>Uploading photos from a camera</Link>.
       </FaqItem>
 
       <h3 style={{ marginTop: '2rem', marginBottom: '0.75rem', color: 'var(--primary)' }}>Account</h3>

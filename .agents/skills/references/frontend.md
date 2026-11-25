@@ -2,8 +2,6 @@
 
 Hooks, the API client, and the abstractions to reuse rather than duplicate.
 
-# 4. Frontend Architecture Rules
-
 Preferred flow:
 
 ```text
@@ -80,9 +78,7 @@ Rules:
   out once in ww-backend for the website, the app and the alerts (ww-backend#381); don't decode
   self-test bits or compare counters here. The page adds only silence, from the deployment's
   `lorawan_ping_minutes`, and words the reason codes, both in `lib/cameraState.ts` (#427).
-* React Doctor fails a PR that introduces any warning (`react-doctor.yml`, `blocking: warning`,
-  scope `changed`). Check before pushing, from `frontend/`:
-  `npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes`. Rules
-  switched off for the repo are in `frontend/doctor.config.json`. Its score is not the gate.
+* React Doctor's command and gate are in `AGENTS.md`, "Validate before committing". Rules
+  switched off for the repo are in `frontend/doctor.config.json`.
 
 Frontend should focus on presentation and user interaction rather than business logic.
