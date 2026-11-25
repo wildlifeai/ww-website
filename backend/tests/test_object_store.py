@@ -233,6 +233,33 @@ async def test_resolver_returns_none_for_a_missing_s3_original(s3):
     assert await resolve_media("s3://b/missing.jpg") is None
 
 
+@pytest.mark.parametrize(
+    ("file_path", "readable"),
+    [
+        ("s3://ww-test-media/originals/p/d/h.jpg", True),
+        ("gdrive://abc", True),
+        ("https://example.org/a.jpg", True),
+        ("http://example.org/a.jpg", True),
+        ("supabase://bucket/a.jpg", False),  # the placeholder reads nothing
+        ("media/IMG_3.JPG", False),  # imported without its file
+        ("", False),
+    ],
+)
+def test_can_resolve_follows_the_resolver_registry(file_path, readable):
+    """What the CamtrapDP export fetches: every provider resolve_media has, s3:// included (#493)."""
+    from app.domain.media_resolver import can_resolve
+
+    assert can_resolve(file_path) is readable
+
+
+async def test_the_exports_fetch_reads_an_s3_original(s3):
+    from app.domain import camtrapdp_export
+
+    s3.add_response("get_object", {"Body": _body(b"jpeg"), "ContentType": "image/jpeg"}, {"Bucket": "ww-test-media", "Key": "originals/p/d/h.jpg"})
+    assert await camtrapdp_export._fetch_original("s3://ww-test-media/originals/p/d/h.jpg") == b"jpeg"
+    s3.assert_no_pending_responses()
+
+
 async def test_image_route_redirects_an_s3_original(s3, monkeypatch):
     from app.routers import media as media_router
 
