@@ -304,15 +304,16 @@ async def test_a_job_still_in_its_debounce_is_not_pending(monkeypatch):
 
 
 @pytest.fixture
-def leasing(monkeypatch):
+def leasing(monkeypatch, s3_folders):
     """claim() with the database, the lock and the pipeline replaced."""
     from app.schemas.pipeline import PipelineStepType
 
     monkeypatch.setattr(batch_lease, "_batch_rows", lambda status: [_queued_row()])
     monkeypatch.setattr("app.jobs.definitions.build_pipeline_steps", lambda: [PipelineStepType.SPECIESNET, PipelineStepType.BIOCLIP])
     monkeypatch.setattr(settings, "FF_BIOCLIP_ENABLED", True)
+    s3_folders[DEP] = {"p"}
     media = [
-        {"id": "m-s3", "deployment_id": DEP, "file_path": "s3://ww-test-media/originals/p/d/h.jpg"},
+        {"id": "m-s3", "deployment_id": DEP, "file_path": f"s3://ww-test-media/originals/p/{DEP}/h.jpg"},
         {"id": "m-drive", "deployment_id": DEP, "file_path": "gdrive://abc"},
     ]
     monkeypatch.setattr("app.domain.pipeline.fetch_pipeline_media", lambda svc, dep, steps, **kw: media)
@@ -338,7 +339,7 @@ async def test_claim_builds_a_manifest_and_marks_the_job_processing(leasing):
     assert job["models"] == {"speciesnet": True, "bioclip": True}
     assert job["config"]["confidence_threshold"] == 0.2 and "bioclip_rank" in job["config"]
     s3_item, drive_item = job["items"]
-    assert s3_item["url"].startswith("https://s3/ww-test-media/originals/p/d/h.jpg")
+    assert s3_item["url"].startswith(f"https://s3/ww-test-media/originals/p/{DEP}/h.jpg")
     # Never a raw user-writable URL: everything not in S3 goes through the API's resolver.
     assert drive_item == {"media_id": "m-drive", "deployment_id": DEP, "path": f"/api/worker/lease/{lease_id}/media/m-drive"}
     assert "items_total" not in job  # a cluster that does not ask for pages gets today's manifest
@@ -437,7 +438,7 @@ async def test_embed_leases_hand_out_public_crops_and_proxy_the_rest(monkeypatch
     monkeypatch.setattr("app.domain.wildlife_brain._fetch_crops", AsyncMock(return_value=crops))
     work = await batch_lease._embed_work({"name": "embed_deployment_job", "args": [DEP, None]})
     assert work["models"] == {"dinov3": settings.EMBEDDING_DEFAULT_MODEL}
-    items = batch_lease._items("L1", "embed", work["sources"])
+    items = await batch_lease._items("L1", "embed", work["sources"])
     assert items[0]["url"].endswith("/c1.jpg")
     assert items[1] == {"media_id": "m2", "deployment_id": DEP, "path": "/api/worker/lease/L1/media/m2?crop=1"}
 

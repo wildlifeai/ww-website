@@ -75,6 +75,27 @@ def _clear_memory_cache():
 
 
 @pytest.fixture(autouse=True)
+def _no_original_folder_cache(monkeypatch):
+    """Each test reads a deployment's projects afresh: ``media_resolver`` keeps them a minute."""
+    from app.domain import media_resolver
+
+    monkeypatch.setattr(media_resolver, "_folders_cache", {})
+
+
+@pytest.fixture
+def s3_folders(monkeypatch):
+    """``S3_BUCKET`` is ww-test-media, and the dict returned maps a deployment id to the projects
+    whose ``originals/<project>/<deployment>/`` folder holds its originals."""
+    from app.config import settings
+    from app.domain import media_resolver
+
+    projects: dict[str, set[str]] = {}
+    monkeypatch.setattr(settings, "S3_BUCKET", "ww-test-media")
+    monkeypatch.setattr(media_resolver, "_read_projects", lambda ids: {d: frozenset(projects.get(d, ())) for d in ids})
+    return projects
+
+
+@pytest.fixture(autouse=True)
 def _no_cross_process_locks(monkeypatch):
     """Keep ``services.locks`` in-process: no Redis or Supabase runs in tests.
 

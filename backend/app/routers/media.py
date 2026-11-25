@@ -18,7 +18,7 @@ from app.authz import WRITE_REFUSED, require_deployment_access, require_media_ac
 from app.config import settings
 from app.dependencies import get_current_user, get_user_client, get_verified_user, require_not_demo
 from app.domain.media_registry import resolve_url, with_resolved_urls
-from app.domain.media_resolver import serve_media
+from app.domain.media_resolver import MediaRef, serve_media
 from app.domain.pipeline import PipelineBusyError
 from app.domain.soft_delete import now_iso, restore_media_as_user, soft_delete_media_as_user
 from app.jobs.pipeline_run import start_selected_run
@@ -58,7 +58,7 @@ async def get_media_image(
     """
     client = supabase_client.create_anon_client()
 
-    row = row_of(client.table("media").select("file_path").eq("id", media_id).maybe_single().execute())
+    row = row_of(client.table("media").select("deployment_id, file_path").eq("id", media_id).maybe_single().execute())
 
     if not row:
         raise HTTPException(status_code=404, detail="Media record not found")
@@ -67,7 +67,7 @@ async def get_media_image(
 
     # On S3 an original in the bucket, or one too large for Lambda's answer, goes to the
     # browser on a short presigned URL, so the API never proxies (or size-limits) the bytes.
-    served = await serve_media(file_path, size=size)
+    served = await serve_media(file_path, size=size, media=MediaRef(media_id, str(row.get("deployment_id") or "")))
     if served and served.url:
         return RedirectResponse(served.url, status_code=307, headers={"Cache-Control": "private, max-age=60"})
     if not served:

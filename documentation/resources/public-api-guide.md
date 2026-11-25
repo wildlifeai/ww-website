@@ -39,9 +39,11 @@ curl -s -H "X-API-Key: $WW_KEY" "$WW_API/api/v1/deployments"
 
 - **Deployments** in the organisation's projects. Deleted deployments, and those of a deleted
   project, are left out.
-- **Devices**: the cameras with a deployment, open or ended, in one of the organisation's
-  projects. Cameras belong to no organisation, so a camera lent to another organisation's
-  project is in both lists. Deleted cameras are left out.
+- **Devices**: the cameras deployed in the organisation's projects, meaning every camera with at
+  least one deployment, open or ended and not deleted, in a project of the organisation. It is
+  the project rule telemetry follows. Cameras belong to no organisation, so a camera lent to
+  another organisation's project is in both lists. Deleted cameras, and deployments in a deleted
+  project, are left out.
 - **Telemetry**: the LoRaWAN messages a camera sent while deployed in one of the organisation's
   projects. A camera lent to another organisation's project sends that organisation's messages.
   Each message has the values it carried, and null for the rest: the camera can send its battery

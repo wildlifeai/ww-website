@@ -1,6 +1,10 @@
 # Analysis — Dual Camera (HM0360 night / Raspberry Pi color day) + BMP/JPEG dual-write
 
-> **Status:** 🔧 Active spec — current engineering hand-off; kept current until shipped.
+> **Status:** 📋 Analysis, not scheduled (2026-11-26). The WW500 took the one-camera-per-board route:
+> a Raspberry Pi (RP3) or an HM0360 variant, both firmware images in the A/B slots, which Prepare SD
+> card packs (`backend/app/domain/manifest.py`, `_fetch_himax_firmware_pair`). Runtime day/night
+> switching between two sensors is not built; it is the firmware's to decide, and the website needs
+> nothing for it.
 
 **Question:** can we use a Raspberry Pi camera as the **main** sensor (better, colour, daytime) and
 alternate with the **HM0360** (mono, IR, night) by day/night? And how does that interact with the

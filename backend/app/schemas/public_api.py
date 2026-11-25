@@ -55,7 +55,7 @@ class ApiKeyInfo(BaseModel):
 
 
 class DeviceOut(BaseModel):
-    """A camera with a deployment, open or ended, in one of the organisation's projects.
+    """A camera with at least one deployment, open or ended and not deleted, in a project of the organisation.
 
     Cameras belong to no organisation, so a camera lent to another organisation's project is
     in both organisations' lists.

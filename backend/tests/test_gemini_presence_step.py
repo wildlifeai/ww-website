@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 from PIL import Image
 
 from app.config import settings
+from app.domain.media_resolver import MediaRef
 from app.domain.pipeline import GeminiPresenceStep, build_gemini_presence_observation, chunk_bursts
 from app.jobs.definitions import build_pipeline_steps
 from app.schemas.pipeline import PipelineStepType
@@ -174,8 +175,10 @@ async def test_step_writes_one_row_per_frame_and_skips_already_labelled(monkeypa
     monkeypatch.setattr(settings, "GEMINI_PRESENCE_VARIANT", "single")
     inserted: list[list[dict]] = []
     monkeypatch.setattr("app.domain.pipeline.create_service_client", lambda: _fake_svc({"m2"}, inserted))
+    rows_read = []
 
-    async def fake_resolve(path, size="full"):
+    async def fake_resolve(path, size="full", media=None):
+        rows_read.append(media)
         return (_jpeg(), "image/jpeg")
 
     monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)
@@ -192,12 +195,13 @@ async def test_step_writes_one_row_per_frame_and_skips_already_labelled(monkeypa
     monkeypatch.setattr(gp, "presence", fake_presence)
 
     media = [
-        {"id": "m1", "file_path": "azure://a", "timestamp": "2026-09-26T00:00:00+00:00"},
-        {"id": "m2", "file_path": "azure://b", "timestamp": "2026-09-26T00:00:01+00:00"},  # already has a Gemini row
-        {"id": "m3", "file_path": "azure://c", "timestamp": "2026-09-26T00:00:02+00:00"},
+        {"id": "m1", "deployment_id": "dep1", "file_path": "azure://a", "timestamp": "2026-09-26T00:00:00+00:00"},
+        {"id": "m2", "deployment_id": "dep1", "file_path": "azure://b", "timestamp": "2026-09-26T00:00:01+00:00"},  # already has a Gemini row
+        {"id": "m3", "deployment_id": "dep1", "file_path": "azure://c", "timestamp": "2026-09-26T00:00:02+00:00"},
     ]
     result = await GeminiPresenceStep().run(media, "dep1", {"confidence_threshold": 0.2})
 
+    assert rows_read == [MediaRef("m1", "dep1"), MediaRef("m3", "dep1")]  # each frame read as part of its row
     assert called == [1, 1]  # m2 skipped (idempotent), one call per frame
     assert versions == ["v1", "v1"]  # production asks the v1 prompt unless the run's config says otherwise
     rows = [r for batch in inserted for r in batch]
@@ -218,7 +222,7 @@ async def test_step_contact_sheet_groups_a_burst_into_one_call(monkeypatch):
     inserted: list[list[dict]] = []
     monkeypatch.setattr("app.domain.pipeline.create_service_client", lambda: _fake_svc(set(), inserted))
 
-    async def fake_resolve(path, size="full"):
+    async def fake_resolve(path, size="full", media=None):
         return (_jpeg(), "image/jpeg")
 
     monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)
@@ -264,7 +268,7 @@ async def test_step_counts_a_failed_call_as_error_and_keeps_going(monkeypatch):
     inserted: list[list[dict]] = []
     monkeypatch.setattr("app.domain.pipeline.create_service_client", lambda: _fake_svc(set(), inserted))
 
-    async def fake_resolve(path, size="full"):
+    async def fake_resolve(path, size="full", media=None):
         return (_jpeg(), "image/jpeg")
 
     monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)

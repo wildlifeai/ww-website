@@ -15,7 +15,7 @@ A column the table does not have fails the test, so a query naming a column that
 ww-backend's schema is caught here and not in production. ``COLUMNS`` lists the columns of
 each table the API reads, from ww-backend dev's supabase/schema.sql (10 Oct 2026; the cluster
 and observation provenance columns 25 Oct 2026; ``embedding_runs``, observation_events and
-annotation_runs 22 Nov 2026).
+annotation_runs 22 Nov 2026; deployment_moves 26 Nov 2026).
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ COLUMNS = {
         "created_at",
     },
     "deployment_statuses": {"id", "value"},
+    "deployment_moves": {"id", "deployment_id", "from_project_id", "to_project_id", "moved_by", "moved_at"},
     "devices": {"id", "name", "bluetooth_id", "device_eui", "organisation_id", "deleted_at", "created_at"},
     "media": {"id", "deployment_id", "file_path", "timestamp", "deleted_at", "created_at"},
     "observations": {

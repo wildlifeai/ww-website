@@ -1,6 +1,9 @@
 # Spec — Per-Organisation Storage Quota (`organisation_usage`)
 
-> **Status:** 🔧 Active spec — current engineering hand-off; ww-backend (schema) + ww-website (enforce).
+> **Status:** 📋 Proposal, not scheduled (2026-11-26): nothing built since July 2026, and no issue on
+> either side; the ww-backend half is item 8 of the [schema hand-off](ww-backend-schema-handoff.md).
+> ww-backend (schema) + ww-website (enforce). It assumes Drive originals; on the AWS path the
+> originals are in S3 ([2026-10_aws-reannz-migration](2026-10_aws-reannz-migration/README.md)).
 
 **Goal:** cap how much image data an organisation can store, to prevent abuse and back the
 "free for conservation, paid tier for large-scale" model in the FAQ. The per-request upload cap is

@@ -1,6 +1,8 @@
 # Report — Schema & seed items for the `ww-backend` team
 
-> **Status:** 📋 Active hand-off — raised 2026-07-28 from a full audit of `ww-website/documentation`.
+> **Status:** 📋 Open hand-off, checked 2026-11-26 against ww-backend `dev` and `main`: items 3, 4 and
+> 8 still hold and are not yet filed as ww-backend issues, which the board's rule 1 requires; item 1
+> was wrong (the tables exist) and item 7 is done. Raised 2026-07-28 from a full audit of `ww-website/documentation`.
 > **Audience:** `ww-backend` maintainers (schema, RLS/GRANTs, seeds).
 > **Nothing here needs a ww-website change** unless noted; the website-side doc fixes are already done.
 
@@ -10,6 +12,10 @@ line references are to `ww-backend` unless prefixed `ww-website/`.
 ---
 
 ## 1. iNaturalist tables are declared but were never migrated — the feature cannot work
+
+**Wrong, corrected 2026-11-26.** The three tables are in ww-backend's squashed baseline,
+`supabase/migrations/20260610030000_squashed_baseline.sql`, so they exist wherever it ran; dev has
+them (checked 25 Oct 2026). Nothing to do. The finding as raised:
 
 **The finding.** Three tables exist under `supabase/schemas/`:
 
@@ -155,6 +161,10 @@ Two notes:
   schema off the critical path. Full sequence:
   [dual-ai-production-rollout.md §7](../resources/dual-ai-production-rollout.md).
 
+**Done, checked 2026-11-26:** `20260710084653_dual_ai_v0.sql` is on ww-backend `main`, and the
+firmware fix was not a gate after all: `USE_PERCENTAGE` is on in the firmware's `main` since
+2026-07-08 (Seeed commit `fb66bafd`).
+
 ---
 
 ## 8. Schema work two `ww-website` specs are waiting on
@@ -201,3 +211,5 @@ touch you:
   corrected. **Please confirm** that's the right characterisation — it came from that doc's own header.
 - The `ww-backend` repo URL was inconsistent across website docs (`ww-backend` vs
   `wildlife-watcher-backend`); all now use `wildlife-watcher-backend`. Tell us if that's the wrong one.
+  (2026-11-26: the repo has since been renamed `ww-backend`, and the website docs use that name.)
+  (2026-11-26: the repo has since been renamed `ww-backend`, and the website docs use that name.)

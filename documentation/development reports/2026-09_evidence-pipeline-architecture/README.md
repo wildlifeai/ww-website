@@ -6,7 +6,7 @@
 > `media_evidence`, prompt v2, burst rules. The detector false-negative analysis is sections 1 to 5
 > of [2026-09_false-negatives-and-vlm-audit](../2026-09_false-negatives-and-vlm-audit/README.md);
 > the Gemini experiment is section 6 of the same report (lands with #155). Google Cloud rates are in
-> [2026-09_gcp-pilot-and-migration](../2026-09_gcp-pilot-and-migration/README.md) (lands with
+> [2026-09_gcp-pilot-and-migration](../_archive/2026-09_gcp-pilot-and-migration/README.md) (lands with
 > [#157](https://github.com/wildlifeai/ww-website/pull/157)). Schema items are proposals to
 > ww-backend, never migrations here.
 
@@ -67,7 +67,7 @@ frames from the SD card, one burst per trigger
 
 | Layer | Exists today | Rule |
 |---|---|---|
-| L1 | `domain/media_registry.py::group_bursts` (10 s, motion ROI only); `domain/clustering.py::laplacian_variance_sharpness`; `domain/exif.py::parse_maker_note_fields` | Poor quality lowers trust in a blank, never asserts an animal |
+| L1 | `domain/media_registry.py::group_bursts` (10 s, motion ROI only); `laplacian_variance_sharpness` (was in `domain/clustering.py`, deleted with image clustering, #453, PR #472; #164 needs it again); `domain/exif.py::parse_maker_note_fields` | Poor quality lowers trust in a blank, never asserts an animal |
 | L2 | `domain/pipeline.py::build_speciesnet_observations`; `domain/edge_reflection.py::build_edge_observations` | Each source writes its own row; neither is final |
 | L3 | `domain/motion_roi.py::compute_motion_roi_per_frame`; `domain/active_learning.py::combine_al_score` | No model calls |
 | L4 | `domain/pipeline.py::GeminiPresenceStep`*, `EvidenceFusionStep`* | Only the consensus row carries the verdict |
@@ -379,7 +379,7 @@ USD. Unknown stays unknown.
 | Gemini presence, Batch API | L4 | **$10.50** | estimated, published 50% discount | September report §6.3 |
 | Gemini contact sheet | L4 | unknown (7 sheets scored) | unknown | September report §6.6 |
 | SpeciesNet, BioCLIP, DINOv3 on the Azure T4 | L2, L3, L5 | unknown: 1 to 2 s per image, T4 per-second rate not recorded | unknown | [cloud-infrastructure.md](../../resources/cloud-infrastructure.md) |
-| Same on the Cloud Run L4 job | L2, L3, L5 | **$35 to $70** (1 to 2 s per image at the L4 job rate), plus cold starts per execution | estimated; L4 speed unverified | [migration report §6.2](../2026-09_gcp-pilot-and-migration/README.md#62-the-worker-cost-per-photo) |
+| Same on the Cloud Run L4 job | L2, L3, L5 | **$35 to $70** (1 to 2 s per image at the L4 job rate), plus cold starts per execution | estimated; L4 speed unverified | [migration report §6.2](../_archive/2026-09_gcp-pilot-and-migration/README.md#62-the-worker-cost-per-photo) |
 | Media resolve from Drive | L1 | unknown | unknown | |
 | Burst grouping, motion, near-threshold | L3 | negligible, not measured (NumPy at 320x240, no extra download) | estimated | `domain/motion_roi.py` |
 | Edge presence | L2 | $0 (parsed from EXIF at upload) | fact | `domain/exif.py` |
@@ -516,7 +516,8 @@ self-hosted VLM; no box fusion, species on the consensus row, DINO attention, qu
 classifier or learned classifier in this iteration; no hand-tuning beyond the v1 guesses; no
 change to `events.py`; no `observations` schema change from this repo.
 
-Tracking:
+Tracking. State on 2026-11-26: #163, #170, #171, ww-backend#208 (the table is ww-backend's
+`47b_media_evidence.sql`) and ww-backend#209 are closed; #164 to #169 and Seeed#242 are open.
 
 | # | Issue | Acceptance criterion |
 |---|---|---|

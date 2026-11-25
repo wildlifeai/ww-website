@@ -295,7 +295,10 @@ class Settings(BaseSettings):
         "gdrive",
         description="Where the upload job archives originals: gdrive (today, GOOGLE_DRIVE_*) or s3 (S3_BUCKET, originals/ prefix, s3:// paths)",
     )
-    S3_BUCKET: str = Field("", description="The environment's bucket for OBJECT_STORE_BACKEND=s3 and ARCHIVE_BACKEND=s3")
+    S3_BUCKET: str = Field(
+        "",
+        description="The environment's bucket for OBJECT_STORE_BACKEND=s3 and ARCHIVE_BACKEND=s3, and the only bucket s3:// originals are read from",
+    )
     S3_REGION: str = Field("", description="Region of S3_BUCKET; empty = the SDK default (AWS_REGION on Lambda)")
     S3_PRESIGN_GET_SECONDS: int = Field(300, ge=30, le=3600, description="Lifetime of a presigned GET handed to a browser or the cluster")
     EXPORT_LINK_SECRET: str = Field(

@@ -213,7 +213,7 @@ async def test_run_skips_photos_with_a_live_human_verdict(monkeypatch):
 def _speciesnet(monkeypatch, db, during_predict=None):
     """Wire the real SpeciesNetStep to the fake database, a fake resolver and a fake model."""
 
-    async def resolve(path, size="full"):
+    async def resolve(path, size="full", media=None):
         return b"jpeg", "image/jpeg"
 
     class _Model:

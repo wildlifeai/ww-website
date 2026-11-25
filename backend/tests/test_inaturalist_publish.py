@@ -6,6 +6,7 @@ import asyncio
 from unittest.mock import MagicMock
 
 from app.domain import inaturalist_publish as pub
+from app.domain.media_resolver import MediaRef
 
 
 def _media(mid: str, ts: str | None) -> dict:
@@ -232,7 +233,7 @@ def _photo(mid: str, ts: str) -> dict:
 
 def _fake_inat(monkeypatch, db: _Db, seconds_per_photo: float) -> dict:
     """iNaturalist, the photo store and a clock that moves on with each photo upload."""
-    calls: dict = {"created": [], "uploaded": [], "now": 0.0}
+    calls: dict = {"created": [], "uploaded": [], "now": 0.0, "rows_read": []}
 
     async def get_user_token(_user_id):
         return {"api_token": "jwt"}
@@ -241,7 +242,8 @@ def _fake_inat(monkeypatch, db: _Db, seconds_per_photo: float) -> dict:
         calls["created"].append(kwargs["species_guess"])
         return {"id": 100 + len(calls["created"]), "uuid": None}
 
-    async def resolve_media(file_path, size="full"):
+    async def resolve_media(file_path, size="full", media=None):
+        calls["rows_read"].append(media)
         return b"jpeg", "image/jpeg"
 
     async def upload_observation_photo(**kwargs):
@@ -286,6 +288,7 @@ async def test_a_long_publish_hands_back_the_rest_and_carries_on_in_the_same_obs
     assert calls["created"] == ["Rattus rattus", "Rattus rattus"]
     assert calls["uploaded"] == [(101, "a1"), (101, "a2"), (101, "a3"), (102, "b1")]
     assert [link["inat_observation_id"] for link in db.links] == ["row-1", "row-1", "row-1", "row-2"]
+    assert calls["rows_read"] == [MediaRef(m, "dep-1") for m in ("a1", "a2", "a3", "b1")]  # each photo read as part of its row
 
 
 async def test_a_publish_within_its_budget_hands_nothing_back(monkeypatch):
@@ -322,7 +325,7 @@ async def test_a_failed_photo_is_not_handed_back(monkeypatch):
     db = _Db(media, [_obs(m["id"], "animal", "Rattus rattus", "ai", T0) for m in media])
     calls = _fake_inat(monkeypatch, db, seconds_per_photo=1)
 
-    async def missing_first(file_path, size="full"):
+    async def missing_first(file_path, size="full", media=None):
         return None if file_path == "a1.jpg" else (b"jpeg", "image/jpeg")
 
     monkeypatch.setattr(pub, "resolve_media", missing_first)

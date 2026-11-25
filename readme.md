@@ -30,9 +30,9 @@ CamtrapDP / Darwin Core datasets.
 Most work in this repo now happens with an agent in the loop, so the prompts below are part of
 the documentation rather than a novelty. Each section has a few worth starting from.
 
-Point your agent at [`AGENTS.md`](./AGENTS.md) first. It is the quickstart, and it links to
-[`.agents/skills/SKILL.md`](./.agents/skills/SKILL.md), which carries the rules that apply to
-any change and a map to six reference files: the database and cross-repo boundaries, backend,
+Point your agent at [`AGENTS.md`](./AGENTS.md) first. It is the quickstart and carries the rules
+that apply to any change, and it links to [`.agents/skills/SKILL.md`](./.agents/skills/SKILL.md),
+the map to six reference files: the database and cross-repo boundaries, backend,
 frontend, environment and files, gotchas, and documentation. An agent that has read those will
 not try to add a column from this repo, or wonder why the AI pipeline silently no-ops.
 
@@ -51,13 +51,13 @@ Two house rules an agent must follow here:
 ## Tech Stack
 
 - **Frontend**: React 19 + TypeScript + Vite 8, React Router 7, TanStack Query 5
-- **Backend**: FastAPI (Python 3.11+), async in-process job runner (ARQ-ready)
+- **Backend**: FastAPI (Python 3.11+); async jobs on an ARQ GPU worker, in-process locally
 - **Database / Auth / Storage**: Supabase (PostgreSQL + RLS, Auth, Storage)
 - **AI**: SpeciesNet ensemble (detector + species classifier); DINOv3 "Wildlife Brain" embeddings → HDBSCAN clustering → active-learning review
 - **Charts / Maps**: Vega-Lite (`vega-embed`), Leaflet (`react-leaflet`)
-- **Hosting**: Cloudflare Pages (frontend) + Azure Container Apps (backend)
+- **Hosting**: Cloudflare Pages (frontend) + Azure Container Apps (backend); an AWS stack (Lambda, S3, GPU batches on the REANNZ cluster) is built behind settings and no site uses it yet
 - **External services**: Google Drive (image archive), Azure Blob (temp buffer), iNaturalist, Sentry (DINOv3 embedding vectors live in Supabase via **pgvector**)
-- **Schema owner**: the database schema is owned by the [`ww-backend`](https://github.com/wildlifeai/wildlife-watcher-backend) repo (see [Database Migrations](#database-migrations))
+- **Schema owner**: the database schema is owned by the [`ww-backend`](https://github.com/wildlifeai/ww-backend) repo (see [Database Migrations](#database-migrations))
 
 > For the complete dependency reference with versions and rationale, see the
 > [Technology Stack Guide](./documentation/onboarding/01-TECHNOLOGY-STACK.md).
@@ -71,7 +71,7 @@ and production, only the instances and scale differ (see the
 ```
                             ┌──────────────────────────┐
           Browser  ───────▶ │  Cloudflare Pages         │   static React/Vite bundle
-                            │  (frontend, CDN, DNS)     │   + per-branch previews
+                            │  (frontend, CDN, DNS)     │   + a dev preview build
                             └──────────────────────────┘
               │                              │
               │ direct reads + observation   │ heavy / privileged work
@@ -80,7 +80,7 @@ and production, only the instances and scale differ (see the
    ┌────────────────────┐        ┌──────────────────────────────┐
    │  Supabase          │◀──────▶│  FastAPI backend             │
    │  • Postgres + RLS  │ service│  (Azure Container Apps + ACR)│
-   │  • Auth (JWT)      │  role  │  • in-process asyncio jobs   │
+   │  • Auth (JWT)      │  role  │  • jobs: ARQ + GPU worker    │
    │  • Storage:        │        │  • EXIF, AI pipeline,        │
    │    media-renditions│        │    model convert             │
    │    (public bucket) │        └──────────────────────────────┘
@@ -91,9 +91,9 @@ and production, only the instances and scale differ (see the
                           │ Azure Blob  │ │ Google   │ │ pgvector       │
                           │ (TEMP buffer│ │ Drive    │ │ (DINOv3 vectors│
                           │  during     │ │ (PERMANENT│ │  in Supabase)  │
-                          │  upload;    │ │  original │ │  ⚠ code still  │
-                          │  deleted    │ │  archive) │ │  on local      │
-                          │  after)     │ │           │ │  Qdrant        │
+                          │  upload;    │ │  original │ │                │
+                          │  deleted    │ │  archive) │ │                │
+                          │  after)     │ │           │ │                │
                           └─────────────┘ └──────────┘ └────────────────┘
 
    iNaturalist ──▶ taxa autocomplete + lineage, observation publish + community-ID sync
@@ -107,21 +107,20 @@ and production, only the instances and scale differ (see the
 2. Backend parses EXIF, matches the deployment, **buffers bytes to Azure Blob** (temporary), enqueues a job.
 3. Job downloads from the buffer → **uploads originals to Google Drive** (content-hash dedup) → **inserts `media` rows in Supabase** (`file_path = gdrive://…`).
 4. Thumbnails/previews are generated and stored in the **public Supabase `media-renditions` bucket**, that's what the grid displays (Drive is never on the hot path).
-5. The **AI pipeline** auto-runs (SpeciesNet → crop → classify), writing `observations` to Supabase; DINOv3 embeddings go to **Supabase pgvector** (the code still writes them to a local Qdrant container, being migrated out).
+5. The **AI pipeline** auto-runs (SpeciesNet → crop → classify), writing `observations` to Supabase; DINOv3 embeddings go to **Supabase pgvector**.
 6. **Azure blobs are deleted**, they're purely transient; Drive is the archive, Supabase holds the rows + renditions.
 
 The browser reads observations **directly from Supabase** (RLS-scoped by the user's JWT) and only calls the **Azure backend** for privileged/heavy work. **iNaturalist** is contacted when reviewers publish observations or look up taxa.
 
-> **Cloud gap:** the vector store is **pgvector in Supabase**, but the code still writes vectors to a
-> local `docker-compose` **Qdrant** container that isn't provisioned in cloud, so the Wildlife Brain
-> (embeddings → clustering → similarity) is local-only until the pgvector migration lands. See the
-> [Deployment Guide → Vector Store](./documentation/resources/deployment-guide.md#vector-store--pgvector-supabase).
+> **AWS:** the same flow is built behind settings for AWS, with S3 in place of Azure Blob and Drive,
+> and Lambda and GPU batches on the REANNZ cluster in place of the ARQ worker. No site uses it yet:
+> [settings](./documentation/resources/deployment-guide.md#aws-and-the-reannz-batch).
 
 ## Prerequisites
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| **Node.js** | 20 (LTS)+ | Frontend dev server and build |
+| **Node.js** | 22 (LTS)+ | Frontend dev server and build |
 | **Python** | 3.11+ | Backend runtime |
 | **Git** | Any | Version control |
 | **Docker** + Compose | _(optional)_ | Containerised full-stack run / deploy |
@@ -243,15 +242,10 @@ The dev API is tagged **`ww-website-api-dev`** (distinct from the base `ww-websi
 base-only `docker compose up` can't clobber the ~10 GB ML image, which was the recurring cause of
 `No module named 'speciesnet'`.
 
-**Enable the flags** in `.env` (all off by default except `FF_WILDLIFE_BRAIN_ENABLED`):
-
-| Flag | Enables |
-|------|---------|
-| `FF_ML_ENABLED` + `FF_PIPELINE_ENABLED` | the pipeline + auto-annotate after upload |
-| `FF_SPECIESNET_ENABLED` | SpeciesNet detect + classify (core observations) |
-| `FF_BIOCLIP_ENABLED` | BioCLIP secondary zero-shot classifier |
-| `FF_MEDIA_REGISTRY_ENABLED` | thumbnails / animal crops (`media_prep`) |
-| `FF_WILDLIFE_BRAIN_ENABLED` | DINOv3 embeddings / clustering (on by default; skipped without `HF_TOKEN`) |
+**Enable the flags** in `.env`: `FF_ML_ENABLED`, `FF_PIPELINE_ENABLED`, `FF_SPECIESNET_ENABLED`,
+`FF_BIOCLIP_ENABLED` and `FF_MEDIA_REGISTRY_ENABLED`, all off by default; `FF_WILDLIFE_BRAIN_ENABLED`
+is on, and skips the embed without `HF_TOKEN`. What each does:
+[the flag table](./documentation/onboarding/01-TECHNOLOGY-STACK.md#feature-flags).
 
 **Model weights download on the first inference** (SpeciesNet from Kaggle; BioCLIP + DINOv3 from
 HuggingFace), so the first run is slow then cached. For CPU dev set `EMBEDDING_DEVICE=cpu`,
@@ -269,10 +263,10 @@ HF model, put a token in `HF_TOKEN` (SpeciesNet/BioCLIP need none). Architecture
 | Backend refuses to start | A required env var is missing, `config.py` validates them at boot. Check `SUPABASE_*`. |
 | Frontend can't reach API | Set `VITE_API_BASE_URL` (defaults to `http://localhost:8000`); confirm backend is running. |
 | `permission denied for table observations` | The `authenticated` role lacks write GRANTs, apply the `ww-backend` migration. See [03-DATA-AND-SYNC.md](./documentation/onboarding/03-DATA-AND-SYNC.md). |
-| iNaturalist / pipeline endpoints 404 | They are feature-flagged off by default, see [Feature Flags](#feature-flags). |
+| iNaturalist / pipeline endpoints 404 | They are feature-flagged off by default, see [the flag table](./documentation/onboarding/01-TECHNOLOGY-STACK.md#feature-flags). |
 | `No module named 'speciesnet'` / `torch` in a job | The container is on the lean base image. Rebuild + start with **both** compose files, see [Running the AI/ML pipeline locally](#running-the-aiml-pipeline-locally). |
 | `libxcb.so.1: cannot open shared object file` during inference | OpenCV system libs missing, rebuild the **dev** image (the Dockerfile installs `libgl1`, `libxcb1`, …). |
-| Uploaded images don't appear in Annotations | The Drive credential file is mounted only by the dev compose, start with both files, or the upload job can't authenticate. |
+| Uploaded images don't appear in Media | The Drive credential file is mounted only by the dev compose, start with both files, or the upload job can't authenticate. |
 | Upload ends "✅ Pipeline Complete" but no images appear anywhere | The Azure buffer failed before any job was enqueued, check `drive_upload.status`/`error` in the `POST /api/exif/parse` response. Usually a stale `AZURE_STORAGE_CONNECTION_STRING` (the dev storage account is `wwuploadsae` since Jul 2026). Compose reads `.env` at container start, recreate the API container (both compose files) after editing it. |
 | A venv `uvicorn` on :8000 never receives requests | The Docker stack already publishes port 8000, browsers resolve `localhost` to `::1` first and reach the container, silently shadowing a venv server bound to `127.0.0.1`. Use the container, or stop it before running `uvicorn`. |
 | Vite env vars undefined | Root `.env` only; `vite.config.ts` maps `SUPABASE_URL`→`VITE_SUPABASE_URL`, etc. No `frontend/.env` needed. |
@@ -284,7 +278,7 @@ HF model, put a token in `HF_TOKEN` (SpeciesNet/BioCLIP need none). Architecture
 
 > [!CAUTION]
 > **Never make database schema changes from this repository.** All schema, RLS policies, and
-> table GRANTs are owned by the [`ww-backend`](https://github.com/wildlifeai/wildlife-watcher-backend)
+> table GRANTs are owned by the [`ww-backend`](https://github.com/wildlifeai/ww-backend)
 > repo. The web app only consumes the schema (and, for the `authenticated` role, whatever
 > table privileges `ww-backend` grants). When a write fails with `permission denied for table …`,
 > the fix is a `ww-backend` migration, see [03-DATA-AND-SYNC.md](./documentation/onboarding/03-DATA-AND-SYNC.md).
@@ -321,11 +315,11 @@ All documentation lives under [`documentation/`](./documentation), see the
 | Guide | What It Covers |
 |-------|----------------|
 | [00-GETTING-STARTED.md](./documentation/onboarding/00-GETTING-STARTED.md) | Setup, env reference, run both services, verification checklist |
-| [01-TECHNOLOGY-STACK.md](./documentation/onboarding/01-TECHNOLOGY-STACK.md) | Every dependency, version, and integration |
+| [01-TECHNOLOGY-STACK.md](./documentation/onboarding/01-TECHNOLOGY-STACK.md) | Every dependency and integration, and why |
 | [02-CODEBASE-GUIDE.md](./documentation/onboarding/02-CODEBASE-GUIDE.md) | Repo layout, frontend pages/nav/routes, backend layered architecture |
 | [03-DATA-AND-SYNC.md](./documentation/onboarding/03-DATA-AND-SYNC.md) | Supabase, RLS + GRANT model, the async job system |
 | [04-AI-PIPELINE.md](./documentation/onboarding/04-AI-PIPELINE.md) | SpeciesNet pipeline, blank handling, the DINOv3 Wildlife Brain & active learning |
-| [05-ANNOTATION-WORKFLOW.md](./documentation/onboarding/05-ANNOTATION-WORKFLOW.md) | Annotations tab, ribbon, full-screen labeling modal, review provenance |
+| [05-ANNOTATION-WORKFLOW.md](./documentation/onboarding/05-ANNOTATION-WORKFLOW.md) | Media tab, ribbon, full-screen labeling modal, review provenance |
 
 ### Reference Guides & Development Reports
 
@@ -354,12 +348,12 @@ Backend changes follow the **router → domain → service** layering (see
 
 | File | What It Covers |
 |------|----------------|
-| [AGENTS.md](./AGENTS.md) | Quickstart, the non-negotiables, and where everything lives |
-| [.agents/skills/SKILL.md](./.agents/skills/SKILL.md) | The rules that apply to any change, and which reference to read next |
+| [AGENTS.md](./AGENTS.md) | Quickstart, the rules that apply to any change (the non-negotiables), and where everything lives |
+| [.agents/skills/SKILL.md](./.agents/skills/SKILL.md) | The map to the reference files: which one to read next |
 | [references/database-and-cross-repo.md](./.agents/skills/references/database-and-cross-repo.md) | What this repo does not own, and what breaks elsewhere |
 | [references/backend.md](./.agents/skills/references/backend.md) | Layering, async jobs, secrets, feature flags |
 | [references/frontend.md](./.agents/skills/references/frontend.md) | Hooks and the API client abstractions to reuse |
-| [references/environment-and-files.md](./.agents/skills/references/environment-and-files.md) | One `.env`, both compose files, LF and UTF-8 |
+| [references/environment-and-files.md](./.agents/skills/references/environment-and-files.md) | One `.env`, both compose files, LF and UTF-8, the AWS stacks (`infra/aws/`, SSM) and the REANNZ scripts (`cluster/reannz/`) |
 | [references/gotchas.md](./.agents/skills/references/gotchas.md) | Things that look like bugs in your code and are not |
 | [references/documentation.md](./.agents/skills/references/documentation.md) | Where each document lives, validation, and the commit-time check |
 | [.agents/DESIGN.md](./.agents/DESIGN.md) | The UI design system |
