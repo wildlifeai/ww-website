@@ -756,7 +756,7 @@
         "type": "object"
       },
       "DeviceOut": {
-        "description": "A camera with a deployment, open or ended, in one of the organisation's projects.\n\nCameras belong to no organisation, so a camera lent to another organisation's project is\nin both organisations' lists.",
+        "description": "A camera with at least one deployment, open or ended and not deleted, in a project of the organisation.\n\nCameras belong to no organisation, so a camera lent to another organisation's project is\nin both organisations' lists.",
         "properties": {
           "bluetooth_id": {
             "title": "Bluetooth Id",
@@ -6171,7 +6171,7 @@
     },
     "/api/v1/devices": {
       "get": {
-        "description": "The cameras deployed in the organisation's projects, newest registered first.\n\nA camera is listed when it has a deployment, open or ended, in one of the organisation's\nprojects. Cameras belong to no organisation, so a camera lent to another organisation's\nproject is in both lists. A page is at most 1,000 cameras; page with ``offset``.",
+        "description": "The cameras deployed in the organisation's projects, newest registered first.\n\nEvery camera with at least one deployment, open or ended and not deleted, in a project of\nthe organisation: the project rule telemetry follows. Cameras belong to no organisation, so\na camera lent to another organisation's project is in both lists. Deleted cameras, and\ndeployments in a deleted project, are left out. A page is at most 1,000 cameras; page with\n``offset``.",
         "operationId": "api_list_devices_api_v1_devices_get",
         "parameters": [
           {
