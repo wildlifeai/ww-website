@@ -1,6 +1,7 @@
 # Keeps GitHub Actions pins current via PRs. Workflow dependencies are pinned
-# (actions to release tags, CLIs to exact versions) so upstream releases can't
-# silently break CI; this config is how those pins get bumped deliberately.
+# (actions to release tags, or to commit SHAs in deploy-aws.yml, which holds AWS
+# deploy rights; CLIs to exact versions) so upstream releases can't silently
+# break CI; this config is how those pins get bumped deliberately.
 version: 2
 updates:
   - package-ecosystem: github-actions
