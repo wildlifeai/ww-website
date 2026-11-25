@@ -1,8 +1,8 @@
 # Report — Access-Scenario Seed Deployments (ww-backend)
 
-> **Status:** ✅ **Shipped** — seeded by `ww-backend/supabase/seeds/dev/access_test_deployments.sql`.
-> Retained as the reasoning behind those rows; the SQL in that repo is authoritative if the two ever
-> disagree. Move to `_archive/` at the next docs tidy.
+> **Status:** 🕰️ Historical snapshot, archived 2026-11-26. Shipped: seeded by
+> `ww-backend/supabase/seeds/dev/access_test_deployments.sql`, which is authoritative if the two
+> ever disagree. Kept as the reasoning behind those rows.
 
 **Audience:** whoever maintains `ww-backend/supabase/seeds`.
 **Goal:** seed the deployments that back the `sdcard/dev-sdcard/` fixtures so a fresh dev DB
@@ -68,9 +68,10 @@ existing fixtures use.
 DO $$
 BEGIN
   -- ── VALID: General org, alice owns; grant a non-admin a project role too ──
-  INSERT INTO devices (id, name, organisation_id, modified_by, bluetooth_id, device_eui)
+  -- A camera belongs to no organisation (ww-backend#346): the project decides who sees the deployment.
+  INSERT INTO devices (id, name, modified_by, bluetooth_id, device_eui)
   VALUES ('d7785fab-0000-4000-8000-000000000001', 'WW500 — valid test',
-          'b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001',
+          'a0000000-0000-0000-0000-000000000001',
           'BT_TEST_7785', 'EUI_TEST_7785') ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO projects (id, name, description, organisation_id, created_by, modified_by, is_active)
@@ -100,9 +101,9 @@ BEGIN
   -- ── NO ACCESS: org b0…003, owner a0…004; Tama gets NO role here ──
   -- MUST be b0…003, NOT b0…002: Tama is a member of both b0…001 and b0…002, so seeding this in
   -- b0…002 would silently produce a *valid* fixture and the no-access test would pass vacuously.
-  INSERT INTO devices (id, name, organisation_id, modified_by, bluetooth_id, device_eui)
+  INSERT INTO devices (id, name, modified_by, bluetooth_id, device_eui)
   VALUES ('d242025d-0000-4000-8000-000000000003', 'WW500 — no-access test',
-          'b0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000004',
+          'a0000000-0000-0000-0000-000000000004',
           'BT_TEST_2420', 'EUI_TEST_2420') ON CONFLICT (id) DO NOTHING;
 
   INSERT INTO projects (id, name, description, organisation_id, created_by, modified_by, is_active)

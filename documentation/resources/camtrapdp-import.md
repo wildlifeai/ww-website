@@ -1,8 +1,7 @@
 # CamtrapDP Import & Seeding
 
-**Version**: v1.0
 **Status**: Active (gated by `FF_CAMTRAPDP_IMPORT_ENABLED`, default on)
-**Last Updated**: June 2026
+**Last Updated**: November 2026, the import as a job (#454)
 
 ---
 
@@ -36,8 +35,9 @@ diagram runs in that job, `backend/app/jobs/camtrapdp_import.py` (#454), whose `
 counts and warnings. `parse_zip` first checks the package against the input limits in
 `backend/app/domain/zip_limits.py` (listed in the [API reference](api-reference.md#camtrapdp-import)).
 `run_ai=true` additionally runs SpeciesNet + Wildlife Brain over the image-backed imported deployments
-and sets `ai_job_id`. The importing user's **primary organisation** (first `user_roles` org
-membership) owns the new project.
+and sets `ai_job_id`. The organisation of the importing user's first active `organisation_member` or
+`organisation_manager` role owns the new project (`backend/app/authz.py`, `project_creator_org_id`);
+a user with neither gets `403` ([API reference](api-reference.md#camtrapdp-import)).
 
 ### Automated Taxa Registration
 
@@ -182,7 +182,7 @@ The CamtrapDP import domain depends on the backend database schema. Key tables a
 |---------------|-----------------|-------|
 | `deployments` | `setup_by`, `project_id`, `device_id`, `name`, `deployment_start`, `location_name` | `setup_by` is set to the importing user |
 | `devices` | `bluetooth_id` (UNIQUE, NOT NULL) | Placeholder devices use `uuid5(DNS, "imported-<organisation id>-<name>")` and no `organisation_id` (ww-backend#346) |
-| `media` | `deployment_id`, `file_name`, `file_path` | Public `http(s)` URLs are stored as-is; zip-embedded images are uploaded to Google Drive and `file_path` is patched to `gdrive://<id>` so the resolver can serve thumbnails. |
+| `media` | `deployment_id`, `file_name`, `file_path` | Public `http(s)` URLs are stored as-is; zip-embedded images are archived (Drive, or S3 under `ARCHIVE_BACKEND=s3`) and `file_path` is patched to `gdrive://<id>` or `s3://...` so the resolver can serve thumbnails. |
 | `observations` | `deployment_id`, `event_id`, `source_type`, `review_status` | `event_id` via `uuid5`; provenance mapped from `classificationMethod` — see **Annotation mode** below. |
 
 ### Annotation mode & provenance

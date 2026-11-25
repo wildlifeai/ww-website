@@ -7,9 +7,11 @@ Complete endpoint reference for the Wildlife Watcher V2 API.
 `https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io` (dev) |
 `http://localhost:8000` (local)
 
-> There is **no `api.wildlifewatcher.ai`** — the Cloudflare zone serves the frontend only. The API is
-> reached at its Azure Container Apps FQDN; confirm the current values in
-> [cloud-infrastructure](./cloud-infrastructure.md#azure).
+> There is **no `api.wildlifewatcher.ai`**: the Cloudflare zone serves the frontend only. Both sites
+> reach the API at its Azure Container Apps FQDN; confirm the current values in
+> [cloud-infrastructure](./cloud-infrastructure.md#azure). The `ww-dev` AWS stack also answers on its
+> API Gateway HTTP API (stack output `ApiUrl`, [cloud-infrastructure](./cloud-infrastructure.md#aws)),
+> which no site points at yet.
 
 **Authentication:** JWT Bearer token from Supabase Auth (required for protected endpoints).
 
@@ -28,7 +30,8 @@ A route that runs as the caller (`get_user_client`) leaves the decision to RLS; 
 > LoRaWAN uplinks do not come through this API. Network servers post to ww-backend's
 > `lorawan-ingest` edge function, see [LORAWAN_INGEST](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/LORAWAN_INGEST.md).
 
-**Response Format:** All endpoints return a standard envelope:
+**Response Format:** a route that answers with `ApiResponse` (`backend/app/schemas/common.py`)
+returns this envelope:
 
 ```json
 {
@@ -42,20 +45,16 @@ A route that runs as the caller (`get_user_client`) leaves the decision to RLS; 
 }
 ```
 
-On error:
+Errors come in three shapes, so check both the status and the body:
 
-```json
-{
-  "data": null,
-  "error": {
-    "code": "VALIDATION_ERROR",
-    "message": "Human-readable description",
-    "retryable": false,
-    "details": "Optional diagnostic info"
-  },
-  "meta": { "request_id": "..." }
-}
-```
+- **An `ApiError` in the envelope, with HTTP 200:** `data` null and `error` set, as
+  `{ "code", "message", "retryable", "details" }`. `FEATURE_DISABLED`, `PIPELINE_BUSY`,
+  `TOO_MANY_PHOTOS`, `DEMO_DISABLED`, `NOT_FOUND` and the other codes in the route rows arrive this way.
+- **An HTTP error** (`401`, `403`, `404`, `409`, `413`, `422`, `503`, raised as `HTTPException` or by
+  validation): FastAPI's own body, `{ "detail": ... }`, as the
+  [public API guide](public-api-guide.md) says. No handler wraps it in the envelope.
+- **An unhandled error:** `500` with `{ "error": { "code": "INTERNAL_ERROR", "message", "retryable": false } }`
+  and no `meta` (`backend/app/main.py`, `unhandled_exception_handler`).
 
 ---
 
@@ -85,9 +84,7 @@ On error:
 
 ---
 
-> Every endpoint returns the standard `ApiResponse` envelope — `{ "data": …, "meta": { "request_id": … } }`
-> on success, or `{ "error": { "code", "message" }, "meta": … }` on failure. The authoritative
-> request/response schemas are always at **`/docs`** (Swagger) / **`/openapi.json`**.
+> The authoritative request/response schemas are always at **`/docs`** (Swagger) / **`/openapi.json`**.
 
 ## System
 
@@ -140,14 +137,15 @@ the soft delete and its Undo, and the link to a GBIF dataset.
 
 ## Jobs (Async)
 
-Long-running operations (manifest, model conversion, pipeline, embedding) return a `job_id`
+Long-running operations (manifests, model conversion, the AI pipeline and *Run AI again*, embedding,
+thumbnails, the CamtrapDP import and export, the iNaturalist sync) return a `job_id`
 immediately; poll these to track progress. JWT required: a user's jobs are its own, owner-less system jobs
 are readable by any signed-in user, and an API key's jobs are read with `GET /api/v1/jobs/{job_id}`. Prefix `/api/jobs`.
 
 | Method · Path | Description |
 |---|---|
 | `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id. Each job carries `batch_wait` as below. Without `kind` it leaves out the iNaturalist sync that runs at each sign-in (`inat_sync`, `store.UNLISTED_KINDS`), which `GET /api/jobs/{job_id}` still answers |
-| `GET /api/jobs/{job_id}` | Status + `progress`, `message`, `current_phase`, ordered `events[]`, `summary`, and `result` for a job whose answer is data rather than a file (the CamtrapDP import). `batch_wait` is `{ queued_at, usual_wait_minutes }` while the job waits in the queue for the GPU batch on the REANNZ cluster (`WORKER_BACKEND=lambda`), and null once it is leased or when it runs at once (Azure). `usual_wait_minutes` is the wait the website states: `BATCH_MAX_WAIT_MINUTES` plus `BATCH_CRON_INTERVAL_MINUTES` (which must match the cluster's crontab), rounded up to whole hours, or to 15 minutes below an hour; 60 and 30 give 120, "usually within 2 hours". `gpu_batch` is true for the whole life of a batch job, which reports every few minutes rather than seconds |
+| `GET /api/jobs/{job_id}` | Status + `progress`, `message`, `current_phase`, ordered `events[]`, `summary`, and `result` for a job whose answer is data rather than a file (the CamtrapDP import). `batch_wait` is `{ queued_at, usual_wait_minutes }` while the job waits in the queue for the GPU batch on the REANNZ cluster (`WORKER_BACKEND=lambda`), and null once it is leased or when it runs at once (Azure). `usual_wait_minutes` is the wait the website states: `BATCH_MAX_WAIT_MINUTES` plus `BATCH_CRON_INTERVAL_MINUTES` (which must match the cluster's crontab), rounded up to whole hours, or to 15 minutes below an hour: the code defaults, 60 and 30, give 120, "usually within 2 hours"; the values planned with the 4-hourly crontab, 0 and 240, give "usually within 4 hours" ([settings](deployment-guide.md#aws-and-the-reannz-batch)). `gpu_batch` is true for the whole life of a batch job, which reports every few minutes rather than seconds |
 | `GET /api/jobs/{job_id}/result` | Result of a completed job (`result_url`); `409` if not yet complete |
 
 **Status values:** `queued` → `processing` → `completed` · `completed_with_errors` (some items failed —
@@ -165,11 +163,12 @@ Build a camera `MANIFEST.zip` firmware package. Async (returns a `job_id`). No a
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/manifest/generate` | Body `{ model_source, model_type?, resolution?, sscma_model_id?, org_model_id?, camera_type? }` → `{ job_id, status }` |
+| `POST /api/manifest/generate` | Body `ManifestRequest` (`backend/app/schemas/manifest.py`): `model_source` plus the fields that source needs, `camera_type`, `github_branch` (default `main`) → `{ job_id }` |
+| `GET /api/manifest/branches` | The branches of the firmware repo, `wildlifeai/Seeed_Grove_Vision_AI_Module_V2`, fetched by the API to spare the browser a CORS call. No auth |
 
-- **`model_source`:** `default` (best in DB) · `github` (+ `model_type`, `resolution`) · `sscma` (+ `sscma_model_id`) · `organisation` (+ `org_model_id`).
+- **`model_source`:** `My Project` (+ `project_id`, `himax_firmware_id`), which Prepare SD card sends ([AI Model Pipeline](./ai-model-pipeline.md), its "My Project" path) · `Pre-trained Model` (+ `model_name`, `resolution`) · `SenseCap Models` (+ `sscma_model_id`) · `My Organization Models` (+ `org_model_id`) · `No Model`. The older names `project`, `github`, `sscma`, `organisation` and `none` are still accepted. `model_id` and `model_version` (OP 14, OP 15) name the `.TFL`.
 - **GitHub models:** Person Detection `96x96`. The YOLOv8/YOLOv11 detection and pose entries are registered but blocked (the device can only run classifiers; see [AI Model Pipeline](./ai-model-pipeline.md#pre-trained-model-github-zoo)), and `GET /api/models/pretrained/catalog` omits them.
-- **`camera_type`:** `Raspberry Pi` (default) · `HM0360`.
+- **`camera_type`:** default `Grove Vision AI V2`; the per-camera settings are keyed `Raspberry Pi` and `HM0360` (`backend/app/registries/camera_configs.py`).
 
 > **Async pattern** (all job-returning endpoints): `POST …` → `{ job_id }`, then poll
 > `GET /api/jobs/{job_id}` until `completed`, then download from its `result_url`.
@@ -202,7 +201,7 @@ image-upload pipeline — see [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/exif/parse` | Form `files[]` (+ optional `paths[]`, `upload_to_drive`, `assigned_deployment_id`, `run_ai`) → per-file parsed EXIF; buffers bytes to Azure + enqueues the Drive upload job. Photos are stored only in deployments the caller can **write** to (see [Access](#access)): the others are listed in `drive_upload.blocked_deployments`, with `reason: "no_access"` when nothing was stored, and an `assigned_deployment_id` the caller cannot write to is ignored. `auto_create_deployment` needs write on `project_id`. `assigned_deployment_id` binds photos that carry no valid deployment ID; `run_ai` (default `true`) gates the post-upload AI pipeline + Wildlife Brain. Response `drive_upload` tells you whether anything was actually stored, clients **must** treat `{enabled: false}` (`reason: server_disabled` = `GOOGLE_DRIVE_ENABLED` unset, or `not_requested`) and `{status: "skipped", reason: "no_deployment_id"}` as *nothing saved* (media rows are only created by the Drive job); `{status: "error"}` = not authenticated; otherwise it carries the enqueued `job_id`. WW500 test photos (EXIF `Make` "Wildlife.ai" with no `Deployment_ID`, or the all-zero id) are never stored, even under `assigned_deployment_id`; their image entries carry `exif.test_photo: true`, and `test_photos_skipped` counts them in the response and the job summary (ww-website#287). A call takes at most 500 photos (`MAX_UPLOAD_IMAGES_PER_REQUEST`), 50 without sign-in, and 25 on AWS, where a request has 30 s; body files and `files_key` count together, before any key is read, and more answer `403 IMAGE_LIMIT_EXCEEDED` |
+| `POST /api/exif/parse` | Form `files[]` (+ optional `paths[]`, `upload_to_drive`, `assigned_deployment_id`, `run_ai`) → per-file parsed EXIF; buffers bytes in the object store (`OBJECT_STORE_BACKEND`) + enqueues the upload job, which archives the originals to Drive or S3 (`ARCHIVE_BACKEND`). Photos are stored only in deployments the caller can **write** to (see [Access](#access)): the others are listed in `drive_upload.blocked_deployments`, with `reason: "no_access"` when nothing was stored, and an `assigned_deployment_id` the caller cannot write to is ignored. `auto_create_deployment` needs write on `project_id`. `assigned_deployment_id` binds photos that carry no valid deployment ID; `run_ai` (default `true`) gates the post-upload AI pipeline + Wildlife Brain. Response `drive_upload` tells you whether anything was actually stored, clients **must** treat `{enabled: false}` (`reason: server_disabled` = nowhere to archive, `settings.archive_enabled` false: `GOOGLE_DRIVE_ENABLED` unset, or `S3_BUCKET` unset under `ARCHIVE_BACKEND=s3`; or `not_requested`) and `{status: "skipped", reason: "no_deployment_id"}` as *nothing saved* (media rows are only created by the upload job); `{status: "error"}` = not authenticated; otherwise it carries the enqueued `job_id`. WW500 test photos (EXIF `Make` "Wildlife.ai" with no `Deployment_ID`, or the all-zero id) are never stored, even under `assigned_deployment_id`; their image entries carry `exif.test_photo: true`, and `test_photos_skipped` counts them in the response and the job summary (ww-website#287). A call takes at most 500 photos (`MAX_UPLOAD_IMAGES_PER_REQUEST`), 50 without sign-in, and 25 on AWS, where a request has 30 s; body files and `files_key` count together, before any key is read, and more answer `403 IMAGE_LIMIT_EXCEEDED` |
 
 **Key extracted fields:** `deployment_id` (firmware tag `0xF200` → `UserComment` → `Custom_Data`),
 `latitude`/`longitude` (GPS DMS→decimal), `date` (Original → Create → DateTime), `Make`/`Model`,
@@ -305,7 +304,7 @@ Deployment helpers used by the upload flow and Insights. JWT required. Prefix `/
 | `POST /api/deployments/validate` | Resolve deployment ids to `valid` / `no_access` / `not_found` — the upload pre-check that drives the warning banners. Accepts full UUIDs (from EXIF `0xF200`) and 8-hex card-folder prefixes. Body `{ "deployment_ids": ["e10f7c43-…", "7785FABB", …] }` |
 | `DELETE /api/deployments/batch` | Soft-delete deployments and their media and observations, body `{ "deployment_ids": [...] }`. The database decides and cascades: each id goes through `soft_delete_deployment` as the caller, which allows the deployment's creator while a `project_member`, a `project_admin` of the project, or `ww_admin`. Returns `{ deleted_at, deployment_ids, refused_ids }`; ids the caller cannot see are skipped, and `403` when every visible id was refused. `deleted_at` is shared by the whole batch, for Undo |
 | `POST /api/deployments/batch/restore` | Undo that delete, body `{ deployment_ids, deleted_at }` (with a time zone offset, `422` otherwise). Each id goes through `restore_deployment` as the caller under the same rule, which clears exactly that `deleted_at` on the deployment and its media and observations. Returns `{ restored, refused_ids }`; unknown ids and ids with nothing deleted at that time are not counted, and `403` when nothing was restored and something was refused. `409` naming the camera when an open deployment's camera has since got another open deployment (one per camera, ww-backend #320): that deployment stays deleted, the others are restored, and the detail says how many |
-| `POST /api/deployments/fill-timezones` | Store the time zone of each listed deployment that has coordinates and none, body `{ "deployment_ids": [...] }` (UUIDs, at most 500, `422` otherwise). Any signed-in user, the demo account included: the read runs as the caller, so only deployments they can see are filled, and the write (service role) only sets an empty `timezone` from the row's own coordinates. My Data and Annotations call it for the deployments they show without a zone (#309). Returns `{ deployment_id: zone }` for the ones filled |
+| `POST /api/deployments/fill-timezones` | Store the time zone of each listed deployment that has coordinates and none, body `{ "deployment_ids": [...] }` (UUIDs, at most 500, `422` otherwise). Any signed-in user, the demo account included: the read runs as the caller, so only deployments they can see are filled, and the write (service role) only sets an empty `timezone` from the row's own coordinates. The Insights and Media pages call it for the deployments they show without a zone (#309). Returns `{ deployment_id: zone }` for the ones filled |
 | `POST /api/deployments/backfill-timezones` | System admins only (`403` otherwise, demo included). Derive `deployments.timezone` from GPS for rows missing it, across every organisation (idempotent) |
 
 ---
@@ -329,7 +328,7 @@ and the Download CamtrapDP buttons then fall back to the Edge Function's metadat
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_viewer` check decides (viewers and organisation managers export too, ww-backend #331); `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from the archive (Google Drive, or S3 on AWS) with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`) as `<job_id>.zip` (on S3, `exports/<job_id>.zip` in `S3_BUCKET`), `result_url` is a read-only link valid for 24 hours that needs no sign-in (a SAS link on Azure; on S3 the signed download route below, or a presigned GET while `EXPORT_LINK_SECRET` is unset), and a lifecycle rule deletes the ZIP 7 days after it is written. Without `AZURE_STORAGE_CONNECTION_STRING` the route answers `FEATURE_DISABLED`, as with the flag off, and the website falls back to the metadata-only package. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
+| `POST /api/exports/camtrapdp` | Start an export of one project with its original photos (#328). Body `{ project_id, deployment_ids?, date_from?, date_to? }`, the filters of ww-backend's `export-camtrap-dp`. Returns `{ job_id }`; poll `GET /api/jobs/{id}`. The job calls the function as the caller, so its `project_viewer` check decides (viewers and organisation managers export too, ww-backend #331); `404` here when the project is in another organisation. Each original goes into the ZIP at the `media/<deploymentID>/<mediaID>.<ext>` path media.csv gives it, read from the archive (Google Drive, or S3 on AWS) with three tries; one that cannot be read stays in media.csv and is named in `datapackage.json`'s description, and the job ends `completed_with_errors`. The ZIP goes to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`) as `<job_id>.zip` (on S3, `exports/<job_id>.zip` in `S3_BUCKET`), `result_url` is a read-only link valid for 24 hours that needs no sign-in (a SAS link on Azure; on S3 the signed download route below, or a presigned GET while `EXPORT_LINK_SECRET` is unset), and a lifecycle rule deletes the ZIP 7 days after it is written. Without an object store for the ZIP (`AZURE_STORAGE_CONNECTION_STRING` on `azure`, `S3_BUCKET` on `s3`; `settings.camtrapdp_export_enabled`) the route answers `FEATURE_DISABLED`, as with the flag off, and the website falls back to the metadata-only package. Refused above `CAMTRAPDP_EXPORT_MAX_BYTES` (default 4 GiB). Rate limit 5/minute |
 | `GET /api/exports/camtrapdp/{job_id}/download` | The export's `result_url` on S3 once `EXPORT_LINK_SECRET` is set (#462). No sign-in: the query `name`, `expires` (Unix seconds) and `sig` are the authorisation, `sig` being the hex HMAC-SHA256, keyed with `EXPORT_LINK_SECRET`, of the job id, `name` and `expires`. Each open answers `307` to a fresh presigned GET of `exports/<job_id>.zip` that saves as `name` and lasts `S3_PRESIGN_GET_SECONDS` (300 s), so the link works its whole 24 hours even though a presigned URL dies with the Lambda role session that signed it. `403` for an expired, altered or malformed link, with no reason; `404` on another backend or with the secret unset |
 
 ---
@@ -361,9 +360,9 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 
 | Method · Path | Description |
 |---|---|
-| `POST /api/brain/embed/{deployment_id}` | **Write** (see [Access](#access)). Embed + cluster a deployment (server mode enqueues a GPU job). A worker that can't embed (no ML stack, `HF_TOKEN` or GPU) fails the job with the reason and writes no run |
+| `POST /api/brain/embed/{deployment_id}` | **Write** (see [Access](#access)). Embed + cluster a deployment, as a GPU job: on the ARQ worker on Azure, in the REANNZ batch under `WORKER_BACKEND=lambda`. A worker that can't embed (no ML stack, `HF_TOKEN` or GPU) fails the job with the reason and writes no run |
 | `GET /api/brain/clusters/{deployment_id}` | Clusters from the deployment's latest embedding run |
-| `POST /api/brain/clusters/multi` | Aggregate clusters across deployments, body `{ "deployment_ids": [...], "min_confidence": 0 }`; returns `clusters`, `media_clusters` (media→cluster map), `outlier_media_ids`. On AWS a selection of more than 50,000 photos answers `TOO_MANY_PHOTOS`, to stay inside the 6 MB answer and 30 s, until the grid asks only for its page's clusters ([#474](https://github.com/wildlifeai/ww-website/issues/474)) |
+| `POST /api/brain/clusters/multi` | Demo refused. Aggregate clusters across deployments, body `{ "deployment_ids": [...], "min_confidence": 0 }`; returns `clusters`, `media_clusters` (media→cluster map), `outlier_media_ids`. On AWS a selection of more than 50,000 photos answers `TOO_MANY_PHOTOS`, to stay inside the 6 MB answer and 30 s, until the grid asks only for its page's clusters ([#474](https://github.com/wildlifeai/ww-website/issues/474)) |
 | `GET /api/brain/umap/{deployment_id}` | Persisted 2-D UMAP scatter coordinates |
 | `GET /api/brain/outliers/{deployment_id}` | HDBSCAN-rejected images (expert-review candidates) |
 | `GET /api/brain/similar/{media_id}` | Nearest neighbours (`?n=20`, 1 to 100) among the photos of the anchor's organisation, in deployments the caller can read. `NOT_FOUND` envelope when the photo has no embedding |
@@ -372,9 +371,9 @@ Prefix `/api/brain`. Architecture: [04-AI-PIPELINE](../onboarding/04-AI-PIPELINE
 | `GET /api/brain/embedding-runs/{deployment_id}` | List embedding runs (model version, status, image count) |
 | `POST /api/brain/reprocess/deployment/{deployment_id}` | **Write** (see [Access](#access)). Supersede current runs and re-embed a deployment. The worker checks it can embed first, so a failed check leaves the current clusters in place |
 | `POST /api/brain/reprocess/project/{project_id}` | **Write** (see [Access](#access)). Reprocess every deployment in a project |
-| `POST /api/brain/reprocess/all` | Platform-wide re-embed — default dry-run returns a cost estimate; `confirm=true` executes |
+| `POST /api/brain/reprocess/all` | System admins only. Platform-wide re-embed: the default dry run returns a cost estimate; `confirm=true` executes |
 | `GET /api/brain/compare-runs` | Compare cluster assignments between two runs (`?run_a=&run_b=`) |
-| `POST /api/brain/backup` | **No-op** (compat shim) — pgvector inherits Supabase PITR, so there's no separate snapshot; the job completes with nothing to do |
+| `POST /api/brain/backup` | System admins only. **No-op** (compat shim): pgvector inherits Supabase PITR, so there's no separate snapshot; the job completes with nothing to do |
 
 ### Active Learning & Review
 
@@ -453,31 +452,40 @@ account cannot create or revoke. Organisation managers do this in Settings, Inte
 | `DELETE /api/v1/api-keys/{key_id}?organisation_id=` | JWT · organisation manager | Revoke a key (sets `revoked_at`); 404 if the organisation has no such unrevoked key |
 | `GET /api/v1/deployments` | `X-API-Key` · `deployments:read` | Deployments in the organisation's projects, newest first, with `project_name`, `device_name` and `status` (`planned`, `started`, `ended`). Filters `?project_id=&status=&limit=&offset=` |
 | `GET /api/v1/deployments/{deployment_id}` | `X-API-Key` · `deployments:read` | One of those deployments |
-| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The live cameras with a live deployment, open or ended, in a live project of the organisation. Cameras belong to no organisation (ww-backend#346), so a camera lent to another organisation's project is in both lists. `id`, `name`, `bluetooth_id`, `device_eui`, `created_at`, newest registered first (`created_at`, then `id`). `?limit=&offset=` |
+| `GET /api/v1/devices` | `X-API-Key` · `devices:read` | The cameras deployed in the organisation's projects: every live camera with at least one deployment, open or ended and not deleted, in a live project of the organisation, the project rule telemetry follows. Cameras belong to no organisation (ww-backend#346), so a camera lent to another organisation's project is in both lists. `id`, `name`, `bluetooth_id`, `device_eui`, `created_at`, newest registered first (`created_at`, then `id`). `?limit=&offset=` |
 | `GET /api/v1/devices/{device_eui}/telemetry` | `X-API-Key` · `telemetry:read` | The camera's `lorawan_messages` whose deployment is in one of the organisation's projects (ww-backend#323), newest first, with the parsed `battery_level`, `sd_card_used_capacity` and `model_output`. `?date_from=&date_to=&limit=` (≤ 1,000). An EUI with none answers `[]` |
 | `GET /api/v1/observations` | `X-API-Key` · `observations:read` | One verdict per live photo with at least one live observation, chosen as the grid's `photoVerdict` chooses it (#170; `photo_verdict` is its port): the label fields of the observation the card shows, `is_empty`, and `human_reviewed` when any observation is reviewed. Photos in `media.created_at` then `id` order, their observations in `created_at` order. `?project_id=&deployment_id=&limit=&offset=` |
-| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | The [CamtrapDP export](#camtrapdp-export) job for the key's organisation: the same body and package, with `export-camtrap-dp` called with the service role and `organisation_id` (ww-backend#290). 404 for a project outside the organisation, and while `FF_CAMTRAPDP_EXPORT_ENABLED` is off or `AZURE_STORAGE_CONNECTION_STRING` is unset. Returns `{ job_id }` |
+| `POST /api/v1/export/camtrapdp` | `X-API-Key` · `export:camtrapdp` | The [CamtrapDP export](#camtrapdp-export) job for the key's organisation: the same body and package, with `export-camtrap-dp` called with the service role and `organisation_id` (ww-backend#290). 404 for a project outside the organisation, and while `FF_CAMTRAPDP_EXPORT_ENABLED` is off or there is no object store for the ZIP. Returns `{ job_id }` |
 | `GET /api/v1/jobs/{job_id}` | `X-API-Key` · `export:camtrapdp` | A job one of the organisation's keys started (`organisation_id` in `api_jobs.job_data`): `status`, `progress`, `message`, `error`, `result_url`. Any other job answers 404; `/api/jobs/{id}` does not serve these jobs to signed-in users |
 
 ---
 
 ## Error Codes
 
+An `ApiError` code in the envelope comes with HTTP 200 (see Response Format at the top); this table is
+the HTTP statuses.
 
 | HTTP Code | Meaning | Retryable |
 |-----------|---------|-----------|
 | 400 | Bad request (invalid input) | No |
-| 401 | Unauthorized (invalid/missing JWT or webhook secret) | No |
-| 404 | Resource not found | No |
+| 401 | Unauthorized (invalid or missing JWT or API key) | No |
+| 403 | Forbidden: the caller's role (see [Access](#access)), the demo account, a system-admin route, or an API key's scopes | No |
+| 404 | Resource not found, or not visible to the caller | No |
 | 409 | Conflict (e.g., job not yet completed) | Yes |
 | 413 | Payload too large | No |
 | 422 | Validation error (invalid request body) | No |
 | 429 | Rate limit exceeded | Yes (after backoff) |
 | 500 | Internal server error | Yes |
+| 503 | A service the route needs is missing or down: the iNaturalist secret, the object store, GBIF | Yes, once it is back |
 
 ### Rate Limiting
 
-The API enforces per-IP rate limits (default: 60 requests/minute). When exceeded:
+There is no global limit. Limits are per route (`@limiter.limit`, `backend/app/middleware/rate_limit.py`),
+keyed by the signed-in user (the JWT `sub`), else the IP: `POST /api/auth/demo-session` 10,
+`POST /api/exif/parse` 30, `POST /api/pipeline/run` 10, `POST /api/brain/embed/{deployment_id}` 10,
+`POST /api/models/train` 10, `POST /api/exports/camtrapdp` 5 and `GET /api/reports/gbf` 10 a minute.
+`RATE_LIMIT_PER_MINUTE` is the limiter's default, which only slowapi's middleware applies, and none is
+mounted. The `/api/v1` limits are per API key ([public API guide](public-api-guide.md)). When exceeded:
 
 ```json
 {

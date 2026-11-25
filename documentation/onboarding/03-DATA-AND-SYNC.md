@@ -24,7 +24,7 @@ a table has RLS policies for `INSERT`/`UPDATE` but only `GRANT SELECT … TO aut
 fail with *permission denied for table* even though the policy would have allowed the row.
 
 > [!CAUTION]
-> The schema, RLS policies, **and** table GRANTs are owned by the [`ww-backend`](https://github.com/wildlifeai/wildlife-watcher-backend)
+> The schema, RLS policies, **and** table GRANTs are owned by the [`ww-backend`](https://github.com/wildlifeai/ww-backend)
 > repo. The web app never alters them. To enable a new client-side write, add a `ww-backend`
 > migration that grants the privilege to `authenticated` **and** a matching RLS policy.
 > Example (observations): `GRANT INSERT, UPDATE ON public.observations TO authenticated;` plus a
@@ -76,10 +76,11 @@ photos as the user sees them; with the raw BMP on, the app doubles it for op5. A
 camera keeps its old values until its next deployment start. Ranges and the cost note live in
 `frontend/src/lib/burstCapture.ts`.
 
-Beside the burst, `detection_threshold_pct` (50 to 99, default 57, the camera's factory setting) is
-how confident the on-device model must be before a photo counts as a detection; the app writes it
-as op16 (ww-backend#246, ww-mobile-app#342). The input clamps to the column's CHECK range, which
-lives in `frontend/src/lib/detectionThreshold.ts`.
+Beside the burst, `detection_threshold_pct` (a whole percent, 50 to 99, default 57) is how
+confident the on-device model must be before a photo counts as a detection; the app writes it as
+op 16 (ww-backend#246, ww-mobile-app#342 and #524). What op 16 means on each firmware, and the
+firmware's own default: [AI-ARCHITECTURE](../resources/AI-ARCHITECTURE.md#the-contracts-that-must-never-break).
+The input clamps to the column's CHECK range, which lives in `frontend/src/lib/detectionThreshold.ts`.
 
 The same panel edits the capture flash (ww-backend#168, written as op34, op13, op35 and op36 by
 ww-mobile-app#282): `flash_mode` (default `off`, which also turns off the night IR for motion
@@ -136,17 +137,19 @@ The **service-role key is never exposed to the browser** — it stays in the bac
 
 ## Async job system
 
-Heavy tasks (Drive uploads, model conversion, pipeline runs) run as **in-process `asyncio`
-background tasks** — no Redis required for local dev. Container deploys can switch to ARQ + Redis
-via `jobs/worker.py`. When no Redis is reachable, enqueue logs
-`redis connection error … arq_enqueue_failed_fallback_local` and the job falls back to the
-in-process runner — expected noise in local dev, not a failure.
+`enqueue_job` (`backend/app/jobs/dispatch.py`) decides where each job runs. The job names are the
+constants in that file, `IN_PROCESS_JOBS` and `BATCH_JOBS`; this guide does not copy them.
 
-The jobs in `IN_PROCESS_JOBS` (`backend/app/jobs/dispatch.py`: uploads, the CamtrapDP import and
-export, manifests, model conversion and downloads, batch ingest) run in the API process on Azure
-even with `REDIS_URL` set, so their settings belong on the API, and on AWS they run on the `cpu`
-function. On Azure such a job can be cut off when the API replica scales in (dev scales to zero),
-as uploads and the import already can.
+- **Azure** (`WORKER_BACKEND=local`, what both sites use): with `REDIS_URL` set, as in both cloud
+  environments, a job goes to the ARQ GPU worker (`jobs/worker.py`), except the `IN_PROCESS_JOBS`,
+  which run in the API process, so their settings belong on the API. Such a job can be cut off
+  when the API replica scales in (dev scales to zero). Without `REDIS_URL`, as in local dev, every
+  job is an in-process `asyncio` task. When no Redis is reachable, enqueue logs
+  `redis connection error … arq_enqueue_failed_fallback_local` and the job falls back to the
+  in-process runner: expected noise in local dev, not a failure.
+- **AWS** (`WORKER_BACKEND=lambda`): the `BATCH_JOBS` wait in `api_jobs` for the REANNZ batch, and
+  every other job goes to the `cpu` function
+  ([settings](../resources/deployment-guide.md#aws-and-the-reannz-batch)).
 
 ```
 create_job() → queued → processing → completed
@@ -175,8 +178,8 @@ Dragging camera images into the website runs this end-to-end. There is one uploa
 button, Home and the three-step guide all link there. (Until Sep 2026 two uploaders coexisted, a
 modal opened from the header and the older `AnalyseImages` page behind `/upload-data`; they had
 drifted, and the modal was too small for the triage step, so both were folded into the page.)
-**Images always sync to Google Drive**, the old "Sync to Google Drive" toggle was removed; Drive is
-the default long-term store. AI analysis runs after upload by default and can be switched off per
+**Images are always archived**, the old "Sync to Google Drive" toggle was removed: to Google Drive by
+default, or to S3 under `ARCHIVE_BACKEND=s3`. AI analysis runs after upload by default and can be switched off per
 upload (`run_ai`); for CamtrapDP imports it is opt-in. Thumbnails are the AI pipeline's first step,
 so an upload whose AI does not run (switched off, or no AI configured) starts the thumbnails job
 itself, one per deployment, which the upload's chunks share (`start_thumbnail_backfill`).
@@ -260,7 +263,8 @@ where creating its deployment collided with the row the list was about to show.
 
 - a batch request throws → `failedFiles` + `uploadError` (per-batch catch in `startUpload`);
 - the server refuses storage → the response's `drive_upload.enabled === false`
-  (e.g. `GOOGLE_DRIVE_ENABLED` unset → `reason: "server_disabled"`) is logged as an error and
+  (nowhere to archive, `settings.archive_enabled` false, e.g. `GOOGLE_DRIVE_ENABLED` unset →
+  `reason: "server_disabled"`) is logged as an error and
   fails the run. Production ran exactly this way for weeks while the dock showed a green tick
   (Jul 2026), the incident this branch guards against;
 - the server took the batch but could not start its Drive job → `drive_upload.status === "error"`
@@ -285,17 +289,18 @@ with a fresh Supabase client after an HTTP/2 `ConnectionTerminated` (`routers/ex
 POST /api/exif/parse  → parse EXIF, drop WW500 test photos (domain/exif.py is_test_photo,
                         counted as `test_photos_skipped` in the response and the job summary),
                         bind deployment (EXIF Deployment_ID, else card-folder prefix;
-                        `deployment_id_source` says which), buffer bytes to Azure blob store,
-                        enqueue upload_drive_images_job
+                        `deployment_id_source` says which), buffer bytes in the object store
+                        (OBJECT_STORE_BACKEND), enqueue upload_drive_images_job
 upload_drive_images_job:
   DOWNLOAD → PREPROCESS (rename/sort into project/deployment folders)
-  → DRIVE_UPLOAD     google_drive.upload_analysis_images — hash-dedup skips files already in Drive
-  → REGISTER MEDIA   insert `media` rows (file_path = gdrive://<id>, file_hash) so images appear in
-                      the Annotations grid and the pipeline has something to run on
+  → DRIVE_UPLOAD     the archive (object_store.archive_service, ARCHIVE_BACKEND): Drive by default,
+                      hash-dedup skips files already there; or S3 under originals/
+  → REGISTER MEDIA   insert `media` rows (file_path = gdrive://<id> or s3://..., file_hash) so images
+                      appear in the Media grid and the pipeline has something to run on
                       (EXIF timestamps are normalised "YYYY:MM:DD HH:MM:SS" → ISO before insert —
                        raw EXIF is rejected by Postgres and would silently create 0 media rows)
   → AUTO-ANNOTATE    enqueue auto_annotate_deployments (the AI pipeline, async) — see 04-AI-PIPELINE
-  → CLEANUP          delete the Azure blobs; job completes
+  → CLEANUP          delete the buffered objects; job completes
 ```
 
 ### Backend environment requirements (per environment)
@@ -305,6 +310,9 @@ upload_drive_images_job:
 | `GOOGLE_DRIVE_ENABLED` | Defaults to **`False`** — unset means the API parses EXIF, stores **nothing**, and reports `enabled: false`. |
 | `GOOGLE_DRIVE_FOLDER_ID` | Root Drive folder for that environment's archive. |
 | `GOOGLE_SERVICE_ACCOUNT_JSON` | ACA secret `google-sa-json`. The Drive folder must be shared (**Editor**) with the service-account email or uploads 404 at write time. |
+
+These are the Drive archive's. Under `ARCHIVE_BACKEND=s3` the archive needs only `S3_BUCKET`
+([AWS settings](../resources/deployment-guide.md#aws-and-the-reannz-batch)).
 
 Both ACA apps have all three since **2026-07-26** (prod was missing all of them — the root cause of
 "empty `media` table in production"). Dev and prod currently share one service account
@@ -333,7 +341,7 @@ instant in the **deployment's** timezone at display time.
   schema (display-only; `media.timestamp` stays UTC). It is **app-populated** (no DB trigger):
   `resolve_timezone(lat, lon)` in [`domain/photo_preprocessing.py`](../../backend/app/domain/photo_preprocessing.py)
   derives it from the deployment's GPS via `timezonefinder`. CamtrapDP import sets it automatically.
-  The app creates deployments without one, so My Data and Annotations fill it on first view:
+  The app creates deployments without one, so the Insights and Media pages fill it on first view:
   `useFilledTimezones` sends the shown deployments that have none to
   `POST /api/deployments/fill-timezones`, which stores the zone of each one the caller can see that
   has coordinates, and merges the answer in (#309). `POST /api/deployments/backfill-timezones` does

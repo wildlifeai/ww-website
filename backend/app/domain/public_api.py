@@ -109,9 +109,10 @@ async def list_devices(
 ) -> tuple[List[Dict[str, Any]], int]:
     """The cameras deployed in the organisation's projects, newest registered first.
 
-    Cameras belong to no organisation (ww-backend#346). A live camera is listed when it has a
-    live deployment, open or ended, in a live project of the organisation, so a camera lent to
-    another organisation's project is in both lists, once each. Returns (records, total).
+    Cameras belong to no organisation (ww-backend#346). A live camera is listed when it has at
+    least one live deployment, open or ended, in a live project of the organisation, the
+    project rule ``get_telemetry`` follows, so a camera lent to another organisation's project
+    is in both lists, once each. Returns (records, total).
     """
     client = create_service_client()
     query = _in_org(

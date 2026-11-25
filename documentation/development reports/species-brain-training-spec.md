@@ -1,7 +1,9 @@
 # Species Brain training from the Annotations page
 
-> **Status:** 🔧 Active, built behind `FF_MODEL_TRAINING_ENABLED` (default off). Code merged to
-> `dev` pending review; not yet run end to end against a live Edge Impulse project or on a camera.
+> **Status:** 🔧 Active, 2026-11-26: built behind `FF_MODEL_TRAINING_ENABLED` (default off), merged
+> with [#151](https://github.com/wildlifeai/ww-website/pull/151); not yet run end to end against a live
+> Edge Impulse project or on a camera. The page is now Media. Training moves to the REANNZ cluster
+> with [#463](https://github.com/wildlifeai/ww-website/issues/463), and the flag stays off on AWS until then.
 > Owner: Victor. Serves the GDMA APAC 2026 key result "a non-technical user can train a new
 > species identification model" (Tech objective, Multi-species Camera AI on the device).
 
@@ -90,7 +92,8 @@ and in `processing_log` when index 1 is not a target class. The right fix stays 
 Access: the endpoint requires a verified user who manages the organisation that will own the
 model (same rule as the Toolkit upload) and checks that every selected image sits in a
 deployment the caller may read (`app.authz.accessible_deployment_ids`). The job runs on the
-ARQ worker when `REDIS_URL` is set (Edge Impulse waits are long), in-process otherwise.
+ARQ worker when `REDIS_URL` is set (Edge Impulse waits are long), in-process otherwise; on AWS it
+would reach the `cpu` function, whose 15-minute limit a run can pass, hence #463.
 
 Status of the `ai_models` row during a run: created with `file_type = 'training'` and the
 default status, `uploaded` once the dataset is built, `validated` (or `failed`) at the end,

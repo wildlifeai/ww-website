@@ -98,18 +98,20 @@ All uploads are **async jobs**. The API returns a `job_id` immediately, and the 
 
 1. Frontend sends the ZIP file + `model_name` via multipart form.
 2. Router validates the file, resolves the user's organisation, creates an `ai_model_families` record (if new), auto-versions the model, and inserts a placeholder `ai_models` row with `status: "uploading"`.
-3. The file is stored in Redis blob store and a background job (`convert_model_job`) is enqueued.
-4. The worker:
-   - Retrieves the blob from Redis.
+3. The file is handed to a background job (`convert_model_job`) through `services/blob_store.py`: a
+   file in the system temp directory (`ww_blobs`), since the job runs in the API process, or, under
+   `WORKER_BACKEND=lambda`, the object store as `handoff-<key>`, for the `cpu` function.
+4. The job:
+   - Reads the file back.
    - Calls `convert_uploaded_model()` which extracts the ZIP, runs Vela conversion, and returns `(tfl_bytes, txt_bytes, labels)`.
    - Builds 8.3 filenames from the model family's `firmware_model_id` and version.
    - Uploads both files to Supabase Storage.
    - Updates the `ai_models` row to `status: "validated"` with the final storage paths and file hash.
-   - Cleans up the Redis blob.
+   - Deletes the handed-over file.
 
 **Accepted file types:** `.zip` (Edge Impulse export), `.tflite` (raw TFLite), `.cc` (C array)
 
-### Trained on the website (Annotations selection → Edge Impulse API)
+### Trained on the website (Media selection → Edge Impulse API)
 
 **Endpoint:** `POST /api/models/train` (behind `FF_MODEL_TRAINING_ENABLED`; status and limits from
 `GET /api/models/train/status`)
@@ -137,7 +139,8 @@ All uploads are **async jobs**. The API returns a `job_id` immediately, and the 
 Design, limits and the class-order trap:
 [species-brain-training-spec](../development%20reports/species-brain-training-spec.md).
 Two trainers, by `MODEL_TRAINER`: `edge_impulse` (steps 3 to 4) or `gcp`, a Cloud Run job behind `FF_NATIVE_TRAINING_ENABLED` whose int8
-model the worker compiles with Vela and registers as in step 4: [2026-09_gcp-native-model-training](../development%20reports/2026-09_gcp-native-model-training/README.md).
+model the worker compiles with Vela and registers as in step 4. The `gcp` trainer is retiring:
+training moves to the REANNZ cluster with [#463](https://github.com/wildlifeai/ww-website/issues/463), and its report is archived: [2026-09_gcp-native-model-training](../development%20reports/_archive/2026-09_gcp-native-model-training/README.md).
 
 ### Pre-trained Model (GitHub Zoo)
 

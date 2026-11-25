@@ -258,9 +258,11 @@ async def api_list_devices(
 ):
     """The cameras deployed in the organisation's projects, newest registered first.
 
-    A camera is listed when it has a deployment, open or ended, in one of the organisation's
-    projects. Cameras belong to no organisation, so a camera lent to another organisation's
-    project is in both lists. A page is at most 1,000 cameras; page with ``offset``.
+    Every camera with at least one deployment, open or ended and not deleted, in a project of
+    the organisation: the project rule telemetry follows. Cameras belong to no organisation, so
+    a camera lent to another organisation's project is in both lists. Deleted cameras, and
+    deployments in a deleted project, are left out. A page is at most 1,000 cameras; page with
+    ``offset``.
     """
     records, total = await list_devices(key["organisation_id"], limit, offset)
     return DevicesResponse(data=[DeviceOut(**r) for r in records], meta=_meta(request, total=total, page=_page(offset, limit)))

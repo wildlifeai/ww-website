@@ -1,6 +1,6 @@
 # Testing the Website with Seed User Accounts
 
-> **Last updated:** May 18, 2026
+> **Last updated:** 26 Nov 2026: the role rules of UI audit decision 1 (a Project Member writes) and the one upload page.
 
 ## Overview
 
@@ -12,7 +12,7 @@ The Wildlife Watcher development environment ships pre-seeded user accounts with
 
 | What | Location |
 |------|----------|
-| **User emails, roles, org/project assignments, and UUIDs** | [`ww-backend/documentation/resources/USER-CREDENTIALS-REFERENCE.md`](https://github.com/wildlifeai/wildlife-watcher-backend/blob/dev/documentation/resources/USER-CREDENTIALS-REFERENCE.md) |
+| **User emails, roles, org/project assignments, and UUIDs** | [`ww-backend/documentation/resources/USER-CREDENTIALS-REFERENCE.md`](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/USER-CREDENTIALS-REFERENCE.md) |
 | **SQL that creates them** | `ww-backend/supabase/seeds/dev/data.sql` (development seed) |
 | **SQL that creates the core Apps Manager** | `ww-backend/supabase/seeds/seed.sql` (production-safe seed) |
 | **Password** | Set via `SEED_USER_PASSWORD` env var. Stored as a GitHub Secret and available to developers on request. Never hardcoded in source. |
@@ -37,7 +37,7 @@ The seed data covers five distinct permission levels. Each level unlocks differe
 | **Platform Admin** (`ww_admin`) | `tui@ww.org` | Full platform access. Can see cross-org data. Admin tooling (if implemented). |
 | **Organisation Manager** | `kowhai@ww.org`, `tama@ww.org` | View/edit org details. Add/remove org members. Create projects. **Upload Model** page visible. |
 | **Project Admin** | `moana@ww.org`, `ariki@ww.org` | Edit project details. Add/remove project members. Manage deployments within assigned projects. |
-| **Project Member** | `rata@ww.org`, `ngaio@ww.org` | View-only access to assigned projects and their deployments, media, and observations. |
+| **Project Member** | `rata@ww.org`, `ngaio@ww.org` | Uploads, labels and *Run AI* in assigned projects ([write level](api-reference.md#access)); cannot edit the project or its members. The read-only project role is `project_viewer`, the demo account's. |
 | **Unassigned Member** | `hemi@ww.org`, `ria@ww.org` | Authenticated but no project assignments — sees empty Insights. |
 
 ### Feature Visibility by Role
@@ -49,13 +49,18 @@ The seed data covers five distinct permission levels. Each level unlocks differe
 | **Insights → Deployments tab** | All | Org deployments | Project deployments | Project deployments | Empty |
 | **Insights → Deployments → Map view** | All locations | Org locations | Project locations | Project locations | Empty |
 | **Insights → Reports tab** | All | Org data | Project data | Project data | Empty |
-| **Toolkit → CamtrapDP Import** | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Toolkit → Analyse Images** | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Prepare SD Card (Manifest)** | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Upload Model** (nav visible) | ✓ | ✓ | ✗ | ✗ | ✗ |
+| **Upload data → CamtrapDP import** (a ZIP) | ¹ | ¹ | ¹ | ¹ | ¹ |
+| **Upload data** (photos; the header Upload button) | ✓ | ✗² | ✓ | ✓ | ✗ |
+| **Toolkit → Prepare SD card** | ✓ | ✗² | ✓ | ✓ | ✗ |
+| **Upload model** (account menu and Toolkit card) | ✓ | ✓ | ✗ | ✗ | ✗ |
 | **Edit project details** | ✓ | ✓ | ✓ | ✗ | ✗ |
 | **Add/remove project members** | ✓ | ✓ | ✓ | ✗ | ✗ |
 | **Edit org details** | ✓ | ✓ | ✗ | ✗ | ✗ |
+
+¹ Whoever has an active `organisation_member` or `organisation_manager` role (`backend/app/routers/camtrapdp.py`), whatever the project roles; `403` otherwise.
+² Unless the user also holds a project role that writes; an organisation role alone writes to no
+project. The upload and SD-card controls hide for a user who can write to no project
+(`frontend/src/hooks/useWritableProjects.ts`).
 
 ## Automated Validation Strategy
 
@@ -80,7 +85,7 @@ Using `pytest` + the Supabase client, you can authenticate as each test user and
 | Unassigned user sees no projects | `hemi@ww.org` | `supabase.from('projects').select()` | Returns empty list |
 | Upload Model blocked for non-managers | `rata@ww.org` | `POST /api/models/convert` | Returns `403` |
 | Project delete blocked for members and org managers | `rata@ww.org`, `kowhai@ww.org` | `DELETE /api/projects/{id}` on a project they can see | Returns `403` (only a project admin or `ww_admin`); a project they cannot see is `404` |
-| CamtrapDP import succeeds for any authenticated user | `ngaio@ww.org` | `POST /api/camtrapdp/import` | Returns `200` with a `job_id` for a valid ZIP, and the job completes |
+| CamtrapDP import needs an organisation role | `ngaio@ww.org` (has one), and a user with none | `POST /api/camtrapdp/import` | `200` with a `job_id` for a valid ZIP and the job completes for a user with an active `organisation_member` or `organisation_manager` role; `403` "You must belong to an organisation to import data." for one without |
 
 **Implementation approach:**
 
@@ -126,8 +131,8 @@ Using Playwright or Cypress against `http://localhost:5173` (with the backend po
 
 | Test Scenario | Login As | Check |
 |--------------|----------|-------|
-| Upload Model nav item visible for managers | `tama@ww.org` | `Upload Model` link present in header nav |
-| Upload Model nav item hidden for members | `rata@ww.org` | `Upload Model` link NOT in header nav |
+| Upload model visible for managers | `tama@ww.org` | `Upload model` in the account menu and the Toolkit's *Upload AI model* card |
+| Upload model hidden for members | `rata@ww.org` | Neither is there |
 | Project selector shows correct count | `ngaio@ww.org` | Project selector lists exactly 1 project |
 | Project selector empty for unassigned users | `hemi@ww.org` | Selector shows "No projects" / empty state |
 | Map view shows pins only for visible deployments | `ariki@ww.org` | Insights → Deployments → Map shows Tuatara Documentation only |
@@ -150,14 +155,17 @@ async function loginAs(page, email: string) {
   await page.waitForURL('/');   // login redirects to the home page
 }
 
-test('org manager sees Upload Model nav link', async ({ page }) => {
+// Upload model is an account-menu item and a Toolkit card, not a header tab.
+test('org manager sees the Upload AI model card', async ({ page }) => {
   await loginAs(page, 'tama@ww.org');
-  await expect(page.locator('nav >> text=Upload Model')).toBeVisible();
+  await page.goto('/toolkit');
+  await expect(page.getByText('Upload AI model')).toBeVisible();
 });
 
-test('project member does NOT see Upload Model nav link', async ({ page }) => {
+test('project member does NOT see the Upload AI model card', async ({ page }) => {
   await loginAs(page, 'rata@ww.org');
-  await expect(page.locator('nav >> text=Upload Model')).not.toBeVisible();
+  await page.goto('/toolkit');
+  await expect(page.getByText('Upload AI model')).not.toBeVisible();
 });
 
 test('unassigned user sees empty projects', async ({ page }) => {
@@ -179,7 +187,8 @@ For quick manual testing during feature development, use these users:
 | Org management features | `kowhai@ww.org` | Org manager + project admin in Wildlife Research |
 | Cross-org isolation | `ariki@ww.org` | Manager of Conservation Society — should NOT see Wildlife Research data |
 | Project-scoped editing | `moana@ww.org` | Project admin (Kiwi Migration Study) but only org member — cannot manage the org itself |
-| Read-only project access | `rata@ww.org` | Project member — can view Wētāpunga Tracking but cannot edit |
+| Project Member writes | `rata@ww.org` | Project member: uploads, labels and runs AI in Wētāpunga Tracking, cannot edit the project or its members |
+| Read-only project access | the demo account | `project_viewer`, refused every write ([demo-account.md](demo-account.md)) |
 | Cross-org project membership | `ngaio@ww.org` | General org member assigned to a Wildlife Research project |
 | Empty state / onboarding | `hemi@ww.org` | Authenticated but unassigned — tests empty dashboards |
 | CI/CD model uploads | `apps@wildlife.ai` | System manager account used by deployment pipelines |
