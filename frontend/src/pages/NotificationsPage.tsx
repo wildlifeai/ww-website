@@ -8,13 +8,14 @@
 // deployed in this environment yet (see useNotifications).
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, CircleCheck, Info, PawPrint, WifiOff, type LucideIcon } from 'lucide-react'
+import { Bell, CircleCheck, Info, PawPrint, TriangleAlert, WifiOff, type LucideIcon } from 'lucide-react'
 import { NOTIFICATIONS_PAGE, useNotifications, type AppNotification } from '../hooks/useNotifications'
 
-/** The table's four types (ww-backend `54_notifications.sql`), in the filter's order. */
+/** The table's five types (ww-backend `54_notifications.sql`), in the filter's order. */
 const TYPE_META: Record<string, { icon: LucideIcon; label: string }> = {
   species_detection: { icon: PawPrint,    label: 'Species detection' },
   camera_silent:     { icon: WifiOff,     label: 'Camera silent' },
+  camera_fault:      { icon: TriangleAlert, label: 'Camera fault' },
   upload_complete:   { icon: CircleCheck, label: 'Upload complete' },
   system:            { icon: Info,        label: 'System' },
 }

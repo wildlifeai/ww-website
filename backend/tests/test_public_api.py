@@ -203,8 +203,21 @@ def _tables():
             {"id": _id(64), "device_eui": "EUI-A", "deployment_id": DEP_A_DELETED, "received_at": "2026-04-04T00:00:00+00:00"},
         ],
         "lorawan_parsed_messages": [
-            {"id": _id(71), "lorawan_message_id": _id(61), "battery_level": 90, "sd_card_used_capacity": 10, "model_output": "rat:87"},
-            {"id": _id(72), "lorawan_message_id": _id(62), "battery_level": 80, "sd_card_used_capacity": 20, "model_output": "none"},
+            {
+                "id": _id(71),
+                "lorawan_message_id": _id(61),
+                "battery_level": 90,
+                "battery_mv": 5612,
+                "sd_free_pct": 41,
+                "temperature_c": 18,
+                "self_test_bits": 512,
+                "last_reset_reason": 6,
+                "reset_count": 3,
+                "hours_since_reset": 12,
+                "ai_failures": 1,
+                "model_output": "rat:87",
+            },
+            {"id": _id(72), "lorawan_message_id": _id(62), "battery_level": 80, "model_output": "none"},
         ],
         "api_keys": [
             _key("a", 81, ORG_A, ALL_SCOPES),
@@ -381,6 +394,30 @@ def test_telemetry_follows_the_deployment_not_the_camera(api):
     b = api.call("GET", "/api/v1/devices/EUI-A/telemetry", key="b").json()["data"]
     assert [p["deployment_id"] for p in b] == [DEP_B]
     assert api.call("GET", "/api/v1/devices/EUI-B/telemetry").json()["data"] == []
+
+
+def test_telemetry_carries_the_battery_sd_and_health_of_each_message(api):
+    """Each message's decoded values as stored, null for what its frame did not carry (#427)."""
+    a = api.call("GET", "/api/v1/devices/EUI-A/telemetry").json()["data"]
+    assert a == [
+        {
+            "timestamp": "2026-04-01T00:00:00+00:00",
+            "deployment_id": DEP_A,
+            "battery_level": 90,
+            "battery_mv": 5612,
+            "sd_free_pct": 41,
+            "temperature_c": 18,
+            "self_test_bits": 512,
+            "last_reset_reason": 6,
+            "reset_count": 3,
+            "hours_since_reset": 12,
+            "ai_failures": 1,
+            "model_output": "rat:87",
+        }
+    ]
+    b = api.call("GET", "/api/v1/devices/EUI-A/telemetry", key="b").json()["data"]
+    assert b[0]["battery_mv"] is None and b[0]["self_test_bits"] is None and b[0]["battery_level"] == 80
+    assert "sd_card_used_capacity" not in b[0] and "health_state" not in b[0]
 
 
 def test_observations_are_one_verdict_per_live_photo_of_the_organisation(api):

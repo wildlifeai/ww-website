@@ -44,6 +44,19 @@ curl -s -H "X-API-Key: $WW_KEY" "$WW_API/api/v1/deployments"
   project is in both lists. Deleted cameras are left out.
 - **Telemetry**: the LoRaWAN messages a camera sent while deployed in one of the organisation's
   projects. A camera lent to another organisation's project sends that organisation's messages.
+  Each message has the values it carried, and null for the rest: the camera can send its battery
+  and SD card in one message and its health in another.
+
+  | Field | Meaning |
+  |---|---|
+  | `battery_mv` | Battery voltage in millivolts |
+  | `battery_level` | Battery as a percentage of the camera's battery scale, not of charge. Older firmware sends only this |
+  | `sd_free_pct` | SD card free space, percent. Null when the camera could not tell |
+  | `temperature_c` | The temperature of the camera's Bluetooth chip, degrees C |
+  | `self_test_bits` | The camera's self-test, 0 when all is well. Bit 0 is a low battery; bits 1 (AI processor not responding), 8 (main camera), 9 (HM0360 camera) and 11 (SD card missing) are faults |
+  | `last_reset_reason`, `reset_count`, `hours_since_reset` | Why the camera last restarted (a firmware code), how often since the battery went in, and how long ago |
+  | `ai_failures` | Times the AI processor did not respond since the battery went in |
+  | `model_output` | The camera's on-device model output, as the message carried it |
 - **Observations**: one row per photo, with the verdict the website's photo grid shows. A
   person's verdict comes first, then the consensus of the AI models, then the first AI label.
   `is_empty` is true for a photo with no animal, person or vehicle. Only photos with at least one

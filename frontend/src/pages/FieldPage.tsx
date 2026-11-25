@@ -4,9 +4,10 @@
 // Realtime: /field
 // Cameras deployed now, and those whose deployment ended today: KPIs, a map, a "needs attention"
 // panel, and two tabs, Cameras (a status table) and Messages (their LoRaWAN messages, live), read-only
-// for every role. Telemetry (battery, SD usage, last check-in) comes from the
-// deployment_latest_lorawan view and detections from the cameras' own LoRaWAN counts
-// (lib/realtimeReads.ts); the Messages tab is lib/lorawanFeed.ts, live updates hooks/useFieldLive.ts.
+// for every role. Telemetry (last message, battery, SD free, health) comes from the
+// deployment_latest_lorawan view, the ping period and firmware from the deployment, and detections
+// from the cameras' own LoRaWAN counts (lib/realtimeReads.ts); each camera's state is
+// lib/cameraState.ts. The Messages tab is lib/lorawanFeed.ts, live updates hooks/useFieldLive.ts.
 // Nothing here leaves the page: the photos stay on the camera's SD card while it is out.
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -18,11 +19,14 @@ import { useFieldLive } from '../hooks/useFieldLive'
 import { useMessageFeed } from '../hooks/useMessageFeed'
 import { supabase } from '../config/supabase'
 import {
-  fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, realtimeKeys,
-  type FieldDeployment, type Telemetry,
+  fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, firmwareText, realtimeKeys,
+  NO_MESSAGE, type FieldDeployment, type Telemetry,
 } from '../lib/realtimeReads'
-import { CAMERA_STATE, cameraState, type CameraState } from '../lib/cameraState'
-import { agoLabel } from '../lib/lorawanFeed'
+import {
+  CAMERA_STATE, cameraState, healthReasonTexts, needsAttention, silenceText,
+  LOW_BATTERY_REASON, SD_LOW_REASON, type CameraState,
+} from '../lib/cameraState'
+import { agoLabel, batteryText, sdFreeText } from '../lib/lorawanFeed'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { DeploymentMap } from '../components/data/DeploymentMap'
 import { LorawanMessages } from '../components/data/LorawanMessages'
@@ -30,22 +34,19 @@ import { NoProjectSelected } from '../components/common/NoProjectSelected'
 
 // ── Types ─────────────────────────────────────────────────────────────
 
-interface Camera extends FieldDeployment {
-  battery: number | null        // %
-  sdUsed: number | null         // %
-  lastSeen: string | null       // last LoRaWAN message
+interface Camera extends FieldDeployment, Telemetry {
   state: CameraState
   detections48h: number         // the camera's own count, from its LoRaWAN messages
-  troubled: boolean
+  /** In words: the silence first, then the health reasons, worst first. */
   reasons: string[]
+  lowBattery: boolean
+  sdLow: boolean
 }
 
 type Tab = 'cameras' | 'messages'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
-const LOW_BATTERY = 20
-const FULL_SD = 90
 const LORAWAN_GUIDE = '/guides/lorawan-in-new-zealand'
 
 const NO_DEPLOYMENTS: FieldDeployment[] = []
@@ -63,6 +64,7 @@ function Dot({ color }: { color: string }) {
 
 const MUTED: React.CSSProperties = { color: 'var(--text-muted)' }
 const NONE = <span style={MUTED}>-</span>
+const BAD: React.CSSProperties = { color: '#ef4444' }
 
 function Kpi({ label, value, tone }: { label: string; value: number | string; tone?: 'ok' | 'warn' | 'bad' }) {
   const color = tone === 'bad' ? '#ef4444' : tone === 'warn' ? '#f59e0b' : tone === 'ok' ? '#22c55e' : 'var(--text-color)'
@@ -117,35 +119,33 @@ export function FieldPage() {
   const error = (depQuery.error ?? telemetryQuery.error ?? detectionsQuery.error)?.message ?? feed.error
 
   const cameras = useMemo<Camera[]>(() => deps.map(d => {
-    const t = telemetry[d.id] ?? { battery: null, sdUsed: null, lastSeen: null }
-    const state = cameraState({ lastSeen: t.lastSeen, deploymentEnd: d.deployment_end })
+    const t = telemetry[d.id] ?? NO_MESSAGE
+    const state = cameraState({
+      lastSeen: t.lastSeen, deploymentStart: d.deployment_start, deploymentEnd: d.deployment_end,
+      pingMinutes: d.lorawan_ping_minutes, health: t.health,
+    })
     // A finished camera has been collected: nothing about it needs a visit.
-    const reasons: string[] = []
-    if (state !== 'finished') {
-      if (state === 'silent') reasons.push('No check-in >3 days')
-      if (t.battery != null && t.battery < LOW_BATTERY) reasons.push(`Low battery (${t.battery}%)`)
-      if (t.sdUsed != null && t.sdUsed > FULL_SD) reasons.push(`SD almost full (${t.sdUsed}%)`)
-    }
+    const finished = state === 'finished'
+    const reasons = finished ? [] : [
+      ...(state === 'silent' ? [silenceText(d.lorawan_ping_minutes)] : []), ...healthReasonTexts(t.healthReasons),
+    ]
     return {
-      ...d, battery: t.battery, sdUsed: t.sdUsed, lastSeen: t.lastSeen, state,
-      detections48h: detections[d.id] ?? 0, troubled: reasons.length > 0, reasons,
+      ...d, ...t, state, reasons, detections48h: detections[d.id] ?? 0,
+      lowBattery: !finished && t.healthReasons.includes(LOW_BATTERY_REASON),
+      sdLow: !finished && t.healthReasons.includes(SD_LOW_REASON),
     }
   }), [deps, telemetry, detections])
   const names = useMemo(() => new Map(deps.map(d => [d.id, cameraName(d)])), [deps])
 
-  const kpi = useMemo(() => {
-    const out = cameras.filter(c => c.state !== 'finished')
-    return {
-      active: out.length,
-      fresh: out.filter(c => c.state === 'fresh').length,
-      silent: out.filter(c => c.state === 'silent').length,
-      troubled: out.filter(c => c.troubled).length,
-      lowBattery: out.filter(c => c.battery != null && c.battery < LOW_BATTERY).length,
-      detections: cameras.reduce((n, c) => n + c.detections48h, 0),
-    }
-  }, [cameras])
-
-  const troubled = useMemo(() => cameras.filter(c => c.troubled), [cameras])
+  const troubled = useMemo(() => cameras.filter(c => needsAttention(c.state)), [cameras])
+  const kpi = useMemo(() => ({
+    active: cameras.filter(c => c.state !== 'finished').length,
+    troubled: troubled.length,
+    silent: cameras.filter(c => c.state === 'silent').length,
+    fault: cameras.filter(c => c.state === 'fault').length,
+    lowBattery: cameras.filter(c => c.lowBattery).length,
+    detections: cameras.reduce((n, c) => n + c.detections48h, 0),
+  }), [cameras, troubled])
   const pickedKeys = useMemo(() => (picked ? new Set([picked]) : undefined), [picked])
   const withGps = cameras.filter(c => c.latitude != null && c.longitude != null).length
   // Only once telemetry has answered, so the notice does not flash while it loads.
@@ -155,22 +155,27 @@ export function FieldPage() {
     { key: 'location_name', label: 'Camera', cellStyle: { fontWeight: 500 },
       render: c => cameraName(c), getValue: c => c.location_name ?? '' },
     { key: 'project_name', label: 'Project' },
-    { key: '_status', label: 'Status', sortable: false,
+    // The state and the first reason; every reason on hover and in the attention list.
+    { key: '_health', label: 'Health',
       render: c => (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
+        <span title={c.reasons.join('\n') || undefined} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
           <Dot color={CAMERA_STATE[c.state].color} />{CAMERA_STATE[c.state].label}
+          {c.reasons.length > 0 && (
+            <span style={MUTED}>{c.reasons[0]}{c.reasons.length > 1 ? ` +${c.reasons.length - 1}` : ''}</span>
+          )}
         </span>
       ),
-      getValue: c => CAMERA_STATE[c.state].label },
+      getValue: c => [CAMERA_STATE[c.state].label, ...c.reasons].join(', ') },
     { key: 'lastSeen', label: 'Last seen', render: c => agoLabel(c.lastSeen), getValue: c => c.lastSeen ?? '' },
-    { key: 'battery', label: 'Battery',
-      render: c => c.battery == null ? NONE
-        : <span style={{ color: c.battery < LOW_BATTERY ? '#ef4444' : undefined }}>{c.battery}%</span>,
-      getValue: c => String(c.battery ?? -1) },
-    { key: 'sdUsed', label: 'SD used',
-      render: c => c.sdUsed == null ? NONE
-        : <span style={{ color: c.sdUsed > FULL_SD ? '#ef4444' : undefined }}>{c.sdUsed}%</span>,
-      getValue: c => String(c.sdUsed ?? -1) },
+    { key: 'battery', label: 'Battery', cellStyle: { whiteSpace: 'nowrap' },
+      render: c => c.batteryMv == null && c.batteryPct == null ? NONE
+        : <span style={c.lowBattery ? BAD : undefined}>{batteryText(c)}</span>,
+      getValue: batteryText },
+    { key: 'sdFreePct', label: 'SD free',
+      render: c => c.sdFreePct == null ? NONE : <span style={c.sdLow ? BAD : undefined}>{sdFreeText(c)}</span>,
+      getValue: sdFreeText },
+    { key: 'firmware', label: 'Firmware', cellStyle: { whiteSpace: 'nowrap' },
+      render: c => (c.ble_firmware || c.himax_firmware ? firmwareText(c) : NONE), getValue: firmwareText },
     { key: 'detections48h', label: 'Detections 48h',
       render: c => c.detections48h > 0 ? c.detections48h : NONE,
       getValue: c => String(c.detections48h) },
@@ -212,7 +217,7 @@ export function FieldPage() {
               <div style={{ fontSize: '0.875rem' }}>
                 <div style={{ fontWeight: 600 }}>No camera has checked in yet</div>
                 <div style={MUTED}>
-                  Battery, storage and check-ins show after a camera&apos;s first LoRaWAN message.{' '}
+                  Battery, storage, health and check-ins show after a camera&apos;s first LoRaWAN message.{' '}
                   <Link to={LORAWAN_GUIDE} style={{ color: 'var(--primary)' }}>Connecting over LoRaWAN</Link>
                 </div>
               </div>
@@ -223,9 +228,9 @@ export function FieldPage() {
               <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
                 <Kpi label="Active cameras" value={kpi.active} />
                 <Kpi label="Needs attention" value={kpi.troubled} tone={kpi.troubled ? 'bad' : 'ok'} />
-                <Kpi label="Silent (>3d)" value={kpi.silent} tone={kpi.silent ? 'bad' : undefined} />
+                <Kpi label="Silent" value={kpi.silent} tone={kpi.silent ? 'bad' : undefined} />
+                <Kpi label="Fault" value={kpi.fault} tone={kpi.fault ? 'bad' : undefined} />
                 <Kpi label="Low battery" value={kpi.lowBattery} tone={kpi.lowBattery ? 'warn' : undefined} />
-                <Kpi label="Fresh check-in" value={kpi.fresh} tone={kpi.fresh ? 'ok' : undefined} />
                 <Kpi label="Detections 48h" value={kpi.detections} />
               </div>
 

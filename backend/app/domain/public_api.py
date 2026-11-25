@@ -124,6 +124,25 @@ async def list_devices(
     return records, response.count or 0
 
 
+# The decoded values each message carries, as ww-backend stores them per message
+# (`lorawan_parsed_messages`, #358). A message has only the values its frame brought: the WW500
+# sends battery and SD in one part and the health in another. The camera's health state and its
+# reasons are worked out per deployment, not stored per message (ww-backend#381), so they are not
+# here. `sd_card_used_capacity` was never written and is gone (ww-website#427, ww-backend#377).
+TELEMETRY_FIELDS = (
+    "battery_level",
+    "battery_mv",
+    "sd_free_pct",
+    "temperature_c",
+    "self_test_bits",
+    "last_reset_reason",
+    "reset_count",
+    "hours_since_reset",
+    "ai_failures",
+    "model_output",
+)
+
+
 async def get_telemetry(
     org_id: str,
     device_eui: str,
@@ -138,7 +157,7 @@ async def get_telemetry(
     organisation's messages. A message with no deployment is no organisation's.
     """
     client = create_service_client()
-    parsed = "lorawan_parsed_messages(battery_level, sd_card_used_capacity, model_output)"
+    parsed = f"lorawan_parsed_messages({', '.join(TELEMETRY_FIELDS)})"
     query = _in_org(
         client.table("lorawan_messages").select(f"id, deployment_id, received_at, {parsed}, deployments!inner(id, {_PROJECT})"),
         org_id,
@@ -157,9 +176,7 @@ async def get_telemetry(
             {
                 "timestamp": row.get("received_at"),
                 "deployment_id": row.get("deployment_id"),
-                "battery_level": parsed.get("battery_level"),
-                "sd_card_used_capacity": parsed.get("sd_card_used_capacity"),
-                "model_output": parsed.get("model_output"),
+                **{field: parsed.get(field) for field in TELEMETRY_FIELDS},
             }
         )
     return points
