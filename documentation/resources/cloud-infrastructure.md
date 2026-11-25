@@ -206,7 +206,7 @@ but it's a product call: it's what keeps the public demo button fast.
 
 ## AWS
 
-> **Dev deployed, nothing live (2026-11-20).** The accounts, sign-in and the `ww-dev` stacks exist
+> **Dev deployed, nothing live (2026-11-26).** The accounts, sign-in and the `ww-dev` stacks exist
 > for the move in
 > [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md).
 > The dev API answers on AWS, but no site points at it, so no traffic reaches AWS.
@@ -216,7 +216,7 @@ but it's a product call: it's what keeps the public demo button fast.
 | Organization | wildlife.ai's own, all features on | The wildlife.ai account left an outside organization on 2026-11-19, so it pays its own bills and receives its own credits |
 | Management account (`Wildlife.ai`) | Billing, the organization and IAM Identity Center, no workloads | Organization policies cannot restrict the management account |
 | `ww-dev` | Member account for the dev stack | A dev mistake cannot reach prod data, and closing the account removes everything in it |
-| In `ww-dev` (2026-11-20) | Stack `ww-shared`: ECR repository `ww-backend`, deploy role `ww-gha-deploy`. Stack `ww-dev`: functions `ww-dev-api` and `ww-dev-cpu`, an HTTP API (its address is the stack's `ApiUrl` output), bucket `wildlifewatcher-dev-media`, queue `ww-dev-dlq`, the 15-minute tick, alarms to the maintainer. SSM: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` under `/ww/dev/`, every flag off. Lambda concurrency quota 1,000 | Deployed from a workstation; `infra/aws/` holds both templates |
+| In `ww-dev` (2026-11-26) | Stack `ww-shared`: ECR repository `ww-backend`, deploy role `ww-gha-deploy`. Stack `ww-dev`: functions `ww-dev-api` and `ww-dev-cpu`, an HTTP API (its address is the stack's `ApiUrl` output), bucket `wildlifewatcher-dev-media`, queue `ww-dev-dlq`, the 15-minute tick, alarms to the maintainer. SSM under `/ww/dev/`: the three `SUPABASE_*` values, the `FF_*` flags on as on Azure dev, `WORKER_TOKEN_SHA256`, `GPU_IMAGE`, `DEMO_EMAIL`, `DEMO_PASSWORD`, `GENERAL_ORG_ID`, `GOOGLE_SERVICE_ACCOUNT_JSON`. Lambda concurrency quota 1,000 | Deployed from a workstation; `infra/aws/` holds both templates |
 | `ww-prod` | Not created yet; made like `ww-dev` at the prod step | |
 | Region | Asia Pacific (New Zealand), `ap-southeast-6`, in every account | An opt-in region: a new account starts with it off ([Adding an account](#adding-an-aws-account)). It has no Lambda Function URLs and no CloudFormation budget resource (checked 2026-11-20), so the API sits behind an API Gateway HTTP API and the budget is set by hand |
 | IAM Identity Center | Single-Region instance in Auckland, its own user directory | Multi-Region would copy users to US West (Oregon) and needs a KMS key |
