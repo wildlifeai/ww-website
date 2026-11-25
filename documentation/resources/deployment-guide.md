@@ -254,7 +254,7 @@ which `backend/app/aws_params.py` loads at each cold start. Status and design:
 | `WORKER_TOKEN_SHA256` | empty, `/api/worker/*` answers 404 | SSM | Hex SHA-256 of the cluster's lease token |
 | `GPU_IMAGE` | empty | SSM, written by `deploy-aws.yml` | The GPU image (`ghcr.io/...:<sha>`) that `GET /api/worker/pending` tells the cluster to run |
 | `BATCH_MIN_PHOTOS`, `BATCH_MAX_WAIT_MINUTES` | 100, 60 | | The submit gate: the cluster is asked to run once this many photos wait, or once the oldest batch job is this old |
-| `BATCH_CRON_INTERVAL_MINUTES` | 30 | 240 with the 4-hourly crontab | How often the cluster's crontab asks for work; must match it (`cluster/reannz/ww_cron.sh`). Added to the gate's wait for the wait the website states ([`batch_wait`](api-reference.md#jobs-async)) |
+| `BATCH_CRON_INTERVAL_MINUTES` | 240, matching the 4-hourly crontab | | How often the cluster's crontab asks for work; must match it (`cluster/reannz/ww_cron.sh`). Added to the gate's wait for the wait the website states ([`batch_wait`](api-reference.md#jobs-async)) |
 | `BATCH_MAX_QUEUE_HOURS` | 24 | | How long the reaper spares a queued batch job |
 | `BATCH_LEASE_MINUTES`, `BATCH_MAX_ATTEMPTS` | 30, 2 | | A lease with no heartbeat for this long is requeued; leases a job may lose before it fails |
 | `BATCH_LEASE_MAX_PHOTOS`, `BATCH_PART_MAX_PHOTOS` | 2,000, 500 | | Photos per lease and per results part |
@@ -686,7 +686,7 @@ The `ethos-u-vela` package needs to be installed in the container. Verify it's i
 
 **Rate limiting is too aggressive**
 
-The limits are per route, in code (`@limiter.limit`); `RATE_LIMIT_PER_MINUTE` changes none of them. The
+The limits are per route, in code (`@limiter.limit`); no setting changes them. The
 list: [API reference, Rate Limiting](api-reference.md#rate-limiting).
 
 **CORS errors from frontend**

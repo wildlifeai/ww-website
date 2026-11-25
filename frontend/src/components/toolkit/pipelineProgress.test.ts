@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { PipelineJob, PipelineState } from './PipelineStatusBox'
 import { aiBatchWait, jobChanged } from './pipelineProgress'
 
-const WAIT = { queued_at: '2026-11-22T01:00:00+00:00', usual_wait_minutes: 120 }
+const WAIT = { queued_at: '2026-11-22T01:00:00+00:00', usual_wait_minutes: 300 }
 
 const drive = (status: string): PipelineJob => ({ id: `drive-${status}`, status, progress: 1, fileCount: 10 })
 const ai = (status: string, batchWait: PipelineJob['batchWait'] = null): PipelineJob => ({ id: `ai-${status}`, status, progress: 0, fileCount: 0, batchWait })

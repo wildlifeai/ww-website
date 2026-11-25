@@ -333,8 +333,8 @@ def usual_batch_wait_minutes() -> int:
     """The wait the UI states for the next GPU run: the batch's own wait plus the cron's interval.
 
     The cluster's cron asks for work every ``BATCH_CRON_INTERVAL_MINUTES``, so a batch that is
-    due can wait that long again. Rounded up to whole hours above an hour, else to 15 minutes:
-    60 + 30 reads "usually within 2 hours".
+    due can wait that long again. Rounded up to whole hours above an hour, else to 15 minutes
+    (90 becomes 120): the defaults, 60 + 240, read "usually within 5 hours".
     """
     from app.config import settings  # noqa: PLC0415
 

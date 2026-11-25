@@ -4,8 +4,8 @@ import { batchWaitText, canStartGrouping, groupingStatusText, pendingGrouping, w
 
 const DEP = 'd0000000-0000-4000-8000-000000000001'
 const OTHER = 'd0000000-0000-4000-8000-000000000002'
-// 60 minutes of batch wait plus the 30-minute cron, rounded up by the API.
-const WAIT = { queued_at: '2026-11-22T01:00:00+00:00', usual_wait_minutes: 120 }
+// The defaults: 60 minutes of batch wait plus the 4-hourly (240-minute) cron.
+const WAIT = { queued_at: '2026-11-22T01:00:00+00:00', usual_wait_minutes: 300 }
 
 const job = (over: Partial<JobSummary>): JobSummary => ({
   job_id: 'a0000000-0000-4000-8000-000000000001',
@@ -25,7 +25,7 @@ const job = (over: Partial<JobSummary>): JobSummary => ({
 
 describe('batchWaitText', () => {
   it('states the wait the API works out from the settings', () => {
-    expect(batchWaitText(WAIT)).toBe('Waiting for the next GPU run, usually within 2 hours')
+    expect(batchWaitText(WAIT)).toBe('Waiting for the next GPU run, usually within 5 hours')
     expect(batchWaitText({ ...WAIT, usual_wait_minutes: 60 })).toBe('Waiting for the next GPU run, usually within an hour')
     expect(batchWaitText({ ...WAIT, usual_wait_minutes: 45 })).toBe('Waiting for the next GPU run, usually within 45 minutes')
   })
@@ -75,8 +75,8 @@ describe('canStartGrouping', () => {
 
 describe('groupingStatusText', () => {
   it('says a grouping waits for the GPU batch, also after a refresh', () => {
-    expect(groupingStatusText(job({ batch_wait: WAIT }), undefined)).toBe('Waiting for the next GPU run, usually within 2 hours.')
-    expect(groupingStatusText(job({ batch_wait: WAIT }), 'started-here')).toBe('Waiting for the next GPU run, usually within 2 hours.')
+    expect(groupingStatusText(job({ batch_wait: WAIT }), undefined)).toBe('Waiting for the next GPU run, usually within 5 hours.')
+    expect(groupingStatusText(job({ batch_wait: WAIT }), 'started-here')).toBe('Waiting for the next GPU run, usually within 5 hours.')
   })
 
   it("keeps today's wording for work that runs at once", () => {

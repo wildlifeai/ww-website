@@ -42,7 +42,7 @@ def db(monkeypatch):
     fake = FakeDB({"api_jobs": []})
     monkeypatch.setattr(store, "create_service_client", fake.client)
     monkeypatch.setattr(settings, "BATCH_MAX_WAIT_MINUTES", 60)
-    monkeypatch.setattr(settings, "BATCH_CRON_INTERVAL_MINUTES", 30)
+    monkeypatch.setattr(settings, "BATCH_CRON_INTERVAL_MINUTES", 240)
     return fake
 
 
@@ -61,7 +61,7 @@ async def _summary(job_id: str) -> dict:
 
 @pytest.mark.parametrize(
     ("max_wait", "cron", "usual"),
-    [(60, 30, 120), (120, 30, 180), (60, 0, 60), (50, 0, 60), (20, 10, 30), (10, 0, 15), (0, 0, 0)],
+    [(60, 240, 300), (60, 30, 120), (120, 30, 180), (60, 0, 60), (50, 0, 60), (20, 10, 30), (10, 0, 15), (0, 0, 0)],
 )
 def test_the_stated_wait_adds_the_cron_interval_and_rounds_up(monkeypatch, max_wait, cron, usual):
     monkeypatch.setattr(settings, "BATCH_MAX_WAIT_MINUTES", max_wait)
@@ -75,9 +75,9 @@ async def test_a_job_queued_for_the_batch_says_how_long_it_usually_waits(db, mon
 
     job = await store.get_job(job_id)
     assert job is not None and job.batch_wait is not None and job.gpu_batch
-    assert job.batch_wait.usual_wait_minutes == 120
+    assert job.batch_wait.usual_wait_minutes == 300
     assert job.batch_wait.queued_at is not None and job.batch_wait.queued_at.isoformat() == queued_at
-    assert (await _summary(job_id))["batch_wait"] == {"queued_at": queued_at, "usual_wait_minutes": 120}
+    assert (await _summary(job_id))["batch_wait"] == {"queued_at": queued_at, "usual_wait_minutes": 300}
 
 
 async def test_the_wait_survives_a_fresh_process(db, monkeypatch):
@@ -87,7 +87,7 @@ async def test_the_wait_survives_a_fresh_process(db, monkeypatch):
     store._memory_events.clear()
 
     job = await store.get_job(job_id)
-    assert job is not None and job.batch_wait is not None and job.batch_wait.usual_wait_minutes == 120
+    assert job is not None and job.batch_wait is not None and job.batch_wait.usual_wait_minutes == 300
 
 
 async def test_a_leased_job_no_longer_waits_and_a_requeued_one_waits_again(db, monkeypatch):
@@ -139,8 +139,8 @@ def test_both_job_routes_return_the_wait(db):
 
     one = api.get(f"/api/jobs/{JOB}")
     assert one.status_code == 200, one.text
-    assert one.json()["data"]["batch_wait"]["usual_wait_minutes"] == 120
+    assert one.json()["data"]["batch_wait"]["usual_wait_minutes"] == 300
     assert one.json()["data"]["gpu_batch"] is True
     listed = api.get("/api/jobs")
     assert listed.status_code == 200, listed.text
-    assert listed.json()["data"]["jobs"][0]["batch_wait"] == {"queued_at": QUEUED_AT, "usual_wait_minutes": 120}
+    assert listed.json()["data"]["jobs"][0]["batch_wait"] == {"queued_at": QUEUED_AT, "usual_wait_minutes": 300}
