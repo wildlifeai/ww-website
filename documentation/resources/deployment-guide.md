@@ -350,10 +350,9 @@ The backend reads/writes these tables (schema managed by `ww-backend` repo):
 
 ### Realtime
 
-Enable Realtime on `lorawan_parsed_messages` so the mobile app receives live updates:
-
-1. Supabase Dashboard → Database → Replication
-2. Enable `lorawan_parsed_messages` table for Realtime
+The website's Realtime page (`/field`) listens for inserts on `lorawan_messages` and
+`lorawan_parsed_messages`. ww-backend's migration `20260711043000_lorawan_realtime_publication.sql`
+adds both to the `supabase_realtime` publication; nothing is set by hand.
 
 ---
 

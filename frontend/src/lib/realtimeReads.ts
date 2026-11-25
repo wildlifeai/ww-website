@@ -1,6 +1,7 @@
 /**
- * The reads behind the Realtime page (/field): the active deployments of the selected projects,
- * each one's newest LoRaWAN check-in, and its animal detections in the last 48 hours.
+ * The reads behind the Realtime page (/field): the deployments it shows, each one's newest LoRaWAN
+ * check-in, and the detections its camera counted in the last 48 hours. The Messages tab's reads
+ * are in `lorawanFeed.ts`.
  *
  * - Deployments page past PostgREST's 1,000-row cap (`readAllPages`).
  * - Deployment ids go to the database in chunks of `ID_CHUNK`, so an `in.(...)` list stays well
@@ -12,10 +13,9 @@
  * - A new message re-reads only its own deployment (`fetchDeploymentUpdate`).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { fetchLiveObservations } from './liveObservations'
 import { chunk, readAllPages } from './readAllPages'
 
-export interface ActiveDeployment {
+export interface FieldDeployment {
   id: string
   project_id: string
   device_id: string | null
@@ -34,34 +34,45 @@ export interface Telemetry {
   lastSeen: string | null
 }
 
-export interface RecentDetections {
-  count: number
-  latest: string | null
-  /** The species of the latest detection. */
-  top: string | null
-}
-
 /** Deployment ids per request. */
 export const ID_CHUNK = 100
 export const DETECTION_HOURS = 48
 
-type DeploymentRow = Omit<ActiveDeployment, 'project_name' | 'device_name'> & {
+/** The query keys of the page's reads; a live update writes into the same entries. */
+export const realtimeKeys = {
+  all: ['realtime'] as const,
+  deployments: (userId: string | undefined, projectIds: string[] | null) =>
+    ['realtime', 'deployments', userId, projectIds] as const,
+  telemetry: (ids: string[]) => ['realtime', 'telemetry', ids] as const,
+  detections: (ids: string[]) => ['realtime', 'detections', ids] as const,
+  feed: (ids: string[]) => ['realtime', 'feed', ids] as const,
+}
+
+type DeploymentRow = Omit<FieldDeployment, 'project_name' | 'device_name'> & {
   projects: { name: string } | null
   devices: { name: string } | null
 }
 
-/** Active means no end date, or an end date still to come. */
-export async function fetchActiveDeployments(
+/** Midnight at the start of `now`'s day, in the viewer's zone. */
+export function startOfLocalDay(now: Date): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate())
+}
+
+/**
+ * The deployments the page shows: no end date, or one that falls today (the viewer's day) or
+ * later. One that ended today stays on the page as Finished; older ones do not show.
+ */
+export async function fetchFieldDeployments(
   db: SupabaseClient, projectIds: string[], now = new Date(),
-): Promise<ActiveDeployment[]> {
+): Promise<FieldDeployment[]> {
   // No projects, no request, as the chunked reads below do.
   if (projectIds.length === 0) return []
-  const nowIso = now.toISOString()
+  const today = startOfLocalDay(now).toISOString()
   const rows = await readAllPages((from, to) => db
     .from('deployments')
     .select('id, project_id, device_id, location_name, latitude, longitude, deployment_start, deployment_end, projects(name), devices(name)')
     .is('deleted_at', null)
-    .or(`deployment_end.is.null,deployment_end.gt.${nowIso}`)
+    .or(`deployment_end.is.null,deployment_end.gte.${today}`)
     .in('project_id', projectIds)
     .order('deployment_start', { ascending: true })
     .order('id')
@@ -96,40 +107,45 @@ export async function fetchLatestTelemetry(
   return out
 }
 
-interface DetectionRow {
+interface DetectionMessageRow {
   deployment_id: string
-  scientific_name: string | null
-  created_at: string
+  lorawan_parsed_messages: { nn_detections: number | null }[]
 }
 
-export function summariseDetections(rows: DetectionRow[]): Record<string, RecentDetections> {
-  const out: Record<string, RecentDetections> = {}
-  for (const o of rows) {
-    const e = out[o.deployment_id] ?? { count: 0, latest: null, top: null }
-    e.count += 1
-    if (!e.latest || o.created_at > e.latest) { e.latest = o.created_at; e.top = o.scientific_name ?? e.top }
-    out[o.deployment_id] = e
+/** Detections per deployment: the sum of `nn_detections` over its messages. */
+export function sumDetections(rows: DetectionMessageRow[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const m of rows) {
+    for (const p of m.lorawan_parsed_messages) {
+      if (p.nn_detections) out[m.deployment_id] = (out[m.deployment_id] ?? 0) + p.nn_detections
+    }
   }
   return out
 }
 
-/** Animal detections of each deployment in the last `DETECTION_HOURS`. */
-export async function fetchRecentDetections(
+/**
+ * What each deployment's camera counted in the last `DETECTION_HOURS`, from its LoRaWAN messages
+ * (`lorawan_parsed_messages.nn_detections`, the rise in the AI processor's positive count, set by
+ * ww-backend's trigger). Only messages with a detection are read.
+ */
+export async function fetchLorawanDetections(
   db: SupabaseClient, deploymentIds: string[], now = Date.now(),
-): Promise<Record<string, RecentDetections>> {
+): Promise<Record<string, number>> {
   const since = new Date(now - DETECTION_HOURS * 3_600_000).toISOString()
-  const reads = await Promise.all(chunk(deploymentIds, ID_CHUNK).map(ids => fetchLiveObservations<DetectionRow>(db, {
-    columns: 'deployment_id, scientific_name, created_at',
-    filter: q => q.in('deployment_id', ids).eq('observation_type', 'animal').gte('created_at', since),
-  })))
-  const failed = reads.find(r => r.error)
-  if (failed?.error) throw new Error(failed.error.message)
-  return summariseDetections(reads.flatMap(r => r.data ?? []))
+  const reads = await Promise.all(chunk(deploymentIds, ID_CHUNK).map(ids => readAllPages((from, to) => db
+    .from('lorawan_messages')
+    .select('id, deployment_id, lorawan_parsed_messages!inner(nn_detections)')
+    .in('deployment_id', ids)
+    .gte('received_at', since)
+    .gt('lorawan_parsed_messages.nn_detections', 0)
+    .order('id')
+    .range(from, to))))
+  return sumDetections(reads.flat() as unknown as DetectionMessageRow[])
 }
 
 export interface DeploymentUpdate {
   telemetry: Telemetry | undefined
-  detections: RecentDetections | undefined
+  detections: number | undefined
 }
 
 /** One deployment's newest check-in and recent detections, read again after it sends a message. */
@@ -138,7 +154,7 @@ export async function fetchDeploymentUpdate(
 ): Promise<DeploymentUpdate> {
   const [telemetry, detections] = await Promise.all([
     fetchLatestTelemetry(db, [deploymentId]),
-    fetchRecentDetections(db, [deploymentId], now),
+    fetchLorawanDetections(db, [deploymentId], now),
   ])
   return { telemetry: telemetry[deploymentId], detections: detections[deploymentId] }
 }
@@ -149,4 +165,17 @@ export function withEntry<T>(map: Record<string, T>, id: string, value: T | unde
   if (value === undefined) delete next[id]
   else next[id] = value
   return next
+}
+
+/**
+ * `map` with deployment `id`'s last message at `receivedAt`, when that is newer. Any message counts,
+ * an empty frame too, which has no decoded values for a re-read to find.
+ */
+export function withLastSeen(
+  map: Record<string, Telemetry>, id: string, receivedAt: string,
+): Record<string, Telemetry> {
+  const at = Date.parse(receivedAt)
+  const old = map[id]
+  if (Number.isNaN(at) || (old?.lastSeen && Date.parse(old.lastSeen) >= at)) return map
+  return { ...map, [id]: { battery: old?.battery ?? null, sdUsed: old?.sdUsed ?? null, lastSeen: receivedAt } }
 }
