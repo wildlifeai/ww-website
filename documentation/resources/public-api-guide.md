@@ -106,10 +106,11 @@ while :; do
   sleep 30
 done
 
-curl -s -o export.zip "$(echo "$state" | jq -r .data.result_url)"
+curl -sL -o export.zip "$(echo "$state" | jq -r .data.result_url)"
 ```
 
 The job reports `status`, `progress` (0 to 1) and a `message`. Once it is `completed`,
-`result_url` is a signed link that works for 24 hours. `completed_with_errors` means some
-originals could not be read: `media.csv` still lists them and the package's description names
-them. `failed` carries the reason in `error`. Only the organisation's keys can read its jobs.
+`result_url` is a signed link that works for 24 hours and may answer with a redirect to the file,
+so follow redirects (`curl -L`). `completed_with_errors` means some originals could not be read:
+`media.csv` still lists them and the package's description names them. `failed` carries the
+reason in `error`. Only the organisation's keys can read its jobs.

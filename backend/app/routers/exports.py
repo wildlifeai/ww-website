@@ -7,16 +7,20 @@ Poll it with GET /api/jobs/{id}; its result_url is the signed download link.
 Gated by ``FF_CAMTRAPDP_EXPORT_ENABLED``, and needs a configured object store for the ZIPs
 (``settings.object_store_configured``): without either, the endpoint answers FEATURE_DISABLED and the website falls back to the
 metadata-only package.
+
+GET /api/exports/camtrapdp/{job_id}/download → that link on S3 once EXPORT_LINK_SECRET is set (#462),
+opened without a sign-in: a redirect to a fresh presigned GET of the ZIP.
 """
 
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import RedirectResponse
 
 from app.authz import assert_access
 from app.config import settings
 from app.dependencies import get_current_user
-from app.domain.camtrapdp_export import ExportCaller, ExportSelection
+from app.domain.camtrapdp_export import ExportCaller, ExportSelection, open_signed_link
 from app.jobs.dispatch import enqueue_job
 from app.jobs.store import create_job
 from app.middleware.rate_limit import limiter
@@ -56,5 +60,22 @@ async def start_camtrapdp_export(
     caller = ExportCaller(user_token=authorization.removeprefix("Bearer ").strip())
 
     job_id = await create_job(user_id=user.id, kind="export", label="CamtrapDP export with photos")
-    await enqueue_job("export_camtrapdp_originals_job", job_id, asdict(selection), asdict(caller))
+    await enqueue_job("export_camtrapdp_originals_job", job_id, asdict(selection), asdict(caller), link_base=str(request.base_url))
     return ApiResponse(data=JobCreateResponse(job_id=job_id).model_dump(), meta=meta)
+
+
+@router.get("/camtrapdp/{job_id}/download")
+async def download_camtrapdp_export(job_id: str, name: str = Query(""), expires: str = Query(""), sig: str = Query("")):
+    """Open an export's signed link: a 307 to a fresh presigned GET of its ZIP, every time.
+
+    No sign-in, since the link is opened from a new tab, an email or an API client: its HMAC
+    is the authorisation (``domain/camtrapdp_export.py``). 404 unless the server signs export
+    links (``OBJECT_STORE_BACKEND=s3`` and ``EXPORT_LINK_SECRET`` set); 403 for an expired,
+    altered or malformed link, with no reason given.
+    """
+    if not settings.export_link_signed:
+        raise HTTPException(status_code=404, detail="Not Found")
+    url = open_signed_link(job_id, name, expires, sig)
+    if url is None:
+        raise HTTPException(status_code=403, detail="This download link is not valid or has expired.")
+    return RedirectResponse(url, status_code=307, headers={"Cache-Control": "no-store"})

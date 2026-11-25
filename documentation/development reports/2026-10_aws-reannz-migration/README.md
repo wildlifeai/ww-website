@@ -1,6 +1,6 @@
 # AWS and REANNZ migration, approach B
 
-> **Status:** 🔧 Active, 2026-11-21: approach B is built behind settings whose defaults keep today's Azure path. The `ww-dev` stacks run on AWS ([cloud-infrastructure.md](../../resources/cloud-infrastructure.md#aws)), and a first dev batch ran on the REANNZ cluster under Spyfish's `wildlife03546` ([REANNZ](../../resources/cloud-infrastructure.md#reannz)); no site points at either yet. Wildlife Watcher's own REANNZ project is being applied for. Next: the measuring weeks and the crontab (step 4), the REANNZ email, then the routes under "Left" and the dev cutover (step 3).
+> **Status:** 🔧 Active, 2026-11-26: approach B is in `dev` ([pull request #442](https://github.com/wildlifeai/ww-website/pull/442), merged 2026-11-20) behind settings whose defaults keep today's Azure path, and every fix under "Left" that blocked the dev cutover is merged except the GBF report. The `ww-dev` stacks run on AWS and two dev batches ran on the REANNZ cluster under Spyfish's `wildlife03546`; no site points at either yet. Next: point the dev site at `ww-dev` (step 3), the 4-hourly crontab and two measuring weeks (step 4), then production ([checklist](#production-checklist-steps-5-and-6)).
 
 The design is [approach-b.md](approach-b.md), the proposal ranked first on 31 October 2026. The estate it replaces is [cloud-infrastructure.md](../../resources/cloud-infrastructure.md); the Google Cloud plan it supersedes is [2026-09_gcp-pilot-and-migration](../2026-09_gcp-pilot-and-migration/README.md).
 
@@ -32,6 +32,7 @@ Defaults are today's behaviour. On AWS the stack sets the first group; every oth
 | `GPU_IMAGE` | empty | SSM, written by the deploy workflow | the tag `/pending` tells the cron to run |
 | `S3_PRESIGN_GET_SECONDS` | 300 | | browser and part-upload URLs |
 | `BATCH_MIN_PHOTOS`, `BATCH_MAX_WAIT_MINUTES` | 100, 60 | | the submit gate |
+| `BATCH_CRON_INTERVAL_MINUTES` | 30 | 240 from step 4 | the crontab's interval; the website states the gate's wait plus this as the usual wait |
 | `BATCH_MAX_QUEUE_HOURS` | 24 | | the reaper's limit for a queued batch job |
 | `BATCH_LEASE_MINUTES`, `BATCH_MAX_ATTEMPTS` | 30, 2 | | lease expiry without a heartbeat; leases a job may lose |
 | `BATCH_LEASE_MAX_PHOTOS`, `BATCH_PART_MAX_PHOTOS` | 2,000, 500 | | lease and part sizes |
@@ -45,15 +46,16 @@ Defaults are today's behaviour. On AWS the stack sets the first group; every oth
 | Route | Body | Answer |
 |---|---|---|
 | `GET /pending` | | `jobs`, `photos` (upper bound), `oldest_minutes`, `submit`, `image`, `time_limit_minutes`, `contract` |
-| `POST /lease` | `max_photos`, `slurm_job_id` | the manifest, or `{"lease_id": null}` |
+| `POST /lease` | `max_photos`, `slurm_job_id`, `paged` | the manifest, or `{"lease_id": null}` |
+| `GET /lease/{id}/items/{job}` | `offset`, `limit` (query, at most 1,000) | a paged job's photos from `offset`, URLs signed now |
 | `POST /lease/{id}/heartbeat` | `done`, `total` | `cancel`, `expires_at` |
 | `POST /lease/{id}/part` | `job_id`, `part` | `method`, `url` (S3) or `path` (the API), `headers` |
 | `PUT /lease/{id}/part/{job}/{n}` | gzipped part | for the azure and local backends |
 | `POST /lease/{id}/part/complete` | `job_id`, `part` | starts `ingest_results_part_job` |
 | `POST /lease/{id}/done` | `jobs: [{job_id, parts_total, failed_media}]` | releases the lease, starts `finalize_batch_job` per job |
-| `GET /lease/{id}/media/{media_id}?crop=` | | one original or hero crop through the SSRF-guarded resolver |
+| `GET /lease/{id}/media/{media_id}?crop=` | | one original or hero crop through the SSRF-guarded resolver; a 307 to a presigned copy when it is too large to answer |
 
-**Manifest**: `lease_id`, `contract`, `expires_at`, `heartbeat_seconds`, `part_max_photos`, and per job `job_id`, `kind` (`annotate` or `embed`), `models` (`speciesnet`, `bioclip`, or `dinov3` with the model name), `config` (threshold, SpeciesNet cutoffs, `per_detection`, BioCLIP rank and labels), `items` (`media_id`, `deployment_id`, and `url` for S3 or a public rendition, else `path`).
+**Manifest**: `lease_id`, `contract`, `expires_at`, `heartbeat_seconds`, `part_max_photos`, and per job `job_id`, `kind` (`annotate` or `embed`), `models` (`speciesnet`, `bioclip`, or `dinov3` with the model name), `config` (threshold, SpeciesNet cutoffs, `per_detection`, BioCLIP rank and labels), `items` (`media_id`, `deployment_id`, and `url` for S3 or a public rendition, else `path`), or in a paged lease `items_total`, the photos then read page by page.
 
 **Results part** (`backend/app/services/inference_cache.py`, contract 1): gzipped JSON lines. Header: `contract`, `lease_id`, `job_id`, `part`, `kind`, `image`, `slurm_job_id`, `bioclip_labels`, `bioclip_rank`, `embedding_model`. Record per photo: `media_id`, `deployment_id`, then `speciesnet` (the `ImagePrediction` fields), `bioclip` (`bbox` or null for a whole frame, name, score, rank), `dinov3` (the vector), or `error`.
 
@@ -70,7 +72,7 @@ Defaults are today's behaviour. On AWS the stack sets the first group; every oth
 | A results part's S3 ObjectCreated event invokes ingest | The cluster's `POST /part/complete` starts ingest | Works on every backend, so the batch can be tried with the API still on Azure; no bucket notification; a part of an expired lease is not ingested by surprise |
 | Three functions, a separate ingest function | Two, `api` and `cpu`; ingest is a CPU job | The `cpu` function's reserved concurrency (5) is the Supabase guard either way |
 | DINOv3 vectors in the annotate pass, matched to the hero crop by box | A follow-up `embed_deployments_job` batch after the annotate job finishes | The hero crop exists only after ingest writes it; the embed lease ships those exact bytes. Costs one more lease, in the same or the next window |
-| Five lease endpoints | Eight routes (above) | A part PUT for non-S3 backends and a media route, so `gdrive://` originals reach the cluster without a raw URL or a credential |
+| Five lease endpoints | Nine routes (above) | A part PUT for non-S3 backends and a media route, so `gdrive://` originals reach the cluster without a raw URL or a credential |
 | Lease state in `job_data` | A lease row in `services/locks.py` plus marker objects | A process with a stale memory copy of a job (the job store is memory-first) could overwrite `job_data` fields; rows and markers it never writes |
 | `results/{env}/...` | `results/{lease}/{job}/...` | One bucket per environment already |
 | `originals/{org}/{project}/{deployment}/{sha256}` | `originals/{project}/{deployment}/{file_hash}.jpg` | The upload payload carries no organisation; `file_hash` is `google_drive.compute_file_hash` (bytes and deployment id), the existing dedup key |
@@ -89,25 +91,31 @@ On the hero-crop BioCLIP path (`FF_PER_CROP_CLASSIFY_ENABLED` off) a Gemini box 
 | Item | Effect until done | Where |
 |---|---|---|
 | Export link that outlives the Lambda role session (HMAC route redirecting to a fresh presigned URL) | An emailed export link can stop working within hours on AWS | `backend/app/domain/camtrapdp_export.py`, `backend/app/routers/exports.py`; [#462](https://github.com/wildlifeai/ww-website/issues/462) |
+| `GET /api/reports/gbf` counts inside the request | Can outrun the HTTP API's 30 s and answer 503 on AWS | waits on [ww-backend#362](https://github.com/wildlifeai/ww-backend/issues/362) (`gbf_report_counts`); [#456](https://github.com/wildlifeai/ww-website/issues/456) |
 | `train_species_brain_job` as a batch job on the REANNZ cluster, where training is planned (camera models, per-project species models, larger fine-tunes on an A100; 2026-11-20) | Can exceed the 15-minute limit on the `cpu` function; keep `FF_MODEL_TRAINING_ENABLED` off on AWS | `backend/app/jobs/definitions.py`, `backend/app/jobs/dispatch.py`; [#463](https://github.com/wildlifeai/ww-website/issues/463) |
 | `reprocess_project_job` and `reprocess_all_job` fanned out to per-deployment embed batches | On AWS they reach the `cpu` function, which cannot embed, and fail with a clear message | `backend/app/jobs/dispatch.py`; [#464](https://github.com/wildlifeai/ww-website/issues/464) |
 | Drive archive copy and path rewrite (`migrate_archive_job`, step 7) | `gdrive://` rows keep resolving through the media route | [#465](https://github.com/wildlifeai/ww-website/issues/465) |
-| Copy for batch waits: the upload dock, and the Clusters page, which says "Refresh shortly" and shows no queued run while a grouping waits for the cluster | Users see a queued AI job, or no sign of the grouping they started, for up to the window | `frontend/src/contexts/UploadContext.tsx`, `frontend/src/pages/ClusterReviewPage.tsx`; [#460](https://github.com/wildlifeai/ww-website/issues/460) |
+| Grid grouping asks for every photo of the deployments shown, capped at `MULTI_CLUSTER_MAX_PHOTOS` (50,000) | A larger request is refused rather than answered past 6 MB | [#474](https://github.com/wildlifeai/ww-website/issues/474) |
+| Finished `api_jobs` rows deleted after 90 days by the stale-job reaper (agreed in [ww-backend#364](https://github.com/wildlifeai/ww-backend/issues/364)) | The table grows by a row at every sign-in and every *Run AI again* | `backend/app/jobs/store.py`; [#486](https://github.com/wildlifeai/ww-website/issues/486) |
 | The e2e upload test's cleanup deletes its rows but not its originals in the bucket | Test originals pile up under `originals/` in `wildlifewatcher-dev-media` | `e2e/cleanup.mjs`; [#470](https://github.com/wildlifeai/ww-website/issues/470) |
 | `scripts/parity_audit.py`, `scripts/fetch-env.sh` for SSM and Lambda | Azure-only until then | [#466](https://github.com/wildlifeai/ww-website/issues/466) |
 | A test of the flush middleware on a Lambda-mounted app | Covered by reading only | `backend/app/main.py`; [#467](https://github.com/wildlifeai/ww-website/issues/467) |
 | Least-privilege review of `infra/aws/shared.yaml`'s deploy role; action versions in `deploy-aws.yml` | Neither has run | [#468](https://github.com/wildlifeai/ww-website/issues/468) |
 | The new REANNZ project's code in `cluster/reannz/*` (`--account` and the `/nesi/project` and `/nesi/nobackup` paths), and in the cluster layout and crontab below | They name Spyfish's `wildlife03546` until REANNZ assigns the code | `cluster/reannz/`; [#469](https://github.com/wildlifeai/ww-website/issues/469) |
-| Retry the job-status write after a dropped Supabase connection | On Lambda the first write after a frozen spell can fail with `Server disconnected` (logged at debug only). Seen on in-progress writes; a lost final write would leave a finished job looking stuck until the reaper fails it | `backend/app/jobs/store.py`; [#459](https://github.com/wildlifeai/ww-website/issues/459) |
-| Executable bit on `cluster/reannz/*` | Set with `git update-index --chmod=+x` when committing, or `chmod +x` on the cluster | |
-| Routes that do their work inside the request (audit 2026-11-20): `POST /api/pipeline/run` (SpeciesNet and BioCLIP inline, and the Lambda image has neither), `/api/clustering/analyze` and `/analyze/csv` (multipart only), `/api/camtrapdp/import`, `/api/inat/publish` (a 120 s budget), `/api/inat/sync`, `GET /api/reports/gbf`, `POST /api/pipeline/events/cluster` | On AWS each can outrun the HTTP API's 30 s and answer 503; on Azure nothing changes. Each becomes a job, or a shorter budget where the route already resumes | `backend/app/routers/`; [#452](https://github.com/wildlifeai/ww-website/issues/452), [#453](https://github.com/wildlifeai/ww-website/issues/453), [#454](https://github.com/wildlifeai/ww-website/issues/454), [#455](https://github.com/wildlifeai/ww-website/issues/455), [#456](https://github.com/wildlifeai/ww-website/issues/456), [#458](https://github.com/wildlifeai/ww-website/issues/458) |
-| Responses that can pass 6 MB: `POST /api/worker/lease` (up to 2,000 presigned URLs), non-`s3://` originals through `GET /api/media/{id}/image` and the lease media route, `POST /api/brain/clusters/multi` (no deployment limit); and `MAX_UPLOAD_IMAGES_PER_REQUEST` (500) read in series in `/api/exif/parse` | Fail on Lambda only | page the lease manifest, redirect originals, cap the request; [#457](https://github.com/wildlifeai/ww-website/issues/457) |
 
-## ww-backend, issue descriptions for Victor (none required by this branch)
+Merged into `dev` on 2026-11-22 and 2026-11-23, and so off this list: the routes that worked inside the request (pipeline run [#452](https://github.com/wildlifeai/ww-website/issues/452), CamtrapDP import [#454](https://github.com/wildlifeai/ww-website/issues/454), iNaturalist publish and sync [#455](https://github.com/wildlifeai/ww-website/issues/455), event grouping [#458](https://github.com/wildlifeai/ww-website/issues/458); image clustering [#453](https://github.com/wildlifeai/ww-website/issues/453) was retired instead), responses under 6 MB [#457](https://github.com/wildlifeai/ww-website/issues/457), the job-status write retry [#459](https://github.com/wildlifeai/ww-website/issues/459), and the batch-wait wording [#460](https://github.com/wildlifeai/ww-website/issues/460).
 
-1. **Record where originals live.** `media_assets.storage_provider` allows `google_drive`, `azure_blob`, `supabase_storage`. Add `aws_s3` only if the column should be filled; the website leaves it NULL today (`backend/app/domain/media_registry.py`).
-2. **Comments.** `media.file_path` ("Storage path or Google Drive path") and the `media-renditions` comment in `supabase/schemas/storage/01_buckets.sql` ("Originals stay in Google Drive") should name S3.
-3. **The batch queue's reads.** `api_jobs` is filtered on `job_data->dispatch->>backend` and `job_data->lease->>id`. Small today; an expression index when it grows, or the `ai_work_items` table from approach C, which the review recommends once batches are proven.
+## ww-backend
+
+| Change | Issue | State (2026-11-26) |
+|---|---|---|
+| Deleting an event or photo clears only its link (`ON DELETE SET NULL (column)`) | [ww-backend#361](https://github.com/wildlifeai/ww-backend/issues/361) | merged into ww-backend `dev` |
+| GBF counts in the database (`gbf_report_counts`) | [ww-backend#362](https://github.com/wildlifeai/ww-backend/issues/362) | open; [#456](https://github.com/wildlifeai/ww-website/issues/456) waits on it |
+| `media.file_path` can be an `s3://` key | [ww-backend#363](https://github.com/wildlifeai/ww-backend/issues/363) | merged into `dev` |
+| `api_jobs` indexes for the website's reads; finished jobs kept 90 days | [ww-backend#364](https://github.com/wildlifeai/ww-backend/issues/364) | merged into `dev`; the website's deletion is [#486](https://github.com/wildlifeai/ww-website/issues/486) |
+| `media_assets.storage_provider` value `aws_s3` | not filed | only if the column should be filled; the website leaves it NULL (`backend/app/domain/media_registry.py`) |
+
+None reaches the production database until ww-backend promotes `dev` to staging.
 
 ## Migration steps
 
@@ -115,15 +123,36 @@ From [approach-b.md](approach-b.md), section 4, in approach A's order as the rev
 
 | # | Step | Status | Rollback |
 |---|---|---|---|
-| 0 | A REANNZ project for Wildlife Watcher and the email (allocation class, login-node crontab, compute-node HTTPS to the API host, memory above the L4 bundle, a service account for the job); Supabase region; AWS account, Auckland enabled, Lambda quota | A new project, applied for from Victor's existing REANNZ login, separate from Spyfish's `wildlife03546` (2026-11-20); not applied for yet. The request to July 2027: about 900 L4 hours (600 inference, 300 training), 50 A100 hours, 200 GB project storage, 100 GB scratch. L4 is the cheapest GPU on the 30 October price list. AWS done: the Lambda quota (`ww-dev` allowed 10 concurrent executions, the stack reserves 15 and AWS keeps 100 unreserved) is 1,000 since 2026-11-20. Compute nodes reach the AWS API over HTTPS (2026-11-21). REANNZ email drafted, Supabase region not read | none |
-| 1 | `infra/aws/shared.yaml` (`GitHubEnvironment=dev`), then `ww-dev` from `infra/aws/template.yaml` with bucket `wildlifewatcher-dev-media`, in the `ww-dev` account; SSM parameters; the account's budget | 2026-11-20: `ww-shared` and `ww-dev` deployed from a workstation, `/health` 200 on the stack's `ApiUrl`; only `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` in `/ww/dev/`, every flag off; the organization's budget `wildlife-ai-monthly` set | delete the stacks |
-| 2 | Code behind flags into `dev` | on `feat/aws-reannz-batch`, [pull request #442](https://github.com/wildlifeai/ww-website/pull/442) into `dev` (2026-11-20), not merged | revert |
-| 3 | Dev API on Lambda; Pages preview `VITE_API_BASE_URL`; `ALLOWED_ORIGINS` | not started | Pages preview env back to the ACA FQDN |
-| 4 | Dev cluster: SIF, weights, token, crontab; two weeks measuring seconds per photo, cold start, queue wait, RSU, ingest time, precomputed misses | 2026-11-21, first trial under `wildlife03546`, run by Victor through OnDemand: SIF built, weights cached, then one job of SpeciesNet over 57 photos, 50 s on one L4 (peak 1.4 GB, 8 CPUs allotted, billing weight 84), and 58 observations ingested within 90 s. The follow-up DINOv3 job took 34 s (peak 0.9 GB); its ingest failed for the larger deployment because numba could not write its cache on Lambda's read-only filesystem, now set to `/tmp` with `NUMBA_CACHE_DIR`. A second run on the fixed image (`dev-6bcff97`, the same day): the pull worked on the script's own 32G, the GPU job at 2 CPUs and 8G cut the billing weight from 84 to 62, and the grouping that had failed completed. Crontab not set; the two weeks of measuring not started | comment out the crontab line |
-| 5 | `ww-prod`; the Azure prod API gets the `s3://` read path (in this branch) and a read-only key | not started | delete the stack |
-| 6 | Prod cutover | not started | Pages env back |
-| 7 | Drive archive copy | not built | reverse run |
+| 0 | A REANNZ project for Wildlife Watcher (allocation class, login-node crontab, compute-node HTTPS to the API host, memory above the L4 bundle, a service account for the job); Supabase region; AWS account, Auckland enabled, Lambda quota | Requested from Victor's REANNZ login, separate from Spyfish's `wildlife03546` (2026-11-20): to July 2027, about 900 L4 hours (600 inference, 300 training), 50 A100 hours, 200 GB project storage, 100 GB scratch. On 2026-11-23 REANNZ asked whether the GPU jobs are a live service; they are not (scheduled batch jobs, outbound HTTPS only), and the answer asks whether the check should run from a login-node crontab or `scrontab`, since REANNZ's [scron page](https://docs.nesi.org.nz/Batch_Computing/scron/) does not say whether a scron job may call `sbatch`. AWS done: Lambda quota 1,000 (2026-11-20); compute nodes reach the API over HTTPS (2026-11-21). Supabase region not read | none |
+| 1 | `infra/aws/shared.yaml` (`GitHubEnvironment=dev`), then `ww-dev` from `infra/aws/template.yaml` with bucket `wildlifewatcher-dev-media`, in the `ww-dev` account; SSM parameters; the account's budget | 2026-11-20: `ww-shared` and `ww-dev` deployed from a workstation, `/health` 200 on the stack's `ApiUrl`; the organization's budget `wildlife-ai-monthly` set. What runs there now: [cloud-infrastructure.md](../../resources/cloud-infrastructure.md#aws) | delete the stacks |
+| 2 | Code behind flags into `dev` | merged 2026-11-20, [pull request #442](https://github.com/wildlifeai/ww-website/pull/442) | revert |
+| 3 | Dev API on Lambda; Pages preview `VITE_API_BASE_URL`; `ALLOWED_ORIGINS` | The fixes are in `dev` (see "Left"). Next: deploy `ww-dev` from `dev`, set `/ww/dev/ALLOWED_ORIGINS` with the dev site first (the iNaturalist callback returns to the first entry), then the dev preview's `VITE_API_BASE_URL` to the stack's `ApiUrl`. CORS already accepts every `*.ww-website.pages.dev` origin | Pages preview env back to the ACA FQDN |
+| 4 | Dev cluster: SIF, weights, token, crontab; two weeks measuring seconds per photo, cold start, queue wait, RSU, ingest time, precomputed misses | Two trials on 2026-11-21 under `wildlife03546`, run by Victor through OnDemand: SpeciesNet over 57 photos in 50 s on one L4 (peak 1.4 GB), 58 observations ingested within 90 s; DINOv3 in 34 s (peak 0.9 GB); at 2 CPUs and 8G the billing weight fell from 84 to 62. The cluster checks every 4 hours, not 30 minutes (Victor, 2026-11-23): the crontab line below and `BATCH_CRON_INTERVAL_MINUTES` 240, with `BATCH_MAX_WAIT_MINUTES` 0 proposed so each check takes whatever waits and the website says "usually within 4 hours" (60 plus 240 says 5). Crontab not set; the measuring not started | comment out the crontab line |
+| 5 | `ww-prod`; the Azure prod API gets the `s3://` read path (in `dev`, live with the next release) and a read-only key | not started; [checklist](#production-checklist-steps-5-and-6) | delete the stack |
+| 6 | Prod cutover | not started; [checklist](#production-checklist-steps-5-and-6) | Pages env back |
+| 7 | Drive archive copy | not built, [#465](https://github.com/wildlifeai/ww-website/issues/465) | reverse run |
 | 8 | Teardown of `WW-AE` and the Azure, Redis, ARQ, KEDA and Drive code | not started | none |
+
+## Production checklist (steps 5 and 6)
+
+`prod` is the live website: AWS account `ww-prod`, GitHub environment `staging`, the prod/staging Supabase project.
+
+Before anything is created:
+
+1. Step 4's two measuring weeks with no new failure.
+2. A `dev` to `main` release. It gives the Azure production API the `s3://` read path behind today's defaults, and puts `deploy-aws.yml` on `main`, the only branch `workflow_dispatch` runs from.
+3. ww-backend's `dev` promoted to staging, with the changes above.
+4. [#456](https://github.com/wildlifeai/ww-website/issues/456), [#462](https://github.com/wildlifeai/ww-website/issues/462) and [#468](https://github.com/wildlifeai/ww-website/issues/468) merged; [#466](https://github.com/wildlifeai/ww-website/issues/466) and [#469](https://github.com/wildlifeai/ww-website/issues/469) wanted.
+
+Then, each with Victor's yes:
+
+5. The `ww-prod` account as in [Adding an AWS account](../../resources/cloud-infrastructure.md#adding-an-aws-account): Auckland on, the Lambda concurrency quota at 1,000 (about a day), the Identity Center assignment, a budget.
+6. `ww-shared` with `GitHubEnvironment=staging`; the `staging` environment's `AWS_DEPLOY_ROLE_ARN`, `ECR_REGISTRY` and `AWS_REGION`.
+7. SSM `/ww/prod/`: the prod Supabase values; the flags as on Azure production and the keys they need; a new lease token's SHA-256; `ALLOWED_ORIGINS` with the production site first; its own Google service account (dev and production share one today); the demo account; `GENERAL_ORG_ID`.
+8. `deploy-aws.yml` with target `prod`; `/health` 200 on its `ApiUrl`.
+9. On the cluster: `~/.config/ww/prod.token`, `prod.api` and the prod crontab line.
+
+Cutover (step 6): freeze deploys; let the Azure production queue drain; set the Pages production `VITE_API_BASE_URL` to the prod `ApiUrl`; check `/health`, *Try the demo* and one upload with cloud AI. Rollback: the Pages variable back to the Azure address, and redeploy.
 
 ## Setting up step 1 and step 4 by hand
 
@@ -139,4 +168,4 @@ From [approach-b.md](approach-b.md), section 4, in approach A's order as the rev
 | Cluster layout and access | [cloud-infrastructure.md](../../resources/cloud-infrastructure.md#reannz); the scripts in `cluster/reannz/` go to `bin/` |
 | First pull and weights | `sbatch --export=ALL,IMAGE=<image>,SIF=<sif> bin/ww_pull.sl` (32 GB, about 20 minutes, a 3.6 GB SIF), then `bin/ww_cache_models.sh <sif>`, which asks for `HF_TOKEN` (DINOv3 is gated) and keeps it in that one job |
 | A test run by hand | The API asks for a job only at `BATCH_MIN_PHOTOS` (100) queued photos or `BATCH_MAX_WAIT_MINUTES` (60), so a test submits the GPU job directly: `sbatch --job-name ww-<env>-infer --time 20 --export=ALL,SIF=<sif>,WW_API=<api>,WW_ENV=<env>,WW_GPU_IMAGE=<image> bin/ww_infer.sl` |
-| Crontab | `*/30 * * * * /nesi/project/wildlife03546/ww/bin/ww_cron.sh <env> >> /nesi/project/wildlife03546/ww/logs/cron-<env>.log 2>&1` |
+| Crontab | `0 */4 * * * /nesi/project/wildlife03546/ww/bin/ww_cron.sh <env> >> /nesi/project/wildlife03546/ww/logs/cron-<env>.log 2>&1` |

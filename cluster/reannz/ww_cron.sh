@@ -4,10 +4,10 @@
 # one this cluster has not seen). Plain code from Victor's own crontab, not an agent: the
 # cluster's AI agent rules (from 1 November 2026) do not cover it, and no agent touches the token.
 #
-#   */30 * * * * /nesi/project/wildlife03546/ww/bin/ww_cron.sh prod >> /nesi/project/wildlife03546/ww/logs/cron-prod.log 2>&1
+#   0 */4 * * * /nesi/project/wildlife03546/ww/bin/ww_cron.sh prod >> /nesi/project/wildlife03546/ww/logs/cron-prod.log 2>&1
 #
-# The interval must match the API's BATCH_CRON_INTERVAL_MINUTES (default 30): the website adds it
-# to BATCH_MAX_WAIT_MINUTES when it tells people how long AI and grouping usually wait.
+# The interval must match the API's BATCH_CRON_INTERVAL_MINUTES (240 for every 4 hours): the
+# website adds it to BATCH_MAX_WAIT_MINUTES when it tells people how long AI and grouping wait.
 #
 # Reads, per environment, from ~/.config/ww/ (mode 700, files 600, the home directory rather
 # than the project directory, which other project members can read):
