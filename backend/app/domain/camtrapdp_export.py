@@ -35,7 +35,7 @@ from urllib.parse import urlencode
 import structlog
 
 from app.config import settings
-from app.domain.media_resolver import can_resolve
+from app.domain.media_resolver import MediaRef, can_resolve
 
 logger = structlog.get_logger()
 
@@ -65,6 +65,9 @@ _MISSING_NAMED = 20
 _PAGE = 1000
 
 Fetch = Callable[[str], Awaitable[Optional[bytes]]]
+# Reads one original, given its stored path and its own media row: an s3:// original is read
+# only from that row's folder (media_resolver.in_own_folder).
+FetchOriginal = Callable[[str, MediaRef], Awaitable[Optional[bytes]]]
 Progress = Callable[[int, int, int], Awaitable[None]]
 
 
@@ -122,10 +125,11 @@ class Photo:
 
 @dataclass(frozen=True)
 class Original:
-    """Where a photo's original is stored, and its size when known."""
+    """Where a photo's original is stored, its size when known, and its row's ``deployment_id``."""
 
     file_path: str
     size: Optional[int] = None
+    deployment_id: str = ""
 
 
 @dataclass
@@ -182,7 +186,12 @@ def lookup_originals(svc, photos: list[Photo]) -> dict[str, Original]:
     for deployment_id in sorted({p.deployment_id for p in photos}):
         after = None
         while True:
-            q = svc.table("media").select("id, file_path, media_assets(file_size_bytes)").eq("deployment_id", deployment_id).is_("deleted_at", "null")
+            q = (
+                svc.table("media")
+                .select("id, deployment_id, file_path, media_assets(file_size_bytes)")
+                .eq("deployment_id", deployment_id)
+                .is_("deleted_at", "null")
+            )
             if after:
                 q = q.gt("id", after)
             rows = q.order("id").limit(_PAGE).execute().data or []
@@ -191,7 +200,7 @@ def lookup_originals(svc, photos: list[Photo]) -> dict[str, Original]:
                     asset = row.get("media_assets")
                     if isinstance(asset, list):  # PostgREST may nest a to-one as a list
                         asset = asset[0] if asset else None
-                    found[row["id"]] = Original(row.get("file_path") or "", (asset or {}).get("file_size_bytes"))
+                    found[row["id"]] = Original(row.get("file_path") or "", (asset or {}).get("file_size_bytes"), str(row.get("deployment_id") or ""))
             if len(rows) < _PAGE:
                 break
             after = rows[-1]["id"]
@@ -254,7 +263,7 @@ async def write_package(
     photos: list[Photo],
     originals: dict[str, Original],
     *,
-    fetch: Fetch,
+    fetch: FetchOriginal,
     max_bytes: int,
     on_progress: Optional[Progress] = None,
     missing: Optional[list[tuple[str, str]]] = None,
@@ -266,6 +275,7 @@ async def write_package(
     Every original goes to its media.csv path, stored rather than compressed (JPEGs do not
     shrink). The metadata files follow, copied unchanged except datapackage.json, which gains
     the missing photos. ``missing`` starts the list with photos already known to be missing.
+    ``fetch`` is given each original's path and its media row.
     """
     result = ExportResult(photos=len(photos) + len(missing or []), missing=list(missing or []))
     pending = iter(photos)
@@ -284,7 +294,8 @@ async def write_package(
                 elif not can_resolve(original.file_path):
                     why = "no stored original"
                 else:
-                    data = await fetch_with_retries(original.file_path, fetch, backoff_s=backoff_s)
+                    ref = MediaRef(photo.media_id, original.deployment_id)
+                    data = await fetch_with_retries(original.file_path, lambda path: fetch(path, ref), backoff_s=backoff_s)
                     why = "could not be read from storage"
                 async with write_lock:
                     if data is not None:
@@ -336,7 +347,7 @@ async def build_export(
     max_bytes: int,
     on_message: Callable[[str, float], Awaitable[None]],
     on_progress: Optional[Progress] = None,
-    fetch: Optional[Fetch] = None,
+    fetch: Optional[FetchOriginal] = None,
 ) -> tuple[Path, ExportResult]:
     """Make the export ZIP in ``workdir``; returns its path and what went into it.
 
@@ -381,10 +392,10 @@ async def build_export(
     return workdir / "export.zip", result
 
 
-async def _fetch_original(file_path: str) -> Optional[bytes]:
+async def _fetch_original(file_path: str, media: MediaRef) -> Optional[bytes]:
     from app.domain.media_resolver import resolve_media
 
-    resolved = await resolve_media(file_path, size="full")
+    resolved = await resolve_media(file_path, size="full", media=media)
     return resolved[0] if resolved else None
 
 

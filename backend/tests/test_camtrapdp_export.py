@@ -21,6 +21,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.domain import camtrapdp_export as export
+from app.domain.media_resolver import MediaRef
 from app.services import camtrap_dp_function as fn
 
 PROJECT = "11111111-1111-4111-8111-111111111111"
@@ -66,18 +67,21 @@ def _metadata_zip(path: Path, rows: list[dict], description: str = "Project note
 
 
 def _originals(rows, prefix="gdrive://"):
-    return {r["mediaID"]: export.Original(f"{prefix}{r['mediaID']}", 10) for r in rows}
+    return {r["mediaID"]: export.Original(f"{prefix}{r['mediaID']}", 10, r["deploymentID"]) for r in rows}
 
 
 class FakeDrive:
-    """Fetch by file path. ``fail`` maps a path to how many reads fail before one works (None: all)."""
+    """Fetch by file path. ``fail`` maps a path to how many reads fail before one works (None: all).
+    ``rows`` keeps the media row each read was given."""
 
     def __init__(self, fail=None):
         self.fail = dict(fail or {})
         self.calls: list[str] = []
+        self.rows: dict[str, object] = {}
 
-    async def __call__(self, file_path: str):
+    async def __call__(self, file_path: str, media=None):
         self.calls.append(file_path)
+        self.rows[file_path] = media
         left = self.fail.get(file_path, 0)
         if left is None:
             return None
@@ -139,6 +143,8 @@ async def test_every_original_lands_at_its_media_csv_path(tmp_path):
         assert sorted(n for n in out.namelist() if n.startswith("media/")) == sorted(r["filePath"] for r in rows)
     assert (result.photos, result.written, result.missing) == (3, 3, [])
     assert progress[-1] == (3, 3, 0)
+    # Each original is read as part of its own media row.
+    assert drive.rows == {f"gdrive://{r['mediaID']}": MediaRef(r["mediaID"], r["deploymentID"]) for r in rows}
 
 
 async def test_missing_originals_are_retried_reported_and_not_fatal(tmp_path):
@@ -250,8 +256,8 @@ def test_lookup_reads_every_page():
     photos = [export.Photo(r["id"], DEP_A, "p") for r in db]
     found = export.lookup_originals(FakeSvc(db), photos)
     assert len(found) == 2501
-    assert found[_mid(2400)] == export.Original("gdrive://2400", 2400)
-    assert found[_mid(9999)] == export.Original("gdrive://x", None)
+    assert found[_mid(2400)] == export.Original("gdrive://2400", 2400, DEP_A)
+    assert found[_mid(9999)] == export.Original("gdrive://x", None, DEP_A)
 
 
 # ── build_export and the function: authorisation is the function's ────────

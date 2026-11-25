@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 from PIL import Image, ImageDraw
 
 from app.config import settings
+from app.domain.media_resolver import MediaRef
 from app.domain.pipeline import EVIDENCE_FUSION_VERSION, EvidenceFusionStep, build_consensus_observation, fusion_evidence_signals
 from app.jobs.definitions import build_pipeline_steps
 from app.schemas.pipeline import PipelineStepType
@@ -257,12 +258,16 @@ async def test_step_writes_one_consensus_row_per_media_and_recovers_a_burst_neig
     fake = _Fake(media, obs, evidence_table=True, evidence_rows=evidence)
     _enable(monkeypatch, fake)
 
-    async def fake_resolve(path, size="full"):
+    rows_read = []
+
+    async def fake_resolve(path, size="full", media=None):
+        rows_read.append(media)
         return (_jpeg(square=path.endswith("b.jpg")), "image/jpeg")
 
     monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)
 
     result = await EvidenceFusionStep().run(media, DEP, {"confidence_threshold": 0.2})
+    assert sorted(rows_read, key=lambda r: r.id) == [MediaRef("a", DEP), MediaRef("b", DEP)]  # the burst's frames, each as its row
     rows = {r["media_id"]: r for r in fake.inserted}
     assert set(rows) == {"a", "b", "c"}
     assert all(r["source_type"] == "consensus" and r["source_model_version"] == EVIDENCE_FUSION_VERSION for r in rows.values())
@@ -314,7 +319,7 @@ async def test_step_replaces_only_its_own_ai_reviewed_rows(monkeypatch):
     fake = _Fake(media, rows, evidence_table=False)
     _enable(monkeypatch, fake)
 
-    async def fake_resolve(path, size="full"):
+    async def fake_resolve(path, size="full", media=None):
         raise AssertionError("a singleton needs no image")
 
     monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)

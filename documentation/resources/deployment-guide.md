@@ -245,7 +245,7 @@ which `backend/app/aws_params.py` loads at each cold start. Status and design:
 |---|---|---|---|
 | `OBJECT_STORE_BACKEND` | `azure` | `s3` | Where the upload buffer, the export ZIPs and the batch results parts live: `azure` (Blob), `s3`, or `local` (a directory, for dev and tests) |
 | `ARCHIVE_BACKEND` | `gdrive` | `s3` | Where the upload job archives originals: Drive (`GOOGLE_DRIVE_*`), or `originals/` in `S3_BUCKET` as `s3://` paths |
-| `S3_BUCKET`, `S3_REGION` | empty | the stack's bucket and region | The bucket of both `s3` backends; an empty region is the SDK's default |
+| `S3_BUCKET`, `S3_REGION` | empty | the stack's bucket and region | The bucket of both `s3` backends, and the only bucket `s3://` originals are read from, so an Azure API that serves them sets it too; an empty region is the SDK's default |
 | `S3_PRESIGN_GET_SECONDS` | 300 | | Lifetime of a presigned GET handed to a browser or the cluster, 30 to 3,600 |
 | `EXPORT_LINK_SECRET` | empty | SSM | HMAC key of the export download route ([API reference](api-reference.md#camtrapdp-export)) on `s3`. Empty, an export link is a plain presigned GET, which dies with the Lambda role's session |
 | `LOCAL_OBJECT_STORE_DIR` | empty, `<system temp>/ww_objects` | | The `local` backend's directory |
