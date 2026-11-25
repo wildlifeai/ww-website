@@ -1,9 +1,8 @@
-# Environment, Docker and file formats
+# Environment, Docker, file formats and cloud access
 
-One `.env` at the root, both compose files, and the line-ending and encoding rules that a
-PowerShell redirect will quietly break.
-
-# 4a. File Format Rules
+One `.env` at the root, both compose files, the line-ending and encoding rules that a
+PowerShell redirect will quietly break, and working with AWS (`infra/aws/`, SSM parameters,
+deploys) and the REANNZ cluster (`cluster/reannz/`).
 
 ## Line Endings: LF everywhere
 
@@ -47,7 +46,7 @@ redo the edit with a UTF-8-safe tool rather than hand-repairing it.
 
 ---
 
-# 5. Environment Rules
+## Environment rules
 
 Environment configuration is centralized.
 
@@ -79,8 +78,15 @@ How the accounts are laid out and how a person signs in:
   and before adding a resource type, check Auckland offers it:
   `aws cloudformation describe-type --type RESOURCE --type-name <type> --profile ww-dev --region ap-southeast-6`.
   Function URLs (`AWS::Lambda::Url`) and `AWS::Budgets::Budget` are missing there.
+* `deploy-aws.yml` deploys as the role `ww-gha-deploy` (`infra/aws/shared.yaml`), and
+  CloudFormation acts with its rights, which it cannot widen itself. A new resource type in
+  `template.yaml` needs its actions added to that role in `shared.yaml` first, deployed from a
+  workstation, or the next `deploy-aws.yml` run fails.
 * A changed `/ww/<env>/` parameter reaches a function only at its next cold start
   (`app/aws_params.py`): redeploy the stack, or wait for idle copies to retire, before testing it.
+  A variable the function already has wins, so a value `template.yaml` sets (its `Globals`
+  environment, such as `WORKER_BACKEND` or `S3_BUCKET`, and each function's `WW_LAMBDA_ROLE`)
+  overrides an SSM parameter of the same name: change the template instead.
 * Deploying from a workstation, including the Windows ECR login trap: the "Setting up step 1"
   table in the
   [migration report](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md#setting-up-step-1-and-step-4-by-hand).

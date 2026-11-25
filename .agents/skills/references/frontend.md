@@ -2,8 +2,6 @@
 
 Hooks, the API client, and the abstractions to reuse rather than duplicate.
 
-# 4. Frontend Architecture Rules
-
 Preferred flow:
 
 ```text
@@ -76,9 +74,7 @@ Rules:
   is off site-wide (`lib/queryClient.ts`). LoRaWAN values arrive in `lorawan_parsed_messages`, a
   moment after their `lorawan_messages` row, so listen for the decoded row. The Realtime page's
   `hooks/useFieldLive.ts` does both.
-* React Doctor fails a PR that introduces any warning (`react-doctor.yml`, `blocking: warning`,
-  scope `changed`). Check before pushing, from `frontend/`:
-  `npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes`. Rules
-  switched off for the repo are in `frontend/doctor.config.json`. Its score is not the gate.
+* React Doctor's command and gate are in `AGENTS.md`, "Validate before committing". Rules
+  switched off for the repo are in `frontend/doctor.config.json`.
 
 Frontend should focus on presentation and user interaction rather than business logic.
