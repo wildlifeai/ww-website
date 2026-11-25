@@ -39,7 +39,7 @@ colors:
     # not labelled yet: no badge (the card says "No label")
   primary-tints: "rgba(76, 175, 80, 0.04–0.30) for hover, selection and highlight fills"
   third-party:
-    inaturalist: "#74ac00"  # iNaturalist brand green — only on iNat badges/panels
+    inaturalist: "#74ac00"  # iNaturalist brand green, only on iNat badges/panels
 typography:
   family: "'Inter', system-ui, Avenir, Helvetica, Arial, sans-serif"
   base-line-height: 1.5
@@ -58,7 +58,7 @@ spacing:
   card-padding: "1.25rem"
   page-padding: "2rem"
 radius:
-  default: "8px"   # var(--radius) — cards, buttons, inputs, images
+  default: "8px"   # var(--radius): cards, buttons, inputs, images
   small: "4px"     # badges, inline code
   circle: "50%"    # avatars, status dots
 layout:
@@ -72,7 +72,7 @@ stack:
   charts: "Vega-Lite (vega-embed)"
 ---
 
-# Wildlife Watcher Web — Design Language
+# Wildlife Watcher Web design language
 
 Extracted from the codebase (`frontend/src/`), 2026-06. The repo is the source
 of truth: tokens live in [`frontend/src/styles/index.css`](../frontend/src/styles/index.css);
@@ -85,7 +85,7 @@ A practical, data-dense **conservation workbench**, not a marketing site. The
 single marketing surface (logged-out `HomePage` hero: "Smart monitoring of
 small animals") is centred, generous and green; everything behind login is a
 compact dashboard of tables, thumbnails, maps and review queues. Whitespace is
-functional — small gaps (0.5–1rem), dense type (0.75–0.875rem), information
+functional: small gaps (0.5–1rem), dense type (0.75–0.875rem), information
 first. Color temperature is natural: greens carry the brand, white/near-white
 surfaces keep imagery (camera-trap photos) the visual focus.
 
@@ -94,7 +94,7 @@ surfaces keep imagery (camera-trap photos) the visual focus.
 - **Brand green** is the only brand color. Light mode uses the deep
   `rgb(0, 110, 28)`; dark mode and most component accents use the lighter
   `#4caf50`. Low-opacity green tints (`rgba(76,175,80, .04–.30)`) are the
-  house style for hover states, selected rows and highlight panels — prefer a
+  house style for hover states, selected rows and highlight panels. Prefer a
   tint of the primary over introducing a new hue.
 - **Semantic colors** follow Material-ish conventions: orange `#ff9800` /
   amber `#f59e0b` for warnings, red `#f44336`/`#ef4444` for errors, blue
@@ -108,7 +108,7 @@ surfaces keep imagery (camera-trap photos) the visual focus.
   thumbnail the badge is the icon alone. A photo not labelled yet has no badge,
   and its card says "No label". Do not repurpose these hues.
 - **iNaturalist green** `#74ac00` appears only on iNaturalist badges and
-  panels — it is their brand, not ours.
+  panels: it is their brand, not ours.
 - **Dark mode** is automatic via `prefers-color-scheme`; every screen must
   work in both. Use the CSS variables (`var(--surface)`, `var(--border)`,
   `var(--text-color)`) rather than literal greys so both themes hold.
@@ -155,17 +155,17 @@ site rendered in the system fallback.
 The product's native shape is a **catalog with review workflows**, organised
 project → deployment → media → observations:
 
-- **Explore/triage surfaces**: Image Explorer, Media Browser, Cluster Review:
+- **Explore/triage surfaces**: Media (`/annotations`, the `MediaBrowser`), Cluster Review:
   thumbnail grids with status badges plus filters.
 - **Analysis surfaces**: Insights (one deployment is its Reports tab with
   `?deployment=`), Dataset Health, UMAP Explorer: charts and tables over the
   same data.
-- **Field/ops surfaces**: Upload Data, Realtime (`/field`), Manifest, Toolkit:
-  task-driven forms and progress docks.
+- **Field/ops surfaces**: Upload Data, Realtime (`/field`), Manifest, Live View
+  (`/live-view`), Toolkit: task-driven forms and progress docks.
 - **Long-form**: Guides and FAQ render markdown via the `.guide-markdown`
   styles in `index.css`.
 
-Generated screens should lead with media (images) and their status — what
+Generated screens should lead with media (images) and their status: what
 matters before what measures. Pull real terminology from the domain: projects,
 deployments, devices, observations, species, clusters, CamtrapDP exports.
 Never invent species names, stats or copy; source them from the repo.
@@ -173,10 +173,10 @@ Never invent species names, stats or copy; source them from the repo.
 ## Conventions for new screens
 
 1. Use the CSS variables for surface/border/text and the brand green (or its
-   tints) for emphasis — both themes come free.
+   tints) for emphasis, and both themes come free.
 2. Stay dense: 0.8125rem body, 0.5–1rem gaps, 1.25rem card padding, 1200px max
    content width.
 3. One radius (`8px`) everywhere except small badges (`4px`).
 4. Respect the fixed status vocabularies (annotation triad, semantic colors).
-5. Plain CSS / inline styles — do not introduce Tailwind, CSS-in-JS or a
+5. Plain CSS / inline styles. Do not introduce Tailwind, CSS-in-JS or a
    component library.
