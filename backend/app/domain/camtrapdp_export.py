@@ -17,17 +17,23 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
+import hmac
 import io
 import json
 import re
 import shutil
+import time
 import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
+from urllib.parse import urlencode
 
 import structlog
+
+from app.config import settings
 
 logger = structlog.get_logger()
 
@@ -45,6 +51,10 @@ ASSUMED_PHOTO_BYTES = 1_000_000
 # How long a link to a finished export works. A lifecycle rule on the storage account deletes
 # the ZIP 7 days after it is written (documentation/resources/cloud-infrastructure.md).
 LINK_TTL_SECONDS = 24 * 3600
+# What a signed link's HMAC covers, after this label: the job id, the file name and the expiry.
+_LINK_PURPOSE = "camtrapdp-export-link-v1"
+_JOB_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_LINK_FILENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,200}\.zip")
 # One export at a time per deployment of this backend, so its local disk holds one at most.
 EXPORT_LOCK = "camtrapdp-export"
 
@@ -380,10 +390,11 @@ async def _fetch_original(file_path: str) -> Optional[bytes]:
     return resolved[0] if resolved else None
 
 
-async def store_export(zip_path: Path, job_id: str, filename: str, container: str) -> str:
+async def store_export(zip_path: Path, job_id: str, filename: str, container: str, link_base: str = "") -> str:
     """Upload the ZIP to the private object store and return a link that works for a day.
 
     ``container`` is the Azure Blob container; the S3 and local backends use ``exports/``.
+    ``link_base`` is the API's address, for :func:`download_link`.
     """
     from app.services import object_store
 
@@ -394,7 +405,62 @@ async def store_export(zip_path: Path, job_id: str, filename: str, container: st
         logger.error("camtrapdp_export_store_failed", job_id=job_id, error=str(exc))
         raise ExportError("The export could not be saved. Try again later.") from exc
     try:
-        return object_store.export_link(name, LINK_TTL_SECONDS, filename, container=container)
+        return download_link(job_id, filename, container, link_base)
     except Exception as exc:  # noqa: BLE001
         logger.error("camtrapdp_export_link_failed", job_id=job_id, error=str(exc))
         raise ExportError("The export was saved but no download link could be made. Try again later.") from exc
+
+
+# ── The download link ────────────────────────────────────────────────────
+# A presigned S3 URL signed with a Lambda role's temporary credentials dies with the role's
+# session, hours before the day the link promises (#462). So on S3, once EXPORT_LINK_SECRET is
+# set, the link is the API's own route, signed here, which answers each open with a fresh
+# presigned URL of S3_PRESIGN_GET_SECONDS. An Azure SAS link is signed with the account key and
+# lasts its day, so Azure keeps it.
+
+
+def download_link(job_id: str, filename: str, container: str, link_base: str = "") -> str:
+    """The export's one download link, the job's ``result_url``, valid for ``LINK_TTL_SECONDS``.
+
+    The signed API route when ``settings.export_link_signed`` and the API's address is known,
+    otherwise the object store's own link (an Azure SAS link, a presigned S3 GET, a file).
+    """
+    from app.services import object_store
+
+    if settings.export_link_signed and link_base:
+        return signed_link(link_base, job_id, filename, LINK_TTL_SECONDS, settings.EXPORT_LINK_SECRET.strip())
+    return object_store.export_link(blob_name(job_id), LINK_TTL_SECONDS, filename, container=container)
+
+
+def _link_signature(job_id: str, filename: str, expires: int, secret: str) -> str:
+    message = "\n".join((_LINK_PURPOSE, job_id, filename, str(expires))).encode()
+    return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+
+
+def signed_link(link_base: str, job_id: str, filename: str, ttl_seconds: int, secret: str, *, now: Optional[float] = None) -> str:
+    """``GET /api/exports/camtrapdp/{job_id}/download`` on ``link_base``, valid for ``ttl_seconds``."""
+    expires = int((time.time() if now is None else now) + ttl_seconds)
+    query = urlencode({"name": filename, "expires": expires, "sig": _link_signature(job_id, filename, expires, secret)})
+    return f"{link_base.rstrip('/')}/api/exports/camtrapdp/{job_id}/download?{query}"
+
+
+def check_signed_link(job_id: str, filename: str, expires: str, sig: str, secret: str, *, now: Optional[float] = None) -> bool:
+    """True when ``secret`` signed these values and the link has not expired; never says why not.
+
+    The job id must be a UUID, so the ZIP it names is always ``exports/<uuid>.zip``.
+    """
+    if not (_JOB_ID.fullmatch(job_id) and _LINK_FILENAME.fullmatch(filename) and re.fullmatch(r"[0-9]{1,12}", expires)):
+        return False
+    expected = _link_signature(job_id, filename, int(expires), secret)
+    if not hmac.compare_digest(expected.encode(), sig.encode()):
+        return False
+    return (time.time() if now is None else now) < int(expires)
+
+
+def open_signed_link(job_id: str, filename: str, expires: str, sig: str) -> Optional[str]:
+    """A fresh short-lived presigned GET of the ZIP a signed link names, or None for a bad link."""
+    from app.services import object_store
+
+    if not check_signed_link(job_id, filename, expires, sig, settings.EXPORT_LINK_SECRET.strip()):
+        return None
+    return object_store.presign_get(object_store.EXPORTS_PREFIX + blob_name(job_id), settings.S3_PRESIGN_GET_SECONDS, filename=filename)

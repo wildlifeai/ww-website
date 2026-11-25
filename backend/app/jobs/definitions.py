@@ -547,11 +547,12 @@ async def generate_manifest_job(job_id: str, params: dict):
         raise
 
 
-async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: dict):
+async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: dict, link_base: str = ""):
     """CamtrapDP package with the original photos (#328), saved privately behind a signed link.
 
     ``selection`` is an ``ExportSelection`` and ``caller`` an ``ExportCaller`` as dicts: a user's
-    token for the Download buttons, or an organisation id for an API key (#327). The work is in
+    token for the Download buttons, or an organisation id for an API key (#327). ``link_base`` is
+    the address the export was started on, for the API's signed download route (#462). The work is in
     ``domain/camtrapdp_export.py``. The ZIP is built in a temporary directory removed at the end,
     after it is uploaded to the object store (``OBJECT_STORE_BACKEND``: the Azure Blob container
     ``CAMTRAPDP_EXPORT_CONTAINER`` today, or ``exports/`` in S3).
@@ -601,7 +602,7 @@ async def export_camtrapdp_originals_job(job_id: str, selection: dict, caller: d
                 )
                 await update_job(job_id, progress=0.92, message="Saving the export…")
                 filename = export.export_filename(sel.project_id)
-                url = await export.store_export(zip_path, job_id, filename, settings.CAMTRAPDP_EXPORT_CONTAINER)
+                url = await export.store_export(zip_path, job_id, filename, settings.CAMTRAPDP_EXPORT_CONTAINER, link_base)
     except export.ExportError as e:
         await update_job(job_id, status=JobStatus.FAILED, error=str(e))
         logger.warning("job_failed", job_type="export_camtrapdp_originals", job_id=job_id, error=str(e))

@@ -174,7 +174,7 @@ Both Supabase projects are on the Free plan, whose upload limit is 50 MB for eve
 whatever the bucket's own limit says. The CamtrapDP export stored its ZIPs there and failed
 past about 50 photos (#387). A file that can grow, like an export, goes to the object store
 instead: `services/object_store.upload_export` streams it (Azure Blob today, S3 on AWS) and
-`export_link` signs a read-only link.
+`domain/camtrapdp_export.download_link` makes its read-only link.
 
 ---
 
@@ -263,6 +263,16 @@ serve its buckets. boto3 presigns against that global host unless the client has
 `endpoint_url`, so a browser's presigned POST fails with `net::ERR_FAILED` and no CORS answer.
 `services/object_store.new_s3_client` sets `https://s3.<region>.amazonaws.com` with
 virtual-hosted addressing; create every S3 client through it.
+
+---
+
+## A presigned S3 URL dies with the Lambda role that signed it
+
+On Lambda the S3 client signs with the function role's temporary credentials, and a presigned
+URL stops working when that session ends, whatever its `ExpiresIn` says (#462). Hand presigned
+URLs out for minutes (`S3_PRESIGN_GET_SECONDS`, 300 s). A link that must last longer, like an
+export's 24 hours, is the API's own HMAC-signed route, which redirects to a fresh presigned URL
+on each open (`domain/camtrapdp_export.download_link`).
 
 ---
 

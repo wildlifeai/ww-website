@@ -1,18 +1,21 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""The CamtrapDP export with the original photos (#328): domain, job and route.
+"""The CamtrapDP export with the original photos (#328): domain, job, routes and the signed link (#462).
 
 Fakes stand in for ww-backend's export-camtrap-dp (a metadata ZIP shaped like its package.ts
-output), for Drive (a fetch function) and for Azure Blob Storage.
+output), for Drive (a fetch function) and for Azure Blob Storage. S3 is a real boto3 client with
+dummy credentials: presigning is offline.
 """
 
 import csv
 import io
 import json
+import time
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 import pytest
 from fastapi import HTTPException
@@ -455,6 +458,8 @@ def test_route_starts_the_job_as_the_user(client, route, monkeypatch):
     name, job_id, selection, caller = route.enqueue.await_args.args
     assert (name, job_id) == ("export_camtrapdp_originals_job", "job-1")
     assert selection["deployment_ids"] == [DEP_A] and caller == {"user_token": "user-jwt", "organisation_id": None}
+    # The API's own address, for the signed download link (#462).
+    assert route.enqueue.await_args.kwargs == {"link_base": "http://testserver/"}
 
 
 def test_route_hides_another_organisations_project(client, route, monkeypatch):
@@ -478,3 +483,182 @@ def test_route_is_off_without_storage_for_its_zips(client, route, monkeypatch):
 
 def test_route_needs_a_signed_in_user(client):
     assert client.post("/api/exports/camtrapdp", json={"project_id": PROJECT}).status_code in (401, 422)
+
+
+# ── The signed download link (#462) ───────────────────────────────────────
+
+SECRET = "test-only-dummy-export-link-secret"
+JOB = "22222222-2222-4222-8222-222222222222"
+NAME = f"camtrapdp-{PROJECT}-2026-11-26.zip"
+API = "https://api.example/"
+REFUSED = {"detail": "This download link is not valid or has expired."}
+
+
+@pytest.fixture
+def signed(monkeypatch):
+    """The S3 backend with EXPORT_LINK_SECRET set, as on AWS once the parameter exists."""
+    from app.config import settings
+    from app.services import object_store
+
+    client = object_store.new_s3_client(region_name="ap-southeast-2", aws_access_key_id="testing", aws_secret_access_key="testing")
+    monkeypatch.setattr(settings, "OBJECT_STORE_BACKEND", "s3")
+    monkeypatch.setattr(settings, "S3_BUCKET", "ww-test-media")
+    monkeypatch.setattr(settings, "EXPORT_LINK_SECRET", SECRET)
+    object_store.set_s3_client(client)
+    yield settings
+    object_store.set_s3_client(None)
+
+
+def _query(link: str) -> dict:
+    return {k: v[0] for k, v in parse_qs(urlsplit(link).query).items()}
+
+
+def _local(link: str) -> str:
+    """The path and query of a link, for the test client."""
+    parts = urlsplit(link)
+    return f"{parts.path}?{parts.query}"
+
+
+def test_a_signed_link_works_until_it_expires():
+    link = export.signed_link(API, JOB, NAME, 3600, SECRET, now=1000)
+    assert link.startswith(f"{API}api/exports/camtrapdp/{JOB}/download?name={NAME}&expires=4600&sig=")
+    q = _query(link)
+    assert export.check_signed_link(JOB, q["name"], q["expires"], q["sig"], SECRET, now=4599)
+    assert not export.check_signed_link(JOB, q["name"], q["expires"], q["sig"], SECRET, now=4600)
+
+
+@pytest.mark.parametrize(
+    "job_id, name, expires, sig, secret",
+    [
+        ("33333333-3333-4333-8333-333333333333", NAME, None, None, SECRET),  # another export
+        (JOB, "camtrapdp-other.zip", None, None, SECRET),  # another file name
+        (JOB, NAME, "9999999999", None, SECRET),  # a later expiry
+        (JOB, NAME, None, "0" * 64, SECRET),  # a made-up signature
+        (JOB, NAME, None, "é" * 64, SECRET),  # not even ASCII
+        (JOB, NAME, None, "", SECRET),  # no signature
+        (JOB, NAME, "", None, SECRET),  # no expiry
+        (JOB, NAME, "4600.0", None, SECRET),  # an expiry that is not a whole number
+        (JOB, NAME, None, None, "another-secret"),  # signed with another key
+    ],
+)
+def test_an_altered_link_is_refused(job_id, name, expires, sig, secret):
+    q = _query(export.signed_link(API, JOB, NAME, 3600, SECRET, now=1000))
+    expires = q["expires"] if expires is None else expires
+    assert not export.check_signed_link(job_id, name, expires, q["sig"] if sig is None else sig, secret, now=1000)
+
+
+@pytest.mark.parametrize("job_id", ["../../originals/p/d/h", f"{JOB}/../x", "JOB", ""])
+def test_a_link_can_only_name_an_export_zip(job_id):
+    """Even a correctly signed link opens nothing outside exports/<uuid>.zip."""
+    q = _query(export.signed_link(API, job_id, NAME, 3600, SECRET, now=1000))
+    assert not export.check_signed_link(job_id, NAME, q["expires"], q["sig"], SECRET, now=1000)
+
+
+@pytest.mark.parametrize("name", ['x".zip', "x.zip\r\nSet-Cookie: a=b", "x.tar", ".zip"])
+def test_a_link_never_carries_an_unsafe_file_name(name):
+    q = _query(export.signed_link(API, JOB, name, 3600, SECRET, now=1000))
+    assert not export.check_signed_link(JOB, name, q["expires"], q["sig"], SECRET, now=1000)
+
+
+def test_with_the_secret_on_s3_the_link_is_the_signed_route(signed):
+    link = export.download_link(JOB, NAME, "camtrapdp-exports", API)
+    assert link.startswith(f"{API}api/exports/camtrapdp/{JOB}/download?")
+    q = _query(link)
+    assert int(q["expires"]) - time.time() == pytest.approx(export.LINK_TTL_SECONDS, abs=5)
+    assert export.check_signed_link(JOB, q["name"], q["expires"], q["sig"], SECRET)
+
+
+def test_without_the_secret_the_link_is_todays_presigned_get(signed, monkeypatch):
+    monkeypatch.setattr(signed, "EXPORT_LINK_SECRET", "")
+    link = export.download_link(JOB, NAME, "camtrapdp-exports", API)
+    assert link.startswith("https://ww-test-media.s3.ap-southeast-2.amazonaws.com/") and f"/exports/{JOB}.zip?" in link
+    assert "X-Amz-Expires=86400" in link
+
+
+def test_without_the_apis_address_the_link_is_todays_presigned_get(signed):
+    # A job queued before this change has no link_base.
+    assert f"/exports/{JOB}.zip?" in export.download_link(JOB, NAME, "camtrapdp-exports", "")
+
+
+def test_azure_keeps_its_sas_link_with_the_secret_set(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "OBJECT_STORE_BACKEND", "azure")
+    monkeypatch.setattr(settings, "EXPORT_LINK_SECRET", SECRET)
+    monkeypatch.setattr("app.services.azure_storage.read_link", lambda container, blob, ttl, name: f"https://blob/{container}/{blob}?ttl={ttl}")
+    assert export.download_link(JOB, NAME, "camtrapdp-exports", API) == f"https://blob/camtrapdp-exports/{JOB}.zip?ttl=86400"
+
+
+async def test_the_job_on_s3_stores_the_signed_route(job_env, signed, monkeypatch):
+    from app.jobs import definitions, store
+    from app.services import object_store
+
+    upload = AsyncMock()
+    monkeypatch.setattr(object_store, "upload_export", upload)
+    job_id = await store.create_job(user_id="user-1", kind="export")
+    await definitions.export_camtrapdp_originals_job(job_id, {"project_id": PROJECT}, {"user_token": "t"}, link_base=API)
+
+    job = await store.get_job(job_id)
+    assert job.status.value == "completed_with_errors" and "24 hours" in job.message
+    assert job.result_url.startswith(f"{API}api/exports/camtrapdp/{job_id}/download?name=camtrapdp-{PROJECT}-")
+    assert upload.await_args.args[0] == f"{job_id}.zip"
+    q = _query(job.result_url)
+    assert export.check_signed_link(job_id, q["name"], q["expires"], q["sig"], SECRET)
+
+
+def test_the_route_redirects_to_a_fresh_short_presigned_get_on_every_open(client, signed, monkeypatch):
+    """A link signed 23 hours 59 minutes ago, long after the Lambda role session it began in."""
+    from app.services import object_store
+
+    real, presigned = object_store.presign_get, []
+
+    def spy(*args, **kwargs):
+        presigned.append(real(*args, **kwargs))
+        return presigned[-1]
+
+    monkeypatch.setattr(object_store, "presign_get", spy)
+    link = export.signed_link(API, JOB, NAME, export.LINK_TTL_SECONDS, SECRET, now=time.time() - export.LINK_TTL_SECONDS + 60)
+    for _ in range(2):
+        resp = client.get(_local(link), follow_redirects=False)  # no Authorization header
+        assert resp.status_code == 307 and resp.headers["cache-control"] == "no-store"
+        location = resp.headers["location"]
+        assert location.startswith(f"https://ww-test-media.s3.ap-southeast-2.amazonaws.com/exports/{JOB}.zip?")
+        assert "X-Amz-Expires=300" in location and f'filename="{NAME}"' in unquote(location)
+    assert len(presigned) == 2
+
+
+def test_the_route_refuses_an_expired_link(client, signed):
+    link = export.signed_link(API, JOB, NAME, export.LINK_TTL_SECONDS, SECRET, now=time.time() - export.LINK_TTL_SECONDS - 1)
+    resp = client.get(_local(link), follow_redirects=False)
+    assert (resp.status_code, resp.json()) == (403, REFUSED)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name": "camtrapdp-other.zip"},
+        {"expires": "9999999999"},
+        {"sig": "0" * 64},
+        {"expires": "soon"},
+        {"name": None, "expires": None, "sig": None},
+    ],
+)
+def test_the_route_refuses_an_altered_or_malformed_link_alike(client, signed, change):
+    q = _query(export.signed_link(API, JOB, NAME, 3600, SECRET))
+    q = {k: v for k, v in {**q, **change}.items() if v is not None}
+    resp = client.get(f"/api/exports/camtrapdp/{JOB}/download?{urlencode(q)}", follow_redirects=False)
+    assert (resp.status_code, resp.json()) == (403, REFUSED)
+
+
+def test_the_route_refuses_a_link_moved_to_another_path(client, signed):
+    q = _query(export.signed_link(API, JOB, NAME, 3600, SECRET))
+    resp = client.get(f"/api/exports/camtrapdp/not-a-job/download?{urlencode(q)}", follow_redirects=False)
+    assert (resp.status_code, resp.json()) == (403, REFUSED)
+
+
+@pytest.mark.parametrize("backend, secret", [("s3", ""), ("azure", SECRET), ("local", SECRET)])
+def test_the_route_is_not_there_without_signed_links(client, signed, monkeypatch, backend, secret):
+    monkeypatch.setattr(signed, "OBJECT_STORE_BACKEND", backend)
+    monkeypatch.setattr(signed, "EXPORT_LINK_SECRET", secret)
+    link = export.signed_link(API, JOB, NAME, 3600, SECRET)
+    assert client.get(_local(link), follow_redirects=False).status_code == 404
