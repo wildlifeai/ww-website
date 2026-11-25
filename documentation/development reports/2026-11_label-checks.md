@@ -2,7 +2,7 @@
 
 > **Status:** 📋 Proposal, decisions taken 2026-11-21 (a design grill with Victor). Not built. Work is tracked in the issues listed under [Work](#work).
 
-The Wildlife Brain already gives every AI-detected animal a DINOv3 fingerprint (an embedding of its crop) and uses them for groups, find-similar, the map, outliers and the review queue ([wildlife-brain guide](../../frontend/src/content/guides/wildlife-brain.md)). None of those look at the labels: the review queue's "disagreement" is the AI and a person disagreeing on the same photo. These checks compare each label with the labels of animals that look like it, to catch likely mistakes for a second look.
+The Wildlife Brain already gives every AI-detected animal a DINOv3 fingerprint (an embedding of its crop) and uses them for groups, find-similar, the map, outliers and the grid's "Needs review first" sort ([wildlife-brain guide](../../frontend/src/content/guides/wildlife-brain.md)). None of those look at the labels: that sort's "disagreement" is the AI and a person disagreeing on the same photo. These checks compare each label with the labels of animals that look like it, to catch likely mistakes for a second look.
 
 ## Decisions
 

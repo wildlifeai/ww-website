@@ -4,7 +4,9 @@
 #### Author: Claude (Opus 5), investigated with Victor Anton
 #### August 2026
 
-> **Status:** 🔧 Active — one-value fix identified and verified; not yet applied to production.
+> **Status:** 🔧 Active, 2026-11-26: the fix is applied (commit `bf27754`, on `dev` and `main`, and
+> `wildlifewatcher.ai` serves `D6C4Y4J2BS`). Open, with no issue filed: the check on a real device
+> and the question about `7399889N9Z` (see Open items).
 
 **Audience:** whoever owns `frontend/public/.well-known/apple-app-site-association`.
 **Goal:** make iOS password-reset links open the app instead of Safari.
@@ -104,7 +106,7 @@ The Apple Team ID is now recorded as a cross-repo contract in ww-mobile-app's
 
 ## Open items
 
-- [ ] Apply the fix and deploy (this repo).
+- [x] Apply the fix and deploy (this repo): `bf27754`, on `main`.
 - [ ] Verify end-to-end on a real device per the steps above.
 - [ ] Confirm with Apple Developer account access that `7399889N9Z` is not a second team
       the organisation still holds — if it is, work out what it was for. Victor regains

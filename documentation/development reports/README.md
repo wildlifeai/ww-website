@@ -32,7 +32,7 @@ trail, don't rewrite them.
 
 Keep to decisions, contracts, measured numbers, commands and open items; link to the document
 that owns a fact instead of restating it (the standard is in
-[`.agents/skills/SKILL.md`](../../.agents/skills/SKILL.md), Documentation Invariant).
+[`.agents/skills/references/documentation.md`](../../.agents/skills/references/documentation.md), Documentation Invariant).
 
 A report whose status is **📋 Proposal** carries, in its status banner, either a link to the
 issue that tracks the work or the words "not scheduled". A proposal with neither is how the
@@ -77,26 +77,24 @@ Ordered roughly by how likely you are to need them. Descriptions live in the
 | Report | Status |
 |---|---|
 | [2026-11_label-checks](2026-11_label-checks.md) | 📋 Proposal, decisions taken 2026-11-21: DINOv3 checks for odd-one-out and look-alike labels, not built; #448, #449, #450 |
-| [2026-10_aws-reannz-migration](2026-10_aws-reannz-migration/README.md) | 🔧 Active, 2026-11-20: approach B (Lambda, S3, REANNZ batches) built behind settings; the `ww-dev` stacks are deployed behind an HTTP API (Auckland has no Function URLs), nothing points at them; the REANNZ project and email next |
-| [2026-10_ui-audit](2026-10_ui-audit/README.md) | 📋 Proposal, decisions taken 2026-10-21: 133 findings across five page groups, nine improvement agents not scheduled yet |
-| [2026-10_e2e-in-ci](2026-10_e2e-in-ci.md) | 🔧 Active, 2026-10-26: the Playwright flows run on each Cloudflare Pages build of `dev`; pull request previews wait on a Cloudflare setting |
-| [species-brain-training-spec](species-brain-training-spec.md) | 🔧 Active: built behind `FF_MODEL_TRAINING_ENABLED`; first live Edge Impulse run and a load on a camera still to do |
-| [2026-09_evidence-pipeline-architecture](2026-09_evidence-pipeline-architecture/README.md) | 📋 Proposal, 2026-09-29: evidence score, consensus row and `media_evidence` contract; items 1 to 3 built in #155, the rest tracked in its section 17 |
+| [2026-10_aws-reannz-migration](2026-10_aws-reannz-migration/README.md) | 🔧 Active, 2026-11-26: approach B (Lambda, S3, REANNZ batches) is in `dev` behind settings; the `ww-dev` stacks are deployed and nothing points at them. The export link (#462) and the deploy role (#468) need their steps on AWS, the GBF report (#456) is unblocked, and the export leaves out S3 originals (#493); next, the dev site onto `ww-dev` and the 4-hourly crontab |
+| [2026-10_ui-audit](2026-10_ui-audit/README.md) | ✅ Built 21 to 25 October 2026 (#381, #389 to #396, follow-ups #399); kept because code and docs cite its numbered decisions |
+| [2026-10_e2e-in-ci](2026-10_e2e-in-ci.md) | 🔧 Active, 2026-11-26: items 2 to 6 done; item 1, pull request previews through Cloudflare's branch control, open with no issue |
+| [species-brain-training-spec](species-brain-training-spec.md) | 🔧 Active: built behind `FF_MODEL_TRAINING_ENABLED` (#151); first live Edge Impulse run and a load on a camera still to do; training moves to the REANNZ cluster with #463 |
+| [2026-09_evidence-pipeline-architecture](2026-09_evidence-pipeline-architecture/README.md) | 📋 Proposal, 2026-09-29: evidence score, consensus row and `media_evidence` contract; items 1 to 3 built in #155; of its section 17, #163, #170, #171, ww-backend#208 and #209 are closed, #164 to #169 open |
 | [2026-09_false-negatives-and-vlm-audit](2026-09_false-negatives-and-vlm-audit/README.md) | 🔧 Active. Gemini presence step, labeller and eval script implemented behind `FF_GEMINI_PRESENCE_ENABLED`; prompt v1 stays in production after the v2 benchmark on the labelled set (700 frames since 2026-10-09), v3 measured on a subset, section 6 |
-| [2026-09_gcp-native-model-training](2026-09_gcp-native-model-training/README.md) | 📋 Proposal with code, stacked on #151; no cloud resource yet, first measured run to do |
-| [2026-09_gcp-pilot-and-migration](2026-09_gcp-pilot-and-migration/README.md) | 🕰️ Superseded 2026-11-22 by [2026-10_aws-reannz-migration](2026-10_aws-reannz-migration/README.md); pilot [#172](https://github.com/wildlifeai/ww-website/issues/172) and PR [#189](https://github.com/wildlifeai/ww-website/pull/189) closed unmerged; moves to `_archive/` with [#463](https://github.com/wildlifeai/ww-website/issues/463) |
-| [2026-09_person-detection-e2e](2026-09_person-detection-e2e/README.md) | 🔧 Active — model uploaded, transferred and run on hardware with correct labels; website-side reflection blocked on a fresh capture set ([#140](https://github.com/wildlifeai/ww-website/issues/140)) |
-| [ios-universal-links-team-id](ios-universal-links-team-id.md) | 🔧 Active — one-value fix identified and verified; iOS password-reset links stay broken until it ships |
-| [model-class-semantics](model-class-semantics.md) | 📋 Design decision needed ([#135](https://github.com/wildlifeai/ww-website/issues/135)) — blocks behaviour models and any GBIF export |
-| [ww-backend-schema-handoff](ww-backend-schema-handoff.md) | 📋 Open items for the `ww-backend` schema/seed owners |
-| [decoupled-upload-pipeline-spec](decoupled-upload-pipeline-spec.md) | 📋 Proposal — nothing implemented; needs a decision |
-| [lorawan-alert-execution-spec](lorawan-alert-execution-spec.md) | 📋 Active spec — not started; gated on the firmware `USE_PERCENTAGE` fix |
-| [storage-quota-spec](storage-quota-spec.md) | 🔧 Active — needs `ww-backend` schema, then website enforcement |
-| [per-crop-classification-spec](per-crop-classification-spec.md) | 🔧 Active — GPU worker prerequisite met; flag-gated rollout |
-| [exif-telemetry-firmware-spec](exif-telemetry-firmware-spec.md) | 🔧 Active — firmware hand-off; website side already shipped |
-| [dual-camera-rpi-analysis](dual-camera-rpi-analysis.md) | 🔧 Active — firmware/hardware analysis; no website work |
-| [inaturalist-integration](inaturalist-integration.md) | ⚠️ Phases 1–4 built, but the `ww-backend` tables were never migrated |
+| [2026-09_person-detection-e2e](2026-09_person-detection-e2e/README.md) | 🔧 Active, not scheduled: #140 and #135 are closed and edge reflection types a person as `human`; a step 4 rerun that ends in a Camera AI row is still to do, with no issue |
+| [ios-universal-links-team-id](ios-universal-links-team-id.md) | 🔧 Active, 2026-11-26: the fix is applied (`bf27754`, served by wildlifewatcher.ai); the check on a real device and the `7399889N9Z` question are open, with no issue |
+| [model-class-semantics](model-class-semantics.md) | ✅ Decided 2026-10-09, v1 built (#135 closed); requiring a `taxon_id` and the GBIF export still open, see its Outcome |
+| [ww-backend-schema-handoff](ww-backend-schema-handoff.md) | 📋 Open, 2026-11-26: items 3, 4 and 8 for ww-backend, not yet filed as ww-backend issues; item 1 was wrong and item 7 is done |
+| [decoupled-upload-pipeline-spec](decoupled-upload-pipeline-spec.md) | 📋 Proposal, not scheduled: nothing implemented, needs a decision; the AWS migration's S3 uploads change its starting point |
+| [lorawan-alert-execution-spec](lorawan-alert-execution-spec.md) | ⚠️ Needs a redesign, 2026-11-26, not scheduled: written for the old LoRaWAN messages, which [ww-hardware#81](https://github.com/wildlifeai/ww-hardware/pull/81) replaces with counts and health only |
+| [storage-quota-spec](storage-quota-spec.md) | 📋 Proposal, not scheduled: nothing built; its ww-backend half is item 8 of the schema hand-off; assumes Drive originals |
+| [exif-telemetry-firmware-spec](exif-telemetry-firmware-spec.md) | 🔧 Active, firmware hand-off: NN scores reach `UserComment` since 2026-07-08; temperature and battery still to add; website side shipped |
+| [dual-camera-rpi-analysis](dual-camera-rpi-analysis.md) | 📋 Analysis, not scheduled: the WW500 ships one camera per board in two variants, both packed by Prepare SD card; switching sensors by day and night is not built, and is the firmware's to decide |
+| [inaturalist-integration](inaturalist-integration.md) | 🔧 Built behind `FF_INAT_ENABLED`, off everywhere; the tables are in ww-backend's baseline |
 | [dual-layer-ai-architecture-proposal](dual-layer-ai-architecture-proposal.md) | ✅ Adopted — v0 built and merged |
-| [gpu-worker-infra-spec](gpu-worker-infra-spec.md) | ✅ Shipped (dev) — retained as design history |
+| [gpu-worker-infra-spec](gpu-worker-infra-spec.md) | ✅ Shipped, dev 2026-07-03 and production 2026-07-26; kept as design history; the AWS migration retires the worker at its step 8 |
 | [bmp-ingestion-analysis](bmp-ingestion-analysis.md) | ✅ Website side shipped |
-| [access-test-seed-spec](access-test-seed-spec.md) | ✅ Shipped — seeded in `ww-backend` |
+
+Closed reports are in [`_archive/`](_archive/), listed in the [documentation index](../README.md).

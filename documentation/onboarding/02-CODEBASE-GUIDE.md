@@ -12,6 +12,10 @@ ww-website/
 ├── documentation/             # all docs (onboarding / resources / development reports)
 ├── scripts/                   # dev utilities (seed-fixture generator, demo seeding, exports, …)
 ├── test-fixtures/             # camera-trap SD-card fixtures for upload testing (see its README)
+├── e2e/                       # Playwright browser flows, run in CI (see its README)
+├── infra/aws/                 # SAM templates for the AWS stacks (shared.yaml, template.yaml)
+├── cluster/reannz/            # the REANNZ cluster's cron, GPU job and image pull scripts
+├── .agents/                   # agent rules: SKILL.md, its reference files, DESIGN.md
 ├── backend/                   # FastAPI service
 └── frontend/                  # React + Vite SPA
 ```
@@ -20,7 +24,7 @@ ww-website/
 
 ```
 src/
-├── App.tsx                 # Router, signed-in Layout (Toolkit·Review·Insights nav), auth guard, UploadProvider
+├── App.tsx                 # Router, signed-in Layout (Toolkit, Realtime, Media, Insights nav), auth guard, UploadProvider
 ├── main.tsx                # React entry
 ├── pages/                  # route-level components
 ├── components/
@@ -54,7 +58,7 @@ SD card) hide for a user who can write to no project (`hooks/useWritableProjects
 |-----|-------|------|
 | 🧰 Toolkit | `/toolkit` | `ToolkitPage` (motion live view, model upload, iNaturalist, CamtrapDP export, the GBF report behind `FF_GBF_REPORT_ENABLED`, SD-card prep; each card by role) |
 | 📡 Realtime | `/field` | `FieldPage` (live-deployment view; shown only with LoRaWAN data) |
-| 🏷️ Annotations | `/annotations` | `AnnotationsPage` → `MediaBrowser` (+ full-screen modal) |
+| 🏷️ Media | `/annotations` | `AnnotationsPage` → `MediaBrowser` (+ full-screen modal) |
 | 📈 Insights | `/insights` | `InsightsPage` (projects, deployments, charts, maps) |
 
 ### Routes
@@ -117,9 +121,9 @@ Layered so HTTP concerns never leak into business logic:
 ```
 routers/   → thin HTTP controllers: validate input, delegate, shape ApiResponse
 domain/    → pure business logic, NO FastAPI/HTTP imports (unit-testable)
-services/  → infrastructure adapters (Supabase, Azure, Drive, Vela, SpeciesNet, http)
+services/  → infrastructure adapters (Supabase, Azure, S3, Drive, Lambda, SSM, Vela, SpeciesNet, http)
 schemas/   → Pydantic request/response models
-jobs/      → async job system (definitions, runner, store, ARQ worker)
+jobs/      → async job system (definitions, dispatch, runner, store, ARQ worker, the REANNZ batch's ingest)
 middleware/→ request id, structured logging, rate limiting, CORS
 registries/→ static config (camera configs, model + embedding registries)
 ```
@@ -127,7 +131,9 @@ registries/→ static config (camera configs, model + embedding registries)
 **Routers** (`/api/*`, registered in `app/main.py`): `auth` (demo session), `admin` (system-admin
 device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `exports`, `reports` (the GBF
 report, answering `FEATURE_DISABLED` without `FF_GBF_REPORT_ENABLED`), `models`, `media`,
-`public_api`, `inaturalist`, and, each behind its feature flag, `camtrapdp`,
+`public_api`, `inaturalist`, `uploads` (presigned S3 uploads), `worker` (the REANNZ batch's lease
+routes, 404 until `WORKER_TOKEN_SHA256` is set), `lambda_events` (`/events`, only under
+`WW_LAMBDA_ROLE`), and, each behind its feature flag, `camtrapdp`,
 `pipeline`, `brain`
 (embeddings/clusters/UMAP/similarity), `qa` (AI-vs-human agreement), `intelligence`
 (dataset health/alerts).
@@ -136,7 +142,16 @@ report, answering `FEATURE_DISABLED` without `FF_GBF_REPORT_ENABLED`), `models`,
 `wildlife_brain` + `embedding_lifecycle` + `active_learning` (the DINOv3 "Brain"),
 `human_verdicts` (cluster confirm and undo, batch review: one human row per photo),
 `intelligence`, `media_registry` / `media_resolver`, `model`, `manifest`, `camtrapdp`, `camtrapdp_export`, `inaturalist`,
-`public_api`, `gbf_report` + `gbif_dataset` (the GBF report and a project's GBIF dataset).
+`public_api`, `gbf_report` + `gbif_dataset` (the GBF report and a project's GBIF dataset),
+`batch_lease` (the REANNZ batch's leases), `zip_limits` (ZIP input limits).
+
+**The AWS path** (behind settings whose defaults keep Azure,
+[settings](../resources/deployment-guide.md#aws-and-the-reannz-batch)): `app/aws_params.py` (SSM
+parameters into the environment) and `app/lambda_events.py`; `services/object_store.py` (Azure Blob,
+S3 or a local directory, and the archive), `services/incoming.py` (presigned uploads),
+`services/lambda_invoke.py` (jobs to the `cpu` function); `jobs/batch_infer.py` (the cluster's
+inference) and `jobs/ingest.py` (its results into the pipeline). Other jobs with a file of their own:
+`jobs/pipeline_run.py` (*Run AI again*), `jobs/camtrapdp_import.py`, `jobs/inat_sync.py`.
 
 ### Adding a feature (backend)
 

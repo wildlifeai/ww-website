@@ -5,7 +5,7 @@
 > (*how to deploy*); this doc is *what exists and how to maintain it*. **Re-audit quarterly** (see the
 > [review checklist](#periodic-review-checklist)). Last updated: **2026-11-26**.
 
-> **In progress, 2026-11-21:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path. A dev stack runs on AWS ([AWS](#aws)) and a first dev batch ran on the cluster ([REANNZ](#reannz)); no site points at either.
+> **AWS and REANNZ:** what exists there is in [AWS](#aws) and [REANNZ](#reannz) below; no site points at either. The move's status: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md).
 
 > ### ✅ Single-RG AU East (migration complete — 2026-06-30)
 > The org runs **only the `WW-AE` resource group** (`australiaeast`). The old `WW-Website` RG and the three
@@ -21,7 +21,7 @@ or orphaned, and both are bugs.
 |----------|---------------|
 | **Azure** | Backend API + ARQ worker (Container Apps), container registry, upload blob buffer, CamtrapDP export ZIPs, Redis broker, logs |
 | **Supabase** | Postgres + RLS, Auth, Storage (renditions), the system of record — **two projects** (dev / prod) |
-| **Cloudflare** | Frontend (Pages + per-branch previews), DNS for `wildlifewatcher.ai`, CDN |
+| **Cloudflare** | Frontend (Pages, builds of `main` and `dev` only), DNS for `wildlifewatcher.ai`, CDN |
 | **Google Drive** | Permanent original-image archive (`gdrive://`) |
 | **AWS** | Being set up, dev only: the `ww-dev` stacks, which no site points at yet ([AWS](#aws)) |
 | **REANNZ** | Being set up, dev trial: GPU batches under Spyfish's project `wildlife03546` until Wildlife Watcher's own is approved ([REANNZ](#reannz)) |
@@ -338,7 +338,7 @@ at the *same* project):
 | `nuhwmubvygxyddkycmpa` | **prod / staging** | `ww-backend`, `ww-embedding-worker`, its KEDA `pg-conn` scaler |
 
 Each holds Postgres (+ RLS, the access model), Auth (GoTrue), and Storage (public `media-renditions`
-bucket). Schema is owned by [`ww-backend`](https://github.com/wildlifeai/wildlife-watcher-backend)
+bucket). Schema is owned by [`ww-backend`](https://github.com/wildlifeai/ww-backend)
 (`db:change` workflow). **Dev DB resets every deploy; staging/prod persists.** The chosen cloud vector
 store is **pgvector in these projects** (see deployment-guide → Vector Store).
 
@@ -358,9 +358,8 @@ secret (ACA secret / vault, never in chat).
   control and what a build reports to GitHub: the deployment guide's
   [Preview Deployments](deployment-guide.md#preview-deployments).
 - **DNS** for `wildlifewatcher.ai`; CDN + anonymous web analytics.
-- Maintenance: deploys are git-driven (Pages build on push); no servers to patch. **After the AU East
-  migration, the frontend's backend API URL + the API's CORS allow-list must point at the new
-  `ww-backend-dev` / `ww-backend` FQDNs.**
+- Maintenance: deploys are git-driven (Pages build on push); no servers to patch. The frontend's
+  `VITE_API_BASE_URL` and the API's `ALLOWED_ORIGINS` must name each other: when an API moves, change both.
 
 ## Google Drive
 
