@@ -3,7 +3,7 @@ title: Tuning motion detection with the live view
 description: Watch a camera's live picture over its USB cable, see where it detects motion and whether that would wake it, set its motion settings and type console commands
 category: Setup
 order: 15
-updated: 2026-10-26
+updated: 2026-11-26
 ---
 
 The **Motion live view** in the Toolkit is a bench tool for a Wildlife Watcher camera on its USB
@@ -17,9 +17,8 @@ settings, type console commands and save frames and the session log.
   talk to a USB cable from a web page.
 - The camera's USB serial cable for the AI board's console. Close any other program using it
   (TeraTerm, `live_view.py`, the ship-check app): only one can hold it.
-- AI firmware that sends the motion grid. If the page says the pictures carry none, update it.
-
-> **TODO (team):** name the first AI firmware release with the motion grid (Seeed PR #276).
+- AI firmware that sends the motion grid. No released AI firmware sends it yet, so ask wildlife.ai
+  for a build that does. Without it, the page says the pictures carry no motion grid.
 
 ## Connecting
 
@@ -91,9 +90,6 @@ back, so a value the camera refuses does not stay on screen.
 3. Move or angle the camera to keep them out, or raise the threshold or lower the sensitivity
    until the lamp stays off.
 4. Move something the size of your animal where you expect animals, and check the lamp lights.
-
-> **TODO (team):** recommended settings and placement advice for common sites (foliage, shadows,
-> background), once worked out with the live view.
 
 ## Disconnecting
 

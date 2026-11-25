@@ -1,11 +1,10 @@
 # Spec — Per-detection (per-crop) species classification
 
-> **Status:** 🔧 Active spec — engineering hand-off; ww-website (backend pipeline).
-> **Prerequisite met:** the GPU/ARQ worker is **live on dev** since 2026-07-03
-> ([cloud-infrastructure.md](../resources/cloud-infrastructure.md)), so this work is **no longer
-> blocked**. It ships behind `FF_PER_CROP_CLASSIFY_ENABLED` (default off), which must be set on the
-> **worker**. Production still needs its own worker first
-> ([prod-worker-provisioning-runbook.md](../resources/prod-worker-provisioning-runbook.md)).
+> **Status:** 🕰️ Historical snapshot, archived 2026-11-26. Shipped: one observation per detection
+> with BioCLIP per crop (`build_speciesnet_observations` with `per_detection`, `backend/app/domain/pipeline.py`),
+> behind `FF_PER_CROP_CLASSIFY_ENABLED`, on in production, whose GPU worker runs since 2026-07-26.
+> What the code does today: [04-AI-PIPELINE](../../onboarding/04-AI-PIPELINE.md). Below is the spec as
+> written, kept for the why.
 
 **Goal:** label **each detected animal** in a frame independently, so mixed-species frames
 (e.g. a cat *and* a rat) and same-species groups get accurate per-animal species — replacing

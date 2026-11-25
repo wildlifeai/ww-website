@@ -1,6 +1,6 @@
 # UI audit: simpler pages that fit the member's role and their data
 
-> **Status:** 📋 Proposal, decisions taken 21 October 2026; the improvement agents are not scheduled yet. Five read-only audits of `frontend/src` at dev 77dae73, one per page group, plus a pass through the demo session on dev.
+> **Status:** ✅ Built, 2026-11-26: decisions taken 21 October 2026, all nine improvement agents merged 21 to 25 October (#381, #389 to #396) and the follow-ups in #399. Kept because the code and the docs cite its decisions by number. Five read-only audits of `frontend/src` at dev 77dae73, one per page group, plus a pass through the demo session on dev.
 
 #### Author: Claude, with Victor Anton
 #### 20 October 2026

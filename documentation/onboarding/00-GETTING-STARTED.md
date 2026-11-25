@@ -8,7 +8,7 @@ deeper companion to the root [`readme.md`](../../readme.md).
 ```
 Browser (React + Vite, :5173) ──REST + Supabase JWT──▶ FastAPI (:8000)
                               └──Supabase Auth / data──▶ Supabase (PostgreSQL + RLS, Auth, Storage)
-FastAPI ──▶ Azure Blob (temp image buffer) ──▶ async job ──▶ Google Drive (permanent archive)
+FastAPI ──▶ upload buffer (Azure Blob, or S3) ──▶ async job ──▶ archive (Google Drive, or S3)
 ```
 
 - The **frontend** reads/writes most data **directly from Supabase** (scoped by RLS) and calls the
@@ -60,7 +60,6 @@ Missing **required** values make the backend refuse to start.
 |----------|---------|-------------|
 | `VITE_API_BASE_URL` | `http://localhost:8000` | Backend URL the frontend calls |
 | `ALLOWED_ORIGINS` | `…,http://localhost:5173` | CORS origins (comma-separated) |
-| `RATE_LIMIT_PER_MINUTE` | `60` | Per-IP API rate limit |
 | `GOOGLE_DRIVE_ENABLED` | `false` | Async upload of analysed images to Drive |
 | `AZURE_STORAGE_CONNECTION_STRING` | _(empty)_ | Required when Drive upload is enabled, and for the CamtrapDP export with the original photos |
 | `SENTRY_DSN` / `LOG_LEVEL` | _/ `info`_ | Error tracking / logging level |
@@ -97,7 +96,7 @@ npm run dev
 | Auth | click **Login** | Supabase Auth UI appears |
 | Signed-in nav | log in | top tabs: **Toolkit · Media · Insights** (the Media tab is `/annotations` in the code) (plus **Realtime**, greyed out until a camera in your projects has sent LoRaWAN data) |
 | Data reads | open **Insights** | your projects / deployments |
-| Upload path | log in as a [seed user](../resources/testing-with-seed-users.md) and drag a folder from [`test-fixtures/camera-trap/sdcard/dev-sdcard/MEDIA/`](../../test-fixtures/camera-trap/README.md) into **Upload Data** | pipeline reaches **✅ Done**; the images appear in **Annotations** |
+| Upload path | log in as a [seed user](../resources/testing-with-seed-users.md) and drag a folder from [`test-fixtures/camera-trap/sdcard/dev-sdcard/MEDIA/`](../../test-fixtures/camera-trap/README.md) into **Upload Data** | pipeline reaches **✅ Done**; the images appear in **Media** |
 
 If observation edits fail with `permission denied for table observations`, the database is missing
 write GRANTs for the `authenticated` role — that's a `ww-backend` migration, see

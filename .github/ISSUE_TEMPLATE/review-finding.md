@@ -5,7 +5,7 @@ title: ""
 labels: review-finding
 ---
 
-**What:** <one-sentence statement — for a pending decision, start the title with "Decide:">
+**What:** <one-sentence statement. For a pending decision, start the title with "Decide:">
 
 **Where:** <file:line, or doc reference>
 

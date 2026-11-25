@@ -5,10 +5,11 @@ that keeps this agent layer from rotting.
 
 ## Development conversations and documentation
 
-**Docs are the record, GitHub issues are the tracker.** The rules live in
-[`documentation/development reports/README.md`](../../../documentation/development%20reports/README.md),
-including how to file a finding and what to check before closing a thread. Read it before
-starting or closing one.
+Docs are the record and GitHub issues the tracker
+([AGENTS.md](../../../AGENTS.md#non-negotiables)). How to file a finding and what to check before
+closing a thread are in
+[`documentation/development reports/README.md`](../../../documentation/development%20reports/README.md).
+Read it before starting or closing one.
 
 Never leave substantive material only in a chat transcript, an email or a PR comment. An
 investigation, a review exchange or a design decision belongs in a dated report. This is the
@@ -18,14 +19,8 @@ evaporates anyway because it only ever existed in a conversation.
 
 ## Documentation Invariant
 
-When behavior changes:
-
-* Update the relevant documentation
-* Keep documentation and implementation synchronized
-* Update route documentation when routes change
-* Update API documentation when contracts change
-
-Do not create duplicate documentation when existing documentation can be updated.
+Update the docs with the change ([AGENTS.md](../../../AGENTS.md#non-negotiables) says which doc a
+route or an API change updates).
 
 What a report or doc keeps: decisions (one line each, the reason in a clause), contracts
 (columns, signals, weights, env vars, schemas), measured numbers with source and date, commands,
@@ -34,39 +29,13 @@ existing code (a `file::function` link does it), worked narratives. Each fact ha
 everything else links to it. Before writing, decide which document owns each fact.
 
 
-# 9. Validation Requirements
+## Validation
 
-Before committing:
+The gates are in `AGENTS.md`, "Validate before committing"; run them before you claim work is
+done. `node scripts/validate-docs.js` fails on any repository path or relative link that no
+longer resolves, so run it after a rename or a move too; CI runs it as the `Docs Links` job.
 
-## Backend Changes
-
-Run:
-
-* Ruff linting
-* Ruff formatting
-* Pytest
-* Pyright (see `AGENTS.md`)
-
-## Frontend Changes
-
-Run:
-
-* ESLint
-* TypeScript validation: `npx tsc -b --noEmit`, **not** `npx tsc --noEmit`. The root
-  `tsconfig.json` is references-only (`"files": []`), so plain `tsc --noEmit` type-checks
-  nothing and exits 0 with errors present. `npm run build` (`tsc -b && vite build`) catches
-  them; so does the `-b` form on its own.
-* Production build if applicable, then `npm run size`: the size budgets fail CI, not just the
-  build
-
-## Documentation changes
-
-Run `node scripts/validate-docs.js` from the repo root after a rename or a move: it fails on any
-repository path or relative link that no longer resolves, and CI runs it as the `Docs Links` job.
-
-## General
-
-Verify:
+Also verify:
 
 * Documentation is updated
 * Feature flags are respected
@@ -77,7 +46,7 @@ Do not commit changes that fail validation.
 
 ---
 
-# 10. Development Principles
+## Development principles
 
 Prefer:
 
@@ -102,12 +71,11 @@ Avoid:
 
 ## House style
 
-- **No em dashes.** Use commas, or start a new sentence. This applies to every document and
-  anything else that gets pasted somewhere: em dashes read as machine-written to the people who
-  fund this work. Existing source comments still carry them; leave those alone unless you are
-  already rewriting the file.
-- **Verify against the code, not the docs**, and against `ww-backend` for anything about the
-  database. Treat any undated claim as a hypothesis, and say when you checked.
+- **No em dashes** ([AGENTS.md](../../../AGENTS.md#non-negotiables)): they read as
+  machine-written to the people who fund this work. Existing source comments still carry them;
+  leave those alone unless you are already rewriting the file.
+- **Verify against the code, not the docs.** Treat any undated claim as a hypothesis, and say
+  when you checked.
 
 ## Commit messages
 

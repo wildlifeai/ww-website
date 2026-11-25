@@ -2,7 +2,7 @@
 
 How to deploy the Wildlife Watcher V2 platform (backend + frontend) to production.
 
-> **In progress, 2026-11-20:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path. A dev stack runs on AWS, but no site points at it, so everything below still describes how to deploy today. Design, status and the AWS deploy steps: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md); signing in to AWS: [cloud-infrastructure.md](cloud-infrastructure.md#signing-in-to-aws).
+> **AWS:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path ([AWS and the REANNZ batch](#aws-and-the-reannz-batch)). Everything else below describes the Azure deployment the sites use. Status, design and the AWS deploy steps: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md); signing in to AWS: [cloud-infrastructure.md](cloud-infrastructure.md#signing-in-to-aws).
 
 ## Table of Contents
 
@@ -26,12 +26,12 @@ How to deploy the Wildlife Watcher V2 platform (backend + frontend) to productio
 
 | Component | Dev | Staging (current "prod") |
 |-----------|-----|--------------------------|
-| **Supabase** | `qegeovogqxiouqbrxmnh` (Dev_Wildlife_Watcher) | `nuhwmubvygxyddkycmpa` (Stag_Wildlife_Watcher) |
+| **Supabase** | Dev_Wildlife_Watcher ([project refs](cloud-infrastructure.md#supabase)) | Stag_Wildlife_Watcher |
 | **Azure Container App** | `ww-backend-dev` (WW-AE RG) | `ww-backend` (WW-AE RG) |
 | **Azure Blob Container** | `wildlife-watcher-uploads-dev` | `wildlife-watcher-uploads` (storage account `wwuploadsae`) |
 | **CamtrapDP export ZIPs** | `camtrapdp-exports`, shared with staging | `camtrapdp-exports` (same account) |
-| **Frontend** | Cloudflare Pages preview deploys (per branch) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
-| **Google Drive** | `Data/dev` — `1-F6cQc5lpYOJNSPKRs7i79Gh539N5hUT` | `Data/Production` — `1apf13KX075Fv4K0A2nbaTqOmCwZ9vJzr` |
+| **Frontend** | Cloudflare Pages build of `dev` (`dev.ww-website.pages.dev`); no other branch is built, see [Preview Deployments](#preview-deployments) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
+| **Google Drive** | `Data/dev` ([folder IDs](cloud-infrastructure.md#google-drive)) | `Data/Production` |
 
 > **Seed data**: The dev Supabase project is seeded with test users, organisations, projects, devices
 > and deployments. Counts and credentials are **not** duplicated here —
@@ -103,7 +103,7 @@ curl "https://${FQDN}/health"
 
 ## Frontend Deployment (Cloudflare Pages)
 
-The frontend is a static React+Vite app deployed to **Cloudflare Pages** with automatic preview deployments per branch.
+The frontend is a static React+Vite app deployed to **Cloudflare Pages**, which builds `main` and `dev` only ([Preview Deployments](#preview-deployments)).
 
 ### Setup (One-Time)
 
@@ -116,7 +116,7 @@ The frontend is a static React+Vite app deployed to **Cloudflare Pages** with au
    | **Build command** | `cd frontend && npm install && npm run build` |
    | **Build output directory** | `frontend/dist` |
    | **Root directory** | `/` (repository root) |
-   | **Node.js version** | `20` (match [00-GETTING-STARTED](../onboarding/00-GETTING-STARTED.md#prerequisites)) |
+   | **Node.js version** | `22` (match [00-GETTING-STARTED](../onboarding/00-GETTING-STARTED.md#prerequisites) and CI) |
 
 4. Set environment variables (in Cloudflare Pages settings):
 
@@ -124,11 +124,7 @@ The frontend is a static React+Vite app deployed to **Cloudflare Pages** with au
    |----------|-------|
    | `SUPABASE_URL` | `https://nuhwmubvygxyddkycmpa.supabase.co` |
    | `SUPABASE_ANON_KEY` | _(from Supabase Dashboard)_ |
-   | `VITE_API_BASE_URL` | `https://ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io` |
-
-   > The dev-preview equivalent is `https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io`.
-   > Re-check both against `cloud-infrastructure.md` before pasting — the FQDNs changed with the
-   > 2026-06-30 move to `WW-AE` / Australia East.
+   | `VITE_API_BASE_URL` | the production API's base URL, `https://` and its FQDN; the dev preview takes the dev API's ([base URLs](api-reference.md#wildlife-watcher-api-reference), checked against [cloud-infrastructure.md](cloud-infrastructure.md#azure)) |
 
 5. Assign custom domain: `wildlifewatcher.ai` (DNS is already on Cloudflare)
 
@@ -163,7 +159,6 @@ See [00-GETTING-STARTED.md](../onboarding/00-GETTING-STARTED.md#environment-vari
 - [ ] `ALLOWED_ORIGINS` is set to your exact frontend domain(s)
 - [ ] `SENTRY_DSN` is set for error tracking
 - [ ] `LOG_LEVEL` is `info` (not `debug`)
-- [ ] `RATE_LIMIT_PER_MINUTE` is appropriate for your traffic
 - [ ] `AZURE_STORAGE_CONNECTION_STRING` is set for image buffering and the CamtrapDP export ZIPs
 - [ ] `GOOGLE_DRIVE_ENABLED` is set to `true` if Drive uploads are needed
 
@@ -198,11 +193,11 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 | `GENERAL_ORG_ID` | Default org for auto-assignment. |
 | `REDIS_URL` | **ARQ job queue.** Empty → in-memory fallback (no durable/cross-container jobs). The **worker needs the same value.** |
 
-**Original-image storage** — *missing → uploads "complete" but produce no usable media; `GET /api/media/:id/image` returns **422** ("cannot be resolved"):*
+**Original-image storage**: *missing → uploads "complete" but produce no usable media; `GET /api/media/:id/image` answers **404** ("the file path cannot be resolved to a hosted image"). On AWS the bucket does this job: [AWS and the REANNZ batch](#aws-and-the-reannz-batch).*
 
 | Var | Enables |
 |-----|---------|
-| `AZURE_STORAGE_CONNECTION_STRING` (+ `AZURE_STORAGE_CONTAINER_NAME`) | Blob buffering of originals. **This is the one that bites.** The container *name* alone does nothing; without the **connection string** every upload logs `azure_storage_not_configured_for_store` and no media rows are created. It also stores the CamtrapDP export ZIPs (`CAMTRAPDP_EXPORT_CONTAINER`); without it the export answers `FEATURE_DISABLED`. |
+| `AZURE_STORAGE_CONNECTION_STRING` (+ `AZURE_STORAGE_CONTAINER_NAME`) | Blob buffering of originals. **This is the one that bites.** The container *name* alone does nothing; without the **connection string** every upload logs `azure_storage_not_configured_for_store` and no media rows are created. It also stores the CamtrapDP export ZIPs (`CAMTRAPDP_EXPORT_CONTAINER`); on Azure, without it the export answers `FEATURE_DISABLED`. |
 | `SUPABASE_MEDIA_BUCKET` | Supabase Storage bucket for media. |
 | `GOOGLE_DRIVE_ENABLED=true` + `GOOGLE_SERVICE_ACCOUNT_JSON` + `GOOGLE_DRIVE_FOLDER_ID` | Drive archival. **Folder ID alone does nothing** — without `ENABLED` + the service account, queued uploads stay `pending_drive_uploads` and the images never become servable. |
 
@@ -214,7 +209,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 | `FF_SPECIESNET_ENABLED=true` (+ `SPECIESNET_RUN_MODE`) | SpeciesNet detector+classifier. **Runs in the ARQ worker, not the API image (`--target api`)** — confirm the worker container is deployed with the same flags + `REDIS_URL` + GPU. |
 | `FF_MEDIA_REGISTRY_ENABLED=true` | Thumbnails / animal crops (the **Labels** view is empty without crops). |
 | `FF_BIOCLIP_ENABLED`, `FF_WILDLIFE_BRAIN_ENABLED` (+ `HF_TOKEN` for the gated DINOv3 weights, `EMBEDDING_*`; the vector store is **pgvector** in Supabase — no `QDRANT_*` vars, Qdrant is removed) | BioCLIP + DINOv3 embeddings / clustering. See [Vector Store](#vector-store--pgvector-supabase) and [Wildlife Brain on a deployed worker](#wildlife-brain-on-a-deployed-worker). |
-| `FF_MODEL_TRAINING_ENABLED` (+ `EDGE_IMPULSE_API_KEY`, `EDGE_IMPULSE_PROJECT_ID`) | Species Brain training from the Annotations page. The job runs on the **worker** when `REDIS_URL` is set, so set all three there as well as on the API; without the credentials the action only exports a dataset ZIP. |
+| `FF_MODEL_TRAINING_ENABLED` (+ `EDGE_IMPULSE_API_KEY`, `EDGE_IMPULSE_PROJECT_ID`) | Species Brain training from the Media page. The job runs on the **worker** when `REDIS_URL` is set, so set all three there as well as on the API; without the credentials the action only exports a dataset ZIP. Keep it off on AWS until training runs on the REANNZ cluster ([#463](https://github.com/wildlifeai/ww-website/issues/463)). |
 | `FF_PER_CROP_CLASSIFY_ENABLED` | Per-detection (per-crop) species — one observation per animal, BioCLIP refines each crop. **Requires the GPU worker**; default off (collapses per image when off). |
 
 **Demo account** — *missing → "Try the demo" self-disables (`DEMO_DISABLED`):*
@@ -238,6 +233,35 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 > ```
 > If `GOOGLE_DRIVE_ENABLED`, `FF_PIPELINE_ENABLED`, `FF_SPECIESNET_ENABLED`, or `FF_MEDIA_REGISTRY_ENABLED` are absent, that subsystem is off regardless of what the UI seems to show.
 
+### AWS and the REANNZ batch
+
+The settings of the AWS path, checked against `backend/app/config.py` on 2026-11-26. Every default
+keeps the Azure path. On AWS the SAM template (`infra/aws/template.yaml`) sets the backends, the bucket
+and the function names; every other value, secret or not, is an SSM SecureString under `/ww/<env>/`,
+which `backend/app/aws_params.py` loads at each cold start. Status and design:
+[2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md).
+
+| Var | Default | On AWS | What |
+|---|---|---|---|
+| `OBJECT_STORE_BACKEND` | `azure` | `s3` | Where the upload buffer, the export ZIPs and the batch results parts live: `azure` (Blob), `s3`, or `local` (a directory, for dev and tests) |
+| `ARCHIVE_BACKEND` | `gdrive` | `s3` | Where the upload job archives originals: Drive (`GOOGLE_DRIVE_*`), or `originals/` in `S3_BUCKET` as `s3://` paths |
+| `S3_BUCKET`, `S3_REGION` | empty | the stack's bucket and region | The bucket of both `s3` backends; an empty region is the SDK's default |
+| `S3_PRESIGN_GET_SECONDS` | 300 | | Lifetime of a presigned GET handed to a browser or the cluster, 30 to 3,600 |
+| `EXPORT_LINK_SECRET` | empty | SSM | HMAC key of the export download route ([API reference](api-reference.md#camtrapdp-export)) on `s3`. Empty, an export link is a plain presigned GET, which dies with the Lambda role's session |
+| `LOCAL_OBJECT_STORE_DIR` | empty, `<system temp>/ww_objects` | | The `local` backend's directory |
+| `WORKER_BACKEND` | `local` | `lambda` | `local`: ARQ when `REDIS_URL` is set, else in-process. `lambda`: the jobs in `BATCH_JOBS` (`backend/app/jobs/dispatch.py`) wait in `api_jobs` for the REANNZ batch, and every other job goes to `CPU_FUNCTION_NAME` |
+| `CPU_FUNCTION_NAME` | empty, the job runs in-process | `ww-<env>-cpu` | The Lambda function for CPU jobs |
+| `WORKER_TOKEN_SHA256` | empty, `/api/worker/*` answers 404 | SSM | Hex SHA-256 of the cluster's lease token |
+| `GPU_IMAGE` | empty | SSM, written by `deploy-aws.yml` | The GPU image (`ghcr.io/...:<sha>`) that `GET /api/worker/pending` tells the cluster to run |
+| `BATCH_MIN_PHOTOS`, `BATCH_MAX_WAIT_MINUTES` | 100, 60 | | The submit gate: the cluster is asked to run once this many photos wait, or once the oldest batch job is this old |
+| `BATCH_CRON_INTERVAL_MINUTES` | 30 | 240 with the 4-hourly crontab | How often the cluster's crontab asks for work; must match it (`cluster/reannz/ww_cron.sh`). Added to the gate's wait for the wait the website states ([`batch_wait`](api-reference.md#jobs-async)) |
+| `BATCH_MAX_QUEUE_HOURS` | 24 | | How long the reaper spares a queued batch job |
+| `BATCH_LEASE_MINUTES`, `BATCH_MAX_ATTEMPTS` | 30, 2 | | A lease with no heartbeat for this long is requeued; leases a job may lose before it fails |
+| `BATCH_LEASE_MAX_PHOTOS`, `BATCH_PART_MAX_PHOTOS` | 2,000, 500 | | Photos per lease and per results part |
+| `WW_LAMBDA_ROLE` | empty | `api` or `cpu`, set by the template | Which function this process is: mounts `/events` and the flush middleware, skips the lifespan reaper |
+| `WW_SSM_PREFIX`, `WW_ENV` | unset | `/ww/<env>/`, `<env>`, set by the template | Environment variables, not settings: the SSM path `aws_params.py` loads before `Settings()`, and the environment's name on the tick's metric line |
+| `SUPABASE_*` | empty | SSM | Empty defaults let the GPU image import the app; the API refuses to start without them (`Settings.require_supabase`) |
+
 ### iNaturalist
 
 Publishing photos to a person's own iNaturalist account, and the badge sync (#123). Off everywhere
@@ -259,8 +283,10 @@ The code default, `https://wildlifewatcher.ai/inat/callback`, is the site, where
 callback, so set the variable everywhere. After the callback the API sends the browser to the first
 `ALLOWED_ORIGINS` entry plus `/toolkit?inat=connected`, so on dev that entry must be the dev site.
 
-**2. Set the variables on the API container only.** The worker needs none: publish and sync run in
-API requests, publish in rounds that each end inside the ingress timeout.
+**2. Set the variables on the API container only.** The worker needs none: publish runs in API
+requests, in rounds that each end inside the ingress timeout, and the sync, `sync_inat_job`, is a job
+that runs in the API process (`IN_PROCESS_JOBS`). On AWS the sync runs on the `cpu` function, which
+reads the same `INAT_*` parameters from SSM.
 
 | Var | Value |
 |---|---|
@@ -306,7 +332,7 @@ They exist on dev (checked 25 Oct 2026).
 > **Known limit:** the OAuth state lives in the memory of the API replica that started the sign-in
 > (`routers/inaturalist.py::_pending_oauth`). A callback that reaches another replica, or one that
 > restarted, answers `400 Invalid or expired OAuth state`. Dev runs one replica; production can run
-> three. Connecting with a pasted token does not use it.
+> more ([replica counts](cloud-infrastructure.md#azure)). Connecting with a pasted token does not use it.
 
 ---
 
@@ -374,7 +400,7 @@ vector database.
 > space in `registries/embedding_registry.py`, `domain/wildlife_brain.py` and `embedding_runs`. It is a
 > label, not a dependency; renaming it to `vector_space` needs a coordinated ww-backend column change.
 
-**As built** (schema owned by [`ww-backend`](https://github.com/wildlifeai/wildlife-watcher-backend)):
+**As built** (schema owned by [`ww-backend`](https://github.com/wildlifeai/ww-backend)):
 1. **`ww-backend`:** the `vector` extension is enabled (in the `extensions` schema) and the vector lives
    on **`media_embeddings.embedding`** — declared **unbounded** `extensions.vector` (not `vector(1280)`)
    so one column holds both DINOv3 variants (384-d `dinov3-vits` / 1280-d `dinov3-vith`). Search is the
@@ -419,11 +445,16 @@ October 2026).
 | `ACR_USERNAME` | ACR admin username |
 | `ACR_PASSWORD` | ACR admin password |
 | `AZURE_CREDENTIALS` | Azure service principal JSON (for `az login`) |
-| `SUPABASE_URL` | Supabase project URL (for model deployment) |
-| `SUPABASE_ANON_KEY` | Supabase anon key (for model deployment) |
-| `GENERAL_ORG_ID` | `b0000000-0000-0000-0000-000000000001` |
+| `DEMO_EMAIL`, `DEMO_PASSWORD` | Set on the API at each deploy, for *Try the demo* ([demo-account.md](demo-account.md)) |
+| `HF_TOKEN` | Synced to the worker's `hf-token` secret for the gated DINOv3 weights; the workflow warns when it is missing |
 
+### AWS: `deploy-aws.yml`
 
+`.github/workflows/deploy-aws.yml` builds the `lambda` and `gpu` images and deploys `ww-<env>` with SAM.
+It runs only by `workflow_dispatch`, from a workflow on `main`, when the repository variable
+`AWS_DEPLOY_ENABLED` is `true`, with the GitHub environment's OIDC role `AWS_DEPLOY_ROLE_ARN`
+(environments `dev` and `staging`). Its variables and the first deploy from a workstation:
+[2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md#setting-up-step-1-and-step-4-by-hand).
 
 ---
 
@@ -501,7 +532,7 @@ This automatically captures:
 | Setting | Dev | Staging/Prod |
 |---------|-----|--------------|
 | `min-replicas` | 0 (scale to zero) | 1 (keeps the public demo button warm) |
-| `max-replicas` | 1 | 3 |
+| `max-replicas` | 1 | see [cloud-infrastructure.md](cloud-infrastructure.md#azure) |
 | CPU | 0.25 vCPU | 0.5 vCPU |
 | Memory | 0.5 Gi | 1 Gi |
 
@@ -601,7 +632,7 @@ a cold run pays it again. Neither is measured on the T4 yet, nor is the per-seco
 lists it as unknown). Measure one deployment with a known crop count on staging and take the rate
 from Cost Management for that hour. The `POST /api/brain/reprocess/all` dry run uses placeholder
 constants (75 ms per image, US$3 an hour in `embedding_lifecycle.py`), not measurements. The
-[GCP pilot report §6.2](../development%20reports/2026-09_gcp-pilot-and-migration/README.md#62-the-worker-cost-per-photo)
+[GCP pilot report §6.2](../development%20reports/_archive/2026-09_gcp-pilot-and-migration/README.md#62-the-worker-cost-per-photo)
 has the same method worked through for the whole pipeline.
 
 ### Verifying the split works
@@ -611,7 +642,7 @@ has the same method worked through for the whole pipeline.
 3. Worker logs show `arq_worker_startup` then `auto_embed_complete` with a cluster count.
 4. Annotations → **Group → Cluster (embeddings)** populates; the worker scales back to **0** when idle.
 
-> Status polling already works cross-process: `recover_stuck_jobs()` + the Supabase `api_jobs` mirror mean the API reports progress on jobs the worker ran. No extra wiring needed.
+> Status polling already works cross-process: the Supabase `api_jobs` mirror means the API reports progress on jobs the worker ran, and the age-based reaper (`reap_stale_jobs`) fails a job that stops reporting. No extra wiring needed.
 
 ---
 
@@ -635,12 +666,12 @@ az containerapp show \
 
 With `REDIS_URL` **unset**, jobs run in-process as asyncio background tasks; with it set, they are
 offloaded to the ARQ worker, so first check *which* process should have run the job. The jobs in
-`IN_PROCESS_JOBS` (uploads, the CamtrapDP import and export, manifests, model conversion and
-downloads) always run in the API process, where one can be cut off when the replica scales in (dev
-scales to zero), as uploads and the import already can ([03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.md#async-job-system)). A job stuck in
+`IN_PROCESS_JOBS` always run in the API process, where one can be cut off when the replica scales in
+(dev scales to zero); which jobs those are: [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.md#async-job-system). A job stuck in
 `queued` on a `REDIS_URL`-configured API usually means the worker isn't running or KEDA never woke it
-(see [GPU Worker](#gpu-worker--scale-to-zero-the-ml-worker)). If a container restarts mid-job, the job
-store's `recover_stuck_jobs()` marks interrupted jobs as `failed` on next boot. Check restart logs:
+(see [GPU Worker](#gpu-worker--scale-to-zero-the-ml-worker)). Nothing is failed at boot: if a container
+restarts mid-job, the age-based reaper (`reap_stale_jobs`, `backend/app/jobs/store.py`) fails the job once
+it has stopped reporting. Check restart logs:
 
 ```bash
 az containerapp logs show \
@@ -655,11 +686,8 @@ The `ethos-u-vela` package needs to be installed in the container. Verify it's i
 
 **Rate limiting is too aggressive**
 
-Increase the limit via environment variable:
-
-```
-RATE_LIMIT_PER_MINUTE=120
-```
+The limits are per route, in code (`@limiter.limit`); `RATE_LIMIT_PER_MINUTE` changes none of them. The
+list: [API reference, Rate Limiting](api-reference.md#rate-limiting).
 
 **CORS errors from frontend**
 

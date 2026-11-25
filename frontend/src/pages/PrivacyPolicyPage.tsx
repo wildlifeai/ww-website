@@ -95,7 +95,8 @@ export function PrivacyPolicyPage() {
 
       <h3 style={{ marginTop: '1.5rem', marginBottom: '0.5rem' }}>3.1 Data Storage</h3>
       <ul style={{ paddingLeft: '1.5rem', marginBottom: '1rem' }}>
-        <li><strong>Cloud storage:</strong> Your account data, project records, and uploaded files are stored securely on Supabase (hosted on Amazon Web Services infrastructure).</li>
+        <li><strong>Cloud storage:</strong> Your account data, project records, and uploaded files such as AI models are stored securely on Supabase (hosted on Amazon Web Services infrastructure). Photos you upload through the Website are stored in Amazon Web Services' Auckland region in New Zealand, and Supabase keeps smaller copies of them (thumbnails, previews and crops of the animals) for display.</li>
+        <li><strong>AI processing:</strong> The AI models that identify species and group similar animals run on the REANNZ research computing cluster in New Zealand. It fetches your uploaded photos over an encrypted connection and sends the results back to the platform.</li>
         <li><strong>Local storage (App):</strong> The App uses an offline-first architecture. A local database on your device stores a synchronised copy of your data for offline use.</li>
         <li><strong>Browser storage (Website):</strong> Authentication tokens are stored in your browser's local storage. No sensitive personal data is persisted client-side beyond session tokens.</li>
         <li><strong>Secure credentials:</strong> Authentication tokens are stored in your device's secure storage (Keychain on iOS, Encrypted SharedPreferences on Android) when using the App.</li>
@@ -121,7 +122,8 @@ export function PrivacyPolicyPage() {
         <li><strong>Service providers:</strong> We use third parties to operate the platform, including:
           <ul style={{ paddingLeft: '1.5rem', marginTop: '0.25rem' }}>
             <li><strong>Supabase</strong> – database, authentication, and file storage</li>
-            <li><strong>Amazon Web Services</strong> – cloud infrastructure hosting</li>
+            <li><strong>Amazon Web Services</strong> – cloud infrastructure hosting, including the platform's server and storage of uploaded photos, in its Auckland region</li>
+            <li><strong>REANNZ</strong> – New Zealand research computing cluster that runs the AI models on uploaded photos</li>
             <li><strong>Google Maps</strong> – mapping and location services</li>
             <li><strong>Expo</strong> – mobile app build and update distribution</li>
             <li><strong>GitHub</strong> – pre-trained AI model hosting and source code</li>

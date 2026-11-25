@@ -5,10 +5,10 @@ The Wildlife Watcher web platform: a **React + Vite** SPA and a **FastAPI** back
 (SpeciesNet / BioCLIP / DINOv3) and the tooling that builds camera SD-card manifests.
 
 **Before changing code, infrastructure or docs, read
-[`.agents/skills/SKILL.md`](.agents/skills/SKILL.md)**: the workflow rules, the five that apply
-to almost any change, and a map to the reference files that carry the detail (the database and
-cross-repo boundaries, backend, frontend, environment and files, gotchas, documentation).
-This file is only the quickstart.
+[`.agents/skills/SKILL.md`](.agents/skills/SKILL.md)**: a map to the reference files that carry
+the detail (the database and cross-repo boundaries, backend, frontend, environment and cloud
+access, gotchas, documentation). This file holds the quickstart, the gates and the
+non-negotiables, which the skill and the references do not repeat.
 
 ## Run it
 
@@ -35,19 +35,25 @@ Setup detail, env reference and a verification checklist:
 
 ```bash
 cd backend  && ruff check . && ruff format --check . && pyright && pytest
-cd frontend && npm run lint && npx tsc -b --noEmit && npm run build && npm run size
+cd frontend && npm run lint && npm test && npx tsc -b --noEmit && npm run build && npm run size
+cd frontend && npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes
 node scripts/validate-docs.js
 ```
 
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
 
+React Doctor passes on its "No issues found" line; its score is not the gate. It scans only
+files git tracks, so `git add` a new file first, or it passes here and fails on the pull request.
+
 `pyright` (from `requirements-dev.txt`) type-checks the backend with the `[tool.pyright]`
 settings in `backend/pyproject.toml` and must report no errors. It resolves imports from the Python on `PATH`, so activate the venv
 first: dozens of unresolved imports (`structlog`, `supabase`) mean it is reading another
 interpreter, and its count is wrong.
 
-`ci.yml` runs the same gates on every pull request and adds three that only run there: pytest
+`react-doctor.yml` runs React Doctor on every pull request and fails one that introduces any
+warning. `ci.yml` runs the other gates, the unit tests (`npm test`, vitest) inside the required
+Frontend Lint (ESLint) check, and adds three that only run there: pytest
 with a statement-coverage floor, a build of the backend's `api` Docker stage that is started and
 asked for `/docs`, and a check that `backend/openapi.json` matches the app (regenerate it with
 `python scripts/export_openapi.py` in `backend/` when a route or a model changes). The coverage
@@ -55,7 +61,7 @@ floor and the `size-limit` budgets in `frontend/package.json` are ratchets set j
 figures: raising one is a deliberate change in the pull request that needs it. The comment above
 each job in `ci.yml` says what it proves. `codeql.yml` scans JavaScript, TypeScript and Python on
 pull requests, on pushes to dev and weekly; its findings are code scanning alerts in the Security
-tab, and it is advisory until it is made a required check (#229). `dependency-audit.yml` runs
+tab, and it is advisory, not a required check on dev (26 Nov 2026). `dependency-audit.yml` runs
 `npm audit` on the frontend and `e2e/` and `pip-audit` on the backend, advisory on a pull request
 that changes a lockfile or a requirements file and blocking on its Monday run; Dependabot opens
 the grouped bump PRs. The lint toolchain and `size-limit` each come as one group, majors included,
@@ -89,7 +95,6 @@ run them by hand when API key, `/api/v1`, or deployment and project delete code 
   file, the skill or its reference files wrong, missing or redundant, then add, edit or delete
   in the same commit. The three questions are in
   [`.agents/skills/references/documentation.md`](.agents/skills/references/documentation.md).
-  A confidently wrong skill costs more than a thin one.
 - **No em dashes** in documents or anything else that gets pasted elsewhere. Commas, or a new
   sentence.
 - **This repo does not own the database.** Schema, RLS policies **and** table GRANTs live in
@@ -97,7 +102,8 @@ run them by hand when API key, `/api/v1`, or deployment and project delete code 
   `supabase/schemas/`. Never create or alter tables, columns or functions from here, and never
   edit `ww-backend` from website work: file an issue there with the exact change, then consume
   it once merged. No live database is changed by hand, not even to repair drift. Verify column
-  names against that repo rather than guessing.
+  names against that repo rather than guessing. How to ask for a change:
+  [`references/database-and-cross-repo.md`](.agents/skills/references/database-and-cross-repo.md).
 - **Backend layering is `routers → domain → services`.** No FastAPI or HTTP imports in
   `domain/`; no business logic in `routers/`.
 - **The service-role key is backend-only.** Never expose it to frontend code, never commit
@@ -114,8 +120,9 @@ run them by hand when API key, `/api/v1`, or deployment and project delete code 
   still open becomes an issue on the
   [project board](https://github.com/orgs/wildlifeai/projects/3).
 - **Shared contracts are cross-repo.** EXIF fields, op-parameters, LoRaWAN payloads and
-  `CONFIG.TXT` belong to the firmware and `ww-hardware` repos; the mobile app shares this
-  database. Never change one unilaterally.
+  `CONFIG.TXT` belong to the two firmware repos and `ww-backend`, which owns which is in
+  [`references/database-and-cross-repo.md`](.agents/skills/references/database-and-cross-repo.md);
+  the mobile app shares this database. Never change one unilaterally.
 
 ## Where things are
 
@@ -123,9 +130,10 @@ run them by hand when API key, `/api/v1`, or deployment and project delete code 
 |---|---|
 | Start here, in order | the six guides in [`documentation/onboarding/`](documentation/onboarding/), numbered 00 to 05 |
 | Doc index, what's living vs frozen | [`documentation/README.md`](documentation/README.md) |
-| Deep agent rules | [`.agents/skills/SKILL.md`](.agents/skills/SKILL.md) |
+| Agent reference files, by task | [`.agents/skills/SKILL.md`](.agents/skills/SKILL.md) |
 | UI design system | [`.agents/DESIGN.md`](.agents/DESIGN.md) |
 | What actually exists in Azure, AWS, REANNZ, Supabase and Cloudflare, and signing in to AWS | [`documentation/resources/cloud-infrastructure.md`](documentation/resources/cloud-infrastructure.md) |
 | API endpoints | [`documentation/resources/api-reference.md`](documentation/resources/api-reference.md) (authoritative: `/docs`) |
+| Deploys, previews and the deploy pipeline | [`documentation/resources/deployment-guide.md`](documentation/resources/deployment-guide.md) |
 | How the code got this way | [`documentation/development reports/`](documentation/development%20reports/README.md) |
 | Frozen history, read for *why*, never as current behaviour | `documentation/development reports/_archive/` |

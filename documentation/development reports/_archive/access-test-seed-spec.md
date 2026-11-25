@@ -1,8 +1,8 @@
 # Report — Access-Scenario Seed Deployments (ww-backend)
 
-> **Status:** ✅ **Shipped** — seeded by `ww-backend/supabase/seeds/dev/access_test_deployments.sql`.
-> Retained as the reasoning behind those rows; the SQL in that repo is authoritative if the two ever
-> disagree. Move to `_archive/` at the next docs tidy.
+> **Status:** 🕰️ Historical snapshot, archived 2026-11-26. Shipped: seeded by
+> `ww-backend/supabase/seeds/dev/access_test_deployments.sql`, which is authoritative if the two
+> ever disagree. Kept as the reasoning behind those rows.
 
 **Audience:** whoever maintains `ww-backend/supabase/seeds`.
 **Goal:** seed the deployments that back the `sdcard/dev-sdcard/` fixtures so a fresh dev DB
