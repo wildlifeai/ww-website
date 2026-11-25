@@ -261,7 +261,7 @@ export function ResourcesPage() {
             <Step n={5}>Once completed, you can visualize all animal observations and data distributions directly on the platform.</Step>
 
             <Note>
-              Images recorded by Wildlife Watchers follow the CamTrapDP standards and remain fully compatible with other major camera trap software pipelines.
+              Images recorded by Wildlife Watchers are standard JPEG files with the deployment, time and location written into each one, so other camera trap software can open them. To share a labelled dataset, download a CamtrapDP package from the Toolkit.
             </Note>
           </Section>
 

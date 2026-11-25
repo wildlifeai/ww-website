@@ -5,9 +5,10 @@
 ww-backend's ``export-camtrap-dp`` Edge Function builds the package's metadata and checks who
 may have it (``services/camtrap_dp_function.py``). Its media.csv gives each photo the path
 ``media/<deploymentID>/<mediaID>.<ext>``, the contract between the two repos. Only this
-backend can read Google Drive, so this module puts each original at exactly that path and
-writes one ZIP on local disk, a photo at a time. ``filePublic`` (false for a photo with a
-person in it) is the function's; the export copies media.csv unchanged.
+backend can read the archive (Google Drive, or S3 on AWS), so this module reads each original
+through the media resolver, puts it at exactly that path and writes one ZIP on local disk, a
+photo at a time. ``filePublic`` (false for a photo with a person in it) is the function's; the
+export copies media.csv unchanged.
 
 A photo whose original cannot be read stays in media.csv and is named in the package's
 description, so the export finishes with what it has rather than failing.
@@ -34,6 +35,7 @@ from urllib.parse import urlencode
 import structlog
 
 from app.config import settings
+from app.domain.media_resolver import can_resolve
 
 logger = structlog.get_logger()
 
@@ -230,10 +232,6 @@ def note_missing(descriptor: dict, missing: list[tuple[str, str]]) -> dict:
 # ── Writing the ZIP ──────────────────────────────────────────────────────
 
 
-def _readable(file_path: str) -> bool:
-    return file_path.startswith(("gdrive://", "https://", "http://"))
-
-
 async def fetch_with_retries(file_path: str, fetch: Fetch, *, attempts: int = FETCH_ATTEMPTS, backoff_s: Optional[float] = None) -> Optional[bytes]:
     """The original's bytes, or None once ``attempts`` reads have failed."""
     backoff_s = FETCH_BACKOFF_S if backoff_s is None else backoff_s
@@ -283,7 +281,7 @@ async def write_package(
                 data = None
                 if original is None:
                     why = "not found in the database"
-                elif not _readable(original.file_path):
+                elif not can_resolve(original.file_path):
                     why = "no stored original"
                 else:
                     data = await fetch_with_retries(original.file_path, fetch, backoff_s=backoff_s)

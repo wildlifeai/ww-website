@@ -288,6 +288,27 @@ async def test_build_export_calls_the_function_as_the_user(tmp_path, monkeypatch
     assert result.written == 1 and zip_path.exists() and not (tmp_path / "metadata.zip").exists()
 
 
+async def test_an_export_of_s3_originals_has_every_photo_in_media(tmp_path, monkeypatch):
+    """With ARCHIVE_BACKEND=s3 (AWS) originals are s3:// keys, and each one is read into media/ (#493)."""
+    rows = _media_rows([(1, DEP_A, "jpg", True), (2, DEP_A, "jpg", False), (3, DEP_A, "png", True)])
+    keys = {r["mediaID"]: f"s3://ww-test-media/originals/{PROJECT}/{DEP_A}/{r['mediaID']}.jpg" for r in rows}
+    monkeypatch.setattr(fn, "download_package", _fake_function(rows, []))
+    media = [{"id": m, "deployment_id": DEP_A, "file_path": key} for m, key in keys.items()]
+    monkeypatch.setattr("app.services.supabase_client.create_service_client", lambda: FakeSvc(media))
+    fetch = FakeDrive()
+
+    zip_path, result = await export.build_export(
+        export.ExportSelection(PROJECT, [DEP_A]), export.ExportCaller(user_token="t"), tmp_path, max_bytes=10**9, on_message=_noop, fetch=fetch
+    )
+
+    assert sorted(fetch.calls) == sorted(keys.values())
+    assert (result.photos, result.written, result.missing) == (3, 3, [])
+    with zipfile.ZipFile(zip_path) as out:
+        for row in rows:
+            assert out.read(row["filePath"]) == f"JPEG:{keys[row['mediaID']]}".encode()
+        assert json.loads(out.read("datapackage.json"))["description"] == "Project notes"
+
+
 @pytest.mark.parametrize(
     ("status", "message", "shown"),
     [

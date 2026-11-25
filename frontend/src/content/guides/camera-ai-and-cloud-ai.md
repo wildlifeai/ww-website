@@ -3,7 +3,7 @@ title: How Wildlife Watcher's AIs work together
 description: What the Camera AI on your device and the Cloud AI on the website each do, why one photo can have two opinions, why a person still checks them, and how the Wildlife Brain groups look-alikes
 category: Analysis
 order: 20
-updated: 2026-11-20
+updated: 2026-11-26
 ---
 
 Wildlife Watcher identifies animals in two places — once on the camera itself, and again on the website after you upload — and then a third tool, the **Wildlife Brain**, groups the look-alikes to speed up your review. They are different tools with different jobs, and your photos benefit from all of them.
@@ -14,13 +14,13 @@ Wildlife Watcher identifies animals in two places — once on the camera itself,
 
 - It works in the field, instantly, on every photo the camera takes.
 - It is trained for **your project's target species**, not for every animal.
-- Its results are saved inside each photo, so they travel with the image to the website — where they appear as a **📟 Camera AI** label next to the website's own result (see below).
+- Its results are saved inside each photo, so they travel with the image to the website, where they show as **Camera AI** beside the website's own results (see below).
 
 > **Tip:** a project without a Species Brain still takes photos normally — it just won't identify animals until you add one in the project settings.
 
 ## Cloud AI — on the website
 
-When you upload photos, the website automatically runs a much larger identification system on powerful servers. Think of it as the thorough second opinion:
+After you upload photos, the website automatically runs a much larger identification system on powerful servers. Its results can take from a few minutes to a few hours to appear. Think of it as the thorough second opinion:
 
 - It first finds the animals in each photo, then identifies the species.
 - It knows thousands of species, not just your project's targets.
@@ -33,7 +33,7 @@ Because it has far more computing power than the camera, the Cloud AI result is 
 | | Camera AI | Cloud AI |
 |---|---|---|
 | Where it runs | On the camera, offline | On the website, after upload |
-| Speed | Immediate, in the field | When photos are uploaded |
+| Speed | Immediate, in the field | Minutes to a few hours after upload |
 | Species it knows | Your project's targets | Thousands of species |
 | Best at | Fast local detection | Accurate identification |
 
@@ -41,17 +41,24 @@ The two are complementary: the Camera AI reacts in the field the moment somethin
 
 ## Two results on one photo
 
-On the website, a photo can carry both opinions side by side, each with a small label so you always know where a result came from:
+On the website, a photo can carry several opinions. In the photo grid, a teal badge with a chip icon means an AI labelled the photo, and a green badge with a tick means a person has reviewed it. Open a photo to see where each result came from:
 
-- **📟 Camera AI** — what your camera's Species Brain decided in the field.
-- **☁ Cloud AI** — what the website's model decided on upload.
-- **👤 Reviewed** — a person has checked it.
+- **Camera AI**, with the model's name: what your camera's Species Brain decided in the field.
+- The name of a Cloud AI model, for example SpeciesNet: what that model decided after upload.
+- **Consensus**: the website's models weighed together, when there is one.
+- The reviewer's email: a person has checked it.
 
-When they disagree, a person decides: **human review always wins**, then Cloud AI, then Camera AI. So the labels aren't a conflict to resolve — they're two independent checks that make it easy to trust the ones that agree and focus your attention on the ones that don't.
+The photo's label, under **Verdict**, is one of these, and the others are listed under **model opinions**. The website picks the label in this order:
+
+1. A person's label, once someone has reviewed the photo.
+2. Without one, a **Consensus** result, when there is one, decides whether the photo is empty, and the species name comes from the first model result the website saved.
+3. With neither, the first result the website saved.
+
+The first result saved is usually the **Camera AI**'s, because the website reads it from the photo before the Cloud AI runs. So until a person reviews a photo, its label can be the camera's answer even where the Cloud AI disagrees: open the photo to compare them. The results aren't a conflict to resolve. They are independent checks that make it easy to trust the ones that agree and focus your attention on the ones that don't.
 
 ## Why a person still checks the AI
 
-Neither AI is right every time, so the website treats every AI label as a suggestion. A photo only shows **👤 Reviewed** once a person has confirmed or corrected it.
+Neither AI is right every time, so the website treats every AI label as a suggestion. A photo only shows **Reviewed** once a person has confirmed or corrected it.
 
 A 2026 study in the *Biodiversity Data Journal* shows why. It asked a general-purpose AI model, the kind behind chat assistants, to name the species in 10,000 photos of Colombian amphibians, birds, fish, mammals and reptiles. That is not the AI Wildlife Watcher uses, and the photos were nature photos shared online rather than camera-trap photos, but its lessons apply to any AI that names species:
 
@@ -73,10 +80,10 @@ After the Cloud AI has identified species, the **Wildlife Brain** does something
 - **Find similar** — from one animal, jump straight to others that look like it.
 - **Map (UMAP)** — a visual scatter of your whole dataset to spot patterns and outliers.
 
-You run it from the **Clusters** page. See [Grouping look-alikes with the Wildlife Brain](/guides/wildlife-brain) for the full walkthrough. (It's a separate tool from your camera's *Species Brain* — the Species Brain identifies on the device; the Wildlife Brain groups on the website.)
+It runs after an upload when **Run AI analysis after upload** is ticked, as it is by default, and you can run it yourself from **Media**: pick one deployment in the **Filter** tab, then choose **Run Wildlife Brain** in the **Review** tab. See [Grouping look-alikes with the Wildlife Brain](/guides/wildlife-brain) for the full walkthrough. (It's a separate tool from your camera's *Species Brain*: the Species Brain identifies on the device; the Wildlife Brain groups on the website.)
 
-## What's next
+## Camera AI detections over LoRaWAN
 
-Field alerts sent directly from the camera over long-range radio (LoRaWAN) are **in development** — the goal is that a Camera AI detection can notify your team without waiting for the SD card to be collected.
+A camera connected over long-range radio (LoRaWAN, in early access) also sends a short message when its Camera AI detects something, so the detection shows on the website's **Realtime** page before you collect the SD card. The website does not send a notification for it. See [Connecting your Wildlife Watcher over LoRaWAN](/guides/lorawan-in-new-zealand).
 
 For help setting up your camera, see [Focusing the camera](/guides/focusing-the-camera). For common questions about the AI, see the [FAQ](/faq).
