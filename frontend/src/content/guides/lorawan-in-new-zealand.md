@@ -3,7 +3,7 @@ title: Connecting your Wildlife Watcher over LoRaWAN in New Zealand
 description: What LoRaWAN telemetry gives you, and the three ways to get connected — an existing network, your own gateway, or a wildlife.ai kit
 category: Setup
 order: 20
-updated: 2026-07-16
+updated: 2026-11-26
 ---
 
 Your Wildlife Watcher can report home over **LoRaWAN** — a long-range, very
@@ -135,6 +135,31 @@ coverage right the first time.
 
 **Contact us at [wildlife.ai](https://wildlife.ai/contact/) to get
 started.**
+
+## The Realtime page
+
+Once your cameras send LoRaWAN messages, the **Realtime** tab shows the cameras deployed in the
+projects you have selected, and the ones collected today.
+
+- **The map.** Tap or click a camera to pick it: it gets a ring on the map and its row is
+  highlighted in the Cameras table. Tap it again to clear it. The page has no photos: they stay
+  on the SD card until you collect the camera and upload them.
+- **Cameras** lists each camera once, with its newest message. Its status is **Fresh** (a
+  message in the last 24 hours), **Stale** (24 to 72 hours), **Silent** (nothing for more than 3
+  days), **Awaiting** (no message yet) or **Finished** (its deployment ended today).
+  **Detections 48h** is what the camera's own AI counted in the last 48 hours.
+- **Messages** lists the messages, newest first:
+  - **Check-in**, or **Detection +2** when the camera counted 2 detections since its previous
+    message. A camera's first count after it is deployed has nothing to compare with, so that
+    message shows as a Check-in.
+  - **Battery** in volts, or as a percentage from older firmware.
+  - **SD free** is how much of the SD card is still free; a dash means the camera could not
+    tell.
+  - It opens with the newest 50 messages. **Load older** adds 50 more, up to 500.
+  - Messages that arrive while the page is open stay lightly highlighted.
+- **Live** by the title means new messages appear as they arrive. **Connecting** means the
+  page is reconnecting; it reads everything again once it is back, and when you return to the
+  tab.
 
 ## Quick technical reference
 

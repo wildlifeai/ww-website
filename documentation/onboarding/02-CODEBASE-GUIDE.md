@@ -80,7 +80,7 @@ password) or uses Forgot password.
 | `/toolkit` | `ToolkitPage` | Motion live view, privileged model upload, iNaturalist, CamtrapDP export, GBF contribution report, SD-card prep |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
-| `/field` | `FieldPage` | Realtime: active deployments with their newest LoRaWAN check-in from the `deployment_latest_lorawan` view, read-only (`lib/realtimeReads.ts`) |
+| `/field` | `FieldPage` | Realtime: active deployments, and those that ended today, read-only. Cameras tab: each one's newest LoRaWAN check-in from the `deployment_latest_lorawan` view and its own detection count (`lib/realtimeReads.ts`), state from `lib/cameraState.ts`. Messages tab: their LoRaWAN messages, live (`lib/lorawanFeed.ts`, `hooks/useFieldLive.ts`). Nothing navigates away |
 | `/upload-data` | `UploadDataPage` (→ `UploadFlow`) | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
 | `/live-view` | `LiveViewPage` | A bench tool for a WW500 on its USB cable through Web Serial (Chrome or Edge on a computer), no backend: the live picture with the motion grid and wake status, and Controls (run modes, Save frame, frame interval, motion ops, Keep awake), Console (commands, session log) and Device tabs. The console protocol is `lib/liveView.ts` and `lib/liveViewSession.ts`, ported from the firmware's `live_view.py` and `live_preview.md` (#400) |

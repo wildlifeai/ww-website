@@ -2,39 +2,45 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Realtime: /field
-// Cameras deployed now: KPIs, a map, a "needs attention" panel and a status table, read-only for
-// every role. Telemetry (battery, SD usage, last check-in) comes from the deployment_latest_lorawan
-// view, recent detections from observations; the reads are in lib/realtimeReads.ts.
-import { useEffect, useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
+// Cameras deployed now, and those whose deployment ended today: KPIs, a map, a "needs attention"
+// panel, and two tabs, Cameras (a status table) and Messages (their LoRaWAN messages, live), read-only
+// for every role. Telemetry (battery, SD usage, last check-in) comes from the
+// deployment_latest_lorawan view and detections from the cameras' own LoRaWAN counts
+// (lib/realtimeReads.ts); the Messages tab is lib/lorawanFeed.ts, live updates hooks/useFieldLive.ts.
+// Nothing here leaves the page: the photos stay on the camera's SD card while it is out.
+import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { RadioTower, TriangleAlert } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
+import { useFieldLive } from '../hooks/useFieldLive'
+import { useMessageFeed } from '../hooks/useMessageFeed'
 import { supabase } from '../config/supabase'
 import {
-  fetchActiveDeployments, fetchDeploymentUpdate, fetchLatestTelemetry, fetchRecentDetections,
-  withEntry, type ActiveDeployment, type RecentDetections, type Telemetry,
+  fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, realtimeKeys,
+  type FieldDeployment, type Telemetry,
 } from '../lib/realtimeReads'
+import { CAMERA_STATE, cameraState, type CameraState } from '../lib/cameraState'
+import { agoLabel } from '../lib/lorawanFeed'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { DeploymentMap } from '../components/data/DeploymentMap'
+import { LorawanMessages } from '../components/data/LorawanMessages'
 import { NoProjectSelected } from '../components/common/NoProjectSelected'
 
 // ── Types ─────────────────────────────────────────────────────────────
 
-type Freshness = 'fresh' | 'stale' | 'silent' | 'awaiting'
-
-interface Camera extends ActiveDeployment {
+interface Camera extends FieldDeployment {
   battery: number | null        // %
   sdUsed: number | null         // %
-  lastSeen: string | null       // last LoRaWAN check-in
-  freshness: Freshness
-  detections24h: number
-  lastDetection: string | null
-  topSpecies: string | null
+  lastSeen: string | null       // last LoRaWAN message
+  state: CameraState
+  detections48h: number         // the camera's own count, from its LoRaWAN messages
   troubled: boolean
   reasons: string[]
 }
+
+type Tab = 'cameras' | 'messages'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -42,39 +48,15 @@ const LOW_BATTERY = 20
 const FULL_SD = 90
 const LORAWAN_GUIDE = '/guides/lorawan-in-new-zealand'
 
-const NO_DEPLOYMENTS: ActiveDeployment[] = []
+const NO_DEPLOYMENTS: FieldDeployment[] = []
 const NO_TELEMETRY: Record<string, Telemetry> = {}
-const NO_DETECTIONS: Record<string, RecentDetections> = {}
+const NO_DETECTIONS: Record<string, number> = {}
+const TABS: { id: Tab; label: string }[] = [{ id: 'cameras', label: 'Cameras' }, { id: 'messages', label: 'Messages' }]
 
-function freshnessOf(lastSeen: string | null): Freshness {
-  if (!lastSeen) return 'awaiting'
-  const hours = (Date.now() - new Date(lastSeen).getTime()) / 3_600_000
-  if (hours <= 24) return 'fresh'
-  if (hours <= 72) return 'stale'
-  return 'silent'
-}
-
-function agoLabel(iso: string | null): string {
-  if (!iso) return '-'
-  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60_000))
-  if (mins < 60) return `${mins}m ago`
-  const h = Math.round(mins / 60)
-  if (h < 48) return `${h}h ago`
-  return `${Math.round(h / 24)}d ago`
-}
-
-const FRESHNESS: Record<Freshness, { color: string; label: string }> = {
-  fresh:    { color: '#22c55e', label: 'Fresh' },
-  stale:    { color: '#f59e0b', label: 'Stale' },
-  silent:   { color: '#ef4444', label: 'Silent' },
-  awaiting: { color: '#9ca3af', label: 'Awaiting' },
-}
-
-function Dot({ freshness }: { freshness: Freshness }) {
+function Dot({ color }: { color: string }) {
   return (
     <span aria-hidden="true" style={{
-      display: 'inline-block', width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-      background: FRESHNESS[freshness].color,
+      display: 'inline-block', width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: color,
     }} />
   )
 }
@@ -92,18 +74,22 @@ function Kpi({ label, value, tone }: { label: string; value: number | string; to
   )
 }
 
+const cameraName = (d: FieldDeployment) => d.location_name || d.device_name || d.id.slice(0, 8)
+
 // ── Component ──────────────────────────────────────────────────────────
 
 export function FieldPage() {
   const { user } = useAuth()
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const { queryProjectIds, noProjectSelected } = useProjectSelection()
+  const [tab, setTab] = useState<Tab>('cameras')
+  // A camera picked on the map or in the table, ringed on the map and tinted in the table.
+  const [picked, setPicked] = useState<string | null>(null)
+  const pick = (id: string) => setPicked(p => (p === id ? null : id))
 
   const depEnabled = !!user && !!queryProjectIds
   const depQuery = useQuery({
-    queryKey: ['realtime', 'deployments', user?.id, queryProjectIds],
-    queryFn: () => fetchActiveDeployments(supabase, queryProjectIds ?? []),
+    queryKey: realtimeKeys.deployments(user?.id, queryProjectIds),
+    queryFn: () => fetchFieldDeployments(supabase, queryProjectIds ?? []),
     enabled: depEnabled,
   })
   const deps = depQuery.data ?? NO_DEPLOYMENTS
@@ -111,97 +97,71 @@ export function FieldPage() {
 
   // A refetch keeps the last answer on screen; telemetry and detections are keyed by deployment.
   const telemetryQuery = useQuery({
-    queryKey: ['realtime', 'telemetry', depIds],
+    queryKey: realtimeKeys.telemetry(depIds),
     queryFn: () => fetchLatestTelemetry(supabase, depIds),
     enabled: depIds.length > 0,
     placeholderData: keepPreviousData,
   })
   const detectionsQuery = useQuery({
-    queryKey: ['realtime', 'detections', depIds],
-    queryFn: () => fetchRecentDetections(supabase, depIds),
+    queryKey: realtimeKeys.detections(depIds),
+    queryFn: () => fetchLorawanDetections(supabase, depIds),
     enabled: depIds.length > 0,
     placeholderData: keepPreviousData,
   })
+  const feed = useMessageFeed(depIds)
+  const live = useFieldLive(deps)
+
   const telemetry = telemetryQuery.data ?? NO_TELEMETRY
   const detections = detectionsQuery.data ?? NO_DETECTIONS
   const loading = depEnabled && depQuery.isPending
-  const error = (depQuery.error ?? telemetryQuery.error ?? detectionsQuery.error)?.message ?? null
-
-  // Live updates: a new LoRaWAN message for a shown deployment reads that deployment's telemetry
-  // and detections again, two requests, and writes them into the cached answers. Needs
-  // lorawan_messages in the supabase_realtime publication (ww-backend migration 20260711043000);
-  // without it the page reads on load only.
-  useEffect(() => {
-    // No listening while nothing is selected or nothing is shown.
-    if (!user || !queryProjectIds || depIds.length === 0) return
-    // Realtime already enforces RLS; the filter narrows to the deployments this page shows, so
-    // messages for other projects, or bench messages with no deployment yet, read nothing.
-    const shown = new Set(depIds)
-    const refresh = async (id: string) => {
-      try {
-        const { telemetry, detections } = await fetchDeploymentUpdate(supabase, id)
-        queryClient.setQueryData<Record<string, Telemetry>>(['realtime', 'telemetry', depIds],
-          old => old && withEntry(old, id, telemetry))
-        queryClient.setQueryData<Record<string, RecentDetections>>(['realtime', 'detections', depIds],
-          old => old && withEntry(old, id, detections))
-      } catch {
-        // Read everything again, which shows the error if the database still refuses.
-        void queryClient.invalidateQueries({ queryKey: ['realtime', 'telemetry'] })
-        void queryClient.invalidateQueries({ queryKey: ['realtime', 'detections'] })
-      }
-    }
-    const channel = supabase
-      .channel('field-lorawan-live')
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'lorawan_messages' },
-        (payload) => {
-          const row = payload.new as { deployment_id: string | null }
-          if (row.deployment_id && shown.has(row.deployment_id)) void refresh(row.deployment_id)
-        })
-      .subscribe()
-    return () => { void supabase.removeChannel(channel) }
-  }, [user, queryProjectIds, depIds, queryClient])
+  const error = (depQuery.error ?? telemetryQuery.error ?? detectionsQuery.error)?.message ?? feed.error
 
   const cameras = useMemo<Camera[]>(() => deps.map(d => {
     const t = telemetry[d.id] ?? { battery: null, sdUsed: null, lastSeen: null }
-    const det = detections[d.id] ?? { count: 0, latest: null, top: null }
-    const freshness = freshnessOf(t.lastSeen)
+    const state = cameraState({ lastSeen: t.lastSeen, deploymentEnd: d.deployment_end })
+    // A finished camera has been collected: nothing about it needs a visit.
     const reasons: string[] = []
-    if (freshness === 'silent') reasons.push('No check-in >3 days')
-    if (t.battery != null && t.battery < LOW_BATTERY) reasons.push(`Low battery (${t.battery}%)`)
-    if (t.sdUsed != null && t.sdUsed > FULL_SD) reasons.push(`SD almost full (${t.sdUsed}%)`)
+    if (state !== 'finished') {
+      if (state === 'silent') reasons.push('No check-in >3 days')
+      if (t.battery != null && t.battery < LOW_BATTERY) reasons.push(`Low battery (${t.battery}%)`)
+      if (t.sdUsed != null && t.sdUsed > FULL_SD) reasons.push(`SD almost full (${t.sdUsed}%)`)
+    }
     return {
-      ...d, battery: t.battery, sdUsed: t.sdUsed, lastSeen: t.lastSeen, freshness,
-      detections24h: det.count, lastDetection: det.latest, topSpecies: det.top,
-      troubled: reasons.length > 0, reasons,
+      ...d, battery: t.battery, sdUsed: t.sdUsed, lastSeen: t.lastSeen, state,
+      detections48h: detections[d.id] ?? 0, troubled: reasons.length > 0, reasons,
     }
   }), [deps, telemetry, detections])
+  const names = useMemo(() => new Map(deps.map(d => [d.id, cameraName(d)])), [deps])
 
-  const kpi = useMemo(() => ({
-    active: cameras.length,
-    fresh: cameras.filter(c => c.freshness === 'fresh').length,
-    silent: cameras.filter(c => c.freshness === 'silent').length,
-    troubled: cameras.filter(c => c.troubled).length,
-    lowBattery: cameras.filter(c => c.battery != null && c.battery < LOW_BATTERY).length,
-    detections: cameras.reduce((n, c) => n + c.detections24h, 0),
-  }), [cameras])
+  const kpi = useMemo(() => {
+    const out = cameras.filter(c => c.state !== 'finished')
+    return {
+      active: out.length,
+      fresh: out.filter(c => c.state === 'fresh').length,
+      silent: out.filter(c => c.state === 'silent').length,
+      troubled: out.filter(c => c.troubled).length,
+      lowBattery: out.filter(c => c.battery != null && c.battery < LOW_BATTERY).length,
+      detections: cameras.reduce((n, c) => n + c.detections48h, 0),
+    }
+  }, [cameras])
 
   const troubled = useMemo(() => cameras.filter(c => c.troubled), [cameras])
+  const pickedKeys = useMemo(() => (picked ? new Set([picked]) : undefined), [picked])
   const withGps = cameras.filter(c => c.latitude != null && c.longitude != null).length
   // Only once telemetry has answered, so the notice does not flash while it loads.
   const nothingReported = telemetryQuery.isSuccess && !cameras.some(c => c.lastSeen != null)
 
   const columns = useMemo<Column<Camera>[]>(() => [
     { key: 'location_name', label: 'Camera', cellStyle: { fontWeight: 500 },
-      render: c => c.location_name || c.device_name || c.id.slice(0, 8), getValue: c => c.location_name ?? '' },
+      render: c => cameraName(c), getValue: c => c.location_name ?? '' },
     { key: 'project_name', label: 'Project' },
-    { key: '_status', label: 'Check-in', sortable: false,
+    { key: '_status', label: 'Status', sortable: false,
       render: c => (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem' }}>
-          <Dot freshness={c.freshness} />{FRESHNESS[c.freshness].label}
+          <Dot color={CAMERA_STATE[c.state].color} />{CAMERA_STATE[c.state].label}
         </span>
       ),
-      getValue: c => FRESHNESS[c.freshness].label },
+      getValue: c => CAMERA_STATE[c.state].label },
     { key: 'lastSeen', label: 'Last seen', render: c => agoLabel(c.lastSeen), getValue: c => c.lastSeen ?? '' },
     { key: 'battery', label: 'Battery',
       render: c => c.battery == null ? NONE
@@ -211,18 +171,23 @@ export function FieldPage() {
       render: c => c.sdUsed == null ? NONE
         : <span style={{ color: c.sdUsed > FULL_SD ? '#ef4444' : undefined }}>{c.sdUsed}%</span>,
       getValue: c => String(c.sdUsed ?? -1) },
-    { key: 'detections24h', label: 'Detections 48h',
-      render: c => c.detections24h > 0
-        ? <span>{c.detections24h}{c.topSpecies ? ` · ${c.topSpecies}` : ''}</span>
-        : NONE,
-      getValue: c => String(c.detections24h) },
+    { key: 'detections48h', label: 'Detections 48h',
+      render: c => c.detections48h > 0 ? c.detections48h : NONE,
+      getValue: c => String(c.detections48h) },
   ], [])
 
   return (
     <div>
-      <h2 style={{ margin: '0 0 0.375rem 0' }}>Realtime</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', margin: '0 0 0.375rem 0' }}>
+        <h2 style={{ margin: 0 }}>Realtime</h2>
+        {cameras.length > 0 && (
+          <span role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', fontSize: '0.75rem', ...MUTED }}>
+            <Dot color={live ? '#22c55e' : '#9ca3af'} />{live ? 'Live' : 'Connecting'}
+          </span>
+        )}
+      </div>
       <p style={{ ...MUTED, fontSize: '0.9rem', margin: '0 0 1rem 0' }}>
-        Cameras deployed now, with their last LoRaWAN check-in.
+        Cameras deployed now or collected today, with their LoRaWAN messages.
       </p>
 
       {error && <p role="alert" style={{ color: 'var(--error)', marginBottom: '1rem' }}>{error}</p>}
@@ -273,16 +238,15 @@ export function FieldPage() {
                   </div>
                   <div>
                     {troubled.map(c => (
-                      <button
+                      <div
                         key={c.id}
-                        onClick={() => navigate(`/annotations?deployment=${c.id}`)}
-                        style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '100%', textAlign: 'left', padding: '0.55rem 0.875rem', background: 'transparent', border: 'none', borderTop: '1px solid var(--border)', cursor: 'pointer', color: 'var(--text-color)', fontSize: '0.82rem' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', padding: '0.55rem 0.875rem', borderTop: '1px solid var(--border)', fontSize: '0.82rem' }}
                       >
-                        <Dot freshness={c.freshness} />
-                        <strong style={{ minWidth: 140 }}>{c.location_name || c.device_name || c.id.slice(0, 8)}</strong>
+                        <Dot color={CAMERA_STATE[c.state].color} />
+                        <strong style={{ minWidth: 140 }}>{cameraName(c)}</strong>
                         <span style={MUTED}>{c.reasons.join(' · ')}</span>
                         <span style={{ marginLeft: 'auto', ...MUTED }}>{agoLabel(c.lastSeen)}</span>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -293,22 +257,51 @@ export function FieldPage() {
           {/* Map */}
           {withGps > 0 && (
             <div style={{ marginBottom: '1.25rem' }}>
-              <DeploymentMap deployments={cameras} selectedDeploymentId={null} onSelectDeployment={(id) => navigate(`/annotations?deployment=${id}`)} />
+              <DeploymentMap deployments={cameras} selectedDeploymentId={picked} onSelectDeployment={pick} />
             </div>
           )}
 
-          {/* Status table */}
-          <DataTable<Camera>
-            columns={columns}
-            rows={cameras}
-            rowKey={c => c.id}
-            searchable
-            searchPlaceholder="Search cameras…"
-            exportFilename="realtime-cameras"
-            emptyMessage="No active cameras."
-            onRowClick={c => navigate(`/annotations?deployment=${c.id}`)}
-            pageSize={50}
-          />
+          {/* Cameras | Messages */}
+          <div role="tablist" aria-label="Realtime" style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--border)', marginBottom: '0.875rem' }}>
+            {TABS.map(t => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                id={`field-tab-${t.id}`}
+                aria-selected={tab === t.id}
+                aria-controls={`field-panel-${t.id}`}
+                onClick={() => setTab(t.id)}
+                style={{
+                  padding: '0.5rem 0.75rem', marginBottom: -1, border: 'none', background: 'transparent', cursor: 'pointer',
+                  fontSize: '0.8125rem', fontWeight: tab === t.id ? 600 : 500, whiteSpace: 'nowrap',
+                  color: tab === t.id ? 'var(--primary)' : 'var(--text-muted)',
+                  borderBottom: `2px solid ${tab === t.id ? 'var(--primary)' : 'transparent'}`,
+                }}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Both panels stay mounted, so each keeps its search and sort. */}
+          <div role="tabpanel" id="field-panel-cameras" aria-labelledby="field-tab-cameras" hidden={tab !== 'cameras'}>
+            <DataTable<Camera>
+              columns={columns}
+              rows={cameras}
+              rowKey={c => c.id}
+              searchable
+              searchPlaceholder="Search cameras…"
+              exportFilename="realtime-cameras"
+              emptyMessage="No active cameras."
+              selectedKeys={pickedKeys}
+              onRowClick={c => pick(c.id)}
+              pageSize={50}
+            />
+          </div>
+          <div role="tabpanel" id="field-panel-messages" aria-labelledby="field-tab-messages" hidden={tab !== 'messages'}>
+            <LorawanMessages feed={feed} names={names} />
+          </div>
         </>
       )}
     </div>

@@ -208,6 +208,17 @@ dev preview after them for a month while its header promised every pull request'
 
 ---
 
+## A Supabase channel name is reused while it is still leaving
+
+`supabase.channel(name)` returns the client's existing channel of that name, and
+`removeChannel` leaves it only when the server answers. An effect that removes a channel and
+subscribes again under the same name (its deps changed, say another project ticked) gets the
+leaving channel back: the new `.on()` bindings are dropped as duplicates and `.subscribe()` does
+nothing, so the page stops getting changes with no error. Give each subscription its own name, as
+`hooks/useFieldLive.ts` does (read in `@supabase/realtime-js` 2.118, 26 Nov 2026).
+
+---
+
 ## Search the open branches before writing a helper
 
 Grep the open PR branches, not only `dev`, for a function before adding one. In September 2026

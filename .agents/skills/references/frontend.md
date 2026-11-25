@@ -71,6 +71,11 @@ Rules:
   dock keeps a polled job only when `jobChanged` (`components/toolkit/pipelineProgress.ts`)
   counts a change, so a new job field the dock shows must count there, or a job whose status
   stays `queued` never shows it.
+* A page that listens to Supabase Realtime reads again after every re-subscribe and on return to
+  the tab: Realtime does not resend changes missed while disconnected, and `refetchOnWindowFocus`
+  is off site-wide (`lib/queryClient.ts`). LoRaWAN values arrive in `lorawan_parsed_messages`, a
+  moment after their `lorawan_messages` row, so listen for the decoded row. The Realtime page's
+  `hooks/useFieldLive.ts` does both.
 * React Doctor fails a PR that introduces any warning (`react-doctor.yml`, `blocking: warning`,
   scope `changed`). Check before pushing, from `frontend/`:
   `npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes`. Rules

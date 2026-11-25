@@ -102,7 +102,7 @@ every surface records review state consistently. See [05-ANNOTATION-WORKFLOW](./
 
 Deleting photos soft-deletes their `media` rows only; their observations stay readable, because
 the `observations` read policy checks the deployment, not the photo. Every read that counts or
-lists observations (Realtime, the upload summary) goes through
+lists observations (the upload summary) goes through
 `frontend/src/lib/liveObservations.ts`, which drops observations on a deleted photo, keeps those
 with no photo unless asked not to, and pages past the 1,000-row cap (#198). Insights reads no
 observations: ww-backend's `insights_observation_counts` and `deployment_daily_counts` (#334)
@@ -361,4 +361,4 @@ instant in the **deployment's** timezone at display time.
 
 - **Storage buckets**: `firmware`, `ai-models` (private); `media-renditions` (public — thumbnails/previews, see [04-AI-PIPELINE](./04-AI-PIPELINE.md)).
 - **Auth providers**: GitHub + Google OAuth.
-- **Realtime**: enable on `lorawan_parsed_messages` for live mobile updates.
+- **Realtime**: `lorawan_messages` and `lorawan_parsed_messages` in the `supabase_realtime` publication (ww-backend migration `20260711043000`), for the website's Realtime page.
