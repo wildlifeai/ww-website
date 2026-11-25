@@ -3757,6 +3757,77 @@
         ]
       }
     },
+    "/api/exports/camtrapdp/{job_id}/download": {
+      "get": {
+        "description": "Open an export's signed link: a 307 to a fresh presigned GET of its ZIP, every time.\n\nNo sign-in, since the link is opened from a new tab, an email or an API client: its HMAC\nis the authorisation (``domain/camtrapdp_export.py``). 404 unless the server signs export\nlinks (``OBJECT_STORE_BACKEND=s3`` and ``EXPORT_LINK_SECRET`` set); 403 for an expired,\naltered or malformed link, with no reason given.",
+        "operationId": "download_camtrapdp_export_api_exports_camtrapdp__job_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expires",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Expires",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sig",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Sig",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Download Camtrapdp Export",
+        "tags": [
+          "exports"
+        ]
+      }
+    },
     "/api/inat/auth": {
       "get": {
         "description": "Start the iNat OAuth flow. Returns a URL to redirect the user to.",

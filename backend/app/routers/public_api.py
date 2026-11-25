@@ -329,7 +329,8 @@ async def api_export_camtrapdp(
         date_to=body.date_to.isoformat() if body.date_to else None,
     )
     job_id = await create_job(kind="export", label="CamtrapDP export with photos (API)", organisation_id=org_id)
-    await enqueue_job("export_camtrapdp_originals_job", job_id, asdict(selection), asdict(ExportCaller(organisation_id=org_id)))
+    caller = asdict(ExportCaller(organisation_id=org_id))
+    await enqueue_job("export_camtrapdp_originals_job", job_id, asdict(selection), caller, link_base=str(request.base_url))
     logger.info("public_api_export_started", job_id=job_id, org_id=org_id, key_id=key["id"])
     return ApiResponse(data=JobCreateResponse(job_id=job_id).model_dump(), meta=_meta(request))
 

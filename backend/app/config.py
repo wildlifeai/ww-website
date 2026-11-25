@@ -298,6 +298,13 @@ class Settings(BaseSettings):
     S3_BUCKET: str = Field("", description="The environment's bucket for OBJECT_STORE_BACKEND=s3 and ARCHIVE_BACKEND=s3")
     S3_REGION: str = Field("", description="Region of S3_BUCKET; empty = the SDK default (AWS_REGION on Lambda)")
     S3_PRESIGN_GET_SECONDS: int = Field(300, ge=30, le=3600, description="Lifetime of a presigned GET handed to a browser or the cluster")
+    EXPORT_LINK_SECRET: str = Field(
+        "",
+        description=(
+            "HMAC key for the export download route (#462): with OBJECT_STORE_BACKEND=s3, an export's link is "
+            "GET /api/exports/camtrapdp/{job_id}/download, signed with it. Empty = a plain presigned GET"
+        ),
+    )
     LOCAL_OBJECT_STORE_DIR: str = Field("", description="Directory of OBJECT_STORE_BACKEND=local; empty = <system temp>/ww_objects")
     WORKER_BACKEND: Literal["local", "lambda"] = Field(
         "local",
@@ -380,6 +387,12 @@ class Settings(BaseSettings):
     def camtrapdp_export_enabled(self) -> bool:
         """The export with the original photos is on, and the object store can hold its ZIPs."""
         return self.FF_CAMTRAPDP_EXPORT_ENABLED and self.object_store_configured
+
+    @property
+    def export_link_signed(self) -> bool:
+        """Export links go through the API's signed route: on S3, whose presigned URLs die with a
+        Lambda role's session, and only once ``EXPORT_LINK_SECRET`` is set."""
+        return self.OBJECT_STORE_BACKEND == "s3" and bool(self.EXPORT_LINK_SECRET.strip())
 
 
 # On Lambda the secrets live in SSM Parameter Store, under WW_SSM_PREFIX; elsewhere a no-op.
