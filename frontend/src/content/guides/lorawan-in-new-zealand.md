@@ -20,7 +20,7 @@ you through setting it up in Aotearoa New Zealand, step by step.
 - **Check-ins**: a tiny status message with the camera's detection counts,
   battery, SD card space, temperature and health (any fault, and whether it
   has restarted). The mobile app sets how often when you deploy the camera,
-  at present every 12 hours. Cameras on older firmware send battery and
+  at present every 4 hours. Cameras on older firmware send battery and
   detection counts only, with no health.
 - **Straight away when something happens**: when the on-device AI counts a
   detection, or the camera's health changes, it sends a message at once
@@ -237,8 +237,9 @@ with LoRaWAN check-ins turned on, or that have sent a message, while they are ou
 they are collected. With no such camera in the selected projects, the tab is greyed out.
 
 - **The map.** Tap or click a camera to pick it: it gets a ring on the map and its row is
-  highlighted in the Cameras table. A camera deployed without a GPS position is not on it. Tap it again to clear it. The page has no photos: they stay
-  on the SD card until you collect the camera and upload them.
+  highlighted in the Cameras table. Tap it again to clear it. A camera deployed without a GPS
+  position is not on the map. The page has no photos: they stay on the SD card until you collect
+  the camera and upload them.
 - **Cameras** lists each camera once, with its newest message.
   - **Health** is the camera's state, with its first reason beside it; hover over it for the
     rest. Silent, Fault and Warning cameras are also listed, with every reason, under **need
@@ -254,7 +255,8 @@ they are collected. With no such camera in the selected projects, the tab is gre
       sent none. A camera deployed without its check-in period recorded is **Stale** after 24
       hours with no message and Silent after 3 days.
     - **LoRaWAN off**: deployed with its LoRaWAN check-ins turned off, and listed only because
-      it has sent messages anyway. **Awaiting**: no message yet. **Finished**: its deployment ended today.
+      it has sent messages anyway. **Awaiting**: no message yet. **Finished**: its deployment
+      ended today.
   - **Battery** is in volts, or a percentage from older firmware. Battery and **SD free** turn
     red when the camera's health report finds the battery low or the SD card 10% free or less.
   - **Temperature** is measured inside the camera, on its Bluetooth chip, and comes with its
@@ -286,6 +288,6 @@ they are collected. With no such camera in the selected projects, the tab is gre
 | The Things Network cluster | Australia 1, `au1.cloud.thethings.network` |
 | Uplink port | FPort 2 |
 | Check-in content | detection counts, battery, SD card space, temperature, health (self-test, last restart and why, restarts, AI processor failures); older firmware: battery and detection counts |
-| Check-in interval | set by the mobile app when it deploys the camera, at present every 12 hours |
+| Check-in interval | set by the mobile app when it deploys the camera, at present every 4 hours |
 | Messages between check-ins | at once on a new detection or a change in health, at most one of each per check-in interval |
 | Gateway tested by wildlife.ai | Seeed SenseCAP M2 (AS923), Packet Forwarder to TTN |
