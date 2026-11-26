@@ -30,6 +30,7 @@ engineering hand-offs, whose status is on the [status board](development%20repor
 | [embedded-model-lifecycle](resources/embedded-model-lifecycle.md) | End-to-end on-device model flow across website / backend / mobile / firmware |
 | [dual-ai-production-rollout](resources/dual-ai-production-rollout.md) | Runbook to promote dual-AI (Camera AI + Cloud AI / edge reflection) from dev → staging → production, incl. the firmware gating dependency and rollout checklist |
 | [camtrapdp-import](resources/camtrapdp-import.md) | Importing CamtrapDP packages |
+| [lorawan-dev-testing](resources/lorawan-dev-testing.md) | Testing LoRaWAN on cloud dev with a real camera: pointing TTN at dev once, putting the camera back after every dev reset, checking it on the Realtime page |
 | [LORAWAN_INGEST](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/LORAWAN_INGEST.md) (ww-backend) | LoRaWAN ingest: network-server setup for the `lorawan-ingest` edge function. The website receives no uplinks |
 | [ui-components](resources/ui-components.md) | Shared frontend design-system primitives |
 | [testing-with-seed-users](resources/testing-with-seed-users.md) | Role-based seed users + access-control validation matrix |

@@ -133,7 +133,10 @@ workflow runs. Rows you created by hand (a model uploaded through the registry p
 deployment, a project pointed at a model) can be gone the next morning. Scripts that set up a
 test must be re-runnable, reports must record ids as evidence rather than as things to rely
 on, and a "missing row" is a reseed until proven otherwise (2026-09-05: the `20V1` Person
-Detection built in step 1 of the person-detection runbook disappeared this way).
+Detection built in step 1 of the person-detection runbook disappeared this way). A LoRaWAN bench
+test loses its camera, its deployment, its messages and any organisation ingest token with each
+reset; what to redo is in
+[lorawan-dev-testing.md](../../../documentation/resources/lorawan-dev-testing.md).
 
 ---
 

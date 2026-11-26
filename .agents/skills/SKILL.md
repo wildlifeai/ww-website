@@ -30,6 +30,7 @@ The `ww-website` repository is a multi-service platform consisting of:
 | `.env`, Docker, line endings or file encoding | [references/environment-and-files.md](references/environment-and-files.md) |
 | `infra/aws/`, an SSM parameter, an AWS deploy, or `cluster/reannz/` | [references/environment-and-files.md](references/environment-and-files.md) |
 | Something that looks like a bug in your own code | [references/gotchas.md](references/gotchas.md) |
+| LoRaWAN on cloud dev with a real camera, or the Realtime page against real messages | [`lorawan-dev-testing.md`](../../documentation/resources/lorawan-dev-testing.md) |
 | Documentation, validation, commit messages, or your own commit hygiene | [references/documentation.md](references/documentation.md) |
 | The UI design system | [`.agents/DESIGN.md`](../DESIGN.md) |
 | Writing a user guide | [`guide-author/SKILL.md`](guide-author/SKILL.md) |
