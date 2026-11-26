@@ -75,9 +75,10 @@ async def lifespan(app: FastAPI):
         for problem in inat_settings_problems():
             logger.error("inat_settings_problem", problem=problem)
 
-    # Stale-job reaper: age-based, so it only fails jobs with no progress for an hour.
-    # (The old recover_stuck_jobs failed EVERY 'processing' job at startup — wrong now
-    # that AI jobs legitimately run on the separate worker process across API restarts.)
+    # Stale-job reaper: age-based, so it only fails jobs with no progress for an hour, and it
+    # deletes finished jobs FINISHED_JOB_RETENTION_DAYS after their last update. (The old
+    # recover_stuck_jobs failed EVERY 'processing' job at startup, wrong now that AI jobs
+    # legitimately run on the separate worker process across API restarts.)
     from app.jobs.store import reap_stale_jobs
 
     async def _reaper_loop():

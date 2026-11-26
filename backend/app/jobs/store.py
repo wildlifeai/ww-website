@@ -18,10 +18,11 @@ import asyncio
 import contextlib
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Optional, TypeVar
 
 import structlog
+from postgrest import CountMethod, ReturnMethod
 
 from app.schemas.job import (
     EventType,
@@ -51,8 +52,14 @@ _summary_locks: Dict[str, asyncio.Lock] = {}
 # it; the worker teardown drains all (flush_pending_syncs()).
 _pending_sync_tasks: dict[str, set[asyncio.Task]] = {}
 
-# Statuses after which no further work happens — their sync must be durable.
-_TERMINAL_STATUSES = frozenset({JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value, JobStatus.FAILED.value})
+# Statuses after which no further work happens: their sync must be durable, and their rows are
+# deleted FINISHED_JOB_RETENTION_DAYS after their last update.
+_TERMINAL_STATUSES = (JobStatus.COMPLETED.value, JobStatus.COMPLETED_WITH_ERRORS.value, JobStatus.FAILED.value)
+
+# The reaper deletes a finished job's api_jobs row once its updated_at is this many days old
+# (#486), so the database needs no pg_cron job for it (ww-backend#364). The contract is
+# ww-backend's documentation/resources/DATABASE_REFERENCE.md (Other tables, api_jobs).
+FINISHED_JOB_RETENTION_DAYS = 90
 
 # How often job_heartbeat() refreshes api_jobs.updated_at during a long pipeline step.
 # Must stay well under the shortest consumer window: the KEDA scaler's query
@@ -240,9 +247,10 @@ async def reap_stale_jobs(max_age_minutes: int = 60) -> int:
     The threshold is deliberately generous: active jobs refresh ``updated_at`` on every
     progress/status write (at minimum once per deployment for AI jobs), so anything silent
     for an hour is genuinely dead. Returns the number of jobs reaped.
-    """
-    from datetime import timedelta  # noqa: PLC0415
 
+    Then it deletes the finished jobs past their retention (:func:`delete_finished_jobs`),
+    whether or not the first step worked.
+    """
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
 
     def _run() -> int:
@@ -281,10 +289,49 @@ async def reap_stale_jobs(max_age_minutes: int = 60) -> int:
         return reaped
 
     try:
-        return await asyncio.to_thread(_run)
+        reaped = await asyncio.to_thread(_run)
     except Exception as e:
         logger.warning("reap_stale_jobs_failed", error=str(e))
+        reaped = 0
+    await delete_finished_jobs()
+    return reaped
+
+
+async def delete_finished_jobs(older_than_days: int = FINISHED_JOB_RETENTION_DAYS) -> int:
+    """Delete the finished jobs whose ``updated_at`` is over ``older_than_days`` old; returns how many.
+
+    The filter names the finished statuses only (``_TERMINAL_STATUSES``), so a queued or
+    processing job, one waiting for or leased to the REANNZ batch, and a lock row
+    (``status = 'lock'``, ``services/locks.py``) are kept whatever their age. ``updated_at`` is
+    the column, set to now() on insert and by ww-backend's trigger ``trg_api_jobs_updated_at``
+    on every update.
+
+    One DELETE, with no rows sent back. The first run deletes every finished job already past
+    the retention, at most the whole table; each later run only those that crossed it since.
+    It runs from every API replica and from the Lambda tick: a second run finds nothing, and a
+    failed one is retried by the next.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+
+    def _run() -> int:
+        resp = (
+            create_service_client()
+            .table("api_jobs")
+            .delete(count=CountMethod.exact, returning=ReturnMethod.minimal)
+            .in_("status", list(_TERMINAL_STATUSES))
+            .lt("updated_at", cutoff)
+            .execute()
+        )
+        return resp.count or 0
+
+    try:
+        deleted = await asyncio.to_thread(_run)
+    except Exception as e:
+        logger.warning("delete_finished_jobs_failed", error=str(e))
         return 0
+    if deleted:
+        logger.info("finished_jobs_deleted", count=deleted, older_than_days=older_than_days)
+    return deleted
 
 
 def batch_lease_name(lease_id: str) -> str:
@@ -300,8 +347,6 @@ def batch_reap_decision(status: str, jd: dict, now: Optional[datetime] = None) -
     does: an expired lease is requeued until ``BATCH_MAX_ATTEMPTS``, then failed. A released
     lease means the cluster finished and ingest owns the job, so the usual rule applies.
     """
-    from datetime import timedelta  # noqa: PLC0415
-
     from app.config import settings  # noqa: PLC0415
 
     dispatch = jd.get("dispatch")

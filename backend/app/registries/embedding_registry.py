@@ -2,21 +2,21 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Embedding model registry — single source of truth for the Wildlife Brain.
 
-Defines the DINOv3 variants, their **per-variant** vector space + Qdrant
-collection, the exact image preprocessing/pooling constants, and the HDBSCAN /
+Defines the DINOv3 variants, their **per-variant** vector space
+(``embedding_runs.vector_space``), the exact image preprocessing/pooling constants, and the HDBSCAN /
 UMAP / active-learning parameters used across the v4 pipeline.
 
 Per-variant dims (important): the server variant (ViT-H/16+) emits 1280-d; the
 local WebGPU variant (ViT-S/16) emits 384-d. They are **different vector spaces**,
-so each has its own Qdrant collection. Similarity is valid *within* a variant;
+so each has its own vector space. Similarity is valid *within* a variant;
 cross-variant (local ↔ server) similarity is not meaningful without a learned
-projection. ``embedding_runs.embedding_dim`` + ``embedding_runs.qdrant_collection``
+projection. ``embedding_runs.embedding_dim`` + ``embedding_runs.vector_space``
 record which space each run used.
 
 Why this module is deliberately dependency-free (stdlib only):
 
 - The API process imports it to validate requests and serve config WITHOUT pulling
-  in torch / transformers / qdrant (those live in the GPU worker image only).
+  in torch / transformers (those live in the GPU worker image only).
 - ``get_local_embedding_config()`` returns the JSON the in-browser WebGPU path
   consumes, so the frontend mirrors the SAME model id, dim, collection, and
   preprocessing the server uses for that variant.
@@ -37,7 +37,7 @@ class EmbeddingModelName(str, Enum):
     """DINOv3 variants. The value is the canonical ``model_name`` persisted on
     ``embedding_runs.model_name`` (ww-backend) and sent by the WebGPU client.
 
-    Each variant has its own dim + Qdrant collection (see module docstring).
+    Each variant has its own dim + vector space (see module docstring).
     """
 
     DINOV3_VITH = "dinov3-vith"  # ViT-H/16+ — server (Azure GPU). 1280-d. Highest quality.
@@ -81,7 +81,7 @@ class EmbeddingModelSpec:
     hf_model_id: str  # HuggingFace repo id (server load via transformers)
     onnx_artifact_id: str | None  # ONNX repo for the WebGPU client (None = server-only)
     embedding_dim: int  # output dim for THIS variant (1280 ViT-H, 384 ViT-S)
-    qdrant_collection: str  # per-variant collection (different dims can't share one)
+    vector_space: str  # per-variant space (different dims cannot share one), embedding_runs.vector_space
     gated: bool = False  # HF repo requires access approval
     default_provider: ExecutionProvider = ExecutionProvider.SERVER_CPU
     preprocessing: ImagePreprocessing = field(default_factory=ImagePreprocessing)
@@ -93,7 +93,7 @@ _REGISTRY: dict[EmbeddingModelName, EmbeddingModelSpec] = {
         hf_model_id="facebook/dinov3-vith16plus-pretrain-lvd1689m",
         onnx_artifact_id=None,  # too large for browser WebGPU; server-only
         embedding_dim=1280,
-        qdrant_collection="media_embeddings",
+        vector_space="media_embeddings",
         gated=True,
         default_provider=ExecutionProvider.SERVER_GPU,
     ),
@@ -102,7 +102,7 @@ _REGISTRY: dict[EmbeddingModelName, EmbeddingModelSpec] = {
         hf_model_id="facebook/dinov3-vits16-pretrain-lvd1689m",
         onnx_artifact_id="onnx-community/dinov3-vits16-pretrain-lvd1689m-ONNX",  # Transformers.js + WebGPU
         embedding_dim=384,
-        qdrant_collection="media_embeddings_vits",
+        vector_space="media_embeddings_vits",
         gated=True,  # facebook repo is gated; the onnx-community mirror is open (WebGPU path)
         default_provider=ExecutionProvider.WEBGPU,
     ),
@@ -138,9 +138,9 @@ def get_embedding_dim(model_name: str | EmbeddingModelName) -> int:
     return get_model_spec(model_name).embedding_dim
 
 
-def get_collection(model_name: str | EmbeddingModelName) -> str:
-    """Qdrant collection for a variant (per-variant — dims differ)."""
-    return get_model_spec(model_name).qdrant_collection
+def get_vector_space(model_name: str | EmbeddingModelName) -> str:
+    """The logical vector space of a variant (one per variant: dimensions differ)."""
+    return get_model_spec(model_name).vector_space
 
 
 # ── Clustering / reduction presets ───────────────────────────────────
@@ -211,7 +211,7 @@ def get_local_embedding_config() -> dict:
     local variant exactly.
 
     Served to the frontend (e.g. via GET /api/brain/local-config) so client and
-    server agree on model id, dim, collection, and preprocessing for the ViT-S
+    server agree on model id, dim, vector space and preprocessing for the ViT-S
     space. Cross-variant similarity is intentionally not supported (different dims).
     """
     spec = get_model_spec(DEFAULT_LOCAL_MODEL)
@@ -221,7 +221,7 @@ def get_local_embedding_config() -> dict:
         "onnx_artifact_id": spec.onnx_artifact_id,
         "embedding_dim": spec.embedding_dim,
         "execution_provider": ExecutionProvider.WEBGPU.value,
-        "qdrant_collection": spec.qdrant_collection,
+        "vector_space": spec.vector_space,
         "preprocessing": {
             "size": pp.size,
             "resample": pp.resample,

@@ -168,6 +168,11 @@ create_job() → queued → processing → completed
 - **Stale jobs**: a `queued` or `processing` job with no update for an hour is marked `failed` by
   `reap_stale_jobs` (`jobs/store.py`), every 15 minutes from the API on Azure and from the scheduled
   tick on Lambda. A job waiting for the REANNZ batch keeps its own limits. Nothing is failed at boot.
+- **Finished jobs**: the same run deletes a `completed`, `completed_with_errors` or `failed` job once
+  its `updated_at` is `FINISHED_JOB_RETENTION_DAYS` old (`delete_finished_jobs`, `jobs/store.py`), so
+  Processing history goes back that far. The retention is ww-backend's contract
+  ([`DATABASE_REFERENCE.md`](https://github.com/wildlifeai/ww-backend/blob/dev/documentation/resources/DATABASE_REFERENCE.md),
+  Other tables, `api_jobs`); open jobs and lock rows are never deleted.
 - **Frontend**: polls `GET /api/jobs/{id}` (~2s); responses carry ordered `events[]` for incremental
   UI updates. The global `UploadContext` keeps progress alive across navigation via `ProgressDock`.
 
