@@ -202,8 +202,8 @@ export function FaqPage() {
         LoRaWAN support is rolling out in early access. Cameras send small check-ins (battery, trigger counts)
         over LoRaWAN, as often as the mobile app set when you deployed them, and a short message when their AI
         detects something. They never send photos, which stay on the SD card until you collect them or sync with
-        the mobile app. The website's Realtime page shows each camera's last check-in, battery and
-        detection counts; it does not send a notification for a detection. See the{' '}
+        the mobile app. The website's Realtime page shows each camera's last check-in, battery,
+        health and detection counts; it does not send a notification for a detection. See the{' '}
         <Link to="/guides/lorawan-in-new-zealand" style={{ color: 'var(--primary)' }}>LoRaWAN in New Zealand guide</Link>{' '}
         for the three ways to get connected.
       </FaqItem>

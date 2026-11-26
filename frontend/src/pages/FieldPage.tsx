@@ -239,7 +239,7 @@ export function FieldPage() {
                 <div style={{ marginBottom: '1.25rem', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.875rem', background: 'rgba(239,68,68,0.1)', fontWeight: 600, fontSize: '0.85rem' }}>
                     <TriangleAlert size={15} color="#ef4444" aria-hidden="true" />
-                    {troubled.length} camera{troubled.length !== 1 ? 's' : ''} need attention
+                    {troubled.length} camera{troubled.length !== 1 ? 's' : ''} need{troubled.length === 1 ? 's' : ''} attention
                   </div>
                   <div>
                     {troubled.map(c => (

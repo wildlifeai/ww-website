@@ -145,10 +145,26 @@ projects you have selected, and the ones collected today.
 - **The map.** Tap or click a camera to pick it: it gets a ring on the map and its row is
   highlighted in the Cameras table. Tap it again to clear it. The page has no photos: they stay
   on the SD card until you collect the camera and upload them.
-- **Cameras** lists each camera once, with its newest message. Its status is **Fresh** (a
-  message in the last 24 hours), **Stale** (24 to 72 hours), **Silent** (nothing for more than 3
-  days), **Awaiting** (no message yet) or **Finished** (its deployment ended today).
-  **Detections 48h** is what the camera's own AI counted in the last 48 hours.
+- **Cameras** lists each camera once, with its newest message.
+  - **Health** is the camera's state, with its first reason beside it; hover over it for the
+    rest. Silent, Fault and Warning cameras are also listed, with every reason, under **need
+    attention** above the map.
+    - **Fault**: its main camera, its HM0360 camera or its AI processor failed, or its SD card
+      is missing.
+    - **Warning**: a low battery, an SD card 10% free or less, another self-test problem, or,
+      since its previous health report, an unexpected restart or a time its AI processor did
+      not respond.
+    - **OK**: its last health report found nothing wrong. **Checking in**: it sends messages,
+      but its firmware sends no health report.
+    - **Silent**: no message for three check-in periods, counted from its deployment if it has
+      sent none. A camera deployed without its check-in period recorded is **Stale** after 24
+      hours with no message and Silent after 3 days.
+    - **LoRaWAN off**: deployed with its LoRaWAN check-ins turned off. **Awaiting**: no message
+      yet. **Finished**: its deployment ended today.
+  - **Battery** is in volts, or a percentage from older firmware. Battery and **SD free** turn
+    red when the camera's health report finds the battery low or the SD card 10% free or less.
+  - **Firmware** is the version the camera was deployed with.
+  - **Detections 48h** is what the camera's own AI counted in the last 48 hours.
 - **Messages** lists the messages, newest first:
   - **Check-in**, or **Detection +2** when the camera counted 2 detections since its previous
     message. A camera's first count after it is deployed has nothing to compare with, so that
