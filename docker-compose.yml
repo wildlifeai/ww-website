@@ -24,7 +24,8 @@ services:
       # BMP ingest (raw device frames → JPEG in-pipeline); on for the quality trial
       - FF_BMP_INGEST_ENABLED=${FF_BMP_INGEST_ENABLED:-true}
       - BMP_JPEG_QUALITY=${BMP_JPEG_QUALITY:-90}
-      # iNaturalist OAuth
+      # iNaturalist: the stored-token key, then the optional OAuth app
+      - INAT_TOKEN_KEY=${INAT_TOKEN_KEY:-}
       - INAT_CLIENT_ID=${INAT_CLIENT_ID:-}
       - INAT_CLIENT_SECRET=${INAT_CLIENT_SECRET:-}
       # AWS + REANNZ batch (2026-10_aws-reannz-migration); the defaults are today's path.

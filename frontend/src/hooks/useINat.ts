@@ -11,7 +11,6 @@ export type { INatPublishResult }
  *
  * - `connected` / `username`: from GET /api/inat/status
  * - `enabled`: false when FF_INAT_ENABLED is off (the status route answers 404 "not enabled")
- * - `connect()`: starts the OAuth flow (redirects to iNaturalist)
  * - `publish(mediaIds, opts)`: POST /api/inat/publish (burst-consolidated upload), in rounds
  *   until every photo is reached (lib/inatPublishRounds.ts), `opts.onProgress` after each,
  *   answering once for them all
@@ -38,11 +37,6 @@ export function useINat() {
   }, [])
 
   useEffect(() => { refresh() }, [refresh])
-
-  const connect = useCallback(async () => {
-    const d = unwrap(await apiClient.get('/api/inat/auth'))
-    if (d.authorization_url) window.location.href = d.authorization_url
-  }, [])
 
   // Pathway 2: connect with a personal API token the user pastes from
   // https://www.inaturalist.org/users/api_token (no OAuth app / callback needed).
@@ -74,5 +68,5 @@ export function useINat() {
     return unwrap(await apiClient.post('/api/inat/sync')).job_id
   }, [])
 
-  return { connected, username, enabled, connect, setToken, disconnect, publish, sync, refresh }
+  return { connected, username, enabled, setToken, disconnect, publish, sync, refresh }
 }

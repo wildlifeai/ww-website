@@ -73,7 +73,7 @@ test('fixture folders give deployment id prefixes', () => {
   assert.deepEqual(fixturePrefixes(['00000000', '08702E50', '32f55229', 'notes.txt', '1234567', 'IMAGES.000']), ['08702e50', '32f55229'])
 })
 
-test('media rows: created this run, on Drive, in a fixture deployment', () => {
+test('media rows: created this run in a fixture deployment, on Drive or S3', () => {
   const opts = { startedAt: new Date('2026-10-10T14:17:00Z'), prefixes: ['32f55229', '472e4095'] }
   const row = {
     id: 'm1',
@@ -82,11 +82,10 @@ test('media rows: created this run, on Drive, in a fixture deployment', () => {
     created_at: '2026-10-10T14:21:07.123456+00:00',
   }
   assert.equal(isRunMedia(row, opts), true)
+  assert.equal(isRunMedia({ ...row, file_path: `s3://wildlifewatcher-dev-media/originals/p/${row.deployment_id}/h.jpg` }, opts), true)
   assert.equal(isRunMedia({ ...row, deployment_id: '472E4095-1DD9-470D-9FAE-A244AE3EC681' }, opts), true)
   assert.equal(isRunMedia({ ...row, created_at: '2026-10-10T14:16:59.999+00:00' }, opts), false)
   assert.equal(isRunMedia({ ...row, created_at: null }, opts), false)
-  assert.equal(isRunMedia({ ...row, file_path: 'https://example.org/a.jpg' }, opts), false)
-  assert.equal(isRunMedia({ ...row, file_path: 'x/gdrive://1AbC' }, opts), false)
   assert.equal(isRunMedia({ ...row, deployment_id: 'e0000000-0000-0000-0000-000000000010' }, opts), false)
   assert.equal(isRunMedia({ ...row, deployment_id: null }, opts), false)
   assert.equal(isRunMedia(row, { ...opts, prefixes: [] }), false)

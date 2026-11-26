@@ -4,10 +4,12 @@
 
 import base64
 import hashlib
+import json
 import os
 from types import SimpleNamespace
 
 import pytest
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi.testclient import TestClient
 
 # Ensure iNat config vars exist for import
@@ -35,8 +37,9 @@ from app.services.inat_oauth import (
     token_key_problem,
 )
 
-# A stand-in for a registered app's secret: as long as the ones iNaturalist issues.
-SOUND_SECRET = "x" * 43
+# A sound token key: 32 characters or more.
+SOUND_KEY = "x" * 43
+OTHER_KEY = "y" * 43
 
 
 class TestPKCE:
@@ -89,9 +92,9 @@ class TestAuthorizationURL:
 
 class TestTokenEncryption:
     @pytest.fixture(autouse=True)
-    def _sound_secret(self, monkeypatch):
-        # settings may be built before this module's setdefault runs, so set the secret here.
-        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", SOUND_SECRET)
+    def _sound_key(self, monkeypatch):
+        # settings may be built before this module's setdefault runs, so set the key here.
+        monkeypatch.setattr(settings, "INAT_TOKEN_KEY", SOUND_KEY)
 
     def test_encrypt_decrypt_roundtrip(self):
         token = {
@@ -119,37 +122,83 @@ def _no_service_client():
     raise AssertionError("no token is read or written without a sound key")
 
 
+def _keys(monkeypatch, token_key: str, client_secret: str) -> None:
+    monkeypatch.setattr(settings, "INAT_TOKEN_KEY", token_key)
+    monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", client_secret)
+
+
+def _stored_with(key: str, token: dict) -> str:
+    """A token as stored under ``key``: SHA-256 of the key as the Fernet key, as before INAT_TOKEN_KEY."""
+    return Fernet(base64.urlsafe_b64encode(hashlib.sha256(key.encode()).digest())).encrypt(json.dumps(token).encode()).decode()
+
+
 class TestTokenKey:
-    """An empty or short INAT_CLIENT_SECRET gives a key anyone can derive (#123)."""
+    """INAT_TOKEN_KEY keys the stored tokens, INAT_CLIENT_SECRET in its place while it is unset. An
+    empty or short key is one anyone can derive (#123)."""
 
-    @pytest.mark.parametrize("secret", ["", "   ", "changeme"])
-    def test_a_missing_or_short_secret_is_refused(self, monkeypatch, secret):
-        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", secret)
-        problem = token_key_problem()
-        assert problem and "INAT_CLIENT_SECRET" in problem
-        with pytest.raises(INatKeyError, match="INAT_CLIENT_SECRET"):
-            encrypt_token({"access_token": "at"})
-
-    def test_a_registered_secret_is_sound(self, monkeypatch):
-        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", SOUND_SECRET)
+    def test_the_new_name_is_used(self, monkeypatch):
+        _keys(monkeypatch, SOUND_KEY, "")
+        assert settings.inat_token_key_name == "INAT_TOKEN_KEY"
         assert token_key_problem() is None
         assert decrypt_token(encrypt_token({"access_token": "at"})) == {"access_token": "at"}
+        assert decrypt_token(_stored_with(SOUND_KEY, {"api_token": "jwt"})) == {"api_token": "jwt"}
+
+    @pytest.mark.parametrize("token_key", ["", "   "])
+    def test_without_it_the_client_secret_keeps_stored_tokens_readable(self, monkeypatch, token_key):
+        # Padded as a secret store might hand it over: the key was always derived unstripped.
+        secret = f" {SOUND_KEY}\n"
+        _keys(monkeypatch, token_key, secret)
+        assert settings.inat_token_key_name == "INAT_CLIENT_SECRET"
+        assert settings.inat_token_key == secret
+        assert token_key_problem() is None
+        assert decrypt_token(_stored_with(secret, {"api_token": "jwt"})) == {"api_token": "jwt"}
+
+    def test_when_both_are_set_the_new_name_wins(self, monkeypatch):
+        _keys(monkeypatch, OTHER_KEY, SOUND_KEY)
+        assert settings.inat_token_key == OTHER_KEY
+        assert decrypt_token(_stored_with(OTHER_KEY, {"api_token": "jwt"})) == {"api_token": "jwt"}
+        # A different value from the old secret's: what was stored under the secret is lost.
+        with pytest.raises(InvalidToken):
+            decrypt_token(_stored_with(SOUND_KEY, {"api_token": "jwt"}))
+
+    def test_a_short_new_key_is_refused_though_the_client_secret_is_sound(self, monkeypatch):
+        _keys(monkeypatch, "changeme", SOUND_KEY)
+        assert token_key_problem() == "iNaturalist accounts can't be connected on this server: INAT_TOKEN_KEY is shorter than 32 characters"
+
+    @pytest.mark.parametrize(
+        ("token_key", "client_secret", "reason"),
+        [
+            ("", "", "INAT_TOKEN_KEY is not set"),
+            ("   ", "   ", "INAT_TOKEN_KEY is not set"),
+            ("changeme", "", "INAT_TOKEN_KEY is shorter than 32 characters"),
+            ("", "changeme", "INAT_TOKEN_KEY is not set, and INAT_CLIENT_SECRET, used in its place, is shorter than 32 characters"),
+        ],
+    )
+    def test_a_missing_or_short_key_is_refused_and_named(self, monkeypatch, token_key, client_secret, reason):
+        _keys(monkeypatch, token_key, client_secret)
+        problem = token_key_problem()
+        assert problem == f"iNaturalist accounts can't be connected on this server: {reason}"
+        with pytest.raises(INatKeyError, match="INAT_TOKEN_KEY"):
+            encrypt_token({"access_token": "at"})
 
     async def test_no_token_is_stored_or_read_without_a_sound_key(self, monkeypatch):
-        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", "")
+        _keys(monkeypatch, "", "")
         monkeypatch.setattr(inat_oauth, "create_service_client", _no_service_client)
         with pytest.raises(INatKeyError):
             await inat_oauth.store_user_token("u1", {"api_token": "jwt"})
         assert await inat_oauth.get_user_token("u1") is None
 
     def test_settings_check_names_each_problem(self, monkeypatch):
-        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", "")
+        _keys(monkeypatch, "", "")
         monkeypatch.setattr(settings, "INAT_CLIENT_ID", "")
-        problems = inat_settings_problems()
-        assert any("INAT_CLIENT_SECRET" in p for p in problems)
-        assert any("INAT_CLIENT_ID" in p for p in problems)
+        # The site, not the API: wrong for the OAuth app, which is not set up here.
+        monkeypatch.setattr(settings, "INAT_REDIRECT_URI", "https://wildlifewatcher.ai/inat/callback")
+        assert inat_settings_problems() == [token_key_problem()]
 
-        monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", SOUND_SECRET)
+        # The pasted-token path needs only the key: no OAuth app is no problem.
+        monkeypatch.setattr(settings, "INAT_TOKEN_KEY", SOUND_KEY)
+        assert inat_settings_problems() == []
+
         monkeypatch.setattr(settings, "INAT_CLIENT_ID", "app-id")
         # The site, not the API: nothing there handles the callback.
         monkeypatch.setattr(settings, "INAT_REDIRECT_URI", "https://wildlifewatcher.ai/inat/callback")
@@ -165,7 +214,7 @@ def api(monkeypatch):
 
     monkeypatch.setattr(settings, "FF_INAT_ENABLED", True)
     monkeypatch.setattr(settings, "INAT_CLIENT_ID", "app-id")
-    monkeypatch.setattr(settings, "INAT_CLIENT_SECRET", "")
+    _keys(monkeypatch, "", "")
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id="u1")
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -188,7 +237,7 @@ def test_routes_refuse_to_connect_or_publish_without_a_sound_key(api, monkeypatc
     monkeypatch.setattr("app.routers.inaturalist.writable_media_ids", never)
     resp = api.request(method, path, json=body)
     assert resp.status_code == 503
-    assert "INAT_CLIENT_SECRET is not set" in resp.json()["detail"]
+    assert "INAT_TOKEN_KEY is not set" in resp.json()["detail"]
 
 
 class TestTokenExpiry:

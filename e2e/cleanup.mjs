@@ -10,13 +10,15 @@
  *    before its cleanup, and go too. No real device EUI starts with `e2e-`.
  *  - Upload (03): the backend names media rows itself and records no uploader,
  *    so nothing the spec sends can tag them. A run's media rows are the ones
- *    created since the run started (E2E_RUN_STARTED_AT), on a `gdrive://` path,
- *    in a deployment whose id starts with one of the fixture SD card's folder
- *    names. Full runs never overlap (the workflow's `e2e-full` concurrency
- *    group). Their observations, observation events and renditions in the
- *    `media-renditions` bucket go first. The originals stay in Google Drive: the
- *    dev environment holds no Drive credentials, and Drive dedups them by hash,
- *    so repeated runs do not add copies.
+ *    created since the run started (E2E_RUN_STARTED_AT) in a deployment whose
+ *    id starts with one of the fixture SD card's folder names, whatever the
+ *    archive (`gdrive://` on Azure dev, `s3://` on AWS dev). Full runs never
+ *    overlap (the workflow's `e2e-full` concurrency group). Their observations,
+ *    observation events and renditions in the `media-renditions` bucket go
+ *    first. The originals stay, in Drive or in the S3 bucket: the run holds no
+ *    Drive or AWS credential, and both archives key an original by its content
+ *    and deployment, so repeated runs reuse the same originals rather than add
+ *    copies.
  *
  * Refuses to touch anything but the dev Supabase project.
  *
@@ -97,10 +99,9 @@ export function fixturePrefixes(names) {
   return names.map((n) => n.toLowerCase()).filter((n) => /^[0-9a-f]{8}$/.test(n) && n !== '00000000')
 }
 
-/** A media row the upload spec created in this run. */
+/** A media row the upload spec created in this run, whatever archive holds its original. */
 export function isRunMedia(row, { startedAt, prefixes }) {
   if (!prefixes.length) return false
-  if (!(row.file_path || '').startsWith('gdrive://')) return false
   const created = new Date(row.created_at || '')
   if (Number.isNaN(created.getTime()) || created < startedAt) return false
   const dep = (row.deployment_id || '').toLowerCase()
@@ -171,7 +172,7 @@ async function main() {
   const media = prefixes.length
     ? (
         await selectAll(() =>
-          sb.from('media').select('id, deployment_id, file_path, created_at').gte('created_at', startedAt.toISOString()).like('file_path', 'gdrive://%').order('id'),
+          sb.from('media').select('id, deployment_id, file_path, created_at').gte('created_at', startedAt.toISOString()).order('id'),
         )
       ).filter((r) => isRunMedia(r, { startedAt, prefixes }))
     : []
