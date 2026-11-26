@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  fetchDeploymentUpdate, fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections,
-  startOfLocalDay, sumDetections, withEntry, withLastSeen, DETECTION_HOURS, ID_CHUNK,
+  fetchDeploymentUpdate, fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, firmwareText,
+  startOfLocalDay, sumDetections, withEntry, withLastSeen, DETECTION_HOURS, ID_CHUNK, NO_MESSAGE,
 } from './realtimeReads'
+import { batteryText, sdFreeText } from './lorawanFeed'
 import { PAGE_SIZE } from './liveObservations'
 
 type Call = [string, ...unknown[]]
@@ -36,7 +37,12 @@ function fakeDb(answer: (calls: Call[], n: number) => Answer) {
 }
 
 const latest = (deployment: string, at: string, battery: number | null = 80) => ({
-  deployment_id: deployment, received_at: at, battery_level: battery, sd_card_used_capacity: 10,
+  deployment_id: deployment, received_at: at, battery_level: battery, battery_mv: null, sd_free_pct: 41,
+  health_state: null, health_reasons: null,
+})
+/** What `latest` reads as. */
+const seen = (at: string, battery: number | null = 80) => ({
+  ...NO_MESSAGE, lastSeen: at, batteryPct: battery, sdFreePct: 41,
 })
 
 const detected = (deployment: string, ...counts: (number | null)[]) => ({
@@ -46,15 +52,32 @@ const detected = (deployment: string, ...counts: (number | null)[]) => ({
 describe('fetchLatestTelemetry', () => {
   it('reads the view once for the deployments and maps each row', async () => {
     const { db, queries } = fakeDb(() => ({ data: [latest('d1', 't1'), latest('d3', 't2', null)], error: null }))
-    expect(await fetchLatestTelemetry(db, ['d1', 'd2', 'd3'])).toEqual({
-      d1: { battery: 80, sdUsed: 10, lastSeen: 't1' },
-      d3: { battery: null, sdUsed: 10, lastSeen: 't2' },
-    })
+    expect(await fetchLatestTelemetry(db, ['d1', 'd2', 'd3'])).toEqual({ d1: seen('t1'), d3: seen('t2', null) })
     expect(queries).toEqual([[
       ['from', 'deployment_latest_lorawan'],
-      ['select', 'deployment_id, received_at, battery_level, sd_card_used_capacity'],
+      ['select', 'deployment_id, received_at, battery_level, battery_mv, sd_free_pct, health_state, health_reasons'],
       ['in', 'deployment_id', ['d1', 'd2', 'd3']],
     ]])
+  })
+
+  it('reads the volts, the health state and its reasons, and never sd_card_used_capacity', async () => {
+    const row = {
+      ...latest('d1', 't1'), battery_mv: 5612, sd_free_pct: 8,
+      health_state: 'fault', health_reasons: ['self_test_bit_9', 'sd_low'],
+    }
+    const { db, queries } = fakeDb(() => ({ data: [row], error: null }))
+    expect(await fetchLatestTelemetry(db, ['d1'])).toEqual({
+      d1: {
+        lastSeen: 't1', batteryMv: 5612, batteryPct: 80, sdFreePct: 8,
+        health: 'fault', healthReasons: ['self_test_bit_9', 'sd_low'],
+      },
+    })
+    expect(JSON.stringify(queries)).not.toContain('sd_card_used_capacity')
+  })
+
+  it('reads an unknown health_state as none', async () => {
+    const { db } = fakeDb(() => ({ data: [{ ...latest('d1', 't1'), health_state: 'odd' }], error: null }))
+    expect((await fetchLatestTelemetry(db, ['d1'])).d1.health).toBeNull()
   })
 
   it('sends the ids in chunks', async () => {
@@ -72,15 +95,33 @@ describe('fetchLatestTelemetry', () => {
 
 describe('fetchFieldDeployments', () => {
   it('pages past 1,000 rows with a stable order and names the project and device', async () => {
-    const row = (i: number) => ({ id: `d${i}`, project_id: 'p1', projects: { name: 'P' }, devices: null })
+    const row = (i: number) => ({ id: `d${i}`, project_id: 'p1', projects: { name: 'P' }, devices: null, ble: null, himax: null })
     const { db, queries } = fakeDb((_, n) => n === 0
       ? { data: Array.from({ length: PAGE_SIZE }, (_, i) => row(i)), error: null }
       : { data: [row(PAGE_SIZE)], error: null })
     const deps = await fetchFieldDeployments(db, ['p1'], new Date('2026-10-21T00:00:00Z'))
     expect(deps).toHaveLength(PAGE_SIZE + 1)
-    expect(deps[0]).toEqual({ id: 'd0', project_id: 'p1', project_name: 'P', device_name: '-' })
+    expect(deps[0]).toEqual({
+      id: 'd0', project_id: 'p1', project_name: 'P', device_name: '-', ble_firmware: null, himax_firmware: null,
+    })
     expect(queries[0]).toContainEqual(['order', 'id'])
     expect(queries[1]).toContainEqual(['range', PAGE_SIZE, 2 * PAGE_SIZE - 1])
+  })
+
+  it('reads the ping period and the firmware versions through their own keys', async () => {
+    const row = {
+      id: 'd1', project_id: 'p1', lorawan_ping_minutes: 240, projects: { name: 'P' }, devices: { name: 'Cam' },
+      ble: { version: '0.30.62' }, himax: { version: '1.4.2' },
+    }
+    const { db, queries } = fakeDb(() => ({ data: [row], error: null }))
+    expect(await fetchFieldDeployments(db, ['p1'])).toEqual([{
+      id: 'd1', project_id: 'p1', lorawan_ping_minutes: 240, project_name: 'P', device_name: 'Cam',
+      ble_firmware: '0.30.62', himax_firmware: '1.4.2',
+    }])
+    const select = String(queries[0].find(c => c[0] === 'select')?.[1])
+    expect(select).toContain('lorawan_ping_minutes')
+    expect(select).toContain('ble:firmware!deployments_ble_firmware_id_fkey(version)')
+    expect(select).toContain('himax:firmware!deployments_himax_firmware_id_fkey(version)')
   })
 
   it('keeps a deployment that ended today, from midnight in the viewer\'s zone', async () => {
@@ -151,7 +192,7 @@ describe('fetchDeploymentUpdate', () => {
       ? { data: [latest('d1', 't9', 55)], error: null }
       : { data: [detected('d1', 2)], error: null })
     expect(await fetchDeploymentUpdate(db, 'd1', Date.parse('2026-10-21T00:00:00Z'))).toEqual({
-      telemetry: { battery: 55, sdUsed: 10, lastSeen: 't9' },
+      telemetry: seen('t9', 55),
       detections: 2,
     })
     expect(queries).toHaveLength(2)
@@ -177,11 +218,11 @@ describe('withEntry', () => {
 })
 
 describe('withLastSeen', () => {
-  const map = { d1: { battery: 80, sdUsed: null, lastSeen: '2026-11-26T10:00:00+00:00' } }
+  const map = { d1: { ...seen('2026-11-26T10:00:00+00:00'), health: 'fault' as const, healthReasons: ['self_test_bit_9'] } }
 
   it('moves the last message time forward and keeps the values', () => {
     expect(withLastSeen(map, 'd1', '2026-11-26T11:00:00.123456+00:00')).toEqual({
-      d1: { battery: 80, sdUsed: null, lastSeen: '2026-11-26T11:00:00.123456+00:00' },
+      d1: { ...map.d1, lastSeen: '2026-11-26T11:00:00.123456+00:00' },
     })
     expect(map.d1.lastSeen).toBe('2026-11-26T10:00:00+00:00')
   })
@@ -193,7 +234,27 @@ describe('withLastSeen', () => {
 
   it("gives a camera's first message an entry", () => {
     expect(withLastSeen({}, 'd2', '2026-11-26T11:00:00+00:00')).toEqual({
-      d2: { battery: null, sdUsed: null, lastSeen: '2026-11-26T11:00:00+00:00' },
+      d2: { ...NO_MESSAGE, lastSeen: '2026-11-26T11:00:00+00:00' },
     })
+  })
+})
+
+describe('the Cameras table values', () => {
+  it('shows the battery in volts, the percentage from older firmware, and a dash for neither', () => {
+    expect(batteryText({ ...NO_MESSAGE, batteryMv: 5612, batteryPct: 80 })).toBe('5.6 V')
+    expect(batteryText({ ...NO_MESSAGE, batteryPct: 87 })).toBe('87%')
+    expect(batteryText(NO_MESSAGE)).toBe('-')
+  })
+
+  it('shows the SD card free space', () => {
+    expect(sdFreeText({ ...NO_MESSAGE, sdFreePct: 41 })).toBe('41%')
+    expect(sdFreeText(NO_MESSAGE)).toBe('-')
+  })
+
+  it('names the firmware the deployment recorded', () => {
+    expect(firmwareText({ ble_firmware: '0.30.62', himax_firmware: '1.4.2' })).toBe('BLE 0.30.62 · Himax 1.4.2')
+    expect(firmwareText({ ble_firmware: '0.30.62', himax_firmware: null })).toBe('BLE 0.30.62')
+    expect(firmwareText({ ble_firmware: null, himax_firmware: '1.4.2' })).toBe('Himax 1.4.2')
+    expect(firmwareText({ ble_firmware: null, himax_firmware: null })).toBe('-')
   })
 })

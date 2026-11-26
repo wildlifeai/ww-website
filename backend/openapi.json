@@ -756,7 +756,7 @@
         "type": "object"
       },
       "DeviceOut": {
-        "description": "A camera with a deployment, open or ended, in one of the organisation's projects.\n\nCameras belong to no organisation, so a camera lent to another organisation's project is\nin both organisations' lists.",
+        "description": "A camera with at least one deployment, open or ended and not deleted, in a project of the organisation.\n\nCameras belong to no organisation, so a camera lent to another organisation's project is\nin both organisations' lists.",
         "properties": {
           "bluetooth_id": {
             "title": "Bluetooth Id",
@@ -1844,8 +1844,20 @@
         "type": "object"
       },
       "TelemetryPoint": {
-        "description": "One LoRaWAN message a camera sent while deployed in one of the organisation's projects.",
+        "description": "One LoRaWAN message a camera sent while deployed in one of the organisation's projects.\n\nA value is null when the message did not carry it: the camera can send its battery and SD\ncard in one message and its health in another.",
         "properties": {
+          "ai_failures": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Times the AI processor did not respond since the battery was connected, stops at 255",
+            "title": "Ai Failures"
+          },
           "battery_level": {
             "anyOf": [
               {
@@ -1855,11 +1867,48 @@
                 "type": "null"
               }
             ],
+            "description": "Battery as a percentage of the camera's battery scale, not of charge; older firmware sends only this",
             "title": "Battery Level"
+          },
+          "battery_mv": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Battery voltage in millivolts",
+            "title": "Battery Mv"
           },
           "deployment_id": {
             "title": "Deployment Id",
             "type": "string"
+          },
+          "hours_since_reset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hours since the camera last restarted, stops at 65535",
+            "title": "Hours Since Reset"
+          },
+          "last_reset_reason": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the camera last restarted, as a firmware code",
+            "title": "Last Reset Reason"
           },
           "model_output": {
             "anyOf": [
@@ -1873,7 +1922,7 @@
             "description": "The camera's on-device model output, as the payload carried it",
             "title": "Model Output"
           },
-          "sd_card_used_capacity": {
+          "reset_count": {
             "anyOf": [
               {
                 "type": "integer"
@@ -1882,7 +1931,44 @@
                 "type": "null"
               }
             ],
-            "title": "Sd Card Used Capacity"
+            "description": "Restarts since the battery was connected, stops at 255",
+            "title": "Reset Count"
+          },
+          "sd_free_pct": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SD card free space, percent; null when the camera could not tell",
+            "title": "Sd Free Pct"
+          },
+          "self_test_bits": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The camera's self-test bits, 0 when all is well",
+            "title": "Self Test Bits"
+          },
+          "temperature_c": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The BLE processor's chip temperature, degrees C",
+            "title": "Temperature C"
           },
           "timestamp": {
             "anyOf": [
@@ -6171,7 +6257,7 @@
     },
     "/api/v1/devices": {
       "get": {
-        "description": "The cameras deployed in the organisation's projects, newest registered first.\n\nA camera is listed when it has a deployment, open or ended, in one of the organisation's\nprojects. Cameras belong to no organisation, so a camera lent to another organisation's\nproject is in both lists. A page is at most 1,000 cameras; page with ``offset``.",
+        "description": "The cameras deployed in the organisation's projects, newest registered first.\n\nEvery camera with at least one deployment, open or ended and not deleted, in a project of\nthe organisation: the project rule telemetry follows. Cameras belong to no organisation, so\na camera lent to another organisation's project is in both lists. Deleted cameras, and\ndeployments in a deleted project, are left out. A page is at most 1,000 cameras; page with\n``offset``.",
         "operationId": "api_list_devices_api_v1_devices_get",
         "parameters": [
           {

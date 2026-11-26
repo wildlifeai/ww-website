@@ -118,8 +118,8 @@ function MarketingHero() {
             and when each photo was taken without any manual matching.
           </p>
           <ul style={{ paddingLeft: '1.25rem', color: 'var(--text-muted)', lineHeight: 1.85, marginBottom: '1.5rem' }}>
-            <li>A lightweight on-device AI model (Camera AI) flags your target species in real time; the more powerful SpeciesNet model (Cloud AI) assists with full identification when you upload, and the Wildlife Brain groups look-alike animals so large datasets are quick to review.</li>
-            <li>LoRaWAN telemetry (in development) will send battery and SD-card status back to the dashboard.</li>
+            <li>A lightweight on-device AI model (Camera AI) flags your target species in real time; the more powerful SpeciesNet model (Cloud AI) assists with full identification after you upload, and the Wildlife Brain groups look-alike animals so large datasets are quick to review.</li>
+            <li>LoRaWAN check-ins (early access): the Realtime page shows each camera's last check-in, battery and detection counts while it is in the field.</li>
             <li>Fully open hardware: schematics and firmware published on GitHub.</li>
           </ul>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: '1rem' }}>
@@ -155,7 +155,7 @@ function MarketingHero() {
             <li>Create and manage projects, and invite your team as admins or members.</li>
             <li>Define deployment locations and configure camera settings.</li>
             <li>Pair and provision Wildlife Watcher devices over Bluetooth, with a live preview while monitoring.</li>
-            <li>Remote battery and SD-card telemetry over LoRaWAN is in development.</li>
+            <li>Deploy a LoRaWAN camera (early access) and the app sets how often it checks in to the website's Realtime page.</li>
           </ul>
           <StoreBadges height={36} style={{ justifyContent: 'flex-start' }} />
         </div>

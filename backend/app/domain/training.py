@@ -393,7 +393,7 @@ async def media_deployments(client, media_ids: List[str], *, chunk: int = 200) -
 
 async def resolve_sample_images(samples: List[TrainingSample], *, concurrency: int = 8) -> List[Tuple[TrainingSample, bytes]]:
     """Fetch bytes for every sample (crops as-is, full frames downscaled). Failures are dropped and logged."""
-    from app.domain.media_resolver import resolve_media
+    from app.domain.media_resolver import MediaRef, resolve_media
     from app.services.image_processing import resize_to_max
 
     sem = asyncio.Semaphore(concurrency)
@@ -401,7 +401,7 @@ async def resolve_sample_images(samples: List[TrainingSample], *, concurrency: i
     async def _one(s: TrainingSample):
         async with sem:
             try:
-                resolved = await resolve_media(s.image_ref, size="full")
+                resolved = await resolve_media(s.image_ref, size="full", media=MediaRef(s.media_id, s.deployment_id or ""))
             except Exception as exc:  # noqa: BLE001 one bad image must not sink the run
                 logger.warning("training_sample_resolve_failed", sample=s.sample_id, error=str(exc))
                 return None

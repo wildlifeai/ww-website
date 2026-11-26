@@ -2,8 +2,6 @@
 
 Things that look like bugs in your code and are not. Each one cost somebody time.
 
-# 8. Known Architectural Gotchas
-
 ## user_roles Uses scope_id
 
 Do not assume:
@@ -20,8 +18,6 @@ The table uses:
 scope_id
 scope_type
 ```
-
-Always verify schema details in `ww-backend`.
 
 ---
 
@@ -40,18 +36,6 @@ Backend responses follow:
 Frontend code should expect and preserve this structure.
 
 Do not invent alternate response formats.
-
----
-
-## Verify Schema Before Writing Queries
-
-Never guess:
-
-* Table names
-* Column names
-* Constraints
-
-Verify against the actual backend schema before writing queries.
 
 ---
 
@@ -137,7 +121,8 @@ Reuse existing model registries and constants rather than duplicating configurat
 
 Do not hardcode credentials.
 
-Consult the backend seed documentation when test users are required.
+The seeded test users, and where their credentials are kept:
+[testing-with-seed-users.md](../../../documentation/resources/testing-with-seed-users.md).
 
 ---
 
@@ -277,13 +262,28 @@ virtual-hosted addressing; create every S3 client through it.
 
 ---
 
+## An `s3://` original is read only as part of its own photo
+
+`media_resolver.resolve_media` and `serve_media` take the photo's row as
+`media=MediaRef.of(row)` (its `id` and `deployment_id`), and read an `s3://` path only from its own
+folder: `originals/<project>/<deployment>/` in `S3_BUCKET`, the layout `object_store.original_key`
+writes, where the project is the deployment's or one it was moved from (`deployment_moves`; a move
+leaves the files where they were). Without the row, or for any other key or bucket, the answer is
+the one for a missing original, with a `media_s3_original_refused` warning naming the photo. A new
+reader passes the row, a crop its photo's row. An Azure API reads `s3://` originals only when its
+`S3_BUCKET` names the bucket.
+
+---
+
 ## A presigned S3 URL dies with the Lambda role that signed it
 
 On Lambda the S3 client signs with the function role's temporary credentials, and a presigned
 URL stops working when that session ends, whatever its `ExpiresIn` says (#462). Hand presigned
 URLs out for minutes (`S3_PRESIGN_GET_SECONDS`, 300 s). A link that must last longer, like an
 export's 24 hours, is the API's own HMAC-signed route, which redirects to a fresh presigned URL
-on each open (`domain/camtrapdp_export.download_link`).
+on each open (`domain/camtrapdp_export.download_link`). That route is used only once
+`EXPORT_LINK_SECRET` is set (`settings.export_link_signed`); without it the export's link is a
+plain presigned GET and dies with the role.
 
 ---
 
@@ -292,16 +292,17 @@ on each open (`domain/camtrapdp_export.download_link`).
 Starlette parses a form with `max_fields=1000` and `max_files=1000` and answers `400` "Too many
 fields" above either, before the route runs. Keys sent by S3 upload (`files_key`) are fields, so
 `/api/exif/parse` by key, with a `paths` field per photo and one option, stops at 499 photos under
-its 500 cap; the website sends 10 a request (checked 22 Nov 2026). Size a key endpoint's cap by
-its fields, not its photos.
+the Azure cap of 500 (`MAX_UPLOAD_IMAGES_PER_REQUEST`). On Lambda the cap is 25 a call
+(`LAMBDA_MAX_IMAGES_PER_REQUEST` in `routers/exif.py`, #457), and the website sends 10 a request
+(checked 22 Nov 2026). Size a key endpoint's cap by its fields, not its photos.
 
 ---
 
 ## Gemini API key limits
 
 `GEMINI_API_KEY` in the root `.env` is on the free tier: 15 requests per minute and 500 per
-day per model, and no Batch API. Run `scripts/eval_presence.py` with `--min-interval 4.2` and
-`--cache` (resumable, never pays twice); a full run of the 700-frame labelled set spans two daily windows, and `--only` runs a subset.
+day per model, and no Batch API. Run `backend/scripts/eval_presence.py`, from `backend/`, with
+`--min-interval 4.2` and `--cache` (resumable, never pays twice); a full run of the 700-frame labelled set spans two daily windows, and `--only` runs a subset.
 To re-score what is cached (the stratified tables, a new SpeciesNet dump), add `--cache-only`: no
 call is made and uncached frames stay unanswered.
 

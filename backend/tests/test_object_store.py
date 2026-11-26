@@ -219,18 +219,49 @@ def test_archive_service_follows_the_setting(monkeypatch):
 # ── readers of s3:// paths ───────────────────────────────────────────
 
 
-async def test_resolver_reads_an_s3_original(s3):
-    from app.domain.media_resolver import resolve_media
+async def test_resolver_reads_an_s3_original(s3, s3_folders):
+    from app.domain.media_resolver import MediaRef, resolve_media
 
-    s3.add_response("get_object", {"Body": _body(b"jpeg"), "ContentType": "image/jpeg"}, {"Bucket": "other-bucket", "Key": "originals/x.jpg"})
-    assert await resolve_media("s3://other-bucket/originals/x.jpg") == (b"jpeg", "image/jpeg")
+    s3_folders["d"] = {"p"}
+    s3.add_response("get_object", {"Body": _body(b"jpeg"), "ContentType": "image/jpeg"}, {"Bucket": "ww-test-media", "Key": "originals/p/d/h.jpg"})
+    assert await resolve_media("s3://ww-test-media/originals/p/d/h.jpg", media=MediaRef("m1", "d")) == (b"jpeg", "image/jpeg")
 
 
-async def test_resolver_returns_none_for_a_missing_s3_original(s3):
-    from app.domain.media_resolver import resolve_media
+async def test_resolver_returns_none_for_a_missing_s3_original(s3, s3_folders):
+    from app.domain.media_resolver import MediaRef, resolve_media
 
+    s3_folders["d"] = {"p"}
     s3.add_client_error("get_object", service_error_code="NoSuchKey", http_status_code=404)
-    assert await resolve_media("s3://b/missing.jpg") is None
+    assert await resolve_media("s3://ww-test-media/originals/p/d/missing.jpg", media=MediaRef("m1", "d")) is None
+
+
+@pytest.mark.parametrize(
+    ("file_path", "readable"),
+    [
+        ("s3://ww-test-media/originals/p/d/h.jpg", True),
+        ("gdrive://abc", True),
+        ("https://example.org/a.jpg", True),
+        ("http://example.org/a.jpg", True),
+        ("supabase://bucket/a.jpg", False),  # the placeholder reads nothing
+        ("media/IMG_3.JPG", False),  # imported without its file
+        ("", False),
+    ],
+)
+def test_can_resolve_follows_the_resolver_registry(file_path, readable):
+    """What the CamtrapDP export fetches: every provider resolve_media has, s3:// included (#493)."""
+    from app.domain.media_resolver import can_resolve
+
+    assert can_resolve(file_path) is readable
+
+
+async def test_the_exports_fetch_reads_an_s3_original(s3, s3_folders):
+    from app.domain import camtrapdp_export
+    from app.domain.media_resolver import MediaRef
+
+    s3_folders["d"] = {"p"}
+    s3.add_response("get_object", {"Body": _body(b"jpeg"), "ContentType": "image/jpeg"}, {"Bucket": "ww-test-media", "Key": "originals/p/d/h.jpg"})
+    assert await camtrapdp_export._fetch_original("s3://ww-test-media/originals/p/d/h.jpg", MediaRef("m1", "d")) == b"jpeg"
+    s3.assert_no_pending_responses()
 
 
 async def test_image_route_redirects_an_s3_original(s3, monkeypatch):
@@ -238,9 +269,10 @@ async def test_image_route_redirects_an_s3_original(s3, monkeypatch):
 
     anon = MagicMock()
     anon.table.return_value.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = SimpleNamespace(
-        data={"file_path": "s3://ww-test-media/originals/p/d/h.jpg"}
+        data={"deployment_id": "d", "file_path": "s3://ww-test-media/originals/p/d/h.jpg"}
     )
     monkeypatch.setattr(media_router.supabase_client, "create_anon_client", lambda: anon)
+    monkeypatch.setattr("app.domain.media_resolver._read_projects", lambda ids: {"d": frozenset({"p"})})
     resp = await media_router.get_media_image("m1", size="full", user=SimpleNamespace(id="u1"))
     assert resp.status_code == 307
     assert "originals/p/d/h.jpg" in resp.headers["location"]

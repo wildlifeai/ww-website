@@ -3,7 +3,7 @@ title: Project settings and roles
 description: What each project role can change on the Settings page, and how defaults, notifications and members work.
 category: Setup
 order: 30
-updated: 2026-10-22
+updated: 2026-11-26
 ---
 
 Open **Settings** from your avatar menu. Click a project's row to see its settings in a panel on
@@ -41,8 +41,10 @@ change saves as soon as you make it.
 ## Notifications
 
 Notifications are yours alone; nobody else in the project sees or changes them. Tick a channel
-for each event you want to hear about. In-app notifications work now. Email starts once an email
-provider is set up for the site, and mobile notifications are sent by the Wildlife Watcher app.
+for each event you want to hear about. Today the website sends in-app notifications for
+**Species detections** only; **Camera went silent** and **Upload finished** are not sent yet. Email
+starts once an email provider is set up for the site, and mobile notifications are sent by the
+Wildlife Watcher app.
 For species detections you can type part of a species name, for example "rat", to hear only
 about matching detections.
 

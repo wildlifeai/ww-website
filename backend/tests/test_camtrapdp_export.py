@@ -21,6 +21,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.domain import camtrapdp_export as export
+from app.domain.media_resolver import MediaRef
 from app.services import camtrap_dp_function as fn
 
 PROJECT = "11111111-1111-4111-8111-111111111111"
@@ -66,18 +67,21 @@ def _metadata_zip(path: Path, rows: list[dict], description: str = "Project note
 
 
 def _originals(rows, prefix="gdrive://"):
-    return {r["mediaID"]: export.Original(f"{prefix}{r['mediaID']}", 10) for r in rows}
+    return {r["mediaID"]: export.Original(f"{prefix}{r['mediaID']}", 10, r["deploymentID"]) for r in rows}
 
 
 class FakeDrive:
-    """Fetch by file path. ``fail`` maps a path to how many reads fail before one works (None: all)."""
+    """Fetch by file path. ``fail`` maps a path to how many reads fail before one works (None: all).
+    ``rows`` keeps the media row each read was given."""
 
     def __init__(self, fail=None):
         self.fail = dict(fail or {})
         self.calls: list[str] = []
+        self.rows: dict[str, object] = {}
 
-    async def __call__(self, file_path: str):
+    async def __call__(self, file_path: str, media=None):
         self.calls.append(file_path)
+        self.rows[file_path] = media
         left = self.fail.get(file_path, 0)
         if left is None:
             return None
@@ -139,6 +143,8 @@ async def test_every_original_lands_at_its_media_csv_path(tmp_path):
         assert sorted(n for n in out.namelist() if n.startswith("media/")) == sorted(r["filePath"] for r in rows)
     assert (result.photos, result.written, result.missing) == (3, 3, [])
     assert progress[-1] == (3, 3, 0)
+    # Each original is read as part of its own media row.
+    assert drive.rows == {f"gdrive://{r['mediaID']}": MediaRef(r["mediaID"], r["deploymentID"]) for r in rows}
 
 
 async def test_missing_originals_are_retried_reported_and_not_fatal(tmp_path):
@@ -250,8 +256,8 @@ def test_lookup_reads_every_page():
     photos = [export.Photo(r["id"], DEP_A, "p") for r in db]
     found = export.lookup_originals(FakeSvc(db), photos)
     assert len(found) == 2501
-    assert found[_mid(2400)] == export.Original("gdrive://2400", 2400)
-    assert found[_mid(9999)] == export.Original("gdrive://x", None)
+    assert found[_mid(2400)] == export.Original("gdrive://2400", 2400, DEP_A)
+    assert found[_mid(9999)] == export.Original("gdrive://x", None, DEP_A)
 
 
 # ── build_export and the function: authorisation is the function's ────────
@@ -286,6 +292,27 @@ async def test_build_export_calls_the_function_as_the_user(tmp_path, monkeypatch
 
     assert calls == [({"project_id": PROJECT, "deployment_ids": [DEP_A], "from": "2026-01-01T00:00:00+00:00"}, "user-jwt")]
     assert result.written == 1 and zip_path.exists() and not (tmp_path / "metadata.zip").exists()
+
+
+async def test_an_export_of_s3_originals_has_every_photo_in_media(tmp_path, monkeypatch):
+    """With ARCHIVE_BACKEND=s3 (AWS) originals are s3:// keys, and each one is read into media/ (#493)."""
+    rows = _media_rows([(1, DEP_A, "jpg", True), (2, DEP_A, "jpg", False), (3, DEP_A, "png", True)])
+    keys = {r["mediaID"]: f"s3://ww-test-media/originals/{PROJECT}/{DEP_A}/{r['mediaID']}.jpg" for r in rows}
+    monkeypatch.setattr(fn, "download_package", _fake_function(rows, []))
+    media = [{"id": m, "deployment_id": DEP_A, "file_path": key} for m, key in keys.items()]
+    monkeypatch.setattr("app.services.supabase_client.create_service_client", lambda: FakeSvc(media))
+    fetch = FakeDrive()
+
+    zip_path, result = await export.build_export(
+        export.ExportSelection(PROJECT, [DEP_A]), export.ExportCaller(user_token="t"), tmp_path, max_bytes=10**9, on_message=_noop, fetch=fetch
+    )
+
+    assert sorted(fetch.calls) == sorted(keys.values())
+    assert (result.photos, result.written, result.missing) == (3, 3, [])
+    with zipfile.ZipFile(zip_path) as out:
+        for row in rows:
+            assert out.read(row["filePath"]) == f"JPEG:{keys[row['mediaID']]}".encode()
+        assert json.loads(out.read("datapackage.json"))["description"] == "Project notes"
 
 
 @pytest.mark.parametrize(

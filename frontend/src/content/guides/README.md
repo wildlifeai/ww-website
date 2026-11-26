@@ -6,8 +6,10 @@
 > guide and image folder following the rules below.
 
 Every `.md` file in this folder (except this README) is published at
-`https://<site>/guides/<filename-without-extension>` on the next build.
-Merging a PR is the entire publishing workflow — no code changes needed.
+`https://<site>/guides/<filename-without-extension>` when the site next
+builds; no code changes are needed. A guide's PR goes into `dev`, so once it is
+merged the guide shows on the dev site (`https://dev.ww-website.pages.dev`), and
+it reaches wildlifewatcher.ai only at the next release from `dev` to `main`.
 
 ## File format
 

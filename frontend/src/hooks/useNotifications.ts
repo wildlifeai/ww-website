@@ -29,7 +29,7 @@ export interface AppNotification {
 export const NOTIFICATIONS_PAGE = 50
 
 export interface NotificationFilter {
-  /** One of the table's types (`species_detection`, `camera_silent`, `upload_complete`, `system`), or all. */
+  /** One of the table's types (`species_detection`, `camera_silent`, `camera_fault`, `upload_complete`, `system`), or all. */
   type?: string
   unreadOnly?: boolean
 }
