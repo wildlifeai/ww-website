@@ -4,7 +4,7 @@
 // Realtime: /field
 // Cameras deployed now, and those whose deployment ended today: KPIs, a map, a "needs attention"
 // panel, and two tabs, Cameras (a status table) and Messages (their LoRaWAN messages, live), read-only
-// for every role. Telemetry (last message, battery, SD free, health) comes from the
+// for every role. Telemetry (last message, battery, SD free, temperature, health) comes from the
 // deployment_latest_lorawan view, the ping period and firmware from the deployment, and detections
 // from the cameras' own LoRaWAN counts (lib/realtimeReads.ts); each camera's state is
 // lib/cameraState.ts. The Messages tab is lib/lorawanFeed.ts, live updates hooks/useFieldLive.ts.
@@ -20,7 +20,7 @@ import { useMessageFeed } from '../hooks/useMessageFeed'
 import { supabase } from '../config/supabase'
 import {
   fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, firmwareText, realtimeKeys,
-  NO_MESSAGE, type FieldDeployment, type Telemetry,
+  temperatureText, NO_MESSAGE, type FieldDeployment, type Telemetry,
 } from '../lib/realtimeReads'
 import {
   CAMERA_STATE, cameraState, healthReasonTexts, needsAttention, silenceText,
@@ -174,6 +174,8 @@ export function FieldPage() {
     { key: 'sdFreePct', label: 'SD free',
       render: c => c.sdFreePct == null ? NONE : <span style={c.sdLow ? BAD : undefined}>{sdFreeText(c)}</span>,
       getValue: sdFreeText },
+    { key: 'temperatureC', label: 'Temperature', cellStyle: { whiteSpace: 'nowrap' },
+      render: c => (c.temperatureC == null ? NONE : temperatureText(c)), getValue: temperatureText },
     { key: 'firmware', label: 'Firmware', cellStyle: { whiteSpace: 'nowrap' },
       render: c => (c.ble_firmware || c.himax_firmware ? firmwareText(c) : NONE), getValue: firmwareText },
     { key: 'detections48h', label: 'Detections 48h',

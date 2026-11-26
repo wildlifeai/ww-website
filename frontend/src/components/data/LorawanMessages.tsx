@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // LorawanMessages: the Messages tab of the Realtime page, the shown deployments' LoRaWAN messages
-// newest first (lib/lorawanFeed.ts). Rows that arrived while the page is open keep the table's
-// selection tint.
+// newest first (lib/lorawanFeed.ts): check-ins, detections and the camera's answers to settings
+// sent by downlink. Rows that arrived while the page is open keep the table's selection tint.
 import { useMemo } from 'react'
 import { DataTable, type Column } from '../ui/DataTable'
 import {
@@ -12,6 +12,8 @@ import {
 import type { useMessageFeed } from '../../hooks/useMessageFeed'
 
 const MUTED: React.CSSProperties = { color: 'var(--text-muted)' }
+const BOLD: React.CSSProperties = { fontWeight: 600 }
+const ERROR: React.CSSProperties = { color: 'var(--error)' }
 
 export function LorawanMessages({ feed, names }: {
   feed: ReturnType<typeof useMessageFeed>
@@ -32,7 +34,10 @@ export function LorawanMessages({ feed, names }: {
     { key: 'camera', label: 'Camera', cellStyle: { fontWeight: 500 },
       getValue: r => names.get(r.deploymentId) ?? '' },
     { key: 'message', label: 'Message', cellStyle: { whiteSpace: 'nowrap' },
-      render: r => <span style={{ fontWeight: r.detections ? 600 : undefined }}>{messageText(r)}</span>,
+      // A detection stands out; a settings change the camera could not make is in red.
+      render: r => (
+        <span style={r.opError != null ? ERROR : r.detections ? BOLD : undefined}>{messageText(r)}</span>
+      ),
       getValue: messageText },
     { key: 'battery', label: 'Battery', cellStyle: { whiteSpace: 'nowrap' }, getValue: batteryText },
     { key: 'sdFree', label: 'SD free', getValue: sdFreeText },

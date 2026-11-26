@@ -103,20 +103,20 @@ const SELF_TEST_BITS: Record<number, string> = {
   9: 'HM0360 camera failed',
   10: 'LED flash failed',
   11: 'SD card missing',
-  12: 'Microphone failed',
+  12: 'Settings file damaged, photo counters restarted',
   13: 'AI model failed',
   14: 'AI processor missed the BLE processor at start-up',
 }
 
 // Why the camera last restarted, for `unexpected_restart_<reason>` (WW500_LoRaWAN_payloads.md
-// section 2; the reasons that are no warning never reach here).
+// section 2; the reasons that are no warning never reach here, 10 among them since every Bluetooth
+// firmware update reports it, ww-backend#398). Bit 12 above follows ww-backend#399 (#515).
 const RESTART_REASONS: Record<number, string> = {
   2: 'Restarted after a firmware error check',
   3: 'Restarted after an SDK assert',
   4: 'Restarted after a radio stack assert',
   5: 'Restarted after a hard fault',
   6: 'Restarted by its watchdog',
-  10: 'Restarted after a software reset or lockup',
 }
 
 /** One of `health_reasons` (ww-backend DATABASE_REFERENCE.md, Camera health) in words. */

@@ -144,6 +144,7 @@ describe('healthReasonText', () => {
     expect(healthReasonText('self_test_bit_8')).toBe('Main camera failed')
     expect(healthReasonText('self_test_bit_9')).toBe('HM0360 camera failed')
     expect(healthReasonText('self_test_bit_11')).toBe('SD card missing')
+    expect(healthReasonText('self_test_bit_12')).toBe('Settings file damaged, photo counters restarted')
     expect(healthReasonText('self_test_bit_7')).toBe('Self-test bit 7')
   })
 
@@ -151,6 +152,8 @@ describe('healthReasonText', () => {
     expect(healthReasonText('unexpected_restart_6')).toBe('Restarted by its watchdog')
     expect(healthReasonText('unexpected_restart_5')).toBe('Restarted after a hard fault')
     expect(healthReasonText('unexpected_restart_42')).toBe('Restarted unexpectedly (reason 42)')
+    // A firmware update reports 10 and is no warning (ww-backend#398), so it has no words of its own.
+    expect(healthReasonText('unexpected_restart_10')).toBe('Restarted unexpectedly (reason 10)')
   })
 
   it('names the SD card and AI processor reasons, and passes an unknown code through', () => {
