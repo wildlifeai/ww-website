@@ -94,7 +94,7 @@ npm run dev
 | Swagger | open `http://localhost:8000/docs` | interactive API docs |
 | Frontend up | open `http://localhost:5173` | landing page loads |
 | Auth | click **Login** | Supabase Auth UI appears |
-| Signed-in nav | log in | top tabs: **Toolkit · Media · Insights** (the Media tab is `/annotations` in the code) (plus **Realtime**, greyed out until a camera in your projects has sent LoRaWAN data) |
+| Signed-in nav | log in | top tabs: **Toolkit · Media · Insights** (the Media tab is `/annotations` in the code) (plus **Realtime**, greyed out unless the selected projects have a camera deployed with LoRaWAN) |
 | Data reads | open **Insights** | your projects / deployments |
 | Upload path | log in as a [seed user](../resources/testing-with-seed-users.md) and drag a folder from [`test-fixtures/camera-trap/sdcard/dev-sdcard/MEDIA/`](../../test-fixtures/camera-trap/README.md) into **Upload Data** | pipeline reaches **✅ Done**; the images appear in **Media** |
 

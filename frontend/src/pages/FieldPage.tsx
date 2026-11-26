@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Realtime: /field
-// Cameras deployed now, and those whose deployment ended today: KPIs, a map, a "needs attention"
-// panel, and two tabs, Cameras (a status table) and Messages (their LoRaWAN messages, live), read-only
+// LoRaWAN cameras deployed now, and those whose deployment ended today (isLorawanCamera: deployed
+// with LoRaWAN on, or heard from): KPIs, a map, a "needs attention" panel, and two tabs, Cameras (a status table) and Messages (their LoRaWAN messages, live), read-only
 // for every role. Telemetry (last message, battery, SD free, temperature, health) comes from the
 // deployment_latest_lorawan view, the ping period and firmware from the deployment, and detections
 // from the cameras' own LoRaWAN counts (lib/realtimeReads.ts); each camera's state is
@@ -19,7 +19,7 @@ import { useFieldLive } from '../hooks/useFieldLive'
 import { useMessageFeed } from '../hooks/useMessageFeed'
 import { supabase } from '../config/supabase'
 import {
-  fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, firmwareText, realtimeKeys,
+  fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, firmwareText, isLorawanCamera, realtimeKeys,
   temperatureText, NO_MESSAGE, type FieldDeployment, type Telemetry,
 } from '../lib/realtimeReads'
 import {
@@ -115,10 +115,13 @@ export function FieldPage() {
 
   const telemetry = telemetryQuery.data ?? NO_TELEMETRY
   const detections = detectionsQuery.data ?? NO_DETECTIONS
-  const loading = depEnabled && depQuery.isPending
+  // Which deployments are LoRaWAN cameras depends on their telemetry, so wait for both.
+  const loading = depEnabled && (depQuery.isPending || (depIds.length > 0 && telemetryQuery.isPending))
   const error = (depQuery.error ?? telemetryQuery.error ?? detectionsQuery.error)?.message ?? feed.error
 
-  const cameras = useMemo<Camera[]>(() => deps.map(d => {
+  // Live updates and the feed cover every deployment read, so a camera's first message brings it in.
+  const cameras = useMemo<Camera[]>(() => deps.flatMap(d => {
+    if (!isLorawanCamera(d, telemetry[d.id])) return []
     const t = telemetry[d.id] ?? NO_MESSAGE
     const state = cameraState({
       lastSeen: t.lastSeen, deploymentStart: d.deployment_start, deploymentEnd: d.deployment_end,
@@ -129,11 +132,11 @@ export function FieldPage() {
     const reasons = finished ? [] : [
       ...(state === 'silent' ? [silenceText(d.lorawan_ping_minutes)] : []), ...healthReasonTexts(t.healthReasons),
     ]
-    return {
+    return [{
       ...d, ...t, state, reasons, detections48h: detections[d.id] ?? 0,
       lowBattery: !finished && t.healthReasons.includes(LOW_BATTERY_REASON),
       sdLow: !finished && t.healthReasons.includes(SD_LOW_REASON),
-    }
+    }]
   }), [deps, telemetry, detections])
   const names = useMemo(() => new Map(deps.map(d => [d.id, cameraName(d)])), [deps])
 
@@ -194,7 +197,7 @@ export function FieldPage() {
         )}
       </div>
       <p style={{ ...MUTED, fontSize: '0.9rem', margin: '0 0 1rem 0' }}>
-        Cameras deployed now or collected today, with their LoRaWAN messages.
+        LoRaWAN cameras deployed now or collected today, and their messages.
       </p>
 
       {error && <p role="alert" style={{ color: 'var(--error)', marginBottom: '1rem' }}>{error}</p>}
@@ -206,9 +209,10 @@ export function FieldPage() {
       ) : cameras.length === 0 ? (
         <div className="card" style={{ padding: '2rem', textAlign: 'center' }}>
           <RadioTower size={28} color="var(--text-muted)" aria-hidden="true" style={{ marginBottom: '0.5rem' }} />
-          <div style={{ fontWeight: 600 }}>No active deployments</div>
+          <div style={{ fontWeight: 600 }}>No LoRaWAN cameras deployed</div>
           <div style={{ fontSize: '0.85rem', marginTop: '0.35rem', ...MUTED }}>
-            A camera shows here while it is deployed.
+            A camera in the selected projects shows here while it is deployed with LoRaWAN check-ins turned on.{' '}
+            <Link to={LORAWAN_GUIDE} style={{ color: 'var(--primary)' }}>Connecting over LoRaWAN</Link>
           </div>
         </div>
       ) : (
@@ -261,11 +265,17 @@ export function FieldPage() {
             </>
           )}
 
-          {/* Map */}
-          {withGps > 0 && (
+          {/* Map, or why there is none */}
+          {withGps > 0 ? (
             <div style={{ marginBottom: '1.25rem' }}>
               <DeploymentMap deployments={cameras} selectedDeploymentId={picked} onSelectDeployment={pick} />
             </div>
+          ) : (
+            <p style={{ ...MUTED, fontSize: '0.85rem', margin: '0 0 1.25rem 0' }}>
+              No map: {cameras.length === 1
+                ? 'this camera was deployed without a GPS position.'
+                : 'none of these cameras was deployed with a GPS position.'}
+            </p>
           )}
 
           {/* Cameras | Messages */}

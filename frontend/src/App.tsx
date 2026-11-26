@@ -251,8 +251,8 @@ function UploadNavButton() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Lifecycle order: prepare (Toolkit), monitor (Realtime), collect (Review), analyse (Insights).
-// Realtime opens only when one of the user's projects has a device that sends or has sent
-// LoRaWAN data (useHasRealtimeData); otherwise it stays in the header, greyed out, and says why
+// Realtime opens only when the selected projects have a LoRaWAN camera deployed now or collected
+// today (useHasRealtimeData); otherwise it stays in the header, greyed out, and says why
 // (RealtimeTabOff). This replaces UI audit decision 7, which hid it.
 //
 // The labels are the words the home dashboard's three steps use (upload,

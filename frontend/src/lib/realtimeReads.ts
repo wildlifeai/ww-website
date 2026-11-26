@@ -3,6 +3,11 @@
  * check-in, and the detections its camera counted in the last 48 hours. The Messages tab's reads
  * are in `lorawanFeed.ts`.
  *
+ * - The page shows LoRaWAN cameras only (`isLorawanCamera`): deployed with LoRaWAN on, or heard
+ *   from. A camera deployed with no ping period recorded that has never sent a message is taken
+ *   not to use LoRaWAN, so it is left out (Victor, 27 Nov 2026). The header's Realtime tab opens
+ *   on the same rule for the selected projects (`hasLorawanCameras`).
+ *
  * - Deployments page past PostgREST's 1,000-row cap (`readAllPages`).
  * - Deployment ids go to the database in chunks of `ID_CHUNK`, so an `in.(...)` list stays well
  *   inside the URL limit however many cameras are out.
@@ -100,21 +105,63 @@ export function startOfLocalDay(now: Date): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate())
 }
 
+/** No end date, or one today or later: the deployments the page shows, as a PostgREST `or`. */
+function currentFilter(now: Date): string {
+  return `deployment_end.is.null,deployment_end.gte.${startOfLocalDay(now).toISOString()}`
+}
+
+/** A camera the page shows: deployed with LoRaWAN on (a ping period over 0), or heard from. */
+export function isLorawanCamera(
+  d: Pick<FieldDeployment, 'lorawan_ping_minutes'>, t: Pick<Telemetry, 'lastSeen'> | undefined,
+): boolean {
+  return (d.lorawan_ping_minutes ?? 0) > 0 || t?.lastSeen != null
+}
+
 /**
- * The deployments the page shows: no end date, or one that falls today (the viewer's day) or
- * later. One that ended today stays on the page as Finished; older ones do not show.
+ * Whether the projects have a camera the page would show: a deployment shown today with a ping
+ * period over 0, or one with a message. Two reads of one row each; a read the database refuses
+ * counts as none.
+ */
+export async function hasLorawanCameras(
+  db: SupabaseClient, projectIds: string[], now = new Date(),
+): Promise<boolean> {
+  if (projectIds.length === 0) return false
+  const current = currentFilter(now)
+  const [pinging, heard] = await Promise.all([
+    db.from('deployments')
+      .select('id')
+      .is('deleted_at', null)
+      .in('project_id', projectIds)
+      .gt('lorawan_ping_minutes', 0)
+      .or(current)
+      .limit(1),
+    db.from('lorawan_messages')
+      .select('id, deployments!inner(project_id, deployment_end, deleted_at)')
+      .in('deployments.project_id', projectIds)
+      .is('deployments.deleted_at', null)
+      .or(current, { referencedTable: 'deployments' })
+      .limit(1),
+  ])
+  const found = (r: { data: unknown[] | null; error: unknown }) => !r.error && (r.data?.length ?? 0) > 0
+  return found(pinging) || found(heard)
+}
+
+/**
+ * The deployments the page may show: no end date, or one that falls today (the viewer's day) or
+ * later. One that ended today stays on the page as Finished; older ones do not show. The page
+ * keeps the LoRaWAN cameras among them (`isLorawanCamera`) once their telemetry has answered.
  */
 export async function fetchFieldDeployments(
   db: SupabaseClient, projectIds: string[], now = new Date(),
 ): Promise<FieldDeployment[]> {
   // No projects, no request, as the chunked reads below do.
   if (projectIds.length === 0) return []
-  const today = startOfLocalDay(now).toISOString()
+  const current = currentFilter(now)
   const rows = await readAllPages((from, to) => db
     .from('deployments')
     .select(FIELD_DEPLOYMENT_COLUMNS)
     .is('deleted_at', null)
-    .or(`deployment_end.is.null,deployment_end.gte.${today}`)
+    .or(current)
     .in('project_id', projectIds)
     .order('deployment_start', { ascending: true })
     .order('id')
