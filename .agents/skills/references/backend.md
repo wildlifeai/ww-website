@@ -162,6 +162,9 @@ itself with `app/authz.py` (levels and status codes:
   decision 1, 21 Oct 2026). `require_not_demo` stays on as well.
 * A route that runs as the caller (`get_user_client`) needs neither: RLS decides, and the route
   turns a refused row into `403`.
+* A route that reads with the service role but has a database function count as the caller
+  takes `assert_project_viewer` (`_can_view`, ww-backend's `'project_viewer'` rule), so a caller
+  the function would count nothing for gets `404`, not a report of zeros (the GBF report, #456).
 * Creating a project needs an active organisation role (`project_creator_org_id`).
 
 

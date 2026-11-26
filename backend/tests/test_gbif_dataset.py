@@ -129,7 +129,9 @@ async def test_the_report_carries_the_dataset(gbif_api, monkeypatch):
         }
     )
     monkeypatch.setattr(gbf_report, "create_service_client", db.client)
-    r = await gbf_report.gbf_report([P1], date(2026, 1, 1), date(2026, 1, 31))
+    nothing = {"photos": 0, "photos_with_ai": 0, "photos_reviewed": 0, "reviewers": 0, "deployments_with_photos": []}
+    caller = FakeDB({}, rpcs={gbf_report.COUNTS_FUNCTION: lambda params: {**nothing, "flagged": [], "flagged_first": [], "reviewed_detections": []}})
+    r = await gbf_report.gbf_report(caller, [P1], date(2026, 1, 1), date(2026, 1, 31))
     assert r is not None
     [row] = r["target_21"]["datasets"]
     assert row["status"] == "published" and row["published_records"] == 1234 and row["reviewed_detections"] == 0

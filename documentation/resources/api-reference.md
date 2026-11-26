@@ -16,7 +16,7 @@ Complete endpoint reference for the Wildlife Watcher V2 API.
 **Authentication:** JWT Bearer token from Supabase Auth (required for protected endpoints).
 
 <a id="access"></a>**Access.** A route that names a deployment, project, photo or cluster checks the
-caller's live `user_roles` rows (`backend/app/authz.py`) at one of two levels:
+caller's live `user_roles` rows (`backend/app/authz.py`) at one of three levels:
 
 - **Read**, the default: any role on the project, its organisation, or the system. `404` otherwise,
   so ids in other organisations cannot be probed.
@@ -24,6 +24,10 @@ caller's live `user_roles` rows (`backend/app/authz.py`) at one of two levels:
   ww-backend's `has_project_role(..., 'project_member')`, so `project_member` or `project_admin` on
   the project, or `ww_admin`. A `project_viewer`, the demo account included, and every organisation
   role get `403` "You need the Project Member role to change this project." (UI audit decision 1).
+- **Project viewer**, for a route whose figures a database function counts as the caller:
+  ww-backend's `has_project_role(..., 'project_viewer')`, so any role on the project,
+  `organisation_manager` of its organisation, or `ww_admin`. An `organisation_member` with no role
+  on the project gets `404`, as the function would count nothing for them (#456).
 
 A route that runs as the caller (`get_user_client`) leaves the decision to RLS; its row says so.
 
@@ -342,7 +346,7 @@ Prefix `/api/reports`. JWT required, the demo account included: it only reads. G
 
 | Method · Path | Description |
 |---|---|
-| `GET /api/reports/gbf?project_ids=<id>,<id>&from=<date>&to=<date>` | The GBF contribution report (#371): what the projects contribute to targets 6, 4, 20 and 22 of the Global Biodiversity Framework over UTC days `from` to `to`, both included. Needs read access to every project, `404` otherwise and for a deleted one; `422` for a malformed id or `from` after `to`. Returns `{ method_version, period: { from, to }, projects: [{ id, name }], camera_nights_by_month: [{ month, camera_nights }], target_6, target_4, target_20, target_21, target_22 }`. `target_6` (invasive species) and `target_4` (IUCN Vulnerable or worse) are each `{ sites_monitored, species_recorded, species }`, every species `{ taxon_id, scientific_name, common_name, conservation_status, invasive, detections, rate, sites_with, monthly: [{ month, detections, rate }], first_detections: [{ deployment_id, deployment_name, date }] }`, highest rate first; a species can be in both. `target_20` is `{ cameras, sites, camera_nights, photos, photos_with_ai, photos_reviewed }` and `target_22` is `{ reviewers }`, a count. `target_21` is `{ reviewed_detections, datasets }`, a dataset per project `{ project_id, project_name, dataset_key, status, title, doi, published_records, last_published, reviewed_detections }` with `status` `published`, `not_published` (no key), `not_found` or `unavailable`: GBIF's answers are cached for a day and a GBIF failure never fails the report (#373). The definitions (photo verdict, detections by the 30-minute rule, camera-nights, rate per 100 camera-nights, sites) are in `domain/gbf_report.py`. Rate limit 10/minute |
+| `GET /api/reports/gbf?project_ids=<id>,<id>&from=<date>&to=<date>` | The GBF contribution report (#371): what the projects contribute to targets 6, 4, 20, 21 and 22 of the Global Biodiversity Framework over UTC days `from` to `to`, both included. Needs the [project viewer](#access) level on every project, `404` otherwise and for a deleted one; `422` for a malformed id or `from` after `to`. Returns `{ method_version, period: { from, to }, projects: [{ id, name }], camera_nights_by_month: [{ month, camera_nights }], target_6, target_4, target_20, target_21, target_22 }`. `target_6` (invasive species) and `target_4` (IUCN Vulnerable or worse) are each `{ sites_monitored, species_recorded, species }`, every species `{ taxon_id, scientific_name, common_name, conservation_status, invasive, detections, rate, sites_with, monthly: [{ month, detections, rate }], first_detections: [{ deployment_id, deployment_name, date }] }`, highest rate first; a species can be in both. `target_20` is `{ cameras, sites, camera_nights, photos, photos_with_ai, photos_reviewed }` and `target_22` is `{ reviewers }`, a count. `target_21` is `{ reviewed_detections, datasets }`, a dataset per project `{ project_id, project_name, dataset_key, status, title, doi, published_records, last_published, reviewed_detections }` with `status` `published`, `not_published` (no key), `not_found` or `unavailable`: GBIF's answers are cached for a day and a GBIF failure never fails the report (#373). The photos are counted in the database by ww-backend's `gbf_report_counts`, called as the caller (#456); camera-nights, sites and cameras come from every live deployment of the projects. The definitions (photo verdict, detections by the 30-minute rule, first detections, camera-nights, rate per 100 camera-nights, sites) are in `domain/gbf_report.py`. Rate limit 10/minute |
 
 ---
 
