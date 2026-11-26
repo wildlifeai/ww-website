@@ -16,10 +16,10 @@ from app.registries.embedding_registry import (
     HDBSCAN_PRESETS,
     EmbeddingModelName,
     ExecutionProvider,
-    get_collection,
     get_embedding_dim,
     get_local_embedding_config,
     get_model_spec,
+    get_vector_space,
     is_valid_model_name,
     purity_bucket,
     review_depth_for_purity,
@@ -37,10 +37,10 @@ def test_variants_have_distinct_dims_and_collections():
     assert vith.embedding_dim == 1280
     assert vits.embedding_dim == 384
     # Different dims → must be different collections.
-    assert vith.qdrant_collection != vits.qdrant_collection
+    assert vith.vector_space != vits.vector_space
     assert get_embedding_dim("dinov3-vith") == 1280
     assert get_embedding_dim("dinov3-vits") == 384
-    assert get_collection("dinov3-vits") == "media_embeddings_vits"
+    assert get_vector_space("dinov3-vits") == "media_embeddings_vits"
 
 
 def test_local_variant_uses_onnx_community_model():
@@ -92,7 +92,7 @@ def test_local_config_matches_local_variant_space():
     # Client must use the local variant's own dim + collection (384-d ViT-S).
     assert cfg["model_name"] == "dinov3-vits"
     assert cfg["embedding_dim"] == 384 == spec.embedding_dim
-    assert cfg["qdrant_collection"] == spec.qdrant_collection == "media_embeddings_vits"
+    assert cfg["vector_space"] == spec.vector_space == "media_embeddings_vits"
     assert cfg["execution_provider"] == "webgpu"
     assert cfg["preprocessing"]["pooling"] == spec.preprocessing.pooling
     assert cfg["preprocessing"]["image_mean"] == list(spec.preprocessing.image_mean)

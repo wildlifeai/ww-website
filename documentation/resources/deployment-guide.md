@@ -419,9 +419,8 @@ vector database.
 > ✅ **Migration complete (2026-07-09) — pgvector is live; Qdrant is removed.** The Brain runs
 > end-to-end on dev (embed → cluster → similarity). The Qdrant *service* is gone: `qdrant_client.py`,
 > the compose container, `QDRANT_*` config and the `qdrant-client` dependency have all been deleted.
-> **The name survives in one place** — `qdrant_collection` is still the field naming the logical vector
-> space in `registries/embedding_registry.py`, `domain/wildlife_brain.py` and `embedding_runs`. It is a
-> label, not a dependency; renaming it to `vector_space` needs a coordinated ww-backend column change.
+> The logical vector space is `embedding_runs.vector_space` (renamed from `qdrant_collection` on
+> 2026-11-26, ww-backend#396 with #510), set from `registries/embedding_registry.py`.
 
 **As built** (schema owned by [`ww-backend`](https://github.com/wildlifeai/ww-backend)):
 1. **`ww-backend`:** the `vector` extension is enabled (in the `extensions` schema) and the vector lives
