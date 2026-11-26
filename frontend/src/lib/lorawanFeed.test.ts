@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
-  batteryText, byNewest, fetchFeedMessage, fetchFeedPage, isFeedKind, isNew, mergeFeed, messageText,
+  batteryText, byNewest, fetchFeedMessage, fetchFeedPage, isFeedKind, isNew, isSettingsReply, mergeFeed, messageText,
   olderLimit, sdFreeText, toFeedRow, withLiveRow, withNewestPage, withOlderPage,
   FEED_CAP, FEED_PAGE, FEED_SELECT, type FeedRow, type FeedState, type MessageRow,
 } from './lorawanFeed'
@@ -34,7 +34,8 @@ function message(id: string, min: number, parsed: Partial<MessageRow['lorawan_pa
   return {
     id, deployment_id: 'd1', received_at: at(min),
     lorawan_parsed_messages: [{
-      kind: 'report', nn_detections: null, battery_mv: null, battery_level: null, sd_free_pct: null, ...parsed,
+      kind: 'report', nn_detections: null, battery_mv: null, battery_level: null, sd_free_pct: null,
+      op_index: null, op_value: null, op_error: null, ...parsed,
     }],
   }
 }
@@ -67,17 +68,32 @@ describe('toFeedRow and its texts', () => {
 
   it('maps the message and its decoded values', () => {
     expect(toFeedRow(message('m1', 0, { nn_detections: 2, battery_mv: 5600, battery_level: 76, sd_free_pct: 41 }))).toEqual({
-      id: 'm1', deploymentId: 'd1', receivedAt: at(0), detections: 2, batteryMv: 5600, batteryPct: 76, sdFreePct: 41,
+      id: 'm1', deploymentId: 'd1', receivedAt: at(0), kind: 'report', detections: 2, batteryMv: 5600, batteryPct: 76,
+      sdFreePct: 41, opIndex: null, opValue: null, opError: null,
     })
   })
 
-  it('leaves settings replies out', () => {
-    expect(isFeedKind('report')).toBe(true)
-    expect(isFeedKind('legacy')).toBe(true)
-    expect(isFeedKind('op_get')).toBe(false)
-    expect(isFeedKind('op_set')).toBe(false)
-    expect(toFeedRow(message('m', 0, { kind: 'op_get' }))).toBeNull()
-    expect(toFeedRow(message('m', 0, { kind: 'op_set' }))).toBeNull()
+  it('shows check-ins and settings replies, and leaves any other kind out', () => {
+    for (const kind of ['report', 'legacy', 'op_get', 'op_set']) expect(isFeedKind(kind)).toBe(true)
+    expect(isFeedKind('something_new')).toBe(false)
+    expect(toFeedRow(message('m', 0, { kind: 'something_new' }))).toBeNull()
+  })
+
+  it('words a settings reply: read, set, or not, with the reason', () => {
+    const reply = (kind: string, op_index: number, op_value: number | null, op_error: number | null = null) =>
+      messageText(toFeedRow(message('m', 0, { kind, op_index, op_value, op_error }))!)
+    expect(reply('op_get', 16, 18)).toBe('Setting 16 read: 18')
+    expect(reply('op_set', 16, 18)).toBe('Setting 16 set to 18')
+    expect(reply('op_get', 32, 0)).toBe('Setting 32 read: 0')
+    expect(reply('op_set', 16, null, 1)).toBe('Setting 16 not changed: rejected by the AI processor')
+    expect(reply('op_set', 16, null, 2)).toBe('Setting 16 not changed: no answer from the AI processor')
+    expect(reply('op_get', 16, null, 1)).toBe('Setting 16 not read: rejected by the AI processor')
+    expect(reply('op_set', 16, null, 9)).toBe('Setting 16 not changed: error 9')
+  })
+
+  it('tells a settings reply from a check-in', () => {
+    expect(isSettingsReply(row('m', 0))).toBe(false)
+    expect(isSettingsReply(toFeedRow(message('m', 0, { kind: 'op_set', op_index: 16, op_value: 18 }))!)).toBe(true)
   })
 
   it('needs a deployment and a time', () => {
@@ -192,7 +208,7 @@ describe('fetchFeedPage', () => {
       ['from', 'lorawan_messages'],
       ['select', FEED_SELECT],
       ['in', 'deployment_id', ['d1', 'd2']],
-      ['in', 'lorawan_parsed_messages.kind', ['report', 'legacy']],
+      ['in', 'lorawan_parsed_messages.kind', ['report', 'legacy', 'op_get', 'op_set']],
       ['not', 'received_at', 'is', null],
       ['order', 'received_at', { ascending: false }],
       ['order', 'id', { ascending: false }],
@@ -237,7 +253,7 @@ describe('fetchFeedMessage', () => {
     const { db, queries } = fakeDb(() => ({ data: [message('m1', 1, { nn_detections: 2 })], error: null }))
     expect(await fetchFeedMessage(db, 'm1')).toEqual({ ...row('m1', 1), detections: 2 })
     expect(queries[0]).toContainEqual(['eq', 'id', 'm1'])
-    expect(queries[0]).toContainEqual(['in', 'lorawan_parsed_messages.kind', ['report', 'legacy']])
+    expect(queries[0]).toContainEqual(['in', 'lorawan_parsed_messages.kind', ['report', 'legacy', 'op_get', 'op_set']])
   })
 
   it('is null when the message does not show', async () => {

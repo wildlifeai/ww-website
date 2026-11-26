@@ -5,8 +5,8 @@
  * - It opens with the newest `FEED_PAGE`; "Load older" reads the next ones before the oldest row,
  *   and the list keeps at most `FEED_CAP`, the newest.
  * - A row is one `lorawan_messages` row with its `lorawan_parsed_messages` row, embedded `!inner`,
- *   so an empty frame (no decoded values) has none. Settings replies (`op_get`, `op_set`) wait for
- *   a later slice: only `FEED_KINDS` show.
+ *   so an empty frame (no decoded values) has none. Only `FEED_KINDS` show: check-ins (`report`,
+ *   `legacy`) and the camera's answers to a settings downlink (`op_get`, `op_set`, ww-website#516).
  * - The read policies are those of `lorawan_messages` and `lorawan_parsed_messages`, both the
  *   deployment's project (project_viewer and up) and ww_admin, so every role sees the same list.
  * - Supabase Realtime does not resend changes missed while disconnected, so the page reads the
@@ -18,18 +18,24 @@ import { ID_CHUNK } from './realtimeReads'
 
 export const FEED_PAGE = 50
 export const FEED_CAP = 500
-export const FEED_KINDS = ['report', 'legacy']
+export const FEED_KINDS = ['report', 'legacy', 'op_get', 'op_set']
 
 export interface FeedRow {
   /** The `lorawan_messages` id. */
   id: string
   deploymentId: string
   receivedAt: string
+  /** `lorawan_parsed_messages.kind`, one of `FEED_KINDS`. */
+  kind: string
   detections: number | null
   batteryMv: number | null
   /** Percent of the battery byte's scale, today's Cameras table value; used when there is no `batteryMv`. */
   batteryPct: number | null
   sdFreePct: number | null
+  /** A settings reply's op number, the value read or set, and its error (1 rejected, 2 no answer). */
+  opIndex: number | null
+  opValue: number | null
+  opError: number | null
 }
 
 interface ParsedValues {
@@ -38,6 +44,9 @@ interface ParsedValues {
   battery_mv: number | null
   battery_level: number | null
   sd_free_pct: number | null
+  op_index: number | null
+  op_value: number | null
+  op_error: number | null
 }
 
 export interface MessageRow {
@@ -48,7 +57,8 @@ export interface MessageRow {
 }
 
 export const FEED_SELECT =
-  'id, deployment_id, received_at, lorawan_parsed_messages!inner(kind, nn_detections, battery_mv, battery_level, sd_free_pct)'
+  'id, deployment_id, received_at, lorawan_parsed_messages!inner(kind, nn_detections, battery_mv, battery_level, sd_free_pct, '
+  + 'op_index, op_value, op_error)'
 
 export function isFeedKind(kind: string): boolean {
   return FEED_KINDS.includes(kind)
@@ -59,12 +69,36 @@ export function toFeedRow(m: MessageRow): FeedRow | null {
   const p = m.lorawan_parsed_messages.find(x => isFeedKind(x.kind))
   if (!p || !m.deployment_id || !m.received_at) return null
   return {
-    id: m.id, deploymentId: m.deployment_id, receivedAt: m.received_at, detections: p.nn_detections,
+    id: m.id, deploymentId: m.deployment_id, receivedAt: m.received_at, kind: p.kind, detections: p.nn_detections,
     batteryMv: p.battery_mv, batteryPct: p.battery_level, sdFreePct: p.sd_free_pct,
+    opIndex: p.op_index, opValue: p.op_value, opError: p.op_error,
   }
 }
 
+export function isSettingsReply(r: Pick<FeedRow, 'kind'>): boolean {
+  return r.kind === 'op_get' || r.kind === 'op_set'
+}
+
+/** `op_error` in words (ww-backend `lorawan_parsed_messages.op_error`). */
+const OP_ERRORS: Record<number, string> = {
+  1: 'rejected by the AI processor',
+  2: 'no answer from the AI processor',
+}
+
+/**
+ * "Check-in", "Detection +2", or a settings reply: "Setting 16 read: 18", "Setting 16 set to 18",
+ * "Setting 16 not changed: rejected by the AI processor".
+ */
 export function messageText(r: FeedRow): string {
+  if (isSettingsReply(r)) {
+    const setting = `Setting ${r.opIndex ?? '?'}`
+    const read = r.kind === 'op_get'
+    if (r.opError != null) {
+      const why = OP_ERRORS[r.opError] ?? `error ${r.opError}`
+      return `${setting} ${read ? 'not read' : 'not changed'}: ${why}`
+    }
+    return read ? `${setting} read: ${r.opValue ?? '-'}` : `${setting} set to ${r.opValue ?? '-'}`
+  }
   return r.detections && r.detections > 0 ? `Detection +${r.detections}` : 'Check-in'
 }
 

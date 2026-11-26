@@ -10,8 +10,8 @@
  *   versions of the firmware it started with (`ble_firmware_id`, `himax_firmware_id`, read from
  *   `firmware`, which every signed-in user may read).
  * - Telemetry is one read of the view `deployment_latest_lorawan` per chunk: one row per
- *   deployment with the time of its newest message, the latest battery and SD free space, and
- *   the camera's health state and reasons (ww-backend #333, #358, #381), so a chatty camera
+ *   deployment with the time of its newest message, the latest battery and SD free space, the
+ *   temperature and health state and reasons (ww-backend #333, #358, #381), so a chatty camera
  *   cannot crowd a quiet one out (UI audit 04 #10). The view runs as the caller, so
  *   `lorawan_messages`' read policy decides which deployments come back.
  * - A new message re-reads only its own deployment (`fetchDeploymentUpdate`).
@@ -45,6 +45,8 @@ export interface Telemetry {
   /** Percent of the battery byte's scale, for older firmware with no `batteryMv`. */
   batteryPct: number | null
   sdFreePct: number | null
+  /** The camera's Bluetooth chip, degrees C, sent with its health report (new firmware only). */
+  temperatureC: number | null
   health: HealthState | null
   /** `health_reasons` codes, worst first. */
   healthReasons: string[]
@@ -52,7 +54,8 @@ export interface Telemetry {
 
 /** A deployment with no message yet. */
 export const NO_MESSAGE: Telemetry = {
-  lastSeen: null, batteryMv: null, batteryPct: null, sdFreePct: null, health: null, healthReasons: [],
+  lastSeen: null, batteryMv: null, batteryPct: null, sdFreePct: null, temperatureC: null, health: null,
+  healthReasons: [],
 }
 
 /** Deployment ids per request. */
@@ -85,6 +88,11 @@ const FIELD_DEPLOYMENT_COLUMNS = 'id, project_id, device_id, location_name, lati
 export function firmwareText(d: Pick<FieldDeployment, 'ble_firmware' | 'himax_firmware'>): string {
   const parts = [d.ble_firmware && `BLE ${d.ble_firmware}`, d.himax_firmware && `Himax ${d.himax_firmware}`]
   return parts.filter(Boolean).join(' · ') || '-'
+}
+
+/** "16 °C"; a dash for none. */
+export function temperatureText(t: Pick<Telemetry, 'temperatureC'>): string {
+  return t.temperatureC == null ? '-' : `${t.temperatureC} °C`
 }
 
 /** Midnight at the start of `now`'s day, in the viewer's zone. */
@@ -123,17 +131,18 @@ interface LatestMessageRow {
   battery_level: number | null
   battery_mv: number | null
   sd_free_pct: number | null
+  temperature_c: number | null
   health_state: string | null
   health_reasons: string[] | null
 }
 
 const TELEMETRY_COLUMNS =
-  'deployment_id, received_at, battery_level, battery_mv, sd_free_pct, health_state, health_reasons'
+  'deployment_id, received_at, battery_level, battery_mv, sd_free_pct, temperature_c, health_state, health_reasons'
 
 function toTelemetry(m: LatestMessageRow): Telemetry {
   return {
     lastSeen: m.received_at, batteryMv: m.battery_mv, batteryPct: m.battery_level, sdFreePct: m.sd_free_pct,
-    health: toHealthState(m.health_state), healthReasons: m.health_reasons ?? [],
+    temperatureC: m.temperature_c, health: toHealthState(m.health_state), healthReasons: m.health_reasons ?? [],
   }
 }
 

@@ -163,12 +163,17 @@ projects you have selected, and the ones collected today.
       yet. **Finished**: its deployment ended today.
   - **Battery** is in volts, or a percentage from older firmware. Battery and **SD free** turn
     red when the camera's health report finds the battery low or the SD card 10% free or less.
+  - **Temperature** is measured inside the camera, on its Bluetooth chip, and comes with its
+    health report, so a camera whose firmware sends none shows a dash.
   - **Firmware** is the version the camera was deployed with.
   - **Detections 48h** is what the camera's own AI counted in the last 48 hours.
 - **Messages** lists the messages, newest first:
   - **Check-in**, or **Detection +2** when the camera counted 2 detections since its previous
     message. A camera's first count after it is deployed has nothing to compare with, so that
     message shows as a Check-in.
+  - **Setting 16 set to 18**, or **Setting 16 read: 18**, when the camera answers a change to
+    one of its settings, or a question about it, sent over LoRaWAN. **Not changed**, in red,
+    means its AI processor rejected the value or did not answer.
   - **Battery** in volts, or as a percentage from older firmware.
   - **SD free** is how much of the SD card is still free; a dash means the camera could not
     tell.

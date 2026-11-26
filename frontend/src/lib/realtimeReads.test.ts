@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   fetchDeploymentUpdate, fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, firmwareText,
-  startOfLocalDay, sumDetections, withEntry, withLastSeen, DETECTION_HOURS, ID_CHUNK, NO_MESSAGE,
+  startOfLocalDay, sumDetections, temperatureText, withEntry, withLastSeen, DETECTION_HOURS, ID_CHUNK, NO_MESSAGE,
 } from './realtimeReads'
 import { batteryText, sdFreeText } from './lorawanFeed'
 import { PAGE_SIZE } from './liveObservations'
@@ -38,7 +38,7 @@ function fakeDb(answer: (calls: Call[], n: number) => Answer) {
 
 const latest = (deployment: string, at: string, battery: number | null = 80) => ({
   deployment_id: deployment, received_at: at, battery_level: battery, battery_mv: null, sd_free_pct: 41,
-  health_state: null, health_reasons: null,
+  temperature_c: null, health_state: null, health_reasons: null,
 })
 /** What `latest` reads as. */
 const seen = (at: string, battery: number | null = 80) => ({
@@ -55,20 +55,20 @@ describe('fetchLatestTelemetry', () => {
     expect(await fetchLatestTelemetry(db, ['d1', 'd2', 'd3'])).toEqual({ d1: seen('t1'), d3: seen('t2', null) })
     expect(queries).toEqual([[
       ['from', 'deployment_latest_lorawan'],
-      ['select', 'deployment_id, received_at, battery_level, battery_mv, sd_free_pct, health_state, health_reasons'],
+      ['select', 'deployment_id, received_at, battery_level, battery_mv, sd_free_pct, temperature_c, health_state, health_reasons'],
       ['in', 'deployment_id', ['d1', 'd2', 'd3']],
     ]])
   })
 
-  it('reads the volts, the health state and its reasons, and never sd_card_used_capacity', async () => {
+  it('reads the volts, the temperature, the health state and its reasons, and never sd_card_used_capacity', async () => {
     const row = {
-      ...latest('d1', 't1'), battery_mv: 5612, sd_free_pct: 8,
+      ...latest('d1', 't1'), battery_mv: 5612, sd_free_pct: 8, temperature_c: -2,
       health_state: 'fault', health_reasons: ['self_test_bit_9', 'sd_low'],
     }
     const { db, queries } = fakeDb(() => ({ data: [row], error: null }))
     expect(await fetchLatestTelemetry(db, ['d1'])).toEqual({
       d1: {
-        lastSeen: 't1', batteryMv: 5612, batteryPct: 80, sdFreePct: 8,
+        lastSeen: 't1', batteryMv: 5612, batteryPct: 80, sdFreePct: 8, temperatureC: -2,
         health: 'fault', healthReasons: ['self_test_bit_9', 'sd_low'],
       },
     })
@@ -249,6 +249,13 @@ describe('the Cameras table values', () => {
   it('shows the SD card free space', () => {
     expect(sdFreeText({ ...NO_MESSAGE, sdFreePct: 41 })).toBe('41%')
     expect(sdFreeText(NO_MESSAGE)).toBe('-')
+  })
+
+  it('shows the temperature, below zero too, and a dash for none', () => {
+    expect(temperatureText({ temperatureC: 16 })).toBe('16 °C')
+    expect(temperatureText({ temperatureC: -2 })).toBe('-2 °C')
+    expect(temperatureText({ temperatureC: 0 })).toBe('0 °C')
+    expect(temperatureText(NO_MESSAGE)).toBe('-')
   })
 
   it('names the firmware the deployment recorded', () => {

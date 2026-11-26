@@ -52,7 +52,7 @@ export function useFieldLive(deployments: FieldDeployment[]): boolean {
     }
 
     const onDecoded = async (row: { lorawan_message_id: string; device_id: string | null; kind: string }) => {
-      // Settings replies are not shown yet and carry nothing the Cameras table shows.
+      // A settings reply re-reads the camera too: one sent after an error carries its health.
       if (!isFeedKind(row.kind) || (row.device_id && !devices.has(row.device_id))) return
       try {
         const message = await fetchFeedMessage(supabase, row.lorawan_message_id)
