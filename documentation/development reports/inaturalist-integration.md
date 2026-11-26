@@ -15,19 +15,19 @@ camera-trap observations to it, see per-photo upload/ID status on thumbnails, an
 ## 1. End-to-end flow
 
 ```
-Connect (OAuth2 + PKCE)                    Publish                         Sync back
+Connect (pasted token)                     Publish                         Sync back
 ─────────────────────       ──────────────────────────────       ────────────────────────────
-WW user ──▶ /api/inat/auth   select photos in Annotations         scheduled / "↻ Sync IDs"
-        ──▶ iNat consent     ──▶ POST /api/inat/publish            ──▶ POST /api/inat/sync
-        ──▶ callback stores   ── consolidate bursts (Δt)            ── batch-poll public iNat API
-            encrypted token   ── drop by-catch (human/vehicle/blank)── quality_grade + community_taxon
+WW user ──▶ /api/inat/token  select photos in Annotations         scheduled / "↻ Sync IDs"
+        ──▶ checked on iNat  ──▶ POST /api/inat/publish            ──▶ POST /api/inat/sync
+        ──▶ stored encrypted  ── consolidate bursts (Δt)            ── batch-poll public iNat API
+            or OAuth app, §3  ── drop by-catch (human/vehicle/blank)── quality_grade + community_taxon
                               ── create obs + proxy-upload photos    ── update inat_observations (badge)
                               ── record inat_observations(+media)    ── write consensus obs into WW
 ```
 
-Three external token types are used (all handled in `services/inat_oauth.py`): the long-lived
-**OAuth access token** (v1 writes), a 24 h **JWT** from `/users/api_token` (v2/auth reads), and the
-**public API** (no auth) for community-ID polling.
+Every authenticated call sends a 24 h **JWT** from `/users/api_token`
+(`services/inat_oauth.py::resolve_api_jwt`): the one a person pasted, or one the optional OAuth
+path's access token is exchanged for. Community-ID polling uses the **public API** (no auth).
 
 ---
 
@@ -38,7 +38,7 @@ generate the migration + types). Non-breaking: three new tables, no existing tab
 
 | Table | Purpose | Access |
 |---|---|---|
-| `inat_tokens` | Fernet-encrypted per-user OAuth tokens | **service-role only** (no `authenticated` grant) |
+| `inat_tokens` | Fernet-encrypted per-user iNaturalist tokens | **service-role only** (no `authenticated` grant) |
 | `inat_observations` | One row per published burst → iNat observation; holds `inat_observation_id/uuid/uri`, `species_guess`, `geoprivacy`, and the **`sync_status`** lifecycle + `quality_grade` + `community_taxon(_id)` | `SELECT` for project members (via deployment→project); writes service-role only |
 | `inat_observation_media` | Join: WW photos per iNat observation (`inat_photo_id`, `original_filename`) — drives the thumbnail badge | same as above |
 
@@ -49,14 +49,19 @@ mobile-synced `media` table untouched (non-breaking) and avoids a forward foreig
 
 ---
 
-## 3. Account linking (OAuth2 + PKCE) — pre-existing
+## 3. Account linking
 
-Already implemented before this work; surfaced in Phase 3.
+The normal way, decided 26 Nov 2026: the person pastes their personal API token in Toolkit
+(`POST /api/inat/token`), no iNaturalist app registered; Settings, Integrations links there. OAuth2 +
+PKCE through a registered app, built before this work, stays in the API as an optional second path
+with no button on the website. Setup of both:
+[deployment guide](../resources/deployment-guide.md#inaturalist).
 
-- `services/inat_oauth.py`: `generate_pkce_pair` (S256), `build_authorization_url`,
-  `exchange_code_for_token`, `refresh_access_token`, `get_api_jwt`, and **encrypted** token
-  storage in `inat_tokens` (`encrypt_token`/`decrypt_token`, Fernet key derived from
-  `INAT_CLIENT_SECRET`; refused, with the reason, when it is missing or shorter than 32 characters).
+- `services/inat_oauth.py`: `validate_api_token` (the pasted token), `generate_pkce_pair` (S256),
+  `build_authorization_url`, `exchange_code_for_token`, `refresh_access_token`, `get_api_jwt`
+  (OAuth), and **encrypted** token storage in `inat_tokens` (`encrypt_token`/`decrypt_token`,
+  Fernet key from `INAT_TOKEN_KEY`; refused, with the reason, when it is missing or too short,
+  `token_key_problem`).
 - Routes: `GET /api/inat/auth | /callback | /status`, `POST /api/inat/disconnect | /token`.
 - UI: `INaturalistPanel.tsx` (connect/disconnect), surfaced on the **Toolkit** tab (the old *Other*
   tab was retired — `/other` now redirects to `/toolkit`, and the OAuth callback returns to
@@ -187,7 +192,7 @@ no person labelled the photo, and later pipeline runs would skip those photos.
 | Layer | File | Role |
 |---|---|---|
 | Schema | `ww-backend/supabase/schemas/public/tables/51..53_*.sql` + `yyy_policies/88,89_*.sql` | tables + RLS |
-| Auth | `ww-website/backend/app/services/inat_oauth.py` | OAuth/PKCE + token storage (pre-existing) |
+| Auth | `ww-website/backend/app/services/inat_oauth.py` | Pasted-token check, optional OAuth/PKCE, encrypted token storage |
 | Domain | `…/domain/inaturalist.py` | create/upload/poll helpers (pre-existing) |
 | Domain | `…/domain/inaturalist_publish.py` | publish orchestrator (Phase 2) |
 | Domain | `…/domain/inaturalist_sync.py` | sync-back (Phase 4) |
