@@ -64,11 +64,16 @@ Rules:
 * On AWS a GPU job (AI analysis, grouping) stays `queued` until a REANNZ batch leases it, and
   the job API sets `batch_wait` meanwhile, with the wait to state (`usual_wait_minutes`, from
   `BATCH_MAX_WAIT_MINUTES` and `BATCH_CRON_INTERVAL_MINUTES`): word it with `batchWaitText`
-  (`lib/batchWait.ts`), never as a run at 0% or a hard-coded hour (#460). A batch job
-  (`gpu_batch`) reports every few minutes, so the dock's 15 s stall rule skips it. The upload
-  dock keeps a polled job only when `jobChanged` (`components/toolkit/pipelineProgress.ts`)
-  counts a change, so a new job field the dock shows must count there, or a job whose status
-  stays `queued` never shows it.
+  (`lib/batchWait.ts`), never as a run at 0% or a hard-coded hour (#460). The upload job's final
+  message states the same wait with the backend's `store.wait_in_words`, so change the two
+  together (#432). A batch job (`gpu_batch`) reports every few minutes, so the dock's 15 s stall
+  rule skips it. The upload dock keeps a polled job only when `jobChanged`
+  (`components/toolkit/pipelineProgress.ts`) counts a change, so a new job field the dock shows
+  must count there, or a job whose status stays `queued` never shows it.
+* A job's final `message` shows on the site only for a job with no events, or beside a
+  `result_url`'s download link: the dock and Processing history show an upload's events. So a
+  line the uploader must read is an event, and a fact the dock acts on is a field of the job's
+  `result`, as `result.ai` is (`aiNotRun` in `pipelineProgress.ts`, #432).
 * A page that listens to Supabase Realtime reads again after every re-subscribe and on return to
   the tab: Realtime does not resend changes missed while disconnected, and `refetchOnWindowFocus`
   is off site-wide (`lib/queryClient.ts`). LoRaWAN values arrive in `lorawan_parsed_messages`, a

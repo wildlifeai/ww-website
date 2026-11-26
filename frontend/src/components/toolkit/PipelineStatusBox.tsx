@@ -2,7 +2,7 @@ import { useRef, useState, useEffect } from 'react'
 import { Info, TriangleAlert } from 'lucide-react'
 import type { BatchWait, ProgressPhase, ProgressSummary } from '../../types/job'
 import { batchWaitText } from '../../lib/batchWait'
-import { aiAnalysisStatus, aiBatchWait } from './pipelineProgress'
+import { aiAnalysisStatus, aiBatchWait, aiNotRun } from './pipelineProgress'
 
 export type LogEntry = {
   ts: number
@@ -25,6 +25,8 @@ export type PipelineJob = {
   batchWait?: BatchWait | null
   /** The job runs through the GPU batch (AWS), so it reports every few minutes, not seconds. */
   gpuBatch?: boolean
+  /** Why this upload job did not run the AI ("turned off for this upload"); null when it ran or queued it. */
+  aiNotRun?: string | null
 }
 
 export type PipelineState = {
@@ -149,18 +151,21 @@ function deriveSteps(state: PipelineState, phase: string): StepsResult {
     status: driveStatus, progress: driveStatus === 'active' ? driveProg : null,
   }
 
-  // 3 · AI analysis (on AWS it can first wait for the GPU batch, shown as pending)
+  // 3 · AI analysis (on AWS it can first wait for the GPU batch, shown as pending; an upload that
+  // did not run it says why, #432)
   const ai = aiAnalysisStatus(state)
   const wait = aiBatchWait(state)
+  const notRun = aiNotRun(state)
   const aiFailed = aiJobs.some((j) => j.status === 'failed')
   let aiStatus: StepStatus
-  if (aiJobs.length === 0) aiStatus = done ? 'done' : 'pending'
+  if (aiJobs.length === 0) aiStatus = done && notRun == null ? 'done' : 'pending'
   else if (wait) aiStatus = 'pending'
   else if (ai?.active) aiStatus = 'active'
   else if (aiFailed) aiStatus = 'error'
   else aiStatus = 'done'
   const aiDetail =
     wait ? batchWaitText(wait)
+    : notRun != null ? `Not run: ${notRun}`
     : aiStatus === 'pending' ? 'Waiting for upload to finish'
     : aiStatus === 'error' ? 'Analysis failed: see the technical details'
     : aiStatus === 'done' ? 'Species identified'

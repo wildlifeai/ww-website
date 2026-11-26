@@ -304,8 +304,16 @@ upload_drive_images_job:
                       appear in the Media grid and the pipeline has something to run on
                       (EXIF timestamps are normalised "YYYY:MM:DD HH:MM:SS" → ISO before insert —
                        raw EXIF is rejected by Postgres and would silently create 0 media rows)
-  → AUTO-ANNOTATE    enqueue auto_annotate_deployments (the AI pipeline, async) — see 04-AI-PIPELINE
-  → CLEANUP          delete the buffered objects; job completes
+  → CLEANUP          delete the buffered objects
+  → AI PIPELINE      run it in this job when no GPU offload is configured, else reserve or join the
+                      deployment's `ai_pipeline` job and hand it on (ARQ worker, or the REANNZ batch
+                      under WORKER_BACKEND=lambda); see 04-AI-PIPELINE
+  → DONE             the final message ends with what the AI did, also the job's `result`
+                      (upload_ai_outcome, #432): "AI analysis complete" (ran in this job),
+                      "AI analysis queued (job <id>)", on the batch "AI analysis queued for the next
+                      GPU run, usually within <wait> (job <id>)" with the dock's wait (batchWait.ts),
+                      or "AI not run (<reason>)": turned off for this upload, no photo matched a
+                      deployment, or no AI step enabled. A Drive or AI error ends "Done with issues"
 ```
 
 ### Backend environment requirements (per environment)

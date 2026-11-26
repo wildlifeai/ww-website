@@ -5,7 +5,8 @@
 // the queue for the next run on the REANNZ cluster. The job API sets `batch_wait` only while a
 // job waits, with `usual_wait_minutes` worked out from the batch and cron settings
 // (`store.usual_batch_wait_minutes`), so on Azure, where the work runs at once, the wording stays
-// as it was. Every place that states the wait words it with `batchWaitText`.
+// as it was. Every place that states the wait words it with `batchWaitText`; the upload job's final
+// message states it in the same words (`store.wait_in_words` in the backend, #432).
 import type { BatchWait, JobSummary } from '../types/job'
 
 /** A wait in words: "an hour", "2 hours", "45 minutes". */

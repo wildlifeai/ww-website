@@ -10,14 +10,15 @@ import { Link } from 'react-router-dom'
 import { Camera, Cpu } from 'lucide-react'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { batchWaitText } from '../../lib/batchWait'
-import { aiAnalysisStatus, aiBatchWait } from '../toolkit/pipelineProgress'
+import { aiAnalysisStatus, aiBatchWait, aiNotRun } from '../toolkit/pipelineProgress'
 import { Banner, BannerProgress } from '../ui/Banner'
 
 export function LiveInsightsBanner() {
   const { uploadedDeploymentIds, phase, pipelineState } = useUploadStore()
 
-  // Nothing uploaded this session, or the dock was dismissed: no banner.
-  if (uploadedDeploymentIds.length === 0 || phase === 'idle') return null
+  // Nothing uploaded this session, the dock was dismissed, or the upload did not run the AI
+  // (#432, the dock says why): no banner.
+  if (uploadedDeploymentIds.length === 0 || phase === 'idle' || aiNotRun(pipelineState) != null) return null
 
   const ai = aiAnalysisStatus(pipelineState)
   const done = phase === 'completed'

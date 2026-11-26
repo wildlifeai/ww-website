@@ -31,6 +31,20 @@ export function aiBatchWait(state: PipelineState): BatchWait | null {
   return running[0].batchWait ?? null
 }
 
+/** Why an upload job did not run the AI, from its `result` (`{ ai: 'not_run', ai_reason }`, #432), else null. */
+export function aiNotRunReason(result: Record<string, unknown> | null | undefined): string | null {
+  return result?.ai === 'not_run' ? String(result.ai_reason ?? '') : null
+}
+
+/**
+ * Why the upload's AI was not run, once every upload job has finished without running it, else
+ * null: the dock then says so instead of "Species identified".
+ */
+export function aiNotRun(state: PipelineState): string | null {
+  const uploads = state.jobs.filter((j) => j.fileCount > 0)
+  return uploads.length > 0 && uploads.every((j) => j.aiNotRun != null) ? uploads[0].aiNotRun ?? null : null
+}
+
 /**
  * True when a poll changed what the dock shows for a job. A job that starts waiting for the GPU
  * batch stays queued, so the wait and the batch flag count as changes themselves.
@@ -42,6 +56,7 @@ export function jobChanged(prev: PipelineJob, next: PipelineJob): boolean {
     prev.message !== next.message ||
     (next.eventCount ?? 0) > (prev.eventCount ?? 0) ||
     !prev.batchWait !== !next.batchWait ||
-    !prev.gpuBatch !== !next.gpuBatch
+    !prev.gpuBatch !== !next.gpuBatch ||
+    (prev.aiNotRun ?? null) !== (next.aiNotRun ?? null)
   )
 }
