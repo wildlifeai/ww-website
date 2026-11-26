@@ -67,6 +67,8 @@ the old path or grep the sibling repos.
 
 ## 3. `embedding_runs.qdrant_collection` — a dead vendor's name on a live column
 
+**Done 2026-11-26:** renamed to `vector_space` by ww-backend#396 (#387), with the website half in ww-website#510.
+
 ```sql
 -- supabase/schemas/public/tables/34b_embedding_runs.sql:27
 qdrant_collection text NOT NULL DEFAULT 'media_embeddings',
