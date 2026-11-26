@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   fetchDeploymentUpdate, fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, firmwareText,
-  startOfLocalDay, sumDetections, temperatureText, withEntry, withLastSeen, DETECTION_HOURS, ID_CHUNK, NO_MESSAGE,
+  hasLorawanCameras, isLorawanCamera, startOfLocalDay, sumDetections, temperatureText, withEntry, withLastSeen, DETECTION_HOURS, ID_CHUNK, NO_MESSAGE,
 } from './realtimeReads'
 import { batteryText, sdFreeText } from './lorawanFeed'
 import { PAGE_SIZE } from './liveObservations'
@@ -22,7 +22,7 @@ function fakeDb(answer: (calls: Call[], n: number) => Answer) {
       const n = queries.length
       queries.push(calls)
       const chain: Record<string, unknown> = {}
-      for (const m of ['select', 'in', 'eq', 'is', 'or', 'order', 'gt', 'gte', 'not']) {
+      for (const m of ['select', 'in', 'eq', 'is', 'or', 'order', 'gt', 'gte', 'not', 'limit']) {
         chain[m] = (...args: unknown[]) => { calls.push([m, ...args]); return chain }
       }
       chain.range = (...args: unknown[]) => {
@@ -90,6 +90,58 @@ describe('fetchLatestTelemetry', () => {
   it('throws a refused read instead of showing every camera as awaiting', async () => {
     const { db } = fakeDb(() => ({ data: null, error: { message: 'permission denied' } }))
     await expect(fetchLatestTelemetry(db, ['d1'])).rejects.toThrow('permission denied')
+  })
+})
+
+describe('isLorawanCamera', () => {
+  const heard = { lastSeen: '2026-11-27T10:00:00+00:00' }
+  it('is a camera deployed with LoRaWAN on, or one that sent a message', () => {
+    expect(isLorawanCamera({ lorawan_ping_minutes: 240 }, undefined)).toBe(true)
+    expect(isLorawanCamera({ lorawan_ping_minutes: null }, heard)).toBe(true)
+    expect(isLorawanCamera({ lorawan_ping_minutes: 0 }, heard)).toBe(true)
+  })
+
+  it('leaves out a camera with LoRaWAN off or no period recorded that never sent a message', () => {
+    expect(isLorawanCamera({ lorawan_ping_minutes: null }, undefined)).toBe(false)
+    expect(isLorawanCamera({ lorawan_ping_minutes: 0 }, undefined)).toBe(false)
+    expect(isLorawanCamera({ lorawan_ping_minutes: null }, NO_MESSAGE)).toBe(false)
+  })
+})
+
+describe('hasLorawanCameras', () => {
+  const now = new Date(2026, 10, 27, 15, 0)
+  const today = `deployment_end.is.null,deployment_end.gte.${startOfLocalDay(now).toISOString()}`
+
+  it('asks for one deployment with a ping period and one message, both shown today', async () => {
+    const { db, queries } = fakeDb(() => ({ data: [], error: null }))
+    expect(await hasLorawanCameras(db, ['p1', 'p2'], now)).toBe(false)
+    expect(queries).toEqual([
+      [
+        ['from', 'deployments'], ['select', 'id'], ['is', 'deleted_at', null], ['in', 'project_id', ['p1', 'p2']],
+        ['gt', 'lorawan_ping_minutes', 0], ['or', today], ['limit', 1],
+      ],
+      [
+        ['from', 'lorawan_messages'], ['select', 'id, deployments!inner(project_id, deployment_end, deleted_at)'],
+        ['in', 'deployments.project_id', ['p1', 'p2']], ['is', 'deployments.deleted_at', null],
+        ['or', today, { referencedTable: 'deployments' }], ['limit', 1],
+      ],
+    ])
+  })
+
+  it('is true when either read finds one, and counts a refused read as none', async () => {
+    const one = { data: [{ id: 'x' }], error: null }
+    const none = { data: [], error: null }
+    const refused = { data: null, error: { message: 'permission denied' } }
+    expect(await hasLorawanCameras(fakeDb((_, n) => (n === 0 ? one : none)).db, ['p1'], now)).toBe(true)
+    expect(await hasLorawanCameras(fakeDb((_, n) => (n === 1 ? one : none)).db, ['p1'], now)).toBe(true)
+    expect(await hasLorawanCameras(fakeDb((_, n) => (n === 0 ? refused : one)).db, ['p1'], now)).toBe(true)
+    expect(await hasLorawanCameras(fakeDb(() => refused).db, ['p1'], now)).toBe(false)
+  })
+
+  it('asks nothing for no projects', async () => {
+    const { db, queries } = fakeDb(() => ({ data: [], error: null }))
+    expect(await hasLorawanCameras(db, [], now)).toBe(false)
+    expect(queries).toEqual([])
   })
 })
 

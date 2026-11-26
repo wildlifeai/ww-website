@@ -2,25 +2,23 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // useHasRealtimeData: whether the Realtime nav tab opens (otherwise it shows greyed out,
-// RealtimeTabOff). It opens when a device in one of the user's projects sends or has sent
-// LoRaWAN data, meaning at least one lorawan_messages row the user can read. RLS lets a user read
-// a message through its deployment's project (has_project_role, project_viewer), so one limit-1
-// read answers it.
+// RealtimeTabOff). It opens when the projects selected in the header have a camera the Realtime
+// page shows: deployed now or collected today, with LoRaWAN on or a message sent
+// (hasLorawanCameras in lib/realtimeReads.ts, the page's own rule). It follows the selection, so
+// a project with no LoRaWAN camera greys the tab (Victor, 27 Nov 2026). RLS scopes both reads to
+// the projects the user can read.
 //
-// It asks about every project the user can read, not the header selection, so the tab does not
-// change as projects are ticked. The last answer seeds the next page load, so a returning user
-// finds the tab open at once; the read then confirms or greys it.
+// The last answer seeds the next page load, so a returning user finds the tab open at once; the
+// read then confirms or greys it.
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from './useAuth'
 import { useProjectSelection } from './useProjectSelection'
 import { supabase } from '../config/supabase'
+import { hasLorawanCameras } from '../lib/realtimeReads'
 
 const LS_KEY = 'ww:hasRealtimeData'
 // The key this hook replaced (open deployments, not LoRaWAN data); cleared once.
 const OLD_LS_KEY = 'ww:hasActiveDeployments'
-
-// Above this many projects the id list would make a long URL; RLS alone then scopes the read.
-const MAX_FILTER_IDS = 100
 
 function readSeed(): boolean | undefined {
   try { return localStorage.getItem(LS_KEY) === '1' ? true : undefined } catch { return undefined }
@@ -28,19 +26,16 @@ function readSeed(): boolean | undefined {
 
 export function useHasRealtimeData(): boolean {
   const { user } = useAuth()
-  const { projects, isLoading } = useProjectSelection()
-  const ids = projects.map(p => p.id).sort()
+  const { queryProjectIds, isLoading } = useProjectSelection()
+  const ids = (queryProjectIds ?? []).toSorted()
 
   const { data } = useQuery<boolean>({
     queryKey: ['hasRealtimeData', user?.id, ids],
-    enabled: !!user && !isLoading && ids.length > 0,
+    enabled: !!user && ids.length > 0,
     staleTime: 5 * 60 * 1000,
     placeholderData: readSeed,
     queryFn: async () => {
-      let query = supabase.from('lorawan_messages').select('id, deployments!inner(project_id)').limit(1)
-      if (ids.length <= MAX_FILTER_IDS) query = query.in('deployments.project_id', ids)
-      const { data: rows, error } = await query
-      const has = !error && (rows?.length ?? 0) > 0
+      const has = await hasLorawanCameras(supabase, ids)
       try {
         localStorage.setItem(LS_KEY, has ? '1' : '0')
         localStorage.removeItem(OLD_LS_KEY)
@@ -49,6 +44,6 @@ export function useHasRealtimeData(): boolean {
     },
   })
 
-  // No projects, no devices: the seed must not keep the tab for a user who left every project.
+  // Nothing selected, nothing to show: the seed must not open the tab then.
   return (isLoading || ids.length > 0) && !!data
 }

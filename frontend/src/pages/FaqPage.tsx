@@ -199,13 +199,14 @@ export function FaqPage() {
       </FaqItem>
 
       <FaqItem q="Does the camera support LoRaWAN?">
-        LoRaWAN support is rolling out in early access. Cameras send small check-ins (battery, trigger counts)
-        over LoRaWAN, as often as the mobile app set when you deployed them, and a short message when their AI
-        detects something. They never send photos, which stay on the SD card until you collect them or sync with
+        LoRaWAN support is rolling out in early access. Cameras send small check-ins (detection counts, battery,
+        SD card space and health) over LoRaWAN, as often as the mobile app set when you deployed them, and a short
+        message at once when their AI detects something or their health changes. They never send photos, which
+        stay on the SD card until you collect them or sync with
         the mobile app. The website's Realtime page shows each camera's last check-in, battery,
         health and detection counts; it does not send a notification for a detection. See the{' '}
         <Link to="/guides/lorawan-in-new-zealand" style={{ color: 'var(--primary)' }}>LoRaWAN in New Zealand guide</Link>{' '}
-        for the three ways to get connected.
+        for setting it up, step by step, from the gateway to your first check-in.
       </FaqItem>
 
       <FaqItem q="How do I update the AI model on my camera?">

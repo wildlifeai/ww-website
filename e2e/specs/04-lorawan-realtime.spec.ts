@@ -17,7 +17,9 @@ import { login, HAS_CREDS } from '../helpers/session'
  *
  * Needs service-role access to insert synthetic telemetry:
  *   E2E_SUPABASE_URL + E2E_SUPABASE_SERVICE_ROLE_KEY
- * Seed deployment used: Zealandia Kiwi Watch (deterministic dev-seed UUID).
+ * Seed deployment used: Zealandia Kiwi Watch (deterministic dev-seed UUID). It has no ping period
+ * and no message, so the page leaves it out (isLorawanCamera) until the insert arrives: the camera
+ * itself appears live.
  *
  * The rows carry the run's tag as their device_eui (E2E_RUN_TAG in CI, set by
  * .github/workflows/e2e.yml), so e2e/cleanup.mjs can find them when a run dies
