@@ -72,7 +72,7 @@ function MotionStatus({ view, rows }: { view: LiveViewSnapshot; rows: GridRows }
   const notes = [
     ops[10] === 0 ? 'The camera is switched off (op 10 is 0), so motion will not wake it.' : null,
     ops[OP_MD_INTERVAL] === 0 ? 'Motion detection is off on the camera (MD interval 0), so motion will not wake it.' : null,
-    frame && !frame.cells ? 'These pictures carry no motion grid: the camera needs newer AI firmware.' : null,
+    frame && !frame.cells ? 'These pictures carry no motion grid: the AI firmware on this camera does not send one. The guide "Tuning motion detection with the live view" says which firmware does.' : null,
   ].filter(n => n !== null)
   const lines = frame?.cells
     ? [
