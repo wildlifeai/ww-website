@@ -10,12 +10,16 @@ must eventually be failed by the reaper.
 
 import json
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from postgrest import CountMethod, ReturnMethod
+from structlog.testing import capture_logs
 
 from app.jobs import store
 from app.schemas.job import JobStatus
+from app.services import locks
 
 
 class _Result:
@@ -175,3 +179,171 @@ async def test_reap_stale_jobs(monkeypatch):
     assert failed_ids == ["stale"]
     # The reaped job's memory copy is consistent too.
     assert json.loads(store._memory_store["job:stale"])["status"] == "failed"
+
+
+# ── Deleting finished jobs (#486) ─────────────────────────────────────────────
+
+
+class _ApiJobs:
+    """``api_jobs`` rows behind enough of PostgREST for the reaper: select, update and delete,
+    filtered with ``in_``, ``eq`` and ``lt``. An update sets ``updated_at``, as ww-backend's
+    trigger ``trg_api_jobs_updated_at`` does."""
+
+    def __init__(self, rows: list[dict], *, fail: str | None = None):
+        self.rows = rows
+        self.fail = fail
+        self.deletes: list[tuple[dict, list]] = []
+
+    def table(self, name: str):
+        assert name == "api_jobs"
+        return _ApiJobsQuery(self)
+
+    def ids(self) -> set[str]:
+        return {r["id"] for r in self.rows}
+
+
+class _ApiJobsQuery:
+    def __init__(self, db: _ApiJobs):
+        self.db, self.op, self.options, self.payload, self.filters = db, "", {}, {}, []
+
+    def select(self, columns: str):
+        self.op = "select"
+        return self
+
+    def update(self, payload: dict):
+        self.op, self.payload = "update", payload
+        return self
+
+    def delete(self, **options):
+        self.op, self.options = "delete", options
+        return self
+
+    def in_(self, column: str, values):
+        self.filters.append(("in", column, list(values)))
+        return self
+
+    def eq(self, column: str, value):
+        self.filters.append(("eq", column, value))
+        return self
+
+    def lt(self, column: str, value: str):
+        self.filters.append(("lt", column, value))
+        return self
+
+    def _matches(self, row: dict) -> bool:
+        for op, column, value in self.filters:
+            if op == "in" and row[column] not in value:
+                return False
+            if op == "eq" and row[column] != value:
+                return False
+            if op == "lt" and not datetime.fromisoformat(row[column]) < datetime.fromisoformat(value):
+                return False
+        return True
+
+    def execute(self):
+        if self.db.fail == self.op:
+            raise RuntimeError(f"{self.op} failed")
+        hits = [r for r in self.db.rows if self._matches(r)]
+        if self.op == "update":
+            for r in hits:
+                r.update(self.payload, updated_at=_days_ago(0))
+        if self.op == "delete":
+            self.db.deletes.append((self.options, self.filters))
+            self.db.rows = [r for r in self.db.rows if r not in hits]
+            return SimpleNamespace(data=[], count=len(hits))
+        return SimpleNamespace(data=hits, count=None)
+
+
+def _days_ago(days: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+
+def _row(job_id: str, status: str, days: float, **job_data) -> dict:
+    updated = _days_ago(days)
+    return {"id": job_id, "status": status, "updated_at": updated, "job_data": {"status": status, "updated_at": updated, **job_data}}
+
+
+def _batch(**extra) -> dict:
+    return {"dispatch": {"backend": "batch", "queued_at": _days_ago(400), "attempts": 0}, **extra}
+
+
+def _every_status_rows() -> list[dict]:
+    """A finished job of each status past 90 days, one just inside, and every open kind, all old."""
+    return [
+        _row("done-old", "completed", 91),
+        _row("partial-old", "completed_with_errors", 91),
+        _row("failed-old", "failed", 91),
+        _row("done-new", "completed", 89),
+        _row("queued-old", "queued", 400),
+        _row("processing-old", "processing", 400),
+        _row("batch-waiting", "queued", 400, **_batch()),
+        _row("batch-leased", "processing", 400, **_batch(lease={"id": "L1"})),
+        {"id": "lease-row", "status": "lock", "updated_at": _days_ago(400), "job_data": {"kind": "lock"}},
+    ]
+
+
+async def test_finished_jobs_past_90_days_are_deleted_and_newer_or_open_ones_kept(monkeypatch):
+    db = _ApiJobs(_every_status_rows())
+    monkeypatch.setattr(store, "create_service_client", lambda: db)
+
+    assert await store.delete_finished_jobs() == 3
+    assert db.ids() == {"done-new", "queued-old", "processing-old", "batch-waiting", "batch-leased", "lease-row"}
+
+
+async def test_the_delete_sent_to_postgrest_is_exactly_the_rule(monkeypatch):
+    db = _ApiJobs(_every_status_rows())
+    monkeypatch.setattr(store, "create_service_client", lambda: db)
+
+    await store.delete_finished_jobs()
+
+    [(options, filters)] = db.deletes
+    # One statement, counted, with no rows sent back.
+    assert options == {"count": CountMethod.exact, "returning": ReturnMethod.minimal}
+    [status_filter, age_filter] = filters
+    assert status_filter == ("in", "status", ["completed", "completed_with_errors", "failed"])
+    assert age_filter[:2] == ("lt", "updated_at")
+    cutoff = datetime.fromisoformat(age_filter[2])
+    expected = datetime.now(timezone.utc) - timedelta(days=store.FINISHED_JOB_RETENTION_DAYS)
+    assert abs(cutoff - expected) < timedelta(minutes=1)
+    assert store.FINISHED_JOB_RETENTION_DAYS == 90
+
+
+async def test_the_reaper_deletes_after_failing_and_keeps_what_it_just_failed(monkeypatch):
+    db = _ApiJobs(
+        [
+            _row("stalled", "queued", 400),
+            _row("done-old", "completed", 91),
+            _row("batch-leased", "processing", 400, **_batch(lease={"id": "L1"})),
+        ]
+    )
+    monkeypatch.setattr(store, "create_service_client", lambda: db)
+    monkeypatch.setattr(locks, "lease_state", lambda name: "held")
+
+    with capture_logs() as logs:
+        assert await store.reap_stale_jobs(max_age_minutes=60) == 1
+
+    # The stalled job is failed now, so its updated_at is today and it stays for 90 days.
+    assert db.ids() == {"stalled", "batch-leased"}
+    assert next(r for r in db.rows if r["id"] == "stalled")["status"] == "failed"
+    [deleted] = [e for e in logs if e["event"] == "finished_jobs_deleted"]
+    assert deleted["log_level"] == "info" and deleted["count"] == 1
+
+
+async def test_a_failed_delete_is_a_warning_and_the_reaper_still_answers(monkeypatch):
+    db = _ApiJobs([_row("stalled", "processing", 400), _row("done-old", "completed", 91)], fail="delete")
+    monkeypatch.setattr(store, "create_service_client", lambda: db)
+
+    with capture_logs() as logs:
+        assert await store.reap_stale_jobs(max_age_minutes=60) == 1
+
+    assert db.ids() == {"stalled", "done-old"}
+    [warning] = [e for e in logs if e["event"] == "delete_finished_jobs_failed"]
+    assert warning["log_level"] == "warning"
+
+
+async def test_the_delete_runs_when_failing_stale_jobs_did_not(monkeypatch):
+    db = _ApiJobs([_row("done-old", "completed", 91)], fail="select")
+    monkeypatch.setattr(store, "create_service_client", lambda: db)
+
+    assert await store.reap_stale_jobs(max_age_minutes=60) == 0
+    assert db.ids() == set()
