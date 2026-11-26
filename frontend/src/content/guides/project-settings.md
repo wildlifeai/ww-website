@@ -41,8 +41,11 @@ change saves as soon as you make it.
 ## Notifications
 
 Notifications are yours alone; nobody else in the project sees or changes them. Tick a channel
-for each event you want to hear about. Today the website sends in-app notifications for
-**Species detections** only; **Camera went silent** and **Upload finished** are not sent yet. Email
+for each event you want to hear about. The website sends in-app notifications for
+**Species detections**, and, where the server supports them, for **Camera went silent** (no
+message for three check-in periods, from a camera deployed with its check-in period recorded)
+and **Camera fault** (a camera's health gets worse, to Warning or to Fault, as described in the
+[LoRaWAN guide](/guides/lorawan-in-new-zealand)). **Upload finished** is not sent yet. Email
 starts once an email provider is set up for the site, and mobile notifications are sent by the
 Wildlife Watcher app.
 For species detections you can type part of a species name, for example "rat", to hear only
