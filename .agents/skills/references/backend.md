@@ -103,6 +103,8 @@ Rules:
   that rather than in-memory state.
 * `api_jobs` also holds the run-lock leases (`status = 'lock'`, `services/locks.py`) when there is
   no Redis. A new reader of `api_jobs` filters by status or `job_data->>kind`, never takes every row.
+  The reaper deletes a finished job's row `FINISHED_JOB_RETENTION_DAYS` after its last update
+  (`delete_finished_jobs`, #486), so nothing may count on an old job's row being there.
 * The AWS path was merged in #442 and is off by default (`WORKER_BACKEND` is `local`). The cluster
   runs only the models; ingest writes the rows with the same pipeline code. Contracts and status:
   [2026-10_aws-reannz-migration](../../../documentation/development%20reports/2026-10_aws-reannz-migration/README.md).
