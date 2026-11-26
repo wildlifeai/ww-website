@@ -75,15 +75,18 @@ The jobs:
   The cleanup finds a run's rows by markers the run owns. LoRaWAN rows carry the run's tag
   (`e2e-ci-<run id>-<attempt>`) as their `device_eui`; marked rows over an hour old from a
   run that died go too. The upload's media rows cannot carry a tag (the backend names them),
-  so they are the rows created since the run started, on Drive, in a deployment whose id starts
-  with one of the fixture SD card's folder names; their observations, events and renditions go
-  with them. The Drive originals stay: the `dev` environment has no Drive credentials, and Drive
-  dedups by content, so runs do not add copies. Once dev runs on AWS the originals are `s3://`
-  keys in `wildlifewatcher-dev-media`, which the cleanup does not match yet (it looks for
-  `gdrive://` paths), so those rows and originals stay until
-  [#470](https://github.com/wildlifeai/ww-website/issues/470). The script refuses any Supabase project but
-  dev, and `npm run test:cleanup` unit-tests its filters (on a pull request that changes `e2e/`).
-  `node cleanup.mjs --dry-run` lists what it would delete.
+  so they are the rows created since the run started in a deployment whose id starts with one
+  of the fixture SD card's folder names, on Drive (Azure dev) or S3 (AWS dev); their
+  observations, events and renditions go with them. The originals stay: the `dev` environment
+  holds no Drive or AWS credential. Neither archive grows with the runs: Drive dedups by content,
+  and an S3 original's key is the SHA-256 of its bytes and deployment id
+  (`object_store.original_key`), so a run lands on the keys the last one wrote and
+  `wildlifewatcher-dev-media` holds one copy of each fixture frame under `originals/` (the card
+  has 94 JPEGs, under 2 MB, plus 73 BMP frames that are re-compressed only where
+  `FF_BMP_INGEST_ENABLED` is on), a bounded leftover accepted on 26 Nov 2026
+  ([#470](https://github.com/wildlifeai/ww-website/issues/470)). The script refuses any Supabase
+  project but dev, and `npm run test:cleanup` unit-tests its filters (on a pull request that
+  changes `e2e/`). `node cleanup.mjs --dry-run` lists what it would delete.
 - **E2E Full Stack** (`.github/workflows/e2e-full-stack.yml`, #216) runs `01-smoke` and
   `02-demo` against a stack started on the runner, on every pull request (skipped, which counts
   as passing, when it changes none of `backend/`, `frontend/`, `e2e/` or the workflow): a local
