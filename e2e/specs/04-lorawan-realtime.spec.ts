@@ -7,7 +7,9 @@ import { login, HAS_CREDS } from '../helpers/session'
  * decoded row must appear WITHOUT a reload, in the Cameras table and on top of the Messages tab.
  * The message carries a fault bit (self-test bit 9, the HM0360 camera), so the camera's row must
  * also show the health state ww-backend works out from it (deployment_latest_lorawan,
- * health_state, #427): Fault with the fault named, and its battery still showing.
+ * health_state, #427): Fault with the fault named, and its battery and temperature still showing.
+ * A second message, the camera's answer to a settings downlink (kind op_set), must then appear on
+ * top of the Messages tab in words (#516).
  * This is the end-to-end proof that (a) the realtime publication SQL is applied on the dev
  * database and (b) the page's subscription works. The page listens for the decoded
  * lorawan_parsed_messages row, which lorawan-ingest writes after the message, so the values are
@@ -15,7 +17,9 @@ import { login, HAS_CREDS } from '../helpers/session'
  *
  * Needs service-role access to insert synthetic telemetry:
  *   E2E_SUPABASE_URL + E2E_SUPABASE_SERVICE_ROLE_KEY
- * Seed deployment used: Zealandia Kiwi Watch (deterministic dev-seed UUID).
+ * Seed deployment used: Zealandia Kiwi Watch (deterministic dev-seed UUID). It has no ping period
+ * and no message, so the page leaves it out (isLorawanCamera) until the insert arrives: the camera
+ * itself appears live.
  *
  * The rows carry the run's tag as their device_eui (E2E_RUN_TAG in CI, set by
  * .github/workflows/e2e.yml), so e2e/cleanup.mjs can find them when a run dies
@@ -27,11 +31,15 @@ const SB_URL = process.env.E2E_SUPABASE_URL || ''
 const SB_KEY = process.env.E2E_SUPABASE_SERVICE_ROLE_KEY || ''
 const DEPLOYMENT_ID = process.env.E2E_LORAWAN_DEPLOYMENT_ID || 'e0000000-0000-0000-0000-000000000010'
 // Distinctive values to assert on: both tabs show the volts (3123 mV is 3.1 V) and the SD card's
-// free space. Self-test bit 9 is a fault, which the Cameras table names.
+// free space, the Cameras table the temperature. Self-test bit 9 is a fault, which it names.
 const BATTERY = 87
 const BATTERY_MV = 3123
 const SD_FREE = 37
+const TEMPERATURE = -3
 const HM0360_FAULT = 1 << 9
+// The settings reply: op 16 set to a value no camera uses.
+const OP_INDEX = 16
+const OP_VALUE = 4321
 const RUN_TAG = process.env.E2E_RUN_TAG || `e2e-local-${Date.now()}`
 
 test.describe('LoRaWAN realtime telemetry', () => {
@@ -77,7 +85,8 @@ test.describe('LoRaWAN realtime telemetry', () => {
         .from('lorawan_parsed_messages')
         .insert({
           lorawan_message_id: msg!.id, kind: 'report',
-          battery_level: BATTERY, battery_mv: BATTERY_MV, sd_free_pct: SD_FREE, self_test_bits: HM0360_FAULT,
+          battery_level: BATTERY, battery_mv: BATTERY_MV, sd_free_pct: SD_FREE, temperature_c: TEMPERATURE,
+          self_test_bits: HM0360_FAULT,
         })
       expect(e2, `insert lorawan_parsed_messages failed: ${e2?.message}`).toBeNull()
 
@@ -92,15 +101,37 @@ test.describe('LoRaWAN realtime telemetry', () => {
       await expect(camera).toContainText('Fault')
       await expect(camera).toContainText('3.1 V')
       await expect(camera).toContainText(`${SD_FREE}%`)
+      await expect(camera).toContainText(`${TEMPERATURE} °C`)
 
       // The same message is on the Messages tab, as a check-in with its volts and SD free.
       await page.getByRole('tab', { name: 'Messages' }).click()
       const row = page.getByRole('row').filter({ hasText: '3.1 V' }).filter({ hasText: `${SD_FREE}%` }).first()
       await expect(row, 'the message did not appear live on the Messages tab').toBeVisible({ timeout: 30_000 })
       await expect(row).toContainText('Check-in')
+
+      // The camera's answer to a settings downlink, also live, in words.
+      const { data: reply, error: e3 } = await sb
+        .from('lorawan_messages')
+        .insert({
+          device_eui: RUN_TAG,
+          deployment_id: DEPLOYMENT_ID,
+          raw_payload: { e2e_run: RUN_TAG },
+          received_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single()
+      expect(e3, `insert lorawan_messages failed: ${e3?.message}`).toBeNull()
+      const { error: e4 } = await sb
+        .from('lorawan_parsed_messages')
+        .insert({ lorawan_message_id: reply!.id, kind: 'op_set', op_index: OP_INDEX, op_value: OP_VALUE })
+      expect(e4, `insert lorawan_parsed_messages failed: ${e4?.message}`).toBeNull()
+      await expect(
+        page.getByRole('row').filter({ hasText: `Setting ${OP_INDEX} set to ${OP_VALUE}` }).first(),
+        'the settings reply did not appear live on the Messages tab',
+      ).toBeVisible({ timeout: 30_000 })
     } finally {
       // Clean up the synthetic rows so repeated runs stay idempotent. The parsed
-      // rows go with their message (ON DELETE CASCADE); the fault's notifications do not.
+      // rows go with their messages (ON DELETE CASCADE); the fault's notifications do not.
       await sb.from('lorawan_messages').delete().eq('device_eui', RUN_TAG)
       await sb.from('notifications').delete()
         .eq('type', 'camera_fault').eq('deployment_id', DEPLOYMENT_ID).gte('created_at', startedAt)

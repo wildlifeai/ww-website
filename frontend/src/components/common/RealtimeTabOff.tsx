@@ -1,14 +1,14 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// RealtimeTabOff: the Realtime header tab while none of the user's cameras has sent LoRaWAN data
-// (useHasRealtimeData). It stays in its place, greyed out and not a link, so people know the page
+// RealtimeTabOff: the Realtime header tab while the selected projects have no LoRaWAN camera
+// deployed (useHasRealtimeData). It stays in its place, greyed out and not a link, so people know the page
 // exists; hovering says why, and a click opens a note with the way to connect a camera.
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { LucideIcon } from 'lucide-react'
 
-const WHY = 'None of your cameras in the field is sending live updates yet'
+const WHY = 'No camera in the selected projects is deployed with LoRaWAN'
 
 export function RealtimeTabOff({ icon: Icon, text, style }: { icon: LucideIcon; text: string; style: React.CSSProperties }) {
   const [open, setOpen] = useState(false)
@@ -41,7 +41,7 @@ export function RealtimeTabOff({ icon: Icon, text, style }: { icon: LucideIcon; 
           padding: '0.75rem 0.875rem', background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 'var(--radius)', boxShadow: '0 4px 12px rgba(0,0,0,0.12)', fontSize: '0.8125rem', lineHeight: 1.45,
         }}>
-          <p style={{ margin: 0 }}>{WHY}. Realtime opens when a camera in one of your projects sends its first LoRaWAN message.</p>
+          <p style={{ margin: 0 }}>{WHY}. Realtime opens when one is deployed with LoRaWAN check-ins turned on, or sends a LoRaWAN message.</p>
           <Link to="/guides/lorawan-in-new-zealand" onClick={() => setOpen(false)}
             style={{ display: 'inline-block', marginTop: '0.5rem', color: 'var(--primary)' }}>
             Connect a camera over LoRaWAN

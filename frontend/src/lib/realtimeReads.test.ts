@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   fetchDeploymentUpdate, fetchFieldDeployments, fetchLatestTelemetry, fetchLorawanDetections, firmwareText,
-  startOfLocalDay, sumDetections, withEntry, withLastSeen, DETECTION_HOURS, ID_CHUNK, NO_MESSAGE,
+  hasLorawanCameras, isLorawanCamera, startOfLocalDay, sumDetections, temperatureText, withEntry, withLastSeen, DETECTION_HOURS, ID_CHUNK, NO_MESSAGE,
 } from './realtimeReads'
 import { batteryText, sdFreeText } from './lorawanFeed'
 import { PAGE_SIZE } from './liveObservations'
@@ -22,7 +22,7 @@ function fakeDb(answer: (calls: Call[], n: number) => Answer) {
       const n = queries.length
       queries.push(calls)
       const chain: Record<string, unknown> = {}
-      for (const m of ['select', 'in', 'eq', 'is', 'or', 'order', 'gt', 'gte', 'not']) {
+      for (const m of ['select', 'in', 'eq', 'is', 'or', 'order', 'gt', 'gte', 'not', 'limit']) {
         chain[m] = (...args: unknown[]) => { calls.push([m, ...args]); return chain }
       }
       chain.range = (...args: unknown[]) => {
@@ -38,7 +38,7 @@ function fakeDb(answer: (calls: Call[], n: number) => Answer) {
 
 const latest = (deployment: string, at: string, battery: number | null = 80) => ({
   deployment_id: deployment, received_at: at, battery_level: battery, battery_mv: null, sd_free_pct: 41,
-  health_state: null, health_reasons: null,
+  temperature_c: null, health_state: null, health_reasons: null,
 })
 /** What `latest` reads as. */
 const seen = (at: string, battery: number | null = 80) => ({
@@ -55,20 +55,20 @@ describe('fetchLatestTelemetry', () => {
     expect(await fetchLatestTelemetry(db, ['d1', 'd2', 'd3'])).toEqual({ d1: seen('t1'), d3: seen('t2', null) })
     expect(queries).toEqual([[
       ['from', 'deployment_latest_lorawan'],
-      ['select', 'deployment_id, received_at, battery_level, battery_mv, sd_free_pct, health_state, health_reasons'],
+      ['select', 'deployment_id, received_at, battery_level, battery_mv, sd_free_pct, temperature_c, health_state, health_reasons'],
       ['in', 'deployment_id', ['d1', 'd2', 'd3']],
     ]])
   })
 
-  it('reads the volts, the health state and its reasons, and never sd_card_used_capacity', async () => {
+  it('reads the volts, the temperature, the health state and its reasons, and never sd_card_used_capacity', async () => {
     const row = {
-      ...latest('d1', 't1'), battery_mv: 5612, sd_free_pct: 8,
+      ...latest('d1', 't1'), battery_mv: 5612, sd_free_pct: 8, temperature_c: -2,
       health_state: 'fault', health_reasons: ['self_test_bit_9', 'sd_low'],
     }
     const { db, queries } = fakeDb(() => ({ data: [row], error: null }))
     expect(await fetchLatestTelemetry(db, ['d1'])).toEqual({
       d1: {
-        lastSeen: 't1', batteryMv: 5612, batteryPct: 80, sdFreePct: 8,
+        lastSeen: 't1', batteryMv: 5612, batteryPct: 80, sdFreePct: 8, temperatureC: -2,
         health: 'fault', healthReasons: ['self_test_bit_9', 'sd_low'],
       },
     })
@@ -90,6 +90,58 @@ describe('fetchLatestTelemetry', () => {
   it('throws a refused read instead of showing every camera as awaiting', async () => {
     const { db } = fakeDb(() => ({ data: null, error: { message: 'permission denied' } }))
     await expect(fetchLatestTelemetry(db, ['d1'])).rejects.toThrow('permission denied')
+  })
+})
+
+describe('isLorawanCamera', () => {
+  const heard = { lastSeen: '2026-11-27T10:00:00+00:00' }
+  it('is a camera deployed with LoRaWAN on, or one that sent a message', () => {
+    expect(isLorawanCamera({ lorawan_ping_minutes: 240 }, undefined)).toBe(true)
+    expect(isLorawanCamera({ lorawan_ping_minutes: null }, heard)).toBe(true)
+    expect(isLorawanCamera({ lorawan_ping_minutes: 0 }, heard)).toBe(true)
+  })
+
+  it('leaves out a camera with LoRaWAN off or no period recorded that never sent a message', () => {
+    expect(isLorawanCamera({ lorawan_ping_minutes: null }, undefined)).toBe(false)
+    expect(isLorawanCamera({ lorawan_ping_minutes: 0 }, undefined)).toBe(false)
+    expect(isLorawanCamera({ lorawan_ping_minutes: null }, NO_MESSAGE)).toBe(false)
+  })
+})
+
+describe('hasLorawanCameras', () => {
+  const now = new Date(2026, 10, 27, 15, 0)
+  const today = `deployment_end.is.null,deployment_end.gte.${startOfLocalDay(now).toISOString()}`
+
+  it('asks for one deployment with a ping period and one message, both shown today', async () => {
+    const { db, queries } = fakeDb(() => ({ data: [], error: null }))
+    expect(await hasLorawanCameras(db, ['p1', 'p2'], now)).toBe(false)
+    expect(queries).toEqual([
+      [
+        ['from', 'deployments'], ['select', 'id'], ['is', 'deleted_at', null], ['in', 'project_id', ['p1', 'p2']],
+        ['gt', 'lorawan_ping_minutes', 0], ['or', today], ['limit', 1],
+      ],
+      [
+        ['from', 'lorawan_messages'], ['select', 'id, deployments!inner(project_id, deployment_end, deleted_at)'],
+        ['in', 'deployments.project_id', ['p1', 'p2']], ['is', 'deployments.deleted_at', null],
+        ['or', today, { referencedTable: 'deployments' }], ['limit', 1],
+      ],
+    ])
+  })
+
+  it('is true when either read finds one, and counts a refused read as none', async () => {
+    const one = { data: [{ id: 'x' }], error: null }
+    const none = { data: [], error: null }
+    const refused = { data: null, error: { message: 'permission denied' } }
+    expect(await hasLorawanCameras(fakeDb((_, n) => (n === 0 ? one : none)).db, ['p1'], now)).toBe(true)
+    expect(await hasLorawanCameras(fakeDb((_, n) => (n === 1 ? one : none)).db, ['p1'], now)).toBe(true)
+    expect(await hasLorawanCameras(fakeDb((_, n) => (n === 0 ? refused : one)).db, ['p1'], now)).toBe(true)
+    expect(await hasLorawanCameras(fakeDb(() => refused).db, ['p1'], now)).toBe(false)
+  })
+
+  it('asks nothing for no projects', async () => {
+    const { db, queries } = fakeDb(() => ({ data: [], error: null }))
+    expect(await hasLorawanCameras(db, [], now)).toBe(false)
+    expect(queries).toEqual([])
   })
 })
 
@@ -249,6 +301,13 @@ describe('the Cameras table values', () => {
   it('shows the SD card free space', () => {
     expect(sdFreeText({ ...NO_MESSAGE, sdFreePct: 41 })).toBe('41%')
     expect(sdFreeText(NO_MESSAGE)).toBe('-')
+  })
+
+  it('shows the temperature, below zero too, and a dash for none', () => {
+    expect(temperatureText({ temperatureC: 16 })).toBe('16 °C')
+    expect(temperatureText({ temperatureC: -2 })).toBe('-2 °C')
+    expect(temperatureText({ temperatureC: 0 })).toBe('0 °C')
+    expect(temperatureText(NO_MESSAGE)).toBe('-')
   })
 
   it('names the firmware the deployment recorded', () => {

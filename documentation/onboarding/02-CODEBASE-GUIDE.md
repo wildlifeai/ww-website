@@ -47,10 +47,10 @@ src/
 
 Defined as `USER_TABS` in `App.tsx`. The active tab is highlighted, so pages no longer repeat
 their own title, and a deep route lights its parent tab (`lib/navTabs.ts`). Lifecycle order:
-**prepare → collect → analyse**. The 📡 **Realtime** tab opens only when one of the user's
-projects has a device that sends or has sent LoRaWAN data, at least one `lorawan_messages` row the
-user can read (`hooks/useHasRealtimeData.ts`); before that it shows greyed out, and hovering or
-clicking it says why and links the LoRaWAN guide (`components/common/RealtimeTabOff.tsx`). Below 900 px the tabs show
+**prepare → collect → analyse**. The 📡 **Realtime** tab opens only when the projects selected in
+the header have a camera the page shows, deployed now or collected today with a ping period over
+0 or a `lorawan_messages` row (`hasLorawanCameras`, `hooks/useHasRealtimeData.ts`); otherwise it
+shows greyed out, and hovering or clicking it says why and links the LoRaWAN guide (`components/common/RealtimeTabOff.tsx`). Below 900 px the tabs show
 their icon only. Write controls (the header Upload button, Home's upload step, Toolkit's Prepare
 SD card) hide for a user who can write to no project (`hooks/useWritableProjects.ts`).
 
@@ -84,7 +84,7 @@ password) or uses Forgot password.
 | `/toolkit` | `ToolkitPage` | Motion live view, privileged model upload, iNaturalist, CamtrapDP export, GBF contribution report, SD-card prep |
 | `/annotations` | `AnnotationsPage` | Filter/browse media; click a photo → full-screen labeling modal |
 | `/insights` | `InsightsPage` | Projects/Deployments, charts, maps |
-| `/field` | `FieldPage` | Realtime: active deployments, and those that ended today, read-only. Cameras tab: each one's newest LoRaWAN check-in, battery, SD free and health (`health_state`, `health_reasons`) from the `deployment_latest_lorawan` view, its ping period and firmware versions from the deployment, and its own detection count (`lib/realtimeReads.ts`). The state (Finished, LoRaWAN off, Silent after 3 ping periods, Awaiting, Fault, Warning, Stale, OK, or Checking in for a camera that sends no health report) and the reasons in words are `lib/cameraState.ts` only (#427). Messages tab: their LoRaWAN messages, live (`lib/lorawanFeed.ts`, `hooks/useFieldLive.ts`). Nothing navigates away |
+| `/field` | `FieldPage` | Realtime: LoRaWAN cameras deployed now, and those that ended today, read-only. A deployment shows when its ping period is over 0 or it has sent a message (`isLorawanCamera`); one with no period recorded and no message is left out. With no GPS position among them, a line says there is no map. Cameras tab: each one's newest LoRaWAN check-in, battery, SD free, temperature and health (`health_state`, `health_reasons`) from the `deployment_latest_lorawan` view, its ping period and firmware versions from the deployment, and its own detection count (`lib/realtimeReads.ts`). The state (Finished, LoRaWAN off, Silent after 3 ping periods, Awaiting, Fault, Warning, Stale, OK, or Checking in for a camera that sends no health report) and the reasons in words are `lib/cameraState.ts` only (#427). Messages tab: their LoRaWAN messages, live, check-ins, detections and the answers to settings sent by downlink (`lib/lorawanFeed.ts`, `hooks/useFieldLive.ts`). Nothing navigates away |
 | `/upload-data` | `UploadDataPage` (→ `UploadFlow`) | The single upload surface (the header **Upload** button, Home and the guide link here; demo users get `RequireNotDemo`) |
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
 | `/live-view` | `LiveViewPage` | A bench tool for a WW500 on its USB cable through Web Serial (Chrome or Edge on a computer), no backend: the live picture with the motion grid and wake status, and Controls (run modes, Save frame, frame interval, motion ops, Keep awake), Console (commands, session log) and Device tabs. The console protocol is `lib/liveView.ts` and `lib/liveViewSession.ts`, ported from the firmware's `live_view.py` and `live_preview.md` (#400) |
