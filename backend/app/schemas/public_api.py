@@ -76,12 +76,25 @@ class DevicesResponse(ApiResponse):
 
 
 class TelemetryPoint(BaseModel):
-    """One LoRaWAN message a camera sent while deployed in one of the organisation's projects."""
+    """One LoRaWAN message a camera sent while deployed in one of the organisation's projects.
+
+    A value is null when the message did not carry it: the camera can send its battery and SD
+    card in one message and its health in another.
+    """
 
     timestamp: Optional[str] = Field(None, description="When the network received the message")
     deployment_id: str
-    battery_level: Optional[int] = None
-    sd_card_used_capacity: Optional[int] = None
+    battery_level: Optional[int] = Field(
+        None, description="Battery as a percentage of the camera's battery scale, not of charge; older firmware sends only this"
+    )
+    battery_mv: Optional[int] = Field(None, description="Battery voltage in millivolts")
+    sd_free_pct: Optional[int] = Field(None, description="SD card free space, percent; null when the camera could not tell")
+    temperature_c: Optional[int] = Field(None, description="The BLE processor's chip temperature, degrees C")
+    self_test_bits: Optional[int] = Field(None, description="The camera's self-test bits, 0 when all is well")
+    last_reset_reason: Optional[int] = Field(None, description="Why the camera last restarted, as a firmware code")
+    reset_count: Optional[int] = Field(None, description="Restarts since the battery was connected, stops at 255")
+    hours_since_reset: Optional[int] = Field(None, description="Hours since the camera last restarted, stops at 65535")
+    ai_failures: Optional[int] = Field(None, description="Times the AI processor did not respond since the battery was connected, stops at 255")
     model_output: Optional[str] = Field(None, description="The camera's on-device model output, as the payload carried it")
 
 

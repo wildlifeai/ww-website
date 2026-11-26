@@ -74,6 +74,10 @@ Rules:
   is off site-wide (`lib/queryClient.ts`). LoRaWAN values arrive in `lorawan_parsed_messages`, a
   moment after their `lorawan_messages` row, so listen for the decoded row. The Realtime page's
   `hooks/useFieldLive.ts` does both.
+* A camera's health (`health_state`, `health_reasons` in `deployment_latest_lorawan`) is worked
+  out once in ww-backend for the website, the app and the alerts (ww-backend#381); don't decode
+  self-test bits or compare counters here. The page adds only silence, from the deployment's
+  `lorawan_ping_minutes`, and words the reason codes, both in `lib/cameraState.ts` (#427).
 * React Doctor's command and gate are in `AGENTS.md`, "Validate before committing". Rules
   switched off for the repo are in `frontend/doctor.config.json`.
 

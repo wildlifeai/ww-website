@@ -5,6 +5,9 @@ import { login, HAS_CREDS } from '../helpers/session'
 /**
  * LoRaWAN live telemetry (#94): with the Realtime page (/field) open, a new message and its
  * decoded row must appear WITHOUT a reload, in the Cameras table and on top of the Messages tab.
+ * The message carries a fault bit (self-test bit 9, the HM0360 camera), so the camera's row must
+ * also show the health state ww-backend works out from it (deployment_latest_lorawan,
+ * health_state, #427): Fault with the fault named, and its battery still showing.
  * This is the end-to-end proof that (a) the realtime publication SQL is applied on the dev
  * database and (b) the page's subscription works. The page listens for the decoded
  * lorawan_parsed_messages row, which lorawan-ingest writes after the message, so the values are
@@ -16,17 +19,19 @@ import { login, HAS_CREDS } from '../helpers/session'
  *
  * The rows carry the run's tag as their device_eui (E2E_RUN_TAG in CI, set by
  * .github/workflows/e2e.yml), so e2e/cleanup.mjs can find them when a run dies
- * before the `finally` below.
+ * before the `finally` below. The fault also sends a camera_fault notification to anyone with
+ * that alert on in the seed project (ww-backend#359); the `finally` deletes those too.
  */
 
 const SB_URL = process.env.E2E_SUPABASE_URL || ''
 const SB_KEY = process.env.E2E_SUPABASE_SERVICE_ROLE_KEY || ''
 const DEPLOYMENT_ID = process.env.E2E_LORAWAN_DEPLOYMENT_ID || 'e0000000-0000-0000-0000-000000000010'
-// Distinctive values to assert on: the Cameras table shows the percentage, the Messages tab
-// the volts (3123 mV is 3.1 V) and the SD card's free space.
+// Distinctive values to assert on: both tabs show the volts (3123 mV is 3.1 V) and the SD card's
+// free space. Self-test bit 9 is a fault, which the Cameras table names.
 const BATTERY = 87
 const BATTERY_MV = 3123
 const SD_FREE = 37
+const HM0360_FAULT = 1 << 9
 const RUN_TAG = process.env.E2E_RUN_TAG || `e2e-local-${Date.now()}`
 
 test.describe('LoRaWAN realtime telemetry', () => {
@@ -46,6 +51,7 @@ test.describe('LoRaWAN realtime telemetry', () => {
       if (text.includes('realtime:field-lorawan-live') && text.includes('Subscribed to PostgreSQL')) subscribed = true
     }))
 
+    const startedAt = new Date().toISOString()
     try {
       await login(page)
       await page.goto('/field')
@@ -71,16 +77,21 @@ test.describe('LoRaWAN realtime telemetry', () => {
         .from('lorawan_parsed_messages')
         .insert({
           lorawan_message_id: msg!.id, kind: 'report',
-          battery_level: BATTERY, battery_mv: BATTERY_MV, sd_free_pct: SD_FREE,
+          battery_level: BATTERY, battery_mv: BATTERY_MV, sd_free_pct: SD_FREE, self_test_bits: HM0360_FAULT,
         })
       expect(e2, `insert lorawan_parsed_messages failed: ${e2?.message}`).toBeNull()
 
-      // No reload: the distinctive battery value must appear via realtime.
+      // No reload: the camera's row must show the fault, named, with its volts and SD free.
+      const camera = page.locator('#field-panel-cameras').getByRole('row').filter({ hasText: 'HM0360 camera failed' }).first()
       await expect(
-        page.getByText(new RegExp(`${BATTERY}\\s*%`)).first(),
-        'telemetry did not appear live in the Cameras table. Is the realtime publication SQL ' +
-        'applied to the dev DB (ALTER PUBLICATION supabase_realtime ADD TABLE lorawan_parsed_messages)?'
+        camera,
+        'the fault did not appear live in the Cameras table. Is the realtime publication SQL ' +
+        'applied to the dev DB (ALTER PUBLICATION supabase_realtime ADD TABLE lorawan_parsed_messages), ' +
+        'and does deployment_latest_lorawan have health_state (ww-backend#381)?'
       ).toBeVisible({ timeout: 30_000 })
+      await expect(camera).toContainText('Fault')
+      await expect(camera).toContainText('3.1 V')
+      await expect(camera).toContainText(`${SD_FREE}%`)
 
       // The same message is on the Messages tab, as a check-in with its volts and SD free.
       await page.getByRole('tab', { name: 'Messages' }).click()
@@ -89,8 +100,10 @@ test.describe('LoRaWAN realtime telemetry', () => {
       await expect(row).toContainText('Check-in')
     } finally {
       // Clean up the synthetic rows so repeated runs stay idempotent. The parsed
-      // rows go with their message (ON DELETE CASCADE).
+      // rows go with their message (ON DELETE CASCADE); the fault's notifications do not.
       await sb.from('lorawan_messages').delete().eq('device_eui', RUN_TAG)
+      await sb.from('notifications').delete()
+        .eq('type', 'camera_fault').eq('deployment_id', DEPLOYMENT_ID).gte('created_at', startedAt)
     }
   })
 })

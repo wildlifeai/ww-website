@@ -68,13 +68,14 @@ export function messageText(r: FeedRow): string {
   return r.detections && r.detections > 0 ? `Detection +${r.detections}` : 'Check-in'
 }
 
-export function batteryText(r: FeedRow): string {
+/** Volts, or the percentage older firmware sends; a message here, a camera's latest on the Cameras tab. */
+export function batteryText(r: { batteryMv: number | null; batteryPct: number | null }): string {
   if (r.batteryMv != null) return `${(r.batteryMv / 1000).toFixed(1)} V`
   if (r.batteryPct != null) return `${r.batteryPct}%`
   return '-'
 }
 
-export function sdFreeText(r: FeedRow): string {
+export function sdFreeText(r: { sdFreePct: number | null }): string {
   return r.sdFreePct == null ? '-' : `${r.sdFreePct}%`
 }
 
