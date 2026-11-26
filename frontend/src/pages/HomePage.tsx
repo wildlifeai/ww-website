@@ -119,7 +119,7 @@ function MarketingHero() {
           </p>
           <ul style={{ paddingLeft: '1.25rem', color: 'var(--text-muted)', lineHeight: 1.85, marginBottom: '1.5rem' }}>
             <li>A lightweight on-device AI model (Camera AI) flags your target species in real time; the more powerful SpeciesNet model (Cloud AI) assists with full identification after you upload, and the Wildlife Brain groups look-alike animals so large datasets are quick to review.</li>
-            <li>LoRaWAN check-ins (early access): the Realtime page shows each camera's last check-in, battery and detection counts while it is in the field.</li>
+            <li>LoRaWAN check-ins (early access): the Realtime page shows each camera's last check-in, battery, health and detection counts while it is in the field.</li>
             <li>Fully open hardware: schematics and firmware published on GitHub.</li>
           </ul>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1.6, marginBottom: '1rem' }}>
