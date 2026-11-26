@@ -343,6 +343,19 @@ def usual_batch_wait_minutes() -> int:
     return -(-minutes // step) * step
 
 
+def wait_in_words(minutes: int) -> str:
+    """A wait in words, "an hour", "5 hours", "45 minutes", as the website's ``waitInWords`` says it.
+
+    The upload job's final message states the batch wait with it (#432), so the message and the
+    upload dock (``frontend/src/lib/batchWait.ts``) say the same wait.
+    """
+    if minutes == 60:
+        return "an hour"
+    if minutes > 60 and minutes % 60 == 0:
+        return f"{minutes // 60} hours"
+    return "a minute" if minutes == 1 else f"{minutes} minutes"
+
+
 def on_gpu_batch(jd: dict) -> bool:
     """The job runs through the REANNZ batch: it reports every few minutes, not seconds."""
     return (jd.get("dispatch") or {}).get("backend") == "batch"

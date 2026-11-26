@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PipelineJob, PipelineState } from './PipelineStatusBox'
-import { aiBatchWait, jobChanged } from './pipelineProgress'
+import { aiBatchWait, aiNotRun, aiNotRunReason, jobChanged } from './pipelineProgress'
 
 const WAIT = { queued_at: '2026-11-22T01:00:00+00:00', usual_wait_minutes: 300 }
 
@@ -34,5 +34,38 @@ describe('jobChanged', () => {
     expect(jobChanged(ai('processing'), { ...ai('processing'), progress: 0.5 })).toBe(true)
     expect(jobChanged(ai('processing'), { ...ai('processing'), message: 'GPU cluster: 5 of 10 photos' })).toBe(true)
     expect(jobChanged(ai('processing'), { ...ai('processing'), eventCount: 1 })).toBe(true)
+  })
+
+  it('counts an upload job that reports the AI was not run', () => {
+    expect(jobChanged(drive('completed'), { ...drive('completed'), aiNotRun: 'turned off for this upload' })).toBe(true)
+    expect(jobChanged({ ...drive('completed'), aiNotRun: null }, drive('completed'))).toBe(false)
+  })
+})
+
+describe('aiNotRunReason', () => {
+  it("is the reason in an upload job's result when it did not run the AI (#432)", () => {
+    expect(aiNotRunReason({ ai: 'not_run', ai_reason: 'no AI step enabled' })).toBe('no AI step enabled')
+  })
+
+  it('is null when the AI ran or was queued, and before the job has a result', () => {
+    expect(aiNotRunReason({ ai: 'ran' })).toBeNull()
+    expect(aiNotRunReason({ ai: 'queued', ai_job_id: 'a1b2c3d4' })).toBeNull()
+    expect(aiNotRunReason(null)).toBeNull()
+    expect(aiNotRunReason(undefined)).toBeNull()
+  })
+})
+
+describe('aiNotRun', () => {
+  const skipped = (reason: string): PipelineJob => ({ ...drive('completed'), aiNotRun: reason })
+
+  it('is the reason once every upload job finished without running the AI', () => {
+    expect(aiNotRun(state([skipped('turned off for this upload'), skipped('turned off for this upload')]))).toBe('turned off for this upload')
+  })
+
+  it('is null while an upload job is still running, or when one ran or queued the AI', () => {
+    expect(aiNotRun(state([skipped('turned off for this upload'), drive('processing')]))).toBeNull()
+    expect(aiNotRun(state([skipped('no photo matched a deployment'), drive('completed')]))).toBeNull()
+    expect(aiNotRun(state([drive('completed'), ai('queued')]))).toBeNull()
+    expect(aiNotRun(state([]))).toBeNull()
   })
 })

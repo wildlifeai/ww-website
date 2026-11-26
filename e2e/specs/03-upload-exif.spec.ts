@@ -74,10 +74,11 @@ test.describe('SD-card upload with EXIF deployment binding', () => {
       expect(FOLDERS, `deployment ${id} is not one of the card's folders`).toContain(id.slice(0, 8).toUpperCase())
     }
 
-    // The progress dock follows the upload and the Drive sync to the end.
-    const outcome = page.getByText(/^(Upload & analysis complete|Upload failed)$/).first()
+    // The progress dock follows the upload and the Drive sync to the end, and says no analysis
+    // ran, since the AI was switched off (#432).
+    const outcome = page.getByText(/^(Upload complete|Upload & analysis complete|Upload failed)$/).first()
     await expect(outcome).toBeVisible({ timeout: 480_000 })
-    await expect(outcome).toHaveText('Upload & analysis complete')
+    await expect(outcome).toHaveText('Upload complete')
 
     // #92 regression guard: nothing may sit in an "unassigned" bucket.
     await expect(page.getByText(/unassigned|no deployment/i)).not.toBeVisible()

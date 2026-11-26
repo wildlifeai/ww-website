@@ -17,7 +17,7 @@ import { ArrowRight, Minus, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useUploadStore } from '../../contexts/UploadContext'
 import { PipelineStatusBox } from '../toolkit/PipelineStatusBox'
-import { aiBatchWait } from '../toolkit/pipelineProgress'
+import { aiBatchWait, aiNotRun } from '../toolkit/pipelineProgress'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -32,7 +32,7 @@ function semaphoreColor(phase: string): string {
   }
 }
 
-function dockLabel(phase: string, totalFiles: number, activeJobPhase?: string | null, aiWaits = false): string {
+function dockLabel(phase: string, totalFiles: number, activeJobPhase?: string | null, aiWaits = false, aiSkipped = false): string {
   switch (phase) {
     case 'uploading':  return `Uploading ${totalFiles} image${totalFiles !== 1 ? 's' : ''}…`
     case 'processing':
@@ -41,7 +41,7 @@ function dockLabel(phase: string, totalFiles: number, activeJobPhase?: string | 
       if (activeJobPhase === 'cleanup')     return 'Cleaning up…'
       return `Syncing ${totalFiles} image${totalFiles !== 1 ? 's' : ''} to Drive…`
     case 'stalled':    return 'Still working…'
-    case 'completed':  return 'Upload & analysis complete'
+    case 'completed':  return aiSkipped ? 'Upload complete' : 'Upload & analysis complete'
     case 'failed':     return 'Upload failed'
     default:           return 'Upload'
   }
@@ -90,8 +90,8 @@ export function ProgressDock() {
   const activeJobPhase = pipelineState.jobs.find(
     (j) => j.status === 'processing' || j.status === 'in_progress',
   )?.currentPhase
-  // On AWS the AI job can wait for the GPU batch first (#460).
-  const label = dockLabel(phase, pipelineState.totalFiles, activeJobPhase, !!aiBatchWait(pipelineState))
+  // On AWS the AI job can wait for the GPU batch first (#460); an upload may not run it at all (#432).
+  const label = dockLabel(phase, pipelineState.totalFiles, activeJobPhase, !!aiBatchWait(pipelineState), aiNotRun(pipelineState) != null)
   const isActive = phase === 'uploading' || phase === 'processing' || phase === 'stalled'
   const isDone = phase === 'completed' || phase === 'failed'
   const hasErrors = pipelineState.jobs.some(

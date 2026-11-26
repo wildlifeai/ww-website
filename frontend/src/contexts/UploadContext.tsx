@@ -22,7 +22,7 @@ import { registerLocalPreviews } from '../lib/localPreviewStore'
 import { derivePhase, type UploadPhase } from '../lib/uploadPhase'
 import { orderFilesBySession, planBatches } from '../lib/uploadPlanning'
 import type { PipelineState, PipelineJob, LogEntry } from '../components/toolkit/PipelineStatusBox'
-import { jobChanged } from '../components/toolkit/pipelineProgress'
+import { aiNotRunReason, jobChanged } from '../components/toolkit/pipelineProgress'
 
 // Re-exported for existing consumers; implementations live in lib/ so they
 // can be unit-tested without React or the API client.
@@ -216,6 +216,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
                 eventCount: j.event_count ?? job.eventCount ?? 0,
                 batchWait: j.batch_wait ?? null,
                 gpuBatch: !!j.gpu_batch,
+                aiNotRun: aiNotRunReason(j.result),
                 // Transient — consumed below, stripped before storing in state
                 _events: j.events ?? [],
               } as PipelineJob & { _events: unknown[] }

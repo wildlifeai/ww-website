@@ -28,6 +28,8 @@ from app.jobs.store import (
     start_phase,
     update_job,
     update_summary,
+    usual_batch_wait_minutes,
+    wait_in_words,
 )
 from app.schemas.job import EventType, JobStatus, ProgressEvent, ProgressPhase
 from app.services.db_utils import rows_of
@@ -1560,6 +1562,8 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         if _dep_ids and _steps and not _run_ai:
             logger.info("ai_pipeline_skipped_by_request", job_id=job_id, deployments=len(_dep_ids))
         pipeline_errors = 0
+        # (AI job id, enqueue_job's route) when another job runs the AI, for the final message.
+        ai_queued: tuple[str, str] | None = None
         # Run the AI inline only on a single-container / dev image (no GPU offload).
         # With REDIS_URL set (the ARQ GPU worker) or WORKER_BACKEND=lambda (the REANNZ
         # batch), the heavy AI is offloaded (the `elif` branch below) so this CPU
@@ -1667,13 +1671,14 @@ async def upload_drive_images_job(job_id: str, payload: dict):
             # photos that arrive while it runs.
             ai_job_id, new_dep_ids, covered, following = await reserve_ai_job(_dep_ids, _user_id)
             if ai_job_id:
-                await enqueue_job(
+                route = await enqueue_job(
                     "annotate_deployments_job",
                     ai_job_id,
                     new_dep_ids,
                     _user_id,
                     _defer_by=timedelta(seconds=ANNOTATE_DEBOUNCE_SECONDS),
                 )
+                ai_queued = (ai_job_id, route)
                 follow_note = f", after the run already going (job {next(iter(following.values()))[:8]}) finishes" if following else ""
                 await emit_event(
                     job_id,
@@ -1691,6 +1696,8 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                 # Everything is already covered — chain the dock onto the existing job so it
                 # still tracks the analysis to completion instead of enqueuing a duplicate.
                 existing_id = covered[_dep_ids[0]]
+                # The job it joins went where enqueue_job sends this one.
+                ai_queued = (existing_id, "batch" if settings.WORKER_BACKEND == "lambda" else "arq")
                 await emit_event(
                     job_id,
                     ProgressEvent(
@@ -1703,7 +1710,14 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                         ),
                     ),
                 )
-            await complete_phase(job_id, ProgressPhase.AI_PIPELINE)
+            # No complete_phase here: the AI has only been handed on, and an "ai_pipeline complete"
+            # line in the log read as if it had run (#432).
+
+        # What the AI did, for the final message and the job's result (#432). An upload that did not
+        # run it says why in its log as well, which is what Processing history shows.
+        ai_result, ai_words = upload_ai_outcome(_dep_ids, _steps, _run_ai, ai_queued)
+        if ai_result["ai"] == "not_run":
+            await emit_event(job_id, ProgressEvent(type=EventType.PROGRESS, phase=ProgressPhase.AI_PIPELINE, message=f"⏭️ {ai_words}"))
 
         # ── Thumbnails when the AI does not run: they are its first step, so make them here ──
         if thumbnails_need_their_own_job(_dep_ids, _steps, _run_ai):
@@ -1728,13 +1742,14 @@ async def upload_drive_images_job(job_id: str, payload: dict):
                 issue_parts.append(f"{pipeline_errors} AI error(s)")
             final_msg = f"⚠️ Done with issues — {uploaded_count} uploaded, {skipped_count} skipped, {', '.join(issue_parts)}"
         else:
-            final_msg = f"✅ Done — {drive_total} images synced to Drive, AI analysis complete"
+            final_msg = f"✅ Done: {drive_total} images synced to Drive, {ai_words}"
 
         await update_job(
             job_id,
             status=final_status,
             progress=1.0,
             message=final_msg,
+            result=ai_result,
         )
 
         logger.info(
@@ -1795,6 +1810,33 @@ def thumbnails_need_their_own_job(deployment_ids: list[str], steps: list, run_ai
     from app.config import settings
 
     return bool(deployment_ids) and settings.FF_MEDIA_REGISTRY_ENABLED and not (steps and run_ai)
+
+
+def upload_ai_outcome(deployment_ids: list[str], steps: list, run_ai: bool, queued: tuple[str, str] | None = None) -> tuple[dict[str, str], str]:
+    """What an upload's AI did (#432): the job's ``result``, and the words its final message ends with.
+
+    ``queued`` is ``(AI job id, enqueue_job's route)`` when another job runs the AI; without it
+    the AI ran in the upload job, unless one of the conditions for running it failed. The
+    ``result`` is ``{"ai": "ran"}``, ``{"ai": "queued", "ai_job_id": ...}`` or ``{"ai": "not_run",
+    "ai_reason": ...}``; the upload dock reads ``ai_reason``. A job on the GPU batch states the wait
+    as the dock does ("Waiting for the next GPU run, usually within 5 hours").
+    """
+    if not run_ai:
+        reason = "turned off for this upload"
+    elif not deployment_ids:
+        reason = "no photo matched a deployment"
+    elif not steps:
+        reason = "no AI step enabled"
+    elif queued:
+        ai_job_id, route = queued
+        wait = ""
+        if route == "batch":
+            usual = usual_batch_wait_minutes()
+            wait = f" for the next GPU run, usually within {wait_in_words(usual)}" if usual > 0 else " for the next GPU run"
+        return {"ai": "queued", "ai_job_id": ai_job_id}, f"AI analysis queued{wait} (job {ai_job_id[:8]})"
+    else:
+        return {"ai": "ran"}, "AI analysis complete"
+    return {"ai": "not_run", "ai_reason": reason}, f"AI not run ({reason})"
 
 
 async def start_thumbnail_backfill(deployment_id: str, user_id: str | None, delay_s: float = 0) -> str:
