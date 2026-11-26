@@ -36,6 +36,11 @@ was updated to:
    > `feat/exif-confidence-enable` branch, not on `main`).
    > The parser is ready; the firmware flag is the blocker. Full flow:
    > [Embedded model lifecycle](../resources/embedded-model-lifecycle.md).
+   >
+   > **Update (2026-11-26):** no longer true. `USE_PERCENTAGE` is on in the firmware's `main` since
+   > 2026-07-08 (Seeed commit `fb66bafd`, `cvapp.h`), so `UserComment` carries the NN scores; the bench
+   > run of 2026-09-05 saw them in every frame. Telemetry is still not in it (firmware `dev`,
+   > `exif_builder.c`), which is this report's open ask.
 
 **So the only firmware change required to get temperature end-to-end is: include
 `Temp: <celsius>;` in the `UserComment` string.** No new EXIF tag, no parser change, no DB migration.

@@ -13,6 +13,7 @@ import { fetchRules, ruleFor, saveRule, toggleChannel, type Channel, type Rule }
 const EVENTS: { id: string; label: string; hint: string; hasFilter: boolean }[] = [
   { id: 'species_detection', label: 'Species detections', hint: 'When the AI labels a matching species', hasFilter: true },
   { id: 'camera_silent',     label: 'Camera went silent', hint: 'When an active camera stops reporting (needs LoRaWAN)', hasFilter: false },
+  { id: 'camera_fault',      label: 'Camera fault',       hint: 'When a camera reports a fault or a warning (needs LoRaWAN)', hasFilter: false },
   { id: 'upload_complete',   label: 'Upload finished',    hint: 'When an upload and its AI run complete', hasFilter: false },
 ]
 const CHANNELS: { id: Channel; label: string; disabled?: boolean; note?: string }[] = [

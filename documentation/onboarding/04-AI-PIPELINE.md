@@ -13,11 +13,14 @@ classify) and the **Wildlife Brain** (DINOv3 embeddings → clustering → activ
 > **Running it locally** (the heavy ML deps live in the `dev` Docker image, feature flags, model
 > weights, HF token) → see [Running the AI/ML pipeline locally](../../readme.md#running-the-aiml-pipeline-locally).
 
-> **Where it runs in the cloud.** Everything below executes in a **dedicated ARQ GPU worker**
-> (`--target worker`, serverless T4), *not* in the API container — the lean `--target api` image has no
-> ML deps. The API only enqueues. So **AI detection is off on any backend without `REDIS_URL` + a
-> deployed worker**: dev has both since 2026-07-03, production since 2026-07-26. Flags must be set on the
-> **worker**, not just the API. See [cloud-infrastructure](../resources/cloud-infrastructure.md) and
+> **Where it runs in the cloud.** On Azure, everything below executes in a **dedicated ARQ GPU
+> worker** (`--target worker`, serverless T4), *not* in the API container, whose lean `--target api`
+> image has no ML deps; the API only enqueues, so AI detection there needs `REDIS_URL` and a deployed
+> worker: dev has both since 2026-07-03, production since 2026-07-26. Under `WORKER_BACKEND=lambda`
+> (the AWS path) the GPU jobs wait in `api_jobs` for the REANNZ batch instead, with no Redis
+> (`backend/app/jobs/dispatch.py`, [settings](../resources/deployment-guide.md#aws-and-the-reannz-batch)).
+> Flags must be set wherever the pipeline runs: on the **worker** as well as the API on Azure, in the
+> `/ww/<env>/` SSM parameters on AWS. See [cloud-infrastructure](../resources/cloud-infrastructure.md) and
 > [prod-worker-provisioning-runbook](../resources/prod-worker-provisioning-runbook.md).
 
 ## SpeciesNet inference pipeline
@@ -34,6 +37,7 @@ built from the enabled per-step flags). Steps run in order:
 | `SPECIESNET` | **The core model.** Resolves each image to a temp file, runs the **SpeciesNet ensemble** (detector + species classifier in one pass), and writes media-level `observations` with bbox, detection `confidence`, species `classification_probability`, and `scientific_name`/`vernacular_name`. By default SpeciesNet classifies **one species per image**, so multiple detection boxes of the same type are collapsed into **one** observation carrying a `count` (number of boxes) + the highest-confidence box as the representative bbox — not N duplicate rows. **With `FF_PER_CROP_CLASSIFY_ENABLED` on** this collapse is skipped: each kept detection becomes its own observation (`count = 1`, its own bbox), refined per crop by the classify stage — see [Per-detection classification](#per-detection-classification-ff_per_crop_classify_enabled) below. The species is **taxonomically rolled up** by confidence (`rollup_taxon`): below `SPECIES_CONFIDENCE` (0.5) it backs off to genus, below `GENUS_CONFIDENCE` (0.35) to the most specific available higher rank — so a shaky 0.4 "Apteryx mantelli" is recorded as "Apteryx", not a false species claim. | `FF_SPECIESNET_ENABLED` |
 | `ANIMAL_CROP` | Crops the best animal detection into `media_assets.animal_crop_url` for DINOv3 / BioCLIP. No observations. | — |
 | `BIOCLIP` | **Classify stage — pluggable.** Runs a classifier on the animal crop and adds a *second* `animal` observation tagged with the classifier's `source_model_version` — a complement / second opinion to SpeciesNet, strong for taxa outside SpeciesNet's ~2k label set. The classifier is resolved from a registry (`domain/classifiers.py`): [Imageomics BioCLIP](https://imageomics.github.io/pybioclip/) (`bioclip-2`) by default, or whatever `config['classifier']` selects. | `FF_BIOCLIP_ENABLED` |
+| `EVIDENCE_FUSION` | Runs last: one `source_type='consensus'` row per frame from the rows above, the edge rows and burst motion; what the grid shows when no person has ruled ([Which verdict a photo shows](#how-blank--empty-images-are-handled)). Settings: the [flag table](./01-TECHNOLOGY-STACK.md#feature-flags) | `FF_EVIDENCE_FUSION_ENABLED` |
 
 ### Detector → Crop → Classify (the inference tree)
 
@@ -82,7 +86,7 @@ labels (`groupByBox` in `frontend/src/lib/observations.ts`). Below-threshold cro
 flag on, `count` becomes **human-only** ("N individuals" annotations) since AI rows are 1-per-detection.
 Requires the GPU worker; set it on the **worker**, and reprocess a deployment to migrate existing rows
 (`delete_superseded_ai_observations` makes re-runs replace, not append). Design detail:
-[per-crop-classification-spec](../development%20reports/per-crop-classification-spec.md).
+[per-crop-classification-spec](../development%20reports/_archive/per-crop-classification-spec.md).
 
 **Idempotent + incremental (Guard 2):** by default `run_pipeline(only_unannotated=True)` fetches only
 media that **don't already have a cloud `source_type='ai'` observation**, so re-running (or
@@ -104,7 +108,8 @@ those milliseconds can still race.
 (`services/locks.py`) while it reads the media and runs the steps, so a second run waits and then
 sees what the first one wrote. The lock spans processes and has a renewed 10-minute TTL: a Redis key
 when `REDIS_URL` is set, otherwise a lease row in `api_jobs` (`status = 'lock'`, #323), which also
-covers Cloud Run job executions. When Redis or Supabase is unreachable it is an in-process lock only;
+covers runs in different processes: the API, the ARQ worker and the Lambda `cpu` function. When
+Redis or Supabase is unreachable it is an in-process lock only;
 the module docstring has the exact guarantee.
 The upload job joins a **queued** `ai_pipeline` job on the deployment (under a lock, so chunks that
 arrive together make one); the job stays queued while it is deferred and while it waits for the
@@ -124,7 +129,8 @@ may not be the upload's.
 
 > **History:** the earlier `MegaDetectorStep`, `SpeciesNetClassifierStub`, and `EmptyFrameStep`
 > placeholders were **removed** — the SpeciesNet ensemble subsumes detection, classification, and
-> blank handling. The registry is now `MEDIA_PREP → SPECIESNET → ANIMAL_CROP → BIOCLIP`.
+> blank handling. The steps are now the table above (`PipelineStepType` in
+> `backend/app/schemas/pipeline.py`).
 
 ### How blank / empty images are handled
 
@@ -153,7 +159,7 @@ A consensus animal no model named is notified as "Unidentified animal".
 
 ## Wildlife Brain (embeddings → clustering → active learning)
 
-A second, deeper track (`domain/wildlife_brain.py`, `embedding_lifecycle.py`, `clustering.py`,
+A second, deeper track (`domain/wildlife_brain.py`, which also runs HDBSCAN, `embedding_lifecycle.py`,
 `active_learning.py`), surfaced through the `/api/brain/*`, `/api/intelligence/*`, and `/api/qa/*`
 routers. Gated by `FF_WILDLIFE_BRAIN_ENABLED` (on by default, #344) / `FF_ACTIVE_LEARNING_ENABLED` (off).
 

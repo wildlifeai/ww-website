@@ -8,7 +8,7 @@
 
 Repos: **backend** (`ww-backend`, canonical schema), **website** (`ww-website`,
 API + worker + frontend), **firmware** (`Seeed_Grove_Vision_AI_Module_V2`),
-**mobile** (`wildlife-watcher-mobile-app`).
+**mobile** (`ww-mobile-app`).
 
 ---
 
@@ -31,8 +31,8 @@ The two repos promote **differently**, and that asymmetry is why this is safe:
 
 | Repo | dev | staging / production |
 |---|---|---|
-| **ww-backend** (schema) | **destructive reset + full reseed** (`db reset --no-seed` then `seed.sql` + `dev/data.sql` + fixtures) — this is why the demo Rat model + deployment exist only on dev | **schema-only `supabase db push`** — additive migrations, **no reset, no reseed** ([deploy_cloud_projects.yml](https://github.com/wildlifeai/wildlife-watcher-backend/blob/main/.github/workflows/deploy_cloud_projects.yml)) |
-| **ww-website** (app) | merge to `dev` → build + roll `ww-backend-dev` (API) + `ww-embedding-worker-dev` (worker) | merge to the staging branch → build + roll `ww-backend` / `ww-embedding-worker` |
+| **ww-backend** (schema) | **destructive reset + full reseed** (`db reset --no-seed` then `seed.sql` + `dev/data.sql` + fixtures), which is why the demo Rat model + deployment exist only on dev | **schema-only `supabase db push`**: additive migrations, **no reset, no reseed** ([deploy_cloud_projects.yml](https://github.com/wildlifeai/ww-backend/blob/main/.github/workflows/deploy_cloud_projects.yml)) |
+| **ww-website** (app) | merge to `dev` → build + roll `ww-backend-dev` (API) + `ww-embedding-worker-dev` (worker) | a `dev` to `main` release → build + roll `ww-backend` / `ww-embedding-worker` (`.github/workflows/deploy-backend.yml`; there is no staging branch) |
 
 **Consequences:**
 - The `dual_ai_v0` migration (`observations.ai_origin` + `device_alert_rules`) is
@@ -59,15 +59,12 @@ The two repos promote **differently**, and that asymmetry is why this is safe:
 Promoting the **code** is trivial; what makes the feature **actually do something in
 production** is upstream of the website entirely:
 
-> **Firmware:** real cameras do not emit percentage NN scores yet. The
-> `USE_PERCENTAGE` flag is disabled, so the device writes raw int8 logits instead of
-> `"label: pct"` into `UserComment`, and ingestion does not treat those as scores.
-> The fix is staged on firmware branch **`feat/exif-confidence-enable`** but is
-> unverified/unshipped. **Until it ships and a real device writes percentage scores,
-> edge reflection in production is a safe no-op** (nothing to reflect).
-
-So enabling `FF_EDGE_REFLECT_ENABLED` in prod before the firmware ships is harmless
-but pointless. Treat the firmware fix as the **milestone that unlocks prod value**.
+> **Firmware, no longer a gate (checked 2026-11-26):** the firmware's `main` has
+> `USE_PERCENTAGE` on since 2026-07-08 (Seeed commit `fb66bafd`, `cvapp.h`), so a camera
+> on that firmware writes `"label: pct%; "` into `UserComment`; the bench run of 2026-09-05
+> saw scores in every frame. A camera on older firmware writes none, and reflection does
+> nothing for its photos. What the camera's own detection threshold (op 16) means is a
+> separate contract: [AI-ARCHITECTURE](./AI-ARCHITECTURE.md#the-contracts-that-must-never-break).
 
 ---
 
@@ -94,30 +91,29 @@ prod uses the real UI.
 EXIF `UserComment` begins with an 8-byte NUL-padded charset code (`ASCII` + 3 NULs) —
 exactly what the firmware writes. Postgres `jsonb` rejects the NUL codepoint (SQLSTATE
 `22P05`), so storing the parsed dict as `media.exif_metadata` **failed media
-registration for every frame that carried a UserComment**. Latent only because devices
-don't emit UserComment yet — it would have broken **every real device upload** the
-moment the firmware fix (§4) shipped. Fixed in `domain/exif.py` (`_strip_nul` sanitises
-the parsed dict). **This must be in staging/prod before the firmware fix ships.**
+registration for every frame that carried a UserComment**. Latent then because devices
+did not emit UserComment; they do now (§4). Fixed in `domain/exif.py` (`_strip_nul`
+sanitises the parsed dict), which is on `dev` and `main`.
 
 ---
 
 ## 7. Production rollout checklist
 
-Do these in order. Steps 1–2 are safe to do now; step 5 waits on §4.
+Do these in order. Step 2 is done: `dual_ai_v0` is on ww-backend `main` (checked 2026-11-26).
 
 - [ ] **1. Coordinate the schema change with mobile.** The `ai_origin` column changes
       the generated `database.types.ts` mobile consumes. File the coordination note
       (schema-change template) — the change is non-breaking (additive nullable column).
-- [ ] **2. Promote the schema to production.** Merge the `dual_ai_v0` migration to
+- [x] **2. Promote the schema to production.** Merge the `dual_ai_v0` migration to
       ww-backend `main` → `supabase db push` applies `ai_origin` + `device_alert_rules`
       additively (no reset, no reseed). Verify: `SELECT ai_origin FROM observations LIMIT 1;`
       resolves and `device_alert_rules` exists.
-- [ ] **3. Promote the app to staging.** Merge the edge-reflection + badge + the EXIF
-      NUL fix to the staging branch; confirm API + worker roll.
+- [ ] **3. Promote the app to production.** Edge reflection, the badge and the EXIF
+      NUL fix are on `main`; a `dev` to `main` release carries anything newer. Confirm
+      API + worker roll.
 - [ ] **4. Repeat this demo on staging** to validate end-to-end (§8) before prod.
-- [ ] **5. Set the feature flag — timed to firmware.** Keep `FF_EDGE_REFLECT_ENABLED`
-      **off** in prod until the firmware `USE_PERCENTAGE` fix ships and a real device has
-      written percentage scores. Then enable it on **both** the prod API and worker:
+- [ ] **5. Set the feature flag.** The firmware writes percentage scores (§4). Enable
+      `FF_EDGE_REFLECT_ENABLED` on **both** the prod API and worker:
       - API: `az containerapp update -n <api> -g WW-AE --set-env-vars FF_EDGE_REFLECT_ENABLED=true`
       - Worker: `az containerapp revision copy -n <worker> -g WW-AE --set-env-vars FF_EDGE_REFLECT_ENABLED=true`
         (use `revision copy`, **not** `update` — a plain `--set-env-vars` on the worker has
@@ -134,7 +130,7 @@ Do these in order. Steps 1–2 are safe to do now; step 5 waits on §4.
 1. Seed or onboard an edge model with a real `label_map` (target + background) and
    assign it to a project (`projects.model_id`).
 2. Stamp a few JPEGs with `UserComment = "rat: 87; not rat: 13; "` (or use real device
-   frames once the firmware ships). Upload via `POST /api/exif/parse` with
+   frames). Upload via `POST /api/exif/parse` with
    `upload_to_drive=true`, `run_ai=true`, `assigned_deployment_id=<demo deployment>`.
 3. The worker (KEDA-woken on `api_jobs`) runs the Cloud pipeline **and** edge reflection.
 4. **Assert:** `observations` for the deployment contain `ai_origin='edge'` rows (one per

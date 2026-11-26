@@ -6,16 +6,16 @@
 > doc that owns it.
 
 Repos: **website** (`ww-website`), **backend** (`ww-backend`, canonical schema),
-**mobile** (`wildlife-watcher-mobile-app`), **firmware** (`Seeed_Grove_Vision_AI_Module_V2`).
+**mobile** (`ww-mobile-app`), **firmware** (`Seeed_Grove_Vision_AI_Module_V2`).
 
 ```
  (1) Train/export        (2) Upload & convert      (3) Label mapping      (4) Manifest
    Edge Impulse   ──►   website /api/models/  ──►  website label_map ──► website MANIFEST.zip
    int8 .tflite zip      convert → Vela → .TFL       (species ↔ taxon)     (.TFL + labels.txt)
-   (by hand, or the website drives it: Annotations → Actions → Create species ID model…, which
+   (by hand, or the website drives it: Media → Actions → Create species ID model…, which
     covers stages 1 to 3 in one job; see stage 1)
                                                                                  │
- (8) Reflect (planned)  (7) Ingest EXIF        (6) On-device inference    (5) Deploy
+ (8) Reflect            (7) Ingest EXIF        (6) On-device inference    (5) Deploy
    edge observations ◄─ website exif.py    ◄──  firmware: load+run    ◄──  mobile (BLE) or
    beside SpeciesNet     UserComment parse       write EXIF UserComment      SD-card manifest
 ```
@@ -73,9 +73,8 @@ Detail: [AI Model & Manifest Pipeline](./ai-model-pipeline.md).
 Robustness notes (all current): the converter accepts any `.tflite` in the ZIP
 (not only `trained.tflite`), treats `model_variables.h` as optional, ignores macOS
 `__MACOSX`/`._` shadow files, surfaces the real Vela error (e.g. "FullyConnected
-could not run on NPU" = not int8-quantized), and uses unique `_pending/{job_id}`
-placeholder paths to satisfy the `NOT NULL UNIQUE` path columns
-(see backend [path-columns design issue](../../../ww-backend/documentation/development%20reports/ai-models-path-columns-design-issue.md)).
+could not run on NPU" = not int8-quantized), and leaves the `ai_models` path columns null until
+the files exist (they are nullable; the old `_pending/{job_id}` placeholder is retired).
 Every Vela run also refuses a model whose SRAM estimate exceeds `MODEL_ARENA_BYTES` (512 KiB, the arena `ww500_md.ld` reserves).
 
 **Label integrity is enforced here**, because upload is the last point where the
@@ -127,10 +126,13 @@ and writes three things into each JPEG's EXIF:
 - **AE telemetry** → `MakerNote` (`0x927C`), `"integration, analogGain, digitalGain, aeMean, converged"`
 - **NN class scores** → `UserComment` (`0x9286`), `"<label>: <pct>%; …"`
 
-> `USE_PERCENTAGE` is **enabled** on firmware `dev` (`cvapp.h:36`), so percentages are
-> written today. Whether the contract stays percentages or moves to logits is being
-> decided in [firmware #189](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/issues/189);
+> `USE_PERCENTAGE` is **enabled** on the firmware's `main` since 2026-07-08 (Seeed commit
+> `fb66bafd`, `cvapp.h`), so percentages are written today
+> ([firmware #189](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/issues/189), which asked
+> whether they stay, closed 2026-10-26);
 > the website's ingest (stage 7) reads percentages, so a change there needs a change here.
+> The detection threshold, op 16, is a separate contract:
+> [AI-ARCHITECTURE](./AI-ARCHITECTURE.md#the-contracts-that-must-never-break).
 
 ## 7. Ingest EXIF (website)
 On SD-card upload, [`backend/app/domain/exif.py`](../../backend/app/domain/exif.py)
@@ -160,8 +162,8 @@ model, and the camera's raw per-class scores (`lib/cameraScores.ts`) show once, 
 Camera AI row or as their own entry, so a frame the camera judged *no person 62%* still shows
 the device's decision even though nothing is reflected for it.
 Gated on `FF_EDGE_REFLECT_ENABLED`. The ww-backend `dual_ai_v0` migration
-(`observations.ai_origin` + `device_alert_rules`) is **merged** and the flag is on
-**on dev**; real end-to-end value still depends on the firmware fix (stage 6).
+(`observations.ai_origin` + `device_alert_rules`) is **merged** and the flag is **on for dev**;
+the firmware writes the scores it reads (stage 6).
 
 ## Open items
 - **End to end, person detection first.** Nothing has yet travelled the whole path on a
@@ -183,7 +185,7 @@ Gated on `FF_EDGE_REFLECT_ENABLED`. The ww-backend `dual_ai_v0` migration
   images, is the next step ([species-brain-training-spec](../development%20reports/species-brain-training-spec.md)).
 - **Detection models** (YOLOv8/YOLOv11 OD, YOLOv8 Pose) stay `blocked` in the registry until
   the firmware can run a detection head; see *What the device can run* above.
-- **Rollout:** promote schema (ww-backend `main`) + app (staging) + enable the flag per
+- **Rollout:** the schema is on ww-backend `main`; enable the flag in production per
   [dual-ai-production-rollout](./dual-ai-production-rollout.md); coordinate `ai_origin`
   with mobile.
 - ✅ **Backend:** `dual_ai_v0` schema merged; `FF_EDGE_REFLECT_ENABLED` on (dev).

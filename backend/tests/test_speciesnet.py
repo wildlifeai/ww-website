@@ -471,7 +471,10 @@ async def test_per_crop_run_inserts_beside_speciesnet_and_never_updates_it(monke
     deleted = []
     monkeypatch.setattr(pipeline, "delete_superseded_ai_observations", lambda _svc, ids, version: deleted.append((set(ids), version)))
 
-    async def resolve(url, size="full"):
+    rows_read = []
+
+    async def resolve(url, size="full", media=None):
+        rows_read.append(media)
         return b"jpeg", "image/jpeg"
 
     monkeypatch.setattr(media_resolver, "resolve_media", resolve)
@@ -482,13 +485,16 @@ async def test_per_crop_run_inserts_beside_speciesnet_and_never_updates_it(monke
         async def classify(self, paths, config):
             return [CropPrediction(filepath=p, scientific_name="Felis catus", common_name="Domestic Cat", score=0.8, rank="species") for p in paths]
 
-    result = await pipeline.BioCLIPStep()._refine_crops_per_detection([{"id": "m1"}], "dep", {}, Classifier(), "bioclip-v1", 0.0, time.monotonic())
+    result = await pipeline.BioCLIPStep()._refine_crops_per_detection(
+        [{"id": "m1", "deployment_id": "dep"}], "dep", {}, Classifier(), "bioclip-v1", 0.0, time.monotonic()
+    )
 
     svc.table.return_value.update.assert_not_called()
     inserted = svc.table.return_value.insert.call_args.args[0]
     assert [(r["media_id"], r["source_model_version"], r["bbox_x"]) for r in inserted] == [("m1", "bioclip-v1", 0.1)]
     assert deleted == [({"m1"}, "bioclip-v1")]
     assert result.observations_created == 1
+    assert rows_read == [media_resolver.MediaRef("m1", "dep")]  # the crop is read as part of its photo
 
 
 # ── Whole-frame and vehicle box rules (#285) ──────────────────────────────────
@@ -594,7 +600,10 @@ async def test_speciesnet_step_applies_the_rules_and_counts_the_drops(monkeypatc
     monkeypatch.setattr(media_evidence, "write_signals", lambda _svc, rows, _dep: evidence.extend(rows) or len(rows))
     monkeypatch.setattr(settings, "FF_PER_CROP_CLASSIFY_ENABLED", False)
 
-    async def resolve(url, size="full"):
+    rows_read = []
+
+    async def resolve(url, size="full", media=None):
+        rows_read.append(media)
         return b"jpeg", "image/jpeg"
 
     monkeypatch.setattr(media_resolver, "resolve_media", resolve)
@@ -610,8 +619,9 @@ async def test_speciesnet_step_applies_the_rules_and_counts_the_drops(monkeypatc
 
     monkeypatch.setattr(speciesnet_service, "get_speciesnet_service", lambda: Service())
 
-    media = [{"id": i, "file_path": f"p/{i}.jpg"} for i in ("night", "fence", "cat")]
+    media = [{"id": i, "deployment_id": "dep", "file_path": f"p/{i}.jpg"} for i in ("night", "fence", "cat")]
     result = await pipeline.SpeciesNetStep().run(media, "dep", {"confidence_threshold": 0.2})
+    assert rows_read == [media_resolver.MediaRef(i, "dep") for i in ("night", "fence", "cat")]
 
     inserted = [r for call in svc.table.return_value.insert.call_args_list for r in call.args[0]]
     assert {r["media_id"]: r["observation_type"] for r in inserted} == {"night": "blank", "fence": "blank", "cat": "animal"}

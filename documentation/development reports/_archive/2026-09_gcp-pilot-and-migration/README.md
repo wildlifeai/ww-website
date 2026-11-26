@@ -1,12 +1,12 @@
 # Google Cloud pilot and migration plan
 
-> **Status:** 🕰️ Superseded 2026-11-22 by
-> [2026-10_aws-reannz-migration](../2026-10_aws-reannz-migration/README.md) (approach B, ranked first
-> on 31 October 2026). The ML-worker pilot was not run: its issue
-> [#172](https://github.com/wildlifeai/ww-website/issues/172) and its code, PR [#189](https://github.com/wildlifeai/ww-website/pull/189), were closed unmerged, and cost per photo
-> is measured in that report's step 4. The Google Cloud training path (`backend/training/`, the
-> native-training report) still links here, so this file moves to `_archive/` when
-> [#463](https://github.com/wildlifeai/ww-website/issues/463) retires it. Below is the plan as of 2026-10-01, unchanged: prices are USD from the official pricing
+> **Status:** 🕰️ Historical snapshot, superseded 2026-11-22 by
+> [2026-10_aws-reannz-migration](../../2026-10_aws-reannz-migration/README.md) (approach B, ranked first
+> on 31 October 2026) and archived 2026-11-26 with the native-training report; the Google Cloud
+> training code goes with [#463](https://github.com/wildlifeai/ww-website/issues/463). The ML-worker
+> pilot was not run: its issue [#172](https://github.com/wildlifeai/ww-website/issues/172) and its
+> code, PR [#189](https://github.com/wildlifeai/ww-website/pull/189), were closed unmerged, and cost
+> per photo is measured in that report's step 4. Below is the plan as of 2026-10-01, unchanged: prices are USD from the official pricing
 > pages on 2026-09-26, NZD at the ECB rate of 2026-09-25 (**1 USD = 1.7634 NZD**), and figures
 > marked *unverified* must not be quoted onward.
 
@@ -84,7 +84,7 @@ Owners: **Victor** (infrastructure, code), **Dinnie** (billing account, cost mod
 | 8 | GPU quota: the first GPU job in asia-southeast1 grants 3 `NvidiaL4GpuAllocNoZonalRedundancyPerProjectRegion` ([quotas](https://docs.cloud.google.com/run/quotas)); ask the CE about a raise and Singapore capacity | Victor + CE | Quotas page shows 3 or more |
 | 9 | Code (§8), PR to `dev` | Victor | `ruff check`, `ruff format --check`, `pytest` green; API image builds without ML deps; `python -m app.jobs.cloudrun_entry selftest` exits 0 on the dev image |
 | 10 | Build with Cloud Build (§4.1); create the job once by hand (command below) | Victor | `gcloud run jobs execute ww-ml-worker-dev --region asia-southeast1 --wait` succeeds; log shows `cuda? True`, three model loads and the time to "models ready" (`t_cold`, §6.2) |
-| 11 | First real run (command below) after creating the `api_jobs` row; dev is reseeded without notice ([SKILL.md](../../../.agents/skills/SKILL.md)), so record ids as evidence only | Victor | `api_jobs.status = 'completed'`; new `observations` with `source_type='ai'`, `ai_origin='cloud'`; execution start and end noted |
+| 11 | First real run (command below) after creating the `api_jobs` row; dev is reseeded without notice ([gotchas.md](../../../../.agents/skills/references/gotchas.md#cloud-dev-is-reseeded-without-notice)), so record ids as evidence only | Victor | `api_jobs.status = 'completed'`; new `observations` with `source_type='ai'`, `ai_origin='cloud'`; execution start and end noted |
 | 12 | Switch the dev API and park the Azure worker (§3); three uploads of about 10, 100 and 500 photos; record job ids, media ids, counts, durations | Victor | API logs `job_dispatched_cloudrun`, not `job_enqueued_arq`; `az containerapp replica list` for the Azure worker stays empty; Cloud AI labels on all three |
 | 13 | Two days after the last run: §2.1 and §2.2 queries; fill §6.4 and the G3 row of the OKR sheet | Victor (query), Dinnie (sheet) | Cost per photo in NZD with the window, the photo count and the query text |
 | 14 | Architecture review with the CE (§7.4); Track 2 go/no-go | Victor + CE | Decisions recorded here; open items filed |

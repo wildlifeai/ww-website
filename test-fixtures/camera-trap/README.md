@@ -210,9 +210,10 @@ cat'd into the dev seed after `data.sql` (same as `fixtures.generated.sql`). Ske
 
 ```sql
 -- VALID: alice (a0…001) can see this — General org, she's a member.
-INSERT INTO devices (id, name, organisation_id, modified_by, bluetooth_id, device_eui)
+-- A camera belongs to no organisation (ww-backend#346): the project decides who sees the deployment.
+INSERT INTO devices (id, name, modified_by, bluetooth_id, device_eui)
 VALUES ('d7785fab-0000-4000-8000-000000000001', 'WW500 (valid test)',
-        'b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001',
+        'a0000000-0000-0000-0000-000000000001',
         'BT_TEST_7785', 'EUI_TEST_7785') ON CONFLICT (id) DO NOTHING;
 INSERT INTO projects (id, name, description, organisation_id, created_by, modified_by, is_active)
 VALUES ('p7785fab-0000-4000-8000-000000000001', 'Access Test — Valid',

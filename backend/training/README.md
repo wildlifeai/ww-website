@@ -3,7 +3,7 @@
 The container behind `MODEL_TRAINER=gcp`: a manifest of labelled images in, an int8 TFLite
 classifier out. Vela, the tensor-arena check and LM-1 run on the website, not here. The job
 contract (settings, GCS layout, manifest schema, outputs, identities) and the recipe are in
-[2026-09_gcp-native-model-training](../../documentation/development%20reports/2026-09_gcp-native-model-training/README.md).
+[2026-09_gcp-native-model-training](../../documentation/development%20reports/_archive/2026-09_gcp-native-model-training/README.md).
 
 | File | What it does |
 |---|---|
@@ -38,7 +38,7 @@ docker run --rm -v "$PWD/dataset:/data/input" -v "$PWD/out:/data/output" ww-spec
 ## Deploy (not run from this repository)
 
 Project, region, Artifact Registry repo and identities come from the
-[migration plan](../../documentation/development%20reports/2026-09_gcp-pilot-and-migration/README.md);
+[migration plan](../../documentation/development%20reports/_archive/2026-09_gcp-pilot-and-migration/README.md);
 the job flags are in the report's container table.
 
 ```bash

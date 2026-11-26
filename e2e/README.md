@@ -11,7 +11,7 @@ drive the real UI against a real database.
 | `01-smoke` | Site + API up; public pages (`/`, `/guides`, `/faq`, `/resources`) render clean; seeded user can log in and every authed page (`/toolkit`, `/field`, `/annotations`, `/insights`, `/settings`) renders without errors or auth bounces |
 | `02-demo` | "Try the demo" opens a signed-in session via `/api/auth/demo-session`; DemoGuard keeps it read-only (upload gated) |
 | `03-upload-exif` | Real SD-card folder upload through `/upload-data` (webkitdirectory), AI off; the deployment UUIDs the WW500 stamps in EXIF bind exact-match to seeded deployments; a stamped UUID with **no** deployments row goes through triage and is created under that id (#92), so nothing lands unassigned and every touched deployment is one of the card's folders |
-| `04-lorawan-realtime` | With the Realtime page (`/field`) open, a synthetic `lorawan_messages`+`lorawan_parsed_messages` insert appears in the Cameras table and on top of the Messages tab **without reload**. Verifies the page's subscription to the decoded row (#94, `hooks/useFieldLive.ts`) and that the realtime publication SQL is applied to the dev DB |
+| `04-lorawan-realtime` | With the Realtime page (`/field`) open, a synthetic `lorawan_messages`+`lorawan_parsed_messages` insert with a fault bit appears in the Cameras table as Fault with the fault named (#427), and on top of the Messages tab, **without reload**. Verifies the page's subscription to the decoded row (#94, `hooks/useFieldLive.ts`), that the realtime publication SQL is applied to the dev DB, and that `deployment_latest_lorawan` gives the health state |
 | `05-a11y` | The public pages (`/`, `/login`, `/signup`, `/guides`, `/faq`, `/resources`) have no serious or critical axe-core violations (WCAG 2.0 and 2.1, A and AA). No account needed |
 
 ## Running
@@ -28,10 +28,6 @@ useful (smaller) run. Point `E2E_BASE_URL`/`E2E_API_URL` at either the local
 stack (`docker-compose.dev.yml` + `frontend: npm run dev`) or the deployed dev
 site. The upload and realtime specs **write to the target database** — run them
 against dev only, never production.
-
-First run note: the selectors use roles/text and were written from the source;
-if the UI has drifted, expect one calibration pass (traces/screenshots are
-retained on failure — `npm run report`).
 
 ## In CI
 
@@ -82,7 +78,10 @@ The jobs:
   so they are the rows created since the run started, on Drive, in a deployment whose id starts
   with one of the fixture SD card's folder names; their observations, events and renditions go
   with them. The Drive originals stay: the `dev` environment has no Drive credentials, and Drive
-  dedups by content, so runs do not add copies. The script refuses any Supabase project but
+  dedups by content, so runs do not add copies. Once dev runs on AWS the originals are `s3://`
+  keys in `wildlifewatcher-dev-media`, which the cleanup does not match yet (it looks for
+  `gdrive://` paths), so those rows and originals stay until
+  [#470](https://github.com/wildlifeai/ww-website/issues/470). The script refuses any Supabase project but
   dev, and `npm run test:cleanup` unit-tests its filters (on a pull request that changes `e2e/`).
   `node cleanup.mjs --dry-run` lists what it would delete.
 - **E2E Full Stack** (`.github/workflows/e2e-full-stack.yml`, #216) runs `01-smoke` and
@@ -128,14 +127,14 @@ Locally, `CI=true npx playwright test ...` gives the same reporter and settings.
 
 ## Manual checklist (not automatable from here)
 
-- [ ] Realtime publication SQL applied to the **live dev** DB after #94 merges
-      (apply manually — a `supabase/**` push to backend dev resets the DB)
 - [ ] CF Pages build env still injects the intended Supabase anon key (no
       service-role key in the public bundle)
-- [ ] Dev uploads storage account (`wwuploadsae`) reachable from the backend
+- [ ] The dev upload buffer reachable from the backend: storage account `wwuploadsae` on Azure,
+      bucket `wildlifewatcher-dev-media` once dev runs on AWS
 - [ ] Demo account enabled on the dev backend (`/api/auth/demo-session` 200)
 - [ ] After a backend-dev DB reseed: re-run `03-upload-exif` (seeds restore the
-      fixture deployment UUIDs) and re-apply the publication SQL if the reset
-      dropped it
+      fixture deployment UUIDs). The Realtime publication needs nothing: ww-backend's
+      migration `20260711043000_lorawan_realtime_publication.sql` adds both LoRaWAN tables at
+      every reset
 - [ ] LoRaWAN end-to-end with real hardware: bench WW500 uplink → TTN →
       lorawan-ingest → Field page (the spec only covers DB → UI)

@@ -1,8 +1,15 @@
 # Species Brain training on Google Cloud (native trainer)
 
-> **Status:** 📋 Proposal with code, 2026-09-29. Uncommitted on `feat/gcp-native-training-v2`,
+> **Status:** 🕰️ Historical snapshot, archived 2026-11-26. The approach is retired: training moves
+> to the REANNZ cluster and this path's code (`backend/training/`, `services/gcp_training.py`,
+> `jobs/native_training.py`, merged with [#151](https://github.com/wildlifeai/ww-website/pull/151),
+> off behind `FF_NATIVE_TRAINING_ENABLED`) goes with
+> [#463](https://github.com/wildlifeai/ww-website/issues/463). No Google Cloud resource was ever
+> created. Below is the proposal as of 2026-09-29, unchanged.
+>
+> Original status: 📋 Proposal with code, 2026-09-29. Uncommitted on `feat/gcp-native-training-v2`,
 > stacked on [#151](https://github.com/wildlifeai/ww-website/pull/151) (the Edge Impulse
-> trainer, [species-brain-training-spec](../species-brain-training-spec.md)). No Google Cloud
+> trainer, [species-brain-training-spec](../../species-brain-training-spec.md)). No Google Cloud
 > resource exists and nothing has trained through this path: every cost and duration below is
 > an estimate. Google Cloud foundations (projects, IAM, Workload Identity, Artifact Registry,
 > regions, prices, NZD rate) are owned by the

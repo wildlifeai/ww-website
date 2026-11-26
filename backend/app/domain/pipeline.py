@@ -357,7 +357,7 @@ class GeminiPresenceStep(PipelineStep):
     ) -> PipelineStepResult:
         from app.config import settings
         from app.domain.burst_evidence import group_bursts
-        from app.domain.media_resolver import resolve_media
+        from app.domain.media_resolver import MediaRef, resolve_media
         from app.services import gemini_presence as gp
         from app.services.media_evidence import signal_rows, write_signals
 
@@ -390,7 +390,7 @@ class GeminiPresenceStep(PipelineStep):
         frames: dict[str, bytes] = {}
         for m in todo:
             try:
-                resolved = await resolve_media(m["file_path"], size="full")
+                resolved = await resolve_media(m["file_path"], size="full", media=MediaRef.of(m))
                 if not resolved:
                     errors += 1
                     continue
@@ -628,7 +628,7 @@ class EvidenceFusionStep(PipelineStep):
 
         from app.config import settings
         from app.domain.burst_evidence import SUSPICIOUS_V1, band_of, burst_signals, evidence_score, group_bursts
-        from app.domain.media_resolver import resolve_media
+        from app.domain.media_resolver import MediaRef, resolve_media
         from app.domain.motion_roi import compute_motion_fractions
         from app.services.media_evidence import read_signal, signal_rows, write_signals
 
@@ -668,7 +668,7 @@ class EvidenceFusionStep(PipelineStep):
             images: list[Optional[Image.Image]] = []
             for m in burst:
                 try:
-                    resolved = await resolve_media(m["file_path"], size="full")
+                    resolved = await resolve_media(m["file_path"], size="full", media=MediaRef.of(m))
                     images.append(Image.open(io.BytesIO(resolved[0])).convert("RGB") if resolved else None)
                 except Exception as exc:
                     logger.warning("evidence_fusion_resolve_error", media_id=m.get("id"), error=str(exc))
@@ -1080,7 +1080,7 @@ class SpeciesNetStep(PipelineStep):
         import shutil
         import tempfile
 
-        from app.domain.media_resolver import resolve_media
+        from app.domain.media_resolver import MediaRef, resolve_media
         from app.services.media_evidence import signal_rows, write_signals
         from app.services.speciesnet_service import get_speciesnet_service
 
@@ -1099,7 +1099,7 @@ class SpeciesNetStep(PipelineStep):
             # Resolve each media item to a local temp file for the model.
             for m in media:
                 try:
-                    resolved = await resolve_media(m["file_path"], size="full")
+                    resolved = await resolve_media(m["file_path"], size="full", media=MediaRef.of(m))
                     if not resolved:
                         errors += 1
                         continue
@@ -1334,7 +1334,7 @@ class BioCLIPStep(PipelineStep):
 
         from app.config import settings
         from app.domain.classifiers import resolve_classifier, resolve_classifier_name
-        from app.domain.media_resolver import resolve_media
+        from app.domain.media_resolver import MediaRef, resolve_media
 
         start = time.monotonic()
         if not settings.FF_BIOCLIP_ENABLED:
@@ -1399,7 +1399,7 @@ class BioCLIPStep(PipelineStep):
                 if not source:
                     continue
                 try:
-                    resolved = await resolve_media(source, size="full")
+                    resolved = await resolve_media(source, size="full", media=MediaRef.of(m))
                     if not resolved:
                         errors += 1
                         continue
@@ -1497,10 +1497,12 @@ class BioCLIPStep(PipelineStep):
         import shutil
         import tempfile
 
-        from app.domain.media_resolver import resolve_media
+        from app.domain.media_resolver import MediaRef, resolve_media
 
         svc = create_service_client()
         media_ids = [m["id"] for m in media]
+        # A crop is read as part of its photo's row.
+        refs = {m["id"]: MediaRef.of(m) for m in media}
         errors = 0
         observations_created = 0
 
@@ -1525,7 +1527,7 @@ class BioCLIPStep(PipelineStep):
         try:
             for obs in obs_rows:
                 try:
-                    resolved = await resolve_media(obs["crop_url"], size="full")
+                    resolved = await resolve_media(obs["crop_url"], size="full", media=refs.get(obs["media_id"]))
                     if not resolved:
                         errors += 1
                         continue

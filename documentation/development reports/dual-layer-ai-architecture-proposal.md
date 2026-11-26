@@ -7,7 +7,8 @@
 > (`domain/edge_reflection.py`, gated on `FF_EDGE_REFLECT_ENABLED`, **on for dev**), the **LM-1/2**
 > label-chain checks in `domain/model.py`, and the ww-backend **`dual_ai_v0`** schema
 > (`observations.ai_origin` + `device_alert_rules`) — **merged**, so edge reflection is unblocked.
-> Still open for v0: the firmware `USE_PERCENTAGE` fix + `LM-9` guard (cross-repo — **the gating item**),
+> Still open for v0: the firmware `LM-9` guard (the `USE_PERCENTAGE` fix itself is on the firmware's
+> `main` since 2026-07-08, Seeed commit `fb66bafd`, so every "blocked: `USE_PERCENTAGE`" below is history),
 > LM-5 + the golden-set parity harness, and seed/test data (a project model with a real `label_map`
 > + media carrying UserComment NN scores). See §4.1 and
 > [dual-ai-production-rollout](../resources/dual-ai-production-rollout.md).
@@ -177,7 +178,7 @@ Stages 1–5 are **built**; the deltas are marked.
 
 - Today's uplink (`ww-hardware/…/app_ww.c`, `generate_wildlifeWatcherPayload`) is **TrapNZ-legacy**: heartbeat (12 B: event, status, `totalNNEvents`, sw version, ping period, battery) or sprung/set (8 B: + `positiveNNEvents`). Counters only — no class, no confidence, no model identity. It must keep working (TrapNZ integration).
 - The **Nordic nRF52832 owns alert logic**: it owns the LoRa stack, timers, and config (`CONFIG.TXT` format is Nordic-owned); the Himax owns inference and reports events/stats over I2C. Today the Himax only forwards OP counters; it must additionally forward **(class_index, score)** per positive inference — a small I2C message extension (coordinate across both firmware repos; the message-type enums must stay in lockstep).
-- Threshold semantics: OP 16 is a **logit threshold 0–127**, not a percentage. Rule compilation on the website must convert UI percent → device units using the deployed model's output-tensor quantization (scale/zero-point), never a hardcoded mapping (validated in §4 LM-5).
+- Threshold semantics (corrected 2026-11-26): on released firmware OP 16 is a raw int8 threshold, 0 to 127; with [Seeed PR 289](https://github.com/wildlifeai/Seeed_Grove_Vision_AI_Module_V2/pull/289) (open) it becomes a percent, 0 to 100, meaning the same for every model, so a rule's percent compiles as is. The contract: [AI-ARCHITECTURE](../resources/AI-ARCHITECTURE.md#the-contracts-that-must-never-break).
 - LoRaWAN fair-use: alerts must be rate-limited and duty-cycle aware; **instant alerts use confirmed uplinks** (retry ≤ 3), digest/heartbeat unconfirmed.
 
 ## 3.2 Rule configuration (backend → device)
@@ -316,7 +317,7 @@ The class-index chain that must never break:
 | LM-2 | Label **order** matches model class order | Upload validation | Order must come from the model's own metadata (`detection_capabilities` / EI `model_variables.h` when present), never alphabetized; `labels.txt` written in that exact order |
 | LM-3 | **Server↔device score parity** on a golden set | Bench, per model version | Run N golden images through (a) TFLite reference runtime server-side and (b) the physical device (SD-card golden folder, read scores back from EXIF); per-class scores must match within an int8-quantization tolerance (±3 pp) **and argmax must agree on 100% of unambiguous images** |
 | LM-4 | **Permutation canary** | Bench, once per firmware release | Deliberately deploy a shuffled labels.txt to a test device; the parity harness must FAIL — proves the harness actually detects index/label misalignment |
-| LM-5 | Threshold semantics | Bench, per model version | Map OP 16 logit (0–127) ↔ UI percent using the model's output quantization params; verify empirically: a detection scoring X% flips exactly at the compiled threshold |
+| LM-5 | Threshold semantics | Bench, per model version | Verify empirically that a detection scoring X% flips exactly at OP 16 = X, a percent with Seeed PR 289 (before it, a raw int8 value that needed the model's quantization) |
 | LM-6 | EXIF round-trip | Device-in-loop | UserComment present, parses via `backend/app/domain/exif.py` into `user_comment_fields` matching the on-screen scores; MakerNote and DeploymentID unaffected |
 | LM-7 | Truncation behaviour | Bench | >4 classes (EXIF_MAX_DYNAMIC_CLASSES) and >20-char labels: verify defined, documented truncation — highest-scoring classes kept, no buffer corruption |
 | LM-8 | Provenance completeness | E2E | Every edge observation and alert event resolves to exactly one `ai_models` row via `(firmware_model_id, version_number)`; images from a device running vX while DB says vY must be flagged, not silently mapped |

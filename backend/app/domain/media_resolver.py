@@ -10,22 +10,24 @@ Supported providers (extensible via ``RESOLVERS`` dict):
 - ``https://`` / ``http://`` — Public URL, fetched directly
 - ``gdrive://`` — Google Drive file ID, fetched via service account
 - ``supabase://`` — Supabase Storage bucket/path (placeholder)
-- ``s3://``: AWS S3 bucket/key, read through ``services.object_store``
+- ``s3://``: AWS S3 bucket/key, read through ``services.object_store``, only from the
+  ``originals/<project>/<deployment>/`` folder in ``S3_BUCKET`` of the media row it belongs to
 - Relative paths — unresolved local files (returns None)
 
 To add a new provider, implement an async function matching the
 ``Resolver`` signature and register it in the ``RESOLVERS`` dict.
 
 A route that hands an image to a client goes through :func:`serve_media`, which turns
-what Lambda cannot answer into a link.
+what Lambda cannot answer into a link. Both take the row as ``media`` (:class:`MediaRef`).
 """
 
 import asyncio
 import hashlib
 import ipaddress
 import socket
+import time
 from dataclasses import dataclass
-from typing import Callable, Coroutine, Literal, Optional, Tuple
+from typing import Any, Callable, Collection, Coroutine, Iterable, Literal, Mapping, Optional, Tuple
 from urllib.parse import urlparse
 
 import httpx
@@ -187,6 +189,117 @@ async def _resolve_s3(path: str, size: ImageSize) -> Optional[Tuple[bytes, str]]
     return data, content_type if content_type.startswith("image/") else "image/jpeg"
 
 
+# ── S3 originals: only from their own folder ────────────────────────
+#
+# The upload job and the CamtrapDP import write each original to
+# ``object_store.original_key``: ``originals/<project>/<deployment>/<file_hash>.<ext>`` in
+# ``S3_BUCKET``. An ``s3://`` path is read only when it is in that folder of the media row it
+# belongs to; any other is answered as a missing original.
+
+# How long a deployment's projects are reused before they are read again.
+FOLDERS_TTL_SECONDS = 60.0
+_folders_cache: dict[str, tuple[float, frozenset[str]]] = {}
+
+
+@dataclass(frozen=True)
+class MediaRef:
+    """The ``media`` row a stored path belongs to: its id and ``media.deployment_id``."""
+
+    id: str
+    deployment_id: str
+
+    @classmethod
+    def of(cls, row: Mapping[str, Any]) -> "MediaRef":
+        """From a ``media`` row read with its ``id`` and ``deployment_id``."""
+        return cls(str(row.get("id") or ""), str(row.get("deployment_id") or ""))
+
+
+def in_own_folder(file_path: str, deployment_id: str, project_ids: Collection[str]) -> bool:
+    """True when ``file_path`` is ``s3://<S3_BUCKET>/originals/<project>/<deployment_id>/<name>``
+    for one of ``project_ids``."""
+    from app.config import settings
+    from app.services import object_store
+
+    if not file_path.startswith("s3://") or not deployment_id or not settings.S3_BUCKET:
+        return False
+    try:
+        bucket, key = object_store.parse_s3_path(file_path)
+    except object_store.ObjectStoreError:
+        return False
+    if bucket != settings.S3_BUCKET or key.startswith("/") or ".." in key:
+        return False
+    parts = key.split("/", 3)
+    if len(parts) < 4:
+        return False
+    top, project, deployment, name = parts
+    return f"{top}/" == object_store.ORIGINALS_PREFIX and project in project_ids and deployment == deployment_id and bool(name)
+
+
+def _read_projects(deployment_ids: list[str]) -> dict[str, frozenset[str]]:
+    """Each deployment's project, and every project it was moved from.
+
+    ww-backend's ``move_deployment`` leaves the originals where they were uploaded, so a moved
+    deployment's photos stay in the folder of the project it had then (``deployment_moves``).
+    """
+    from app.services.db_utils import read_all, rows_of
+    from app.services.supabase_client import create_service_client
+
+    svc = create_service_client()
+    found: dict[str, set[str]] = {d: set() for d in deployment_ids}
+    for i in range(0, len(deployment_ids), 100):
+        chunk = deployment_ids[i : i + 100]
+        for row in rows_of(svc.table("deployments").select("id, project_id").in_("id", chunk).execute()):
+            found.setdefault(str(row["id"]), set()).add(str(row.get("project_id") or ""))
+        moves = read_all(
+            lambda c=chunk: svc.table("deployment_moves").select("id, deployment_id, from_project_id").in_("deployment_id", c).order("id")
+        )
+        for row in moves:
+            found.setdefault(str(row["deployment_id"]), set()).add(str(row.get("from_project_id") or ""))
+    return {d: frozenset(p for p in projects if p) for d, projects in found.items()}
+
+
+async def original_projects(deployment_ids: Iterable[str]) -> dict[str, frozenset[str]]:
+    """For each deployment, the projects whose ``originals/<project>/<deployment>/`` folder holds its originals.
+
+    Read with the service client and kept :data:`FOLDERS_TTL_SECONDS`, so a run over a
+    deployment's photos reads them once. Raises when the database cannot be read.
+    """
+    now = time.monotonic()
+    out: dict[str, frozenset[str]] = {}
+    stale: list[str] = []
+    for d in sorted({d for d in deployment_ids if d}):
+        hit = _folders_cache.get(d)
+        if hit and now - hit[0] < FOLDERS_TTL_SECONDS:
+            out[d] = hit[1]
+        else:
+            stale.append(d)
+    if stale:
+        fresh = await asyncio.to_thread(_read_projects, stale)
+        if len(_folders_cache) > 10_000:
+            _folders_cache.clear()
+        for d in stale:
+            out[d] = fresh.get(d, frozenset())
+            _folders_cache[d] = (now, out[d])
+    return out
+
+
+async def _s3_original_readable(file_path: str, media: Optional[MediaRef]) -> bool:
+    """True when the ``s3://`` original is in its own row's folder. Otherwise the refusal is logged
+    with the media id and the caller answers as for a missing original."""
+    if media is None or not media.deployment_id:
+        logger.warning("media_s3_original_refused", media_id=media.id if media else None, reason="no media row")
+        return False
+    try:
+        projects = (await original_projects([media.deployment_id])).get(media.deployment_id, frozenset())
+    except Exception as exc:  # noqa: BLE001 - a folder that cannot be checked is not read
+        logger.warning("media_s3_original_refused", media_id=media.id, reason="folder lookup failed", error=str(exc))
+        return False
+    if not in_own_folder(file_path, media.deployment_id, projects):
+        logger.warning("media_s3_original_refused", media_id=media.id, reason="not in its own folder")
+        return False
+    return True
+
+
 # ── Resolver registry ───────────────────────────────────────────────
 
 RESOLVERS: dict[str, tuple[bool, Resolver]] = {
@@ -207,12 +320,15 @@ def can_resolve(file_path: str) -> bool:
     return any(file_path.startswith(prefix) for prefix, (_strip, resolver) in RESOLVERS.items() if resolver is not _resolve_supabase)
 
 
-async def resolve_media(file_path: str, size: ImageSize = "full") -> Optional[Tuple[bytes, str]]:
+async def resolve_media(file_path: str, size: ImageSize = "full", *, media: Optional[MediaRef] = None) -> Optional[Tuple[bytes, str]]:
     """Resolve a file_path to (bytes, content_type) using the appropriate provider.
 
-    Returns None if the path cannot be resolved.
+    Returns None if the path cannot be resolved. ``media`` is the row the path belongs to: an
+    ``s3://`` original is read only from that row's own folder, never without it.
     """
     if not file_path:
+        return None
+    if file_path.startswith("s3://") and not await _s3_original_readable(file_path, media):
         return None
 
     for prefix, (strip, resolver) in RESOLVERS.items():
@@ -239,22 +355,25 @@ def staged_key(file_path: str, size: ImageSize) -> str:
     return f"{STAGED_PREFIX}{hashlib.sha256(f'{size}|{file_path}'.encode('utf-8')).hexdigest()}"
 
 
-async def serve_media(file_path: str, size: ImageSize = "full") -> Optional[ServedMedia]:
+async def serve_media(file_path: str, size: ImageSize = "full", *, media: Optional[MediaRef] = None) -> Optional[ServedMedia]:
     """The image at ``file_path`` as a route should answer it, or None when it cannot be resolved.
 
     With the S3 object store (AWS) an ``s3://`` original is a presigned GET, and any other
     original over :data:`INLINE_MAX_BYTES` (a Drive file, a public URL) is copied under
     ``buffer/media/`` and handed out the same way: the link carries no Drive credential and
     the bytes never pass through Lambda's answer. Other backends answer the bytes, as before.
+    ``media`` is the row, as for :func:`resolve_media`.
     """
     from app.config import settings
     from app.services import object_store
 
     on_s3 = settings.OBJECT_STORE_BACKEND == "s3"
     if on_s3 and file_path.startswith("s3://"):
+        if not await _s3_original_readable(file_path, media):
+            return None
         bucket, key = object_store.parse_s3_path(file_path)
         return ServedMedia(url=object_store.presign_get(key, bucket=bucket))
-    resolved = await resolve_media(file_path, size=size)
+    resolved = await resolve_media(file_path, size=size, media=media)
     if not resolved:
         return None
     data, content_type = resolved

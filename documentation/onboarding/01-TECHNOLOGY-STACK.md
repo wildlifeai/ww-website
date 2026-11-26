@@ -1,24 +1,25 @@
 # 01 — Technology Stack
 
-The exact dependencies the web app runs on. Versions are the source of truth in
+The dependencies the web app runs on and why. Versions live only in
 [`frontend/package.json`](../../frontend/package.json) and
-[`backend/requirements.txt`](../../backend/requirements.txt); this guide explains the *why*.
+[`backend/requirements.txt`](../../backend/requirements.txt).
 
 ## Frontend
 
-| Area | Package | Version | Notes |
-|------|---------|---------|-------|
-| Framework | `react` / `react-dom` | 19.3 | Function components + hooks only |
-| Build | `vite` | 8 | Dev server + `tsc -b && vite build` |
-| Language | `typescript` | ~6.0 | `strict` mode; `tsc -b --noEmit` gate (plain `tsc --noEmit` checks nothing here) |
-| Routing | `react-router-dom` | 7.14 | `useSearchParams`, `NavLink`, nested routes |
-| Server state | `@tanstack/react-query` | 5 | All backend/API reads (`useQuery`/`useMutation`) |
-| Auth/data | `@supabase/supabase-js` | 2 | Direct DB reads/writes (RLS-scoped) + Auth |
-| Auth UI | `@supabase/auth-ui-react` | 0.4 | Login screen |
-| Charts | `vega-embed` (Vega-Lite) | 7 | All charts — Recharts fully removed |
-| Maps | `leaflet` + `react-leaflet` | 1.9 / 5 | Deployment maps |
-| Icons / QR | `lucide-react`, `qrcode.react` | — | UI icons, app-store QR |
-| Tooling | `eslint` 9, `typescript-eslint` 8, `husky` 9, `lint-staged` 16, `commitlint` 20 | — | Lint + pre-commit, commit messages |
+| Area | Package | Notes |
+|------|---------|-------|
+| Framework | `react` / `react-dom` | Function components + hooks only |
+| Build | `vite` | Dev server + `tsc -b && vite build` |
+| Language | `typescript` | `strict` mode; `tsc -b --noEmit` gate (plain `tsc --noEmit` checks nothing here) |
+| Routing | `react-router-dom` | `useSearchParams`, `NavLink`, nested routes |
+| Server state | `@tanstack/react-query` | All backend/API reads (`useQuery`/`useMutation`) |
+| Auth/data | `@supabase/supabase-js` | Direct DB reads/writes (RLS-scoped) + Auth |
+| Auth UI | `@supabase/auth-ui-react` | Login screen |
+| Charts | `vega-embed` (Vega-Lite) | All charts; Recharts fully removed |
+| Maps | `leaflet` + `react-leaflet` | Deployment maps |
+| Icons | `lucide-react` | UI icons |
+| Tests | `vitest` | `npm test`; `*.integration.test.ts` skip there and run in CI |
+| Tooling | `eslint`, `typescript-eslint`, `husky`, `lint-staged`, `@commitlint/cli` | Lint + pre-commit, commit messages |
 
 **Conventions**: no Tailwind — components use inline `style={{}}` objects with CSS variables
 (`--primary`, `--surface`, `--border`, `--radius`). Shared primitives live in
@@ -33,8 +34,8 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | Runtime | Python 3.11+ | |
 | Validation | `pydantic` (+ `pydantic-settings`) | request/response models + env validation |
 | DB client | `supabase` (supabase-py) | service-role + per-request user clients |
-| Jobs | `arq` worker + in-process `asyncio` fallback | `REDIS_URL` set → jobs offload to the ARQ worker, except the `IN_PROCESS_JOBS` ([03-DATA-AND-SYNC](./03-DATA-AND-SYNC.md#async-job-system)); unset → in-process. Cloud dev runs the worker; local dev runs in-process |
-| Storage | `azure-storage-blob`, Google Drive API | temp buffer + permanent archive |
+| Jobs | `arq` worker + in-process `asyncio` fallback | Where each job runs: [03-DATA-AND-SYNC](./03-DATA-AND-SYNC.md#async-job-system). Both Azure environments run the worker; local dev runs in-process |
+| Storage | `azure-storage-blob`, `boto3`, Google Drive API | the upload buffer and export ZIPs (Azure Blob or S3, `OBJECT_STORE_BACKEND`), the archive (Drive or S3, `ARCHIVE_BACKEND`); `boto3` also invokes the Lambda `cpu` function |
 | HTTP | `httpx` + `tenacity` | retrying external calls |
 | AI | SpeciesNet, DINOv3 (Wildlife Brain), `ethos-u-vela` | inference, embeddings, model conversion |
 | Hosted VLM | `google-genai` (Gemini API SDK) | animal-presence filter step (`services/gemini_presence.py`); no torch, ships in the lean API image; prices and token rules in `services/gemini_pricing.py` |
@@ -42,19 +43,29 @@ The exact dependencies the web app runs on. Versions are the source of truth in
 | Errors | `sentry-sdk` | optional, via `SENTRY_DSN` |
 | Lint/test | `ruff`, `pytest`, `pyright` | `pyproject.toml` config (line length 150, pyright settings) |
 
+One requirements file per kind of image, each installed by a `backend/Dockerfile` target over
+`requirements.txt` (every image, and all the lean `api` target has): `requirements-ml.txt` (the
+`worker` and `gpu` targets: torch, SpeciesNet, BioCLIP, DINOv3), `requirements-lambda.txt` (the
+`lambda` target that both AWS Lambda functions run: the CPU clustering stack, no torch) and
+`requirements-dev.txt` (tests and linting, with the ML set in the `dev` target). A dependency of
+code that runs on the `cpu` Lambda function goes in `requirements-lambda.txt`, or the function
+fails to import it.
+
 ## External services
 
 | Service | Used for | Gate |
 |---------|----------|------|
 | **Supabase** | PostgreSQL + RLS, Auth, Storage (incl. the public `media-renditions` bucket), RPCs | always |
-| **Cloudflare** | Frontend hosting (Pages, per-branch previews), DNS for `wildlifewatcher.ai`, CDN, anonymous web analytics | always (hosting) |
+| **Cloudflare** | Frontend hosting (Pages, builds of `main` and `dev` only), DNS for `wildlifewatcher.ai`, CDN, anonymous web analytics | always (hosting) |
 | **Azure** | Backend hosting (Container Apps + ACR); **Blob** = temporary image buffer during upload (deleted after Drive archival); the **ARQ GPU worker** (serverless T4) that runs SpeciesNet / BioCLIP / DINOv3 | hosting; Blob with Drive uploads |
 | **Redis** | ARQ job broker between the API and the GPU worker. Runs as an internal **Container App** (`redis:7-alpine`), not Azure Cache for Redis. Unset `REDIS_URL` → jobs run in-process | `REDIS_URL` |
-| **Google Drive** | Permanent image archive (`gdrive://` originals) | `GOOGLE_DRIVE_ENABLED` |
+| **Google Drive** | Permanent image archive (`gdrive://` originals) | `GOOGLE_DRIVE_ENABLED`, under `ARCHIVE_BACKEND=gdrive` |
+| **AWS** | Being set up, dev only, no site points at it: the API and CPU jobs on Lambda, S3 for uploads, originals and export ZIPs, SSM for settings ([settings](../resources/deployment-guide.md#aws-and-the-reannz-batch), [what exists](../resources/cloud-infrastructure.md#aws)) | `OBJECT_STORE_BACKEND`, `ARCHIVE_BACKEND`, `WORKER_BACKEND` |
+| **REANNZ** | GPU batches (SpeciesNet, BioCLIP, DINOv3) for the AWS path, leased from `api_jobs` by a cron on the cluster (`cluster/reannz/`) | `WORKER_BACKEND=lambda`, `WORKER_TOKEN_SHA256` |
 | **Vector store** | DINOv3 embeddings for the Wildlife Brain (similarity / clustering). **`pgvector` in the Supabase Postgres** — no new vendor; live since 2026-07-09. Vectors live in `media_embeddings.embedding`; the former Qdrant container has been **removed**. See [Deployment Guide → Vector Store](../resources/deployment-guide.md#vector-store--pgvector-supabase) | `FF_WILDLIFE_BRAIN_ENABLED` |
 | **iNaturalist** | Taxa autocomplete + lineage registration, observation publishing + community-ID sync | `FF_INAT_ENABLED` |
 | **Sentry** | Error tracking | `SENTRY_DSN` |
-| **Edge Impulse** | Trains Species Brains (on-camera classifiers) from an Annotations selection: Studio + ingestion APIs driven by `services/edge_impulse.py`. Without credentials the action packages a dataset ZIP instead | `FF_MODEL_TRAINING_ENABLED` + `EDGE_IMPULSE_API_KEY` / `EDGE_IMPULSE_PROJECT_ID` (set on the **worker** too) |
+| **Edge Impulse** | Trains Species Brains (on-camera classifiers) from a selection on the Media page: Studio + ingestion APIs driven by `services/edge_impulse.py`. Without credentials the action packages a dataset ZIP instead | `FF_MODEL_TRAINING_ENABLED` + `EDGE_IMPULSE_API_KEY` / `EDGE_IMPULSE_PROJECT_ID` (set on the **worker** too) |
 
 ## Feature flags
 
@@ -66,7 +77,7 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_ML_ENABLED` | `false` | ML-assisted classification — **must** be true or `build_pipeline_steps()` returns `[]` |
 | `FF_PUBLIC_API_ENABLED` | `false` | Public data API (`/api/v1/*`) |
 | `FF_CAMTRAPDP_IMPORT_ENABLED` | `true` | CamtrapDP package import |
-| `FF_CAMTRAPDP_EXPORT_ENABLED` | `true` | CamtrapDP export with the original photos (`POST /api/exports/camtrapdp`); on Azure it needs `AZURE_STORAGE_CONNECTION_STRING` for its ZIPs, which go to the private Azure Blob container `CAMTRAPDP_EXPORT_CONTAINER` (default `camtrapdp-exports`), and the job runs in the API process (`IN_PROCESS_JOBS`), so these and `CAMTRAPDP_EXPORT_MAX_BYTES` belong on the API; on AWS the ZIPs go to `exports/` in the bucket and the job runs on the `cpu` function, which reads the same `/ww/<env>/` parameters in SSM, and the link is the API's [signed download route](../resources/api-reference.md#camtrapdp-export) once `EXPORT_LINK_SECRET` is set |
+| `FF_CAMTRAPDP_EXPORT_ENABLED` | `true` | CamtrapDP export with the original photos; also needs an object store for its ZIPs. Storage, link and limits: [API reference](../resources/api-reference.md#camtrapdp-export) |
 | `FF_PIPELINE_ENABLED` | `false` | AI pipeline inference endpoints |
 | `FF_GBF_REPORT_ENABLED` | `false` | The GBF contribution report (`GET /api/reports/gbf`) |
 | `FF_SPECIESNET_ENABLED` | `false` | SpeciesNet detector+classifier step |
@@ -81,8 +92,8 @@ Toggle behaviour without code changes (defined in `backend/app/config.py`):
 | `FF_MEDIA_REGISTRY_ENABLED` | `false` | Thumbnail/crop generation + resolve endpoints |
 | `FF_ACTIVE_LEARNING_ENABLED` | `false` | Active-learning review queue + QA report |
 | `FF_INTELLIGENCE_ENABLED` | `false` | Conservation-intelligence endpoints (health, alerts, shift) |
-| `FF_MODEL_TRAINING_ENABLED` | `false` | Annotations → *Create species ID model…* (Edge Impulse training or dataset export). Set on the ARQ worker as well; see [species-brain-training-spec](../development%20reports/species-brain-training-spec.md) |
-| `FF_NATIVE_TRAINING_ENABLED` | `false` | With `MODEL_TRAINER=gcp`, that action trains in a Cloud Run job instead of Edge Impulse. Worker too; see [2026-09_gcp-native-model-training](../development%20reports/2026-09_gcp-native-model-training/README.md) |
+| `FF_MODEL_TRAINING_ENABLED` | `false` | Media → *Create species ID model…* (Edge Impulse training or dataset export). Set on the ARQ worker as well; off on AWS until [#463](https://github.com/wildlifeai/ww-website/issues/463); see [species-brain-training-spec](../development%20reports/species-brain-training-spec.md) |
+| `FF_NATIVE_TRAINING_ENABLED` | `false` | Retiring with [#463](https://github.com/wildlifeai/ww-website/issues/463): with `MODEL_TRAINER=gcp`, that action trains in a Cloud Run job instead of Edge Impulse. History: [2026-09_gcp-native-model-training](../development%20reports/_archive/2026-09_gcp-native-model-training/README.md) |
 | `FF_BMP_INGEST_ENABLED` | `false`¹ | Raw-BMP ingest → JPEG re-compress on upload (¹ compose default: `true`) |
 
 > Always confirm the current set against `config.py` — flags are added as features land.

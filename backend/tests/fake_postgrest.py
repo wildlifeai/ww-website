@@ -15,7 +15,7 @@ A column the table does not have fails the test, so a query naming a column that
 ww-backend's schema is caught here and not in production. ``COLUMNS`` lists the columns of
 each table the API reads, from ww-backend dev's supabase/schema.sql (10 Oct 2026; the cluster
 and observation provenance columns 25 Oct 2026; ``embedding_runs``, observation_events and
-annotation_runs 22 Nov 2026).
+annotation_runs 22 Nov 2026; deployment_moves 26 Nov 2026).
 """
 
 from __future__ import annotations
@@ -42,6 +42,7 @@ COLUMNS = {
         "created_at",
     },
     "deployment_statuses": {"id", "value"},
+    "deployment_moves": {"id", "deployment_id", "from_project_id", "to_project_id", "moved_by", "moved_at"},
     "devices": {"id", "name", "bluetooth_id", "device_eui", "organisation_id", "deleted_at", "created_at"},
     "media": {"id", "deployment_id", "file_path", "timestamp", "deleted_at", "created_at"},
     "observations": {
@@ -112,7 +113,21 @@ COLUMNS = {
     },
     "taxa": {"id", "scientific_name", "common_name", "conservation_status", "invasive_status", "created_at"},
     "lorawan_messages": {"id", "device_eui", "device_id", "deployment_id", "raw_payload", "received_at"},
-    "lorawan_parsed_messages": {"id", "lorawan_message_id", "device_id", "battery_level", "sd_card_used_capacity", "model_output"},
+    "lorawan_parsed_messages": {
+        "id",
+        "lorawan_message_id",
+        "device_id",
+        "battery_level",
+        "battery_mv",
+        "sd_free_pct",
+        "temperature_c",
+        "self_test_bits",
+        "last_reset_reason",
+        "reset_count",
+        "hours_since_reset",
+        "ai_failures",
+        "model_output",
+    },
     "api_keys": {"id", "organisation_id", "name", "key_hash", "key_prefix", "scopes", "expires_at", "last_used_at", "revoked_at", "created_at"},
     "api_jobs": {"id", "status", "job_data", "created_at", "updated_at"},
     "user_roles": {"id", "user_id", "role", "scope_type", "scope_id", "expires_at", "is_active", "deleted_at", "created_at"},

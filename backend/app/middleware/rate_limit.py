@@ -27,8 +27,6 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
-from app.config import settings
-
 
 def _user_or_ip(request: Request) -> str:
     """Rate-limit key: ``user:<sub>`` from the Bearer JWT, else ``ip:<addr>``."""
@@ -46,10 +44,7 @@ def _user_or_ip(request: Request) -> str:
     return f"ip:{get_remote_address(request)}"
 
 
-limiter = Limiter(
-    key_func=_user_or_ip,
-    default_limits=[f"{settings.RATE_LIMIT_PER_MINUTE}/minute"],
-)
+limiter = Limiter(key_func=_user_or_ip)
 
 
 def hit_api_key_limit(key_id: str, per_minute: int, bucket: str = "all") -> Optional[int]:
