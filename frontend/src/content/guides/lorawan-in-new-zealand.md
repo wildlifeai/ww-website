@@ -139,11 +139,12 @@ started.**
 
 ## The Realtime page
 
-Once your cameras send LoRaWAN messages, the **Realtime** tab shows the cameras deployed in the
-projects you have selected, and the ones collected today.
+The **Realtime** tab shows the LoRaWAN cameras in the projects you have selected: those deployed
+with LoRaWAN check-ins turned on, or that have sent a message, while they are out and on the day
+they are collected. With no such camera in the selected projects, the tab is greyed out.
 
 - **The map.** Tap or click a camera to pick it: it gets a ring on the map and its row is
-  highlighted in the Cameras table. Tap it again to clear it. The page has no photos: they stay
+  highlighted in the Cameras table. A camera deployed without a GPS position is not on it. Tap it again to clear it. The page has no photos: they stay
   on the SD card until you collect the camera and upload them.
 - **Cameras** lists each camera once, with its newest message.
   - **Health** is the camera's state, with its first reason beside it; hover over it for the
@@ -159,8 +160,8 @@ projects you have selected, and the ones collected today.
     - **Silent**: no message for three check-in periods, counted from its deployment if it has
       sent none. A camera deployed without its check-in period recorded is **Stale** after 24
       hours with no message and Silent after 3 days.
-    - **LoRaWAN off**: deployed with its LoRaWAN check-ins turned off. **Awaiting**: no message
-      yet. **Finished**: its deployment ended today.
+    - **LoRaWAN off**: deployed with its LoRaWAN check-ins turned off, and listed only because
+      it has sent messages anyway. **Awaiting**: no message yet. **Finished**: its deployment ended today.
   - **Battery** is in volts, or a percentage from older firmware. Battery and **SD free** turn
     red when the camera's health report finds the battery low or the SD card 10% free or less.
   - **Temperature** is measured inside the camera, on its Bluetooth chip, and comes with its
