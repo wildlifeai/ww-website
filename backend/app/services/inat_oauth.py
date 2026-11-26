@@ -53,48 +53,47 @@ class INatKeyError(INatOAuthError):
 
 # ── Encryption helpers ───────────────────────────────────────────────
 
-# iNaturalist issues long random client secrets. An empty or short one gives a key anyone can
-# derive, so tokens are neither stored nor read with it (#123).
-MIN_CLIENT_SECRET_CHARS = 32
+# An empty or short key (settings.inat_token_key) is one anyone can derive, so tokens are neither
+# stored nor read with it (#123).
+MIN_TOKEN_KEY_CHARS = 32
 CALLBACK_PATH = "/api/inat/callback"
+_CANNOT_CONNECT = "iNaturalist accounts can't be connected on this server"
 
 
 def token_key_problem() -> Optional[str]:
     """Why this server cannot encrypt iNaturalist tokens, or None when it can."""
-    secret = settings.INAT_CLIENT_SECRET.strip()
-    if not secret:
-        return "iNaturalist accounts can't be connected on this server: INAT_CLIENT_SECRET is not set"
-    if len(secret) < MIN_CLIENT_SECRET_CHARS:
+    key = settings.inat_token_key.strip()
+    if not key:
+        return f"{_CANNOT_CONNECT}: INAT_TOKEN_KEY is not set"
+    if len(key) < MIN_TOKEN_KEY_CHARS:
+        if settings.inat_token_key_name == "INAT_TOKEN_KEY":
+            return f"{_CANNOT_CONNECT}: INAT_TOKEN_KEY is shorter than {MIN_TOKEN_KEY_CHARS} characters"
         return (
-            "iNaturalist accounts can't be connected on this server: INAT_CLIENT_SECRET is shorter "
-            f"than {MIN_CLIENT_SECRET_CHARS} characters, so it is not the registered app's secret"
+            f"{_CANNOT_CONNECT}: INAT_TOKEN_KEY is not set, and INAT_CLIENT_SECRET, used in its place, "
+            f"is shorter than {MIN_TOKEN_KEY_CHARS} characters"
         )
     return None
 
 
 def inat_settings_problems() -> list[str]:
-    """What stops iNaturalist working with this server's settings, for the startup log."""
+    """What stops iNaturalist working with this server's settings, for the startup log. A missing
+    INAT_CLIENT_ID is not one: people connect with a pasted token, the OAuth app is optional."""
     problems = [p for p in [token_key_problem()] if p]
-    if not settings.INAT_CLIENT_ID:
-        problems.append("INAT_CLIENT_ID is not set, so Connect iNaturalist (OAuth) is refused")
-    elif not settings.INAT_REDIRECT_URI.rstrip("/").endswith(CALLBACK_PATH):
+    if settings.INAT_CLIENT_ID and not settings.INAT_REDIRECT_URI.rstrip("/").endswith(CALLBACK_PATH):
         problems.append(f"INAT_REDIRECT_URI must be this API's {CALLBACK_PATH}: iNaturalist sends people back there")
     return problems
 
 
 def _get_fernet() -> Fernet:
-    """Derive a Fernet key from INAT_CLIENT_SECRET.
+    """Derive a Fernet key from ``settings.inat_token_key`` (SHA-256 of it).
 
-    We use the client secret as a deterministic seed for the encryption key.
-    This means tokens are tied to the application registration: if you
-    rotate the secret, existing stored tokens become unreadable. Refuses
-    (INatKeyError) when the secret is missing or too short to be one.
+    Changing the key makes every stored token unreadable, which disconnects everyone. Refuses
+    (INatKeyError) when the key is missing or too short (token_key_problem).
     """
     problem = token_key_problem()
     if problem:
         raise INatKeyError(problem)
-    # Derive a 32-byte key from the client secret via SHA-256
-    key_material = hashlib.sha256(settings.INAT_CLIENT_SECRET.encode()).digest()
+    key_material = hashlib.sha256(settings.inat_token_key.encode()).digest()
     fernet_key = base64.urlsafe_b64encode(key_material)
     return Fernet(fernet_key)
 

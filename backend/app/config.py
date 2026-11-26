@@ -337,8 +337,12 @@ class Settings(BaseSettings):
     )
 
     # ── iNaturalist (Phase 6) ────────────────────────────────────────
-    INAT_CLIENT_ID: str = Field("")
-    INAT_CLIENT_SECRET: str = Field("")
+    INAT_TOKEN_KEY: str = Field(
+        "",
+        description="Encrypts the iNaturalist tokens this server stores: any random value of 32 characters or more",
+    )
+    INAT_CLIENT_ID: str = Field("", description="The optional OAuth app's ID")
+    INAT_CLIENT_SECRET: str = Field("", description="The optional OAuth app's secret, and the token key while INAT_TOKEN_KEY is unset")
     INAT_REDIRECT_URI: str = Field("https://wildlifewatcher.ai/inat/callback")
 
     # ── Notifications: email channel ─────────────────────────────────
@@ -395,6 +399,21 @@ class Settings(BaseSettings):
         """Export links go through the API's signed route: on S3, whose presigned URLs die with a
         Lambda role's session, and only once ``EXPORT_LINK_SECRET`` is set."""
         return self.OBJECT_STORE_BACKEND == "s3" and bool(self.EXPORT_LINK_SECRET.strip())
+
+    @property
+    def inat_token_key_name(self) -> Literal["INAT_TOKEN_KEY", "INAT_CLIENT_SECRET"]:
+        """The setting that keys the encryption of stored iNaturalist tokens: ``INAT_TOKEN_KEY``,
+        or ``INAT_CLIENT_SECRET`` while it is unset, so a server with only the old name keeps its
+        connected accounts. When both are set, ``INAT_TOKEN_KEY`` wins: giving it a value other than
+        ``INAT_CLIENT_SECRET``'s makes every stored token unreadable and disconnects everyone."""
+        if self.INAT_TOKEN_KEY.strip() or not self.INAT_CLIENT_SECRET.strip():
+            return "INAT_TOKEN_KEY"
+        return "INAT_CLIENT_SECRET"
+
+    @property
+    def inat_token_key(self) -> str:
+        """The value of ``inat_token_key_name``, as set: the key is derived from it unstripped."""
+        return self.INAT_TOKEN_KEY if self.inat_token_key_name == "INAT_TOKEN_KEY" else self.INAT_CLIENT_SECRET
 
 
 # On Lambda the secrets live in SSM Parameter Store, under WW_SSM_PREFIX; elsewhere a no-op.
