@@ -222,7 +222,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 
 | Var | Enables |
 |-----|---------|
-| `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI` + `FF_INAT_ENABLED` | iNaturalist publish and sync, on the API only. Steps: [iNaturalist](#inaturalist). |
+| `FF_INAT_ENABLED` + `INAT_TOKEN_KEY` (the optional OAuth app adds `INAT_CLIENT_ID`, `INAT_CLIENT_SECRET`, `INAT_REDIRECT_URI`) | iNaturalist publish and sync, on the API only. Steps: [iNaturalist](#inaturalist). |
 | `EMAIL_PROVIDER`, `EMAIL_FROM`, `RESEND_API_KEY` / `SENDGRID_API_KEY` / `ACS_CONNECTION_STRING` | Notification email. |
 | `SENTRY_DSN`, `LOG_LEVEL` | Error tracking / log verbosity. |
 
@@ -268,22 +268,13 @@ Publishing photos to a person's own iNaturalist account, and the badge sync (#12
 until `FF_INAT_ENABLED` is set; switch it on in dev first. What publish and sync do:
 [inaturalist-integration](../development%20reports/inaturalist-integration.md).
 
-**1. Register one OAuth app per environment** at <https://www.inaturalist.org/oauth/applications/new>,
-signed in as the iNaturalist account that will own it, confidential if the form asks (the API holds
-the secret). Its redirect URI is the API's `/api/inat/callback`, not the site, and
-`INAT_REDIRECT_URI` must be the same string:
+A person connects by pasting their personal API token from
+<https://www.inaturalist.org/users/api_token> into Toolkit, *Connect* (`POST /api/inat/token`). That
+is the normal way and needs no iNaturalist app. The token lasts about 24 hours; then the account
+shows as not connected and the person pastes a new one. Signing in through an iNaturalist OAuth app
+is an optional second path ([below](#optional-an-oauth-app)).
 
-| Environment | Redirect URI and `INAT_REDIRECT_URI` |
-|---|---|
-| dev (`ww-backend-dev`) | `https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
-| production (`ww-backend`, wildlifewatcher.ai) | `https://ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
-| local | `http://localhost:8000/api/inat/callback` |
-
-The code default, `https://wildlifewatcher.ai/inat/callback`, is the site, where no page handles the
-callback, so set the variable everywhere. After the callback the API sends the browser to the first
-`ALLOWED_ORIGINS` entry plus `/toolkit?inat=connected`, so on dev that entry must be the dev site.
-
-**2. Set the variables on the API container only.** The worker needs none: publish runs in API
+**1. Set the variables on the API container only.** The worker needs none: publish runs in API
 requests, in rounds that each end inside the ingress timeout, and the sync, `sync_inat_job`, is a job
 that runs in the API process (`IN_PROCESS_JOBS`). On AWS the sync runs on the `cpu` function, which
 reads the same `INAT_*` parameters from SSM.
@@ -291,28 +282,24 @@ reads the same `INAT_*` parameters from SSM.
 | Var | Value |
 |---|---|
 | `FF_INAT_ENABLED` | `true` |
-| `INAT_CLIENT_ID` | the app's ID |
-| `INAT_CLIENT_SECRET` | the app's secret, as a `secretref:`. It also keys the encryption of every stored token: missing or shorter than 32 characters, the routes that connect or use an account answer `503` with the reason, and changing it disconnects everyone |
-| `INAT_REDIRECT_URI` | from the table above |
+| `INAT_TOKEN_KEY` | any random value of 32 characters or more, kept secret: a container secret (`secretref:`) on Azure, the SSM SecureString `/ww/<env>/INAT_TOKEN_KEY` on AWS. It encrypts every stored token: missing or shorter than 32 characters, the routes that connect or use an account answer `503` with the reason, and changing it disconnects everyone. While it is unset, `INAT_CLIENT_SECRET` keys the tokens in its place (`config.py::Settings.inat_token_key_name`); to move such a server to `INAT_TOKEN_KEY` without disconnecting anyone, give it the same value |
 
 ```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"   # one key per environment
 az containerapp secret set --name ww-backend-dev --resource-group WW-AE \
-  --secrets inat-client-secret=<the app's secret>
+  --secrets inat-token-key=<the key>
 az containerapp update --name ww-backend-dev --resource-group WW-AE \
-  --set-env-vars FF_INAT_ENABLED=true INAT_CLIENT_ID=<the app's ID> \
-    INAT_CLIENT_SECRET=secretref:inat-client-secret \
-    INAT_REDIRECT_URI=https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback
+  --set-env-vars FF_INAT_ENABLED=true INAT_TOKEN_KEY=secretref:inat-token-key
 ```
 
 The deploy workflow merges its own variables, so these survive the next deploy. The new revision's
 log has an `inat_settings_problem` line for anything still wrong (`services/inat_oauth.py`). The
 frontend needs nothing: it asks `/api/inat/status`.
 
-**3. Test on dev**, as a project member, on a deployment with a location and labelled photos:
+**2. Test on dev**, as a project member, on a deployment with a location and labelled photos:
 
-1. Settings, Integrations, *Connect iNaturalist*: iNaturalist asks to authorise, then Toolkit shows
-   *Connected as* your login. Disconnect, then connect again from Toolkit with a token pasted from
-   <https://www.inaturalist.org/users/api_token>.
+1. Toolkit, *Connect*, paste a token from <https://www.inaturalist.org/users/api_token>: Toolkit
+   shows *Connected as* your login.
 2. Cluster Review, select a few photos labelled as an animal plus one marked Empty and one with a
    person, *Publish to iNaturalist*: one observation per encounter, location obscured, the two
    skipped, and the grid's dove badge on the published ones.
@@ -328,6 +315,42 @@ frontend needs nothing: it asks `/api/inat/status`.
 Before production, check the three tables exist there (read-only):
 `select to_regclass('public.inat_observations'), to_regclass('public.inat_observation_media'), to_regclass('public.inat_tokens');`
 They exist on dev (checked 25 Oct 2026).
+
+#### Optional: an OAuth app
+
+`GET /api/inat/auth` and its callback sign a person in through an iNaturalist OAuth app instead.
+The website has no button for it: Settings, Integrations links to the Toolkit paste box (26 Nov
+2026). Without `INAT_CLIENT_ID` the route answers `500 INAT_CLIENT_ID not configured`; the startup
+log does not report a missing app, only a redirect URI that is wrong for one.
+
+**Register one app per environment** at <https://www.inaturalist.org/oauth/applications/new>, signed
+in as the iNaturalist account that will own it, confidential if the form asks. Its redirect URI is
+the API's `/api/inat/callback`, not the site, and `INAT_REDIRECT_URI` must be the same string:
+
+| Environment | Redirect URI and `INAT_REDIRECT_URI` |
+|---|---|
+| dev (`ww-backend-dev`) | `https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
+| production (`ww-backend`, wildlifewatcher.ai) | `https://ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
+| local | `http://localhost:8000/api/inat/callback` |
+
+The code default, `https://wildlifewatcher.ai/inat/callback`, is the site, where no page handles the
+callback, so set the variable everywhere. After the callback the API sends the browser to the first
+`ALLOWED_ORIGINS` entry plus `/toolkit?inat=connected`, so on dev that entry must be the dev site.
+
+**Add its three variables to the API**: `INAT_CLIENT_ID` (the app's ID), `INAT_CLIENT_SECRET` (the
+app's secret, as a `secretref:`; with `INAT_TOKEN_KEY` set it keys no stored token) and
+`INAT_REDIRECT_URI` (from the table above).
+
+```bash
+az containerapp secret set --name ww-backend-dev --resource-group WW-AE \
+  --secrets inat-client-secret=<the app's secret>
+az containerapp update --name ww-backend-dev --resource-group WW-AE \
+  --set-env-vars INAT_CLIENT_ID=<the app's ID> INAT_CLIENT_SECRET=secretref:inat-client-secret \
+    INAT_REDIRECT_URI=https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback
+```
+
+**Test**: signed in, call `GET /api/inat/auth` and open its `authorization_url`: iNaturalist asks
+to authorise, then Toolkit shows *Connected as* your login.
 
 > **Known limit:** the OAuth state lives in the memory of the API replica that started the sign-in
 > (`routers/inaturalist.py::_pending_oauth`). A callback that reaches another replica, or one that

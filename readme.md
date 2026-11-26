@@ -203,7 +203,8 @@ self-serve:
 | `GOOGLE_DRIVE_FOLDER_ID` | Also in the fetched `.env`. **No default in code**, each environment archives into its own subfolder of the shared `Data` folder, so an unset value fails loudly rather than writing somewhere unwatched |, |
 | `SEED_USER_PASSWORD` (seed-user login) | GitHub Actions secret in `ww-backend` / `ww-website`; see [Testing with Seed Users](./documentation/resources/testing-with-seed-users.md) | Ask a maintainer |
 | `HF_TOKEN` | Your own HuggingFace token (DINOv3 is a gated model) | Self-serve at huggingface.co |
-| `INAT_*`, `SENTRY_DSN` | Optional for local dev, from a maintainer if you work on those integrations |, |
+| `INAT_TOKEN_KEY` | Optional for local dev: any random value of 32 characters or more ([iNaturalist](./documentation/resources/deployment-guide.md#inaturalist)) | None |
+| `INAT_CLIENT_*`, `SENTRY_DSN` | Optional for local dev, from a maintainer if you work on those integrations |, |
 
 The full env-var reference lives in [`backend/app/config.py`](./backend/app/config.py) (validated
 at boot) and [00-GETTING-STARTED.md](./documentation/onboarding/00-GETTING-STARTED.md). Cloud

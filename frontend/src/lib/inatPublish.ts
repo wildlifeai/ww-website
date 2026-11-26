@@ -10,7 +10,7 @@ import { isInatOff } from './inatOff'
 /** The route's limit on photos per request (`INatPublishRequest.media_ids`, max_length 200). */
 export const INAT_PUBLISH_MAX = 200
 
-/** Where an account is connected: Toolkit has the iNaturalist sign-in and the pasted-token path. */
+/** Where an account is connected: Toolkit's paste box for a personal iNaturalist token. */
 export const INAT_CONNECT_PATH = '/toolkit'
 
 /** Where a deployment's location is set (Insights > Deployments, Edit location). */

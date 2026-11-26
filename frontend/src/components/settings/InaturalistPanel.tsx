@@ -4,12 +4,15 @@
  * Home for "Sync now": pulls community IDs back into Wildlife Watcher for every linked
  * observation. This replaces the old per-grid "Sync iNaturalist IDs" bulk action; sync also runs
  * automatically on login (see InatAutoSync). IntegrationsSection decides whether it shows.
- * The sync is a job (lib/inatSync.ts): the panel follows it with useJob.
+ * The sync is a job (lib/inatSync.ts): the panel follows it with useJob. Connecting is Toolkit's
+ * paste box (a personal token), the one connect UI: no OAuth app is registered.
  */
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { RefreshCw } from 'lucide-react'
 import { useJob } from '../../hooks/useJob'
 import type { useINat } from '../../hooks/useINat'
+import { INAT_CONNECT_PATH } from '../../lib/inatPublish'
 import { inatSyncRunning, inatSyncText } from '../../lib/inatSync'
 
 export function InaturalistPanel({ inat }: { inat: ReturnType<typeof useINat> }) {
@@ -19,16 +22,6 @@ export function InaturalistPanel({ inat }: { inat: ReturnType<typeof useINat> })
   const { data: syncJob } = useJob(syncJobId)
   const busy = starting || (!!syncJobId && inatSyncRunning(syncJob))
   const status = msg ?? (syncJobId ? inatSyncText(syncJob) : null)
-
-  // The server refuses to connect without its iNaturalist settings; say why instead of nothing.
-  const connect = async () => {
-    setMsg(null)
-    try {
-      await inat.connect()
-    } catch (e) {
-      setMsg((e as Error)?.message ?? 'Could not start the iNaturalist sign-in.')
-    }
-  }
 
   const syncAll = async () => {
     if (busy) return
@@ -68,9 +61,9 @@ export function InaturalistPanel({ inat }: { inat: ReturnType<typeof useINat> })
             </button>
           </>
         ) : (
-          <button className="btn" onClick={connect} style={{ fontSize: '0.82rem' }}>
-            Connect iNaturalist
-          </button>
+          <Link to={INAT_CONNECT_PATH} className="btn" style={{ fontSize: '0.82rem', textDecoration: 'none' }}>
+            Connect it in Toolkit
+          </Link>
         )}
       </div>
 
