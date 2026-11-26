@@ -27,8 +27,8 @@ from app.registries.embedding_registry import (
     HDBSCAN_PRESETS,
     UMAP_CLUSTER_PARAMS,
     UMAP_PERSIST_PARAMS,
-    get_collection,
     get_embedding_dim,
+    get_vector_space,
     purity_bucket,
     review_depth_for_purity,
 )
@@ -393,7 +393,7 @@ async def _create_embedding_run(deployment_id: str, model_name: str, model_versi
                 "reduction_params": UMAP_PERSIST_PARAMS,
                 "clustering_method": "hdbscan",
                 "clustering_params": {"preset": DEFAULT_HDBSCAN_PRESET},
-                "qdrant_collection": get_collection(model_name),
+                "vector_space": get_vector_space(model_name),
                 "status": "running",
                 "created_by": created_by,
             }
@@ -637,7 +637,7 @@ async def _create_scoped_embedding_run(
                 "reduction_params": UMAP_PERSIST_PARAMS,
                 "clustering_method": "hdbscan",
                 "clustering_params": {"preset": DEFAULT_HDBSCAN_PRESET},
-                "qdrant_collection": get_collection(model_name),
+                "vector_space": get_vector_space(model_name),
                 "status": "running",
                 "created_by": created_by,
             }
