@@ -45,14 +45,17 @@ Victor holds the TTN console. The cameras' application on the `au1` cluster
    Invoke-RestMethod -Method Post -Uri "https://qegeovogqxiouqbrxmnh.supabase.co/functions/v1/lorawan-ingest?token=$t" -ContentType 'application/json' -Body '{"end_device_ids":{"dev_eui":"70B3D57ED0070001"},"uplink_message":{"f_port":2,"frm_payload":"U+gDUSoAE8hUXxIWVQIABwMwAAE="}}'
    ```
 
-   `ok: True` with `kind` `report` is right; a 401 is the wrong token.
+   `ok: True` with `decoded.kind` `report` is right; a 401 is the wrong token.
 
 ## After every reset: put the camera back on dev
 
 In the dev SQL editor (project **Dev_Wildlife_Watcher**, never Stag), run this. It gives the
-camera its DevEUI and an open deployment on a 5-minute ping in the seeded project
-*Wētāpunga Tracking Program*. For another camera, change the name and DevEUI (TTN lists it under
-**End devices**). Safe to run twice.
+camera its DevEUI and an open deployment on a 5-minute ping, with a GPS position so it shows on
+the Realtime map, in the seeded project *Wētāpunga Tracking Program*. For another camera, change
+the name and DevEUI (TTN lists it under **End devices**). Safe to run twice.
+
+These are test rows on cloud dev, which the next reset wipes. Staging is the live tier: no row is
+written there by hand, and every change to it is a ww-backend migration.
 
 ```sql
 DO $$
@@ -60,6 +63,9 @@ DECLARE
   _name constant text := 'WILD-W3CL';
   _eui constant text := '3B4AFAFEFFDA68D8';
   _project constant uuid := 'c0000000-0000-0000-0000-000000000001';
+  -- Any position in New Zealand; the Realtime map leaves out a camera without one.
+  _lat constant double precision := -41.2865;
+  _lon constant double precision := 174.7762;
   _device uuid;
   _deployment uuid;
 BEGIN
@@ -77,11 +83,14 @@ BEGIN
    WHERE device_id = _device AND deployment_end IS NULL AND deleted_at IS NULL;
   IF _deployment IS NULL THEN
     INSERT INTO public.deployments (name, deployment_start, location_name, project_id, device_id,
-                                    device_eui, lorawan_ping_minutes, timezone)
-    VALUES ('Bench LoRaWAN test', now(), 'Bench', _project, _device, _eui, 5, 'Pacific/Auckland')
+                                    device_eui, lorawan_ping_minutes, timezone, latitude, longitude)
+    VALUES ('Bench LoRaWAN test', now(), 'Bench', _project, _device, _eui, 5, 'Pacific/Auckland',
+            _lat, _lon)
     RETURNING id INTO _deployment;
   ELSE
-    UPDATE public.deployments SET lorawan_ping_minutes = 5 WHERE id = _deployment;
+    UPDATE public.deployments
+       SET lorawan_ping_minutes = 5, latitude = coalesce(latitude, _lat), longitude = coalesce(longitude, _lon)
+     WHERE id = _deployment;
   END IF;
   RAISE NOTICE 'device %, deployment %', _device, _deployment;
 END $$;
