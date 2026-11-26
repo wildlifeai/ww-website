@@ -145,7 +145,7 @@ are readable by any signed-in user, and an API key's jobs are read with `GET /ap
 | Method · Path | Description |
 |---|---|
 | `GET /api/jobs` | The caller's jobs, newest first: `{ jobs, next_before }`. Query `limit` (1 to 200, default 50), `status` (repeat for several), `kind` (`upload`, `ai_pipeline`, ...), `before` (the previous page's `next_before`, which is null on the last page). The cursor orders on created time, ties broken on id. Each job carries `batch_wait` as below. Without `kind` it leaves out the iNaturalist sync that runs at each sign-in (`inat_sync`, `store.UNLISTED_KINDS`), which `GET /api/jobs/{job_id}` still answers |
-| `GET /api/jobs/{job_id}` | Status + `progress`, `message`, `current_phase`, ordered `events[]`, `summary`, and `result` for a job whose answer is data rather than a file (the CamtrapDP import). `batch_wait` is `{ queued_at, usual_wait_minutes }` while the job waits in the queue for the GPU batch on the REANNZ cluster (`WORKER_BACKEND=lambda`), and null once it is leased or when it runs at once (Azure). `usual_wait_minutes` is the wait the website states: `BATCH_MAX_WAIT_MINUTES` plus `BATCH_CRON_INTERVAL_MINUTES` (which must match the cluster's crontab), rounded up to whole hours, or to 15 minutes below an hour: the code defaults, 60 and 30, give 120, "usually within 2 hours"; the values planned with the 4-hourly crontab, 0 and 240, give "usually within 4 hours" ([settings](deployment-guide.md#aws-and-the-reannz-batch)). `gpu_batch` is true for the whole life of a batch job, which reports every few minutes rather than seconds |
+| `GET /api/jobs/{job_id}` | Status + `progress`, `message`, `current_phase`, ordered `events[]`, `summary`, and `result` for a job whose answer is data rather than a file (the CamtrapDP import). `batch_wait` is `{ queued_at, usual_wait_minutes }` while the job waits in the queue for the GPU batch on the REANNZ cluster (`WORKER_BACKEND=lambda`), and null once it is leased or when it runs at once (Azure). `usual_wait_minutes` is the wait the website states: `BATCH_MAX_WAIT_MINUTES` plus `BATCH_CRON_INTERVAL_MINUTES` (which must match the cluster's crontab), rounded up to whole hours, or to 15 minutes below an hour: the code defaults, 60 and 240 (the 4-hourly crontab), give 300, "usually within 5 hours"; `BATCH_MAX_WAIT_MINUTES` 0, as the migration plan proposes, gives "usually within 4 hours" ([settings](deployment-guide.md#aws-and-the-reannz-batch)). `gpu_batch` is true for the whole life of a batch job, which reports every few minutes rather than seconds |
 | `GET /api/jobs/{job_id}/result` | Result of a completed job (`result_url`); `409` if not yet complete |
 
 **Status values:** `queued` → `processing` → `completed` · `completed_with_errors` (some items failed —
@@ -484,12 +484,11 @@ There is no global limit. Limits are per route (`@limiter.limit`, `backend/app/m
 keyed by the signed-in user (the JWT `sub`), else the IP: `POST /api/auth/demo-session` 10,
 `POST /api/exif/parse` 30, `POST /api/pipeline/run` 10, `POST /api/brain/embed/{deployment_id}` 10,
 `POST /api/models/train` 10, `POST /api/exports/camtrapdp` 5 and `GET /api/reports/gbf` 10 a minute.
-`RATE_LIMIT_PER_MINUTE` is the limiter's default, which only slowapi's middleware applies, and none is
-mounted. The `/api/v1` limits are per API key ([public API guide](public-api-guide.md)). When exceeded:
+The `/api/v1` limits are per API key ([public API guide](public-api-guide.md)). When exceeded:
 
 ```json
 {
-  "error": "Rate limit exceeded: 60 per 1 minute"
+  "error": "Rate limit exceeded: 10 per 1 minute"
 }
 ```
 

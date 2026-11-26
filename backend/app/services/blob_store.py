@@ -1,11 +1,11 @@
 # Copyright (c) 2024
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Temporary blob storage in Redis for passing files between API and worker.
+"""Hands an uploaded model from ``POST /api/models/convert`` to its conversion job.
 
-Used for model conversion: the API process stores the uploaded ZIP in Redis,
-the worker retrieves it by job_id, processes it, then deletes it.
-
-Blobs auto-expire after 1 hour as a safety net.
+The route stores the file and its metadata under the job id; ``convert_model_job`` reads it,
+then deletes it, on failure too. That job runs in this process (``IN_PROCESS_JOBS`` in
+``jobs/dispatch.py``), so a blob is a file on local disk, ``<system temp>/ww_blobs/<key>.data``,
+with its metadata as JSON in ``<key>.meta`` beside it. Nothing expires them; the job deletes them.
 
 Under ``WORKER_BACKEND=lambda`` the job runs in the CPU function, not this process, so the
 three functions hand off through the object store (``handoff-<key>`` in its buffer) instead.

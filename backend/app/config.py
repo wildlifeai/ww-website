@@ -33,7 +33,6 @@ class Settings(BaseSettings):
         "https://wildlifewatcher.ai,http://localhost:5173",
         description="Comma-separated CORS origins",
     )
-    RATE_LIMIT_PER_MINUTE: int = Field(60, description="Default per-IP rate limit")
 
     # ── Demo account ─────────────────────────────────────────────────
     # Credentials for the shared read-only demo user (seeded by
@@ -136,7 +135,7 @@ class Settings(BaseSettings):
     )
 
     # ── Native Species Brain training on Google Cloud (MODEL_TRAINER=gcp) ──
-    # Report: documentation/development reports/2026-09_gcp-native-model-training. The job
+    # Report: documentation/development reports/_archive/2026-09_gcp-native-model-training. The job
     # runs on the ARQ worker, so set these there as well as on the API.
     FF_NATIVE_TRAINING_ENABLED: bool = Field(False, description="Allow MODEL_TRAINER=gcp; off = POST /api/models/train behaves as without it")
     MODEL_TRAINER: Literal["edge_impulse", "gcp"] = Field(
@@ -144,7 +143,7 @@ class Settings(BaseSettings):
         description="Trainer behind POST /api/models/train: 'edge_impulse' or 'gcp' (the Cloud Run job built from backend/training/)",
     )
     # GOOGLE_CLOUD_PROJECT and CLOUD_RUN_JOB_REGION are the names the Google Cloud migration plan
-    # (2026-09_gcp-pilot-and-migration, §8) uses for the ML-worker job; the trainer shares them.
+    # (_archive/2026-09_gcp-pilot-and-migration, §8) uses for the ML-worker job; the trainer shares them.
     # Credentials are Application Default Credentials (the worker's runtime identity), no key.
     GOOGLE_CLOUD_PROJECT: str = Field("", description="Google Cloud project of the Cloud Run jobs (ww-pilot-dev, later ww-dev / ww-prod)")
     CLOUD_RUN_JOB_REGION: str = Field("asia-southeast1", description="Region of the Cloud Run jobs (Singapore: no Cloud Run L4 in Australia)")
@@ -322,7 +321,7 @@ class Settings(BaseSettings):
     BATCH_MIN_PHOTOS: int = Field(100, ge=1, description="Submit a cluster job once this many photos are queued...")
     BATCH_MAX_WAIT_MINUTES: int = Field(60, ge=0, description="...or once the oldest queued batch job is this old")
     BATCH_CRON_INTERVAL_MINUTES: int = Field(
-        30, ge=0, description="How often the REANNZ cron asks for work, added to the wait the UI states; must match ww_cron.sh's crontab"
+        240, ge=0, description="How often the REANNZ cron asks for work, added to the wait the UI states; must match ww_cron.sh's crontab"
     )
     BATCH_MAX_QUEUE_HOURS: int = Field(24, ge=1, description="The reaper spares a queued batch job this long, instead of 60 minutes")
     BATCH_LEASE_MINUTES: int = Field(30, ge=5, description="A lease with no heartbeat for this long is requeued, then failed")
