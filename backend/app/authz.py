@@ -17,6 +17,11 @@ Two levels, both from the caller's active, non-deleted, unexpired ``user_roles``
   ``project_viewer`` and every organisation role are refused (UI audit decision 1). A route that
   changes project data with the service role, or starts work on it, checks this level.
 
+A route whose figures a database function counts as the caller checks ``_can_view`` instead of
+the read level: ww-backend's ``has_project_role(user, project, 'project_viewer')``, the rule RLS
+reads photos and observations by, so it refuses (``404``) the callers the function would count
+nothing for. Today the GBF report (#456).
+
 These are FastAPI dependencies meant for a route's ``dependencies=[...]`` list,
 so they run alongside the endpoint's existing user dependency without changing
 its signature. They raise **404** (not 403) when the caller cannot read the resource, so IDs in
@@ -65,6 +70,7 @@ def _has_access(roles: list[dict], org_id: Optional[str], project_id: Optional[s
 
 
 _WRITE_ROLES = ("project_member", "project_admin")
+_PROJECT_ROLES = ("project_viewer", "project_member", "project_admin")
 _PROJECT_CREATOR_ROLES = ("organisation_member", "organisation_manager")
 
 WRITE_REFUSED = "You need the Project Member role to change this project."
@@ -85,6 +91,23 @@ def _can_write(roles: list[dict], project_id: Optional[str]) -> bool:
         if project_id and r.get("scope_type") == "project" and r.get("scope_id") == project_id and r.get("role") in _WRITE_ROLES:
             return True
     return False
+
+
+def _can_view(roles: list[dict], org_id: Optional[str], project_id: Optional[str]) -> bool:
+    """``has_project_role(user, project_id, 'project_viewer')`` from the caller's active role rows.
+
+    Any project role on the project itself, ``organisation_manager`` of its organisation, or
+    ``ww_admin``. An ``organisation_member`` with no role on the project is refused, as RLS
+    refuses them its photos. Pure, so the tests pin it."""
+    now = datetime.now(timezone.utc)
+    for r in roles:
+        if not _role_active(r, now):
+            continue
+        if r.get("role") == "ww_admin" and r.get("scope_type") == "system":
+            return True
+        if project_id and r.get("scope_type") == "project" and r.get("scope_id") == project_id and r.get("role") in _PROJECT_ROLES:
+            return True
+    return _is_org_manager(roles, org_id)
 
 
 def _project_creator_org_ids(roles: list[dict]) -> list[str]:
@@ -158,6 +181,20 @@ async def assert_access(user_id: str, **resource) -> None:
         if org_id is None and project_id is None:
             return False
         return _has_access(_fetch_active_roles(svc, user_id), org_id, project_id)
+
+    if not await asyncio.to_thread(_check):
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+async def assert_project_viewer(user_id: str, project_id: str) -> None:
+    """Raise 404 unless ``user_id`` passes ``_can_view`` on the project, as for an unknown one."""
+
+    def _check() -> bool:
+        svc = create_service_client()
+        org_id, resolved = _resolve_org_project(svc, project_id=project_id)
+        if org_id is None and resolved is None:
+            return False
+        return _can_view(_fetch_active_roles(svc, user_id), org_id, resolved)
 
     if not await asyncio.to_thread(_check):
         raise HTTPException(status_code=404, detail="Not found")

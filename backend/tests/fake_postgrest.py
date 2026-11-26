@@ -9,7 +9,8 @@ cases: a filter on an embed trims that embed, and drops the parent row only when
 ``!inner``. Two timestamps with a zone compare as instants, as ``timestamptz`` does. ``update``
 and ``upsert`` are enough for the API key and job stores; ``insert`` and ``delete`` return the
 rows they wrote, as supabase-py asks for by default. Like PostgREST, a read returns at most
-``max_rows`` (1,000) rows, so a read that does not page stops there in a test too.
+``max_rows`` (1,000) rows, so a read that does not page stops there in a test too. A database
+function is ``rpcs[name](params)``, a stand-in the test gives, and each call is kept in ``calls``.
 
 A column the table does not have fails the test, so a query naming a column that is not in
 ww-backend's schema is caught here and not in production. ``COLUMNS`` lists the columns of
@@ -24,7 +25,7 @@ import copy
 import re
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 COLUMNS = {
     "projects": {"id", "name", "organisation_id", "gbif_dataset_key", "deleted_at", "created_at"},
@@ -431,10 +432,12 @@ def _test(row: dict, table: str, column: str, op: str, value: Any) -> bool:
 class FakeDB:
     """``create_service_client()`` for tests: ``FakeDB(tables).client``."""
 
-    def __init__(self, tables: dict[str, list[dict]], max_rows: int = 1000):
+    def __init__(self, tables: dict[str, list[dict]], max_rows: int = 1000, rpcs: Optional[dict[str, Callable[[dict], Any]]] = None):
         self.tables = {name: [dict(r) for r in rows] for name, rows in tables.items()}
         self.requests: list[SimpleNamespace] = []
         self.writes: list[SimpleNamespace] = []
+        self.calls: list[tuple[str, dict]] = []
+        self.rpcs = rpcs or {}
         self.max_rows = max_rows
         self.next_id = 0
 
@@ -444,6 +447,12 @@ class FakeDB:
     def table(self, name: str) -> Query:
         assert name in COLUMNS, f"unknown table {name}"
         return Query(self, name)
+
+    def rpc(self, name: str, params: dict) -> SimpleNamespace:
+        """``rpc(name, params).execute()``: what the test's stand-in returns, as PostgREST's body."""
+        assert name in self.rpcs, f"no stand-in for the function {name}"
+        self.calls.append((name, copy.deepcopy(params)))
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=copy.deepcopy(self.rpcs[name](params)), count=None))
 
     def client(self) -> "FakeDB":
         return self

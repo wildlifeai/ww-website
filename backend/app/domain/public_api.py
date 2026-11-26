@@ -230,10 +230,11 @@ def photo_verdict(obs: List[Dict[str, Any]]) -> tuple[Optional[Dict[str, Any]], 
     """Which observation a photo's card shows, and whether it shows Empty (#170).
 
     A port of the frontend's ``photoVerdict`` in lib/observations.ts, which the grid uses; keep
-    the two the same. A human verdict wins. Otherwise the consensus row decides presence: blank
-    is Empty, anything else takes its name from the first named per-model row. With neither,
-    the first row. A person's own row (``is_human_row``) is preferred over an AI row a reviewer
-    confirmed before decision 2. ``obs`` is in the order the observations were written.
+    the two the same, and ww-backend's ``gbf_report_counts``, which ports it too (#456). A human
+    verdict wins. Otherwise the consensus row decides presence: blank is Empty, anything else
+    takes its name from the first named per-model row. With neither, the first row. A person's
+    own row (``is_human_row``) is preferred over an AI row a reviewer confirmed before decision
+    2. ``obs`` is in the order the observations were written.
     """
     reviewed = [o for o in obs if is_human_reviewed(o)]
     human = next((o for o in reviewed if is_human_row(o)), None)

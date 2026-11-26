@@ -5782,7 +5782,7 @@
     },
     "/api/reports/gbf": {
       "get": {
-        "description": "The GBF contribution report for the projects over the period. It only reads, so the demo\naccount may call it; the caller needs read access to every project (``404`` otherwise).",
+        "description": "The GBF contribution report for the projects over the period. It only reads, so the demo\naccount may call it. The photos are counted with the caller's session, so the caller needs\nwhat the database reads them by on every project (``authz._can_view``): a project role,\n``organisation_manager`` of its organisation, or ``ww_admin``; ``404`` otherwise.",
         "operationId": "get_gbf_report_api_reports_gbf_get",
         "parameters": [
           {
