@@ -145,7 +145,7 @@ def test_a_queued_batch_job_fails_after_the_queue_limit(monkeypatch):
 
 @pytest.mark.parametrize(
     ("state", "attempts", "expected"),
-    [("held", 0, "keep"), ("released", 0, None), ("expired", 0, "requeue"), ("expired", 1, "fail")],
+    [("held", 0, "keep"), ("released", 0, "ingest"), ("expired", 0, "requeue"), ("expired", 1, "fail")],
 )
 def test_a_leased_job_follows_its_lease_row(monkeypatch, state, attempts, expected):
     monkeypatch.setattr(locks, "lease_state", lambda name: state)
@@ -180,6 +180,44 @@ async def test_reaper_requeues_an_expired_lease_and_spares_a_waiting_job(monkeyp
     assert by_status["queued"]["job_data"]["dispatch"]["attempts"] == 1
     assert by_status["failed"]["job_data"]["error"].startswith("Stalled")
     assert len(updates) == 2
+
+
+@pytest.mark.parametrize(
+    ("decision", "failed"),
+    [(("keep", ""), None), (("fail", "Results part 1 could not be written"), "the GPU results could not be written"), ((None, ""), "stalled")],
+)
+async def test_reaper_asks_ingest_about_a_released_lease(monkeypatch, decision, failed):
+    """Kept while a part's ingest has tries left, even past 60 minutes; failed with ingest's own message; else the usual rule."""
+    from app.jobs import ingest
+
+    jd = {**_jd("processing", lease="L1"), "updated_at": _iso(90)}
+    rows = [{"id": "j-released", "status": "processing", "job_data": jd, "updated_at": _iso(90)}]
+    client = MagicMock()
+    client.table.return_value.select.return_value.in_.return_value.execute.return_value = SimpleNamespace(data=rows)
+    monkeypatch.setattr(store, "create_service_client", lambda: client)
+    monkeypatch.setattr(locks, "lease_state", lambda name: "released")
+    asked = AsyncMock(return_value=decision)
+    monkeypatch.setattr(ingest, "released_lease_decision", asked)
+
+    assert await store.reap_stale_jobs(60) == (1 if failed else 0)
+    assert asked.await_args is not None and asked.await_args.args == ("L1", "j-released")
+    updates = [c.args[0] for c in client.table.return_value.update.call_args_list]
+    if failed:
+        assert updates[0]["status"] == "failed" and failed in updates[0]["job_data"]["message"]
+    else:
+        assert updates == []
+
+
+async def test_reaper_keeps_to_the_60_minute_rule_when_the_ingest_check_fails(monkeypatch):
+    from app.jobs import ingest
+
+    rows = [{"id": "j1", "status": "processing", "job_data": {**_jd("processing", lease="L1"), "updated_at": _iso(5)}, "updated_at": _iso(5)}]
+    client = MagicMock()
+    client.table.return_value.select.return_value.in_.return_value.execute.return_value = SimpleNamespace(data=rows)
+    monkeypatch.setattr(store, "create_service_client", lambda: client)
+    monkeypatch.setattr(locks, "lease_state", lambda name: "released")
+    monkeypatch.setattr(ingest, "released_lease_decision", AsyncMock(side_effect=RuntimeError("S3 is down")))
+    assert await store.reap_stale_jobs(60) == 0
 
 
 # ── the lease row API on locks ───────────────────────────────────────
@@ -487,6 +525,7 @@ async def test_finish_records_part_counts_releases_and_finalises(leased, monkeyp
     monkeypatch.setattr(dispatch, "enqueue_job", enqueue)
     await batch_lease.finish("L1", [{"job_id": JOB, "parts_total": 2, "failed_media": ["m9"]}])
     done = json.loads((tmp_path / "results" / "L1" / JOB / "_done.json").read_text())
+    assert datetime.fromisoformat(done.pop("finished_at")) <= datetime.now(timezone.utc)
     assert done == {"parts_total": 2, "failed_media": ["m9"]}
     assert released == ["batch-lease:L1"]
     enqueue.assert_awaited_once_with("finalize_batch_job", "L1", JOB)

@@ -14,8 +14,8 @@ State lives where no stale copy can overwrite it:
   :func:`finish`; an expired one is requeued by the reaper (``jobs/store.py``);
 - each job's row gets ``status = processing`` and ``job_data.lease = {"id": ...}`` once, at claim;
 - parts and their progress are objects under ``results/{lease}/{job}/`` in the object store:
-  the part, a ``.ingested`` marker per part, ``_done.json`` from the cluster and
-  ``_finalized`` once the job is complete (``jobs/ingest.py``).
+  the part, a ``.attempt`` and a ``.ingested`` marker per part, ``_done.json`` from the
+  cluster and ``_finalized`` once the job is complete (``jobs/ingest.py``).
 
 The cluster never gets a database credential and never fetches a URL a user could have
 written: an original in its own S3 folder (``media_resolver.in_own_folder``) comes as a
@@ -79,6 +79,11 @@ def part_key(lease_id: str, job_id: str, part: int) -> str:
 
 def ingested_key(lease_id: str, job_id: str, part: int) -> str:
     return f"{object_store.RESULTS_PREFIX}{lease_id}/{job_id}/part-{int(part):04d}.ingested"
+
+
+def attempt_key(lease_id: str, job_id: str, part: int) -> str:
+    """The part's latest ingest try: its number and when it was queued, started or stopped (``jobs/ingest.py``)."""
+    return f"{object_store.RESULTS_PREFIX}{lease_id}/{job_id}/part-{int(part):04d}.attempt"
 
 
 def done_key(lease_id: str, job_id: str) -> str:
@@ -443,7 +448,12 @@ async def finish(lease_id: str, reports: list[dict]) -> None:
         job_id = str(report.get("job_id"))
         if job_id not in rows:
             raise LeaseError(f"job {job_id} is not in lease {lease_id}")
-        body = {"parts_total": int(report.get("parts_total") or 0), "failed_media": list(report.get("failed_media") or [])}
+        body = {
+            "parts_total": int(report.get("parts_total") or 0),
+            "failed_media": list(report.get("failed_media") or []),
+            # From here a part with no ingest try waits for a free cpu instance (jobs/ingest.py).
+            "finished_at": _now().isoformat(),
+        }
         await object_store.put_object(done_key(lease_id, job_id), json.dumps(body).encode("utf-8"), "application/json")
     await asyncio.to_thread(release_lease, batch_lease_name(lease_id), lease_id)
     for report in reports:
