@@ -83,7 +83,10 @@ How the accounts are laid out and how a person signs in:
   `template.yaml` needs its actions added to that role in `shared.yaml` first, deployed from a
   workstation, or the next `deploy-aws.yml` run fails.
 * A changed `/ww/<env>/` parameter reaches a function only at its next cold start
-  (`app/aws_params.py`): redeploy the stack, or wait for idle copies to retire, before testing it.
+  (`app/aws_params.py`): restart both functions before testing it, with the configuration update in
+  the deployment guide's
+  [AWS and the REANNZ batch](../../../documentation/resources/deployment-guide.md#aws-and-the-reannz-batch),
+  or a deploy.
   A variable the function already has wins, so a value `template.yaml` sets (its `Globals`
   environment, such as `WORKER_BACKEND` or `S3_BUCKET`, and each function's `WW_LAMBDA_ROLE`)
   overrides an SSM parameter of the same name: change the template instead.

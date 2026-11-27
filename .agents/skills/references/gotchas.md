@@ -128,14 +128,16 @@ The seeded test users, and where their credentials are kept:
 
 ## Cloud dev is reseeded without notice
 
-The linked dev Supabase project is reset from `ww-backend`'s seeds whenever that repo's
-workflow runs. Rows you created by hand (a model uploaded through the registry path, a
-deployment, a project pointed at a model) can be gone the next morning. Scripts that set up a
-test must be re-runnable, reports must record ids as evidence rather than as things to rely
-on, and a "missing row" is a reseed until proven otherwise (2026-09-05: the `20V1` Person
-Detection built in step 1 of the person-detection runbook disappeared this way). A LoRaWAN bench
-test loses its camera, its deployment, its messages and any organisation ingest token with each
-reset; what to redo is in
+The linked dev Supabase project is reset from `ww-backend`'s seeds whenever that repo's workflow
+runs, which a merge into its `dev` starts. A reset takes about 10 minutes (01:51 to 02:00 UTC on
+2026-11-26, when the demo login was briefly invalid and the CI e2e failed): a red e2e run in that
+window is not a regression, re-run it after. Rows you created by hand (a model uploaded through
+the registry path, a deployment, a project pointed at a model) can be gone the next morning.
+Scripts that set up a test must be re-runnable, reports must record ids as evidence rather than as
+things to rely on, and a "missing row" is a reseed until proven otherwise (2026-09-05: the `20V1`
+Person Detection built in step 1 of the person-detection runbook disappeared this way). A LoRaWAN
+bench test loses its camera, its deployment, its messages and any organisation ingest token with
+each reset; what to redo is in
 [lorawan-dev-testing.md](../../../documentation/resources/lorawan-dev-testing.md).
 
 ---
@@ -224,7 +226,8 @@ gh pr list --state open --json headRefName -q '.[].headRefName' | while read b; 
 
 Frames of one trigger are grouped only by `domain/burst_evidence.py::group_bursts`: firmware
 sequence tag first, EXIF timestamp gap otherwise (`BURST_GAP_SECONDS`, 10 s), never across a
-deployment or folder. `media_registry.group_bursts`, the labeller and the eval call it. Today's
+deployment or folder. `media_registry.group_bursts`, the pipeline's evidence fusion, the batch
+lease's part edges, the labeller and the eval call it. Today's
 firmware spaces burst frames 3 to 5 s apart, so a tighter gap splits real bursts.
 
 ---

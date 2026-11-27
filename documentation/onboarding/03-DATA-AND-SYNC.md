@@ -140,14 +140,14 @@ The **service-role key is never exposed to the browser** — it stays in the bac
 `enqueue_job` (`backend/app/jobs/dispatch.py`) decides where each job runs. The job names are the
 constants in that file, `IN_PROCESS_JOBS` and `BATCH_JOBS`; this guide does not copy them.
 
-- **Azure** (`WORKER_BACKEND=local`, what both sites use): with `REDIS_URL` set, as in both cloud
-  environments, a job goes to the ARQ GPU worker (`jobs/worker.py`), except the `IN_PROCESS_JOBS`,
+- **Azure** (`WORKER_BACKEND=local`, what production uses): with `REDIS_URL` set, as in
+  production, a job goes to the ARQ GPU worker (`jobs/worker.py`), except the `IN_PROCESS_JOBS`,
   which run in the API process, so their settings belong on the API. Such a job can be cut off
-  when the API replica scales in (dev scales to zero). Without `REDIS_URL`, as in local dev, every
+  when the API replica scales in. Without `REDIS_URL`, as in local dev, every
   job is an in-process `asyncio` task. When no Redis is reachable, enqueue logs
   `redis connection error … arq_enqueue_failed_fallback_local` and the job falls back to the
   in-process runner: expected noise in local dev, not a failure.
-- **AWS** (`WORKER_BACKEND=lambda`): the `BATCH_JOBS` wait in `api_jobs` for the REANNZ batch, and
+- **AWS** (`WORKER_BACKEND=lambda`, what dev uses since 2026-11-26): the `BATCH_JOBS` wait in `api_jobs` for the REANNZ batch, and
   every other job goes to the `cpu` function
   ([settings](../resources/deployment-guide.md#aws-and-the-reannz-batch)).
 

@@ -2,7 +2,7 @@
 
 How to deploy the Wildlife Watcher V2 platform (backend + frontend) to production.
 
-> **AWS:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path ([AWS and the REANNZ batch](#aws-and-the-reannz-batch)). Everything else below describes the Azure deployment the sites use. Status, design and the AWS deploy steps: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md); signing in to AWS: [cloud-infrastructure.md](cloud-infrastructure.md#signing-in-to-aws).
+> **AWS:** a move to AWS, with the GPU work as batches on the REANNZ cluster, is built behind settings whose defaults keep the Azure path ([AWS and the REANNZ batch](#aws-and-the-reannz-batch)). The dev site calls the AWS dev API since 2026-11-26; everything else below describes the Azure deployment production uses. Status, design and the AWS deploy steps: [2026-10_aws-reannz-migration](../development%20reports/2026-10_aws-reannz-migration/README.md); signing in to AWS: [cloud-infrastructure.md](cloud-infrastructure.md#signing-in-to-aws).
 
 ## Table of Contents
 
@@ -27,11 +27,11 @@ How to deploy the Wildlife Watcher V2 platform (backend + frontend) to productio
 | Component | Dev | Staging (current "prod") |
 |-----------|-----|--------------------------|
 | **Supabase** | Dev_Wildlife_Watcher ([project refs](cloud-infrastructure.md#supabase)) | Stag_Wildlife_Watcher |
-| **Azure Container App** | `ww-backend-dev` (WW-AE RG) | `ww-backend` (WW-AE RG) |
-| **Azure Blob Container** | `wildlife-watcher-uploads-dev` | `wildlife-watcher-uploads` (storage account `wwuploadsae`) |
-| **CamtrapDP export ZIPs** | `camtrapdp-exports`, shared with staging | `camtrapdp-exports` (same account) |
+| **Backend** | AWS stack `ww-dev`, the API and CPU jobs on Lambda, GPU batches on REANNZ ([cloud-infrastructure](cloud-infrastructure.md#aws)) | Azure Container App `ww-backend` (WW-AE RG) |
+| **Upload buffer** | S3 bucket `wildlifewatcher-dev-media` | Azure Blob container `wildlife-watcher-uploads` (storage account `wwuploadsae`) |
+| **CamtrapDP export ZIPs** | `exports/` in `wildlifewatcher-dev-media` | `camtrapdp-exports` (same account) |
 | **Frontend** | Cloudflare Pages build of `dev` (`dev.ww-website.pages.dev`); no other branch is built, see [Preview Deployments](#preview-deployments) | Cloudflare Pages (`ww-website.pages.dev` + `wildlifewatcher.ai`) |
-| **Google Drive** | `Data/dev` ([folder IDs](cloud-infrastructure.md#google-drive)) | `Data/Production` |
+| **Original archive** | `originals/` in `wildlifewatcher-dev-media`; local dev uses Drive `Data/dev` ([folder IDs](cloud-infrastructure.md#google-drive)) | Drive `Data/Production` |
 
 > **Seed data**: The dev Supabase project is seeded with test users, organisations, projects, devices
 > and deployments. Counts and credentials are **not** duplicated here —
@@ -44,7 +44,7 @@ How to deploy the Wildlife Watcher V2 platform (backend + frontend) to productio
 
 ## Backend Deployment (Azure Container Apps)
 
-The backend runs as a containerised FastAPI application on **Azure Container Apps** (Consumption plan), deployed via **Azure Container Registry (ACR)**.
+The production backend runs as a containerised FastAPI application on **Azure Container Apps** (Consumption plan), deployed via **Azure Container Registry (ACR)**.
 
 ### Architecture
 
@@ -56,16 +56,17 @@ GitHub Actions (CI/CD)
   └── Update Azure Container App
         │
         ▼
-Azure Container App ("ww-backend" / "ww-backend-dev")  ──REDIS_URL set──▶  ARQ GPU worker
-  ├── FastAPI API Server (port 8000)                                       ("ww-embedding-worker[-dev]",
+Azure Container App ("ww-backend", production)         ──REDIS_URL set──▶  ARQ GPU worker
+  ├── FastAPI API Server (port 8000)                                       ("ww-embedding-worker",
   ├── Job dispatch: ARQ when REDIS_URL is set, else in-process asyncio       --target worker, serverless T4)
   └── Supabase sync for job persistence (api_jobs table)
 ```
 
 > **Note**: heavy ML work (SpeciesNet, BioCLIP, DINOv3) runs in a **separate ARQ GPU worker**, not in
-> the API container, because the lean `--target api` image carries no ML deps. Each environment has its
-> own worker (serverless T4, scale-to-zero): **dev since 2026-07-03, production since 2026-07-26**.
-> With `REDIS_URL` unset, `dispatch.py` falls back to running jobs in-process.
+> the API container, because the lean `--target api` image carries no ML deps. Production has its
+> worker (serverless T4, scale-to-zero) since 2026-07-26; dev's GPU work runs as REANNZ batches
+> ([AWS and the REANNZ batch](#aws-and-the-reannz-batch)). With `REDIS_URL` unset, `dispatch.py`
+> falls back to running jobs in-process.
 > Live state: [cloud-infrastructure.md](cloud-infrastructure.md) · how the prod worker was built:
 > [prod-worker-provisioning-runbook.md](prod-worker-provisioning-runbook.md).
 
@@ -124,7 +125,7 @@ The frontend is a static React+Vite app deployed to **Cloudflare Pages**, which 
    |----------|-------|
    | `SUPABASE_URL` | `https://nuhwmubvygxyddkycmpa.supabase.co` |
    | `SUPABASE_ANON_KEY` | _(from Supabase Dashboard)_ |
-   | `VITE_API_BASE_URL` | the production API's base URL, `https://` and its FQDN; the dev preview takes the dev API's ([base URLs](api-reference.md#wildlife-watcher-api-reference), checked against [cloud-infrastructure.md](cloud-infrastructure.md#azure)) |
+   | `VITE_API_BASE_URL` | the production API's base URL, `https://` and its FQDN ([cloud-infrastructure.md](cloud-infrastructure.md#azure)); the dev preview takes the AWS dev API's, the `ww-dev` stack's `ApiUrl` output ([cloud-infrastructure.md](cloud-infrastructure.md#aws)) |
 
 5. Assign custom domain: `wildlifewatcher.ai` (DNS is already on Cloudflare)
 
@@ -229,7 +230,7 @@ A **fresh container only has the env you explicitly set** — feature flags and 
 
 > **Quick audit** of a container's current env:
 > ```bash
-> az containerapp show --name ww-backend-dev -g WW-AE \
+> az containerapp show --name ww-backend -g WW-AE \
 >   --query "properties.template.containers[0].env[].name" -o tsv | sort
 > ```
 > If `GOOGLE_DRIVE_ENABLED`, `FF_PIPELINE_ENABLED`, `FF_SPECIESNET_ENABLED`, or `FF_MEDIA_REGISTRY_ENABLED` are absent, that subsystem is off regardless of what the UI seems to show.
@@ -263,6 +264,21 @@ which `backend/app/aws_params.py` loads at each cold start. Status and design:
 | `WW_SSM_PREFIX`, `WW_ENV` | unset | `/ww/<env>/`, `<env>`, set by the template | Environment variables, not settings: the SSM path `aws_params.py` loads before `Settings()`, and the environment's name on the tick's metric line |
 | `SUPABASE_*` | empty | SSM | Empty defaults let the GPU image import the app; the API refuses to start without them (`Settings.require_supabase`) |
 
+A changed parameter reaches a function only at its next cold start, so after changing one, restart
+both, `ww-<env>-api` and `ww-<env>-cpu`, with a configuration update (a deploy does it too). On dev:
+
+```bash
+aws lambda update-function-configuration --function-name ww-dev-api --description "reload <date and time>" --profile ww-dev
+aws lambda update-function-configuration --function-name ww-dev-cpu --description "reload <date and time>" --profile ww-dev
+```
+
+**Stack parameter `AllowedOrigins`** (`infra/aws/template.yaml`): the browser origins the media
+bucket's CORS accepts for upload POSTs and original GETs. On `ww-dev` it is the template default
+plus `http://localhost:5175` (2026-11-26), so a local site on 5175 can test against AWS dev while
+another dev server holds 5173. `sam deploy` keeps a parameter it is not passed at the stack's last
+value (SAM CLI 1.173.0, `merge_parameters`), so `deploy-aws.yml` and a workstation deploy keep it;
+passing `AllowedOrigins` replaces the whole list, and a stack created afresh starts from the default.
+
 ### iNaturalist
 
 Publishing photos to a person's own iNaturalist account, and the badge sync (#123). Off everywhere
@@ -287,9 +303,9 @@ reads the same `INAT_*` parameters from SSM.
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(48))"   # one key per environment
-az containerapp secret set --name ww-backend-dev --resource-group WW-AE \
+az containerapp secret set --name ww-backend --resource-group WW-AE \
   --secrets inat-token-key=<the key>
-az containerapp update --name ww-backend-dev --resource-group WW-AE \
+az containerapp update --name ww-backend --resource-group WW-AE \
   --set-env-vars FF_INAT_ENABLED=true INAT_TOKEN_KEY=secretref:inat-token-key
 ```
 
@@ -330,9 +346,12 @@ the API's `/api/inat/callback`, not the site, and `INAT_REDIRECT_URI` must be th
 
 | Environment | Redirect URI and `INAT_REDIRECT_URI` |
 |---|---|
-| dev (`ww-backend-dev`) | `https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
 | production (`ww-backend`, wildlifewatcher.ai) | `https://ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
 | local | `http://localhost:8000/api/inat/callback` |
+
+**Dev is not set up.** Its app's redirect URI was the Azure dev API's `/api/inat/callback`, and AWS
+dev has no `INAT_*` parameters in SSM yet, so iNaturalist on dev needs those parameters under
+`/ww/dev/` and the AWS dev API's `/api/inat/callback` registered with the iNaturalist app.
 
 The code default, `https://wildlifewatcher.ai/inat/callback`, is the site, where no page handles the
 callback, so set the variable everywhere. After the callback the API sends the browser to the first
@@ -343,11 +362,11 @@ app's secret, as a `secretref:`; with `INAT_TOKEN_KEY` set it keys no stored tok
 `INAT_REDIRECT_URI` (from the table above).
 
 ```bash
-az containerapp secret set --name ww-backend-dev --resource-group WW-AE \
+az containerapp secret set --name ww-backend --resource-group WW-AE \
   --secrets inat-client-secret=<the app's secret>
-az containerapp update --name ww-backend-dev --resource-group WW-AE \
+az containerapp update --name ww-backend --resource-group WW-AE \
   --set-env-vars INAT_CLIENT_ID=<the app's ID> INAT_CLIENT_SECRET=secretref:inat-client-secret \
-    INAT_REDIRECT_URI=https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback
+    INAT_REDIRECT_URI=<the redirect URI from the table above>
 ```
 
 **Test**: signed in, call `GET /api/inat/auth` and open its `authorization_url`: iNaturalist asks
@@ -355,8 +374,9 @@ to authorise, then Toolkit shows *Connected as* your login.
 
 > **Known limit:** the OAuth state lives in the memory of the API replica that started the sign-in
 > (`routers/inaturalist.py::_pending_oauth`). A callback that reaches another replica, or one that
-> restarted, answers `400 Invalid or expired OAuth state`. Dev runs one replica; production can run
-> more ([replica counts](cloud-infrastructure.md#azure)). Connecting with a pasted token does not use it.
+> restarted, answers `400 Invalid or expired OAuth state`. Production can run more than one replica
+> ([replica counts](cloud-infrastructure.md#azure)), and on AWS each Lambda instance has its own
+> memory. Connecting with a pasted token does not use it.
 
 ---
 
@@ -438,8 +458,9 @@ vector database.
    incompatible vector dims. DR is automatic — the vectors are a Postgres table under Supabase PITR, so
    the `/api/brain/backup` job is now a **no-op**.
 
-> The heavy ML inference (DINOv3/SpeciesNet on GPU) is a separate concern. In both cloud environments
-> it runs on the ARQ GPU worker (see [Scaling](#scaling)); locally it is the `gpu` profile's
+> The heavy ML inference (DINOv3/SpeciesNet on GPU) is a separate concern. On Azure (production)
+> it runs on the ARQ GPU worker (see [Scaling](#scaling)), on AWS as REANNZ batches
+> ([AWS and the REANNZ batch](#aws-and-the-reannz-batch)); locally it is the `gpu` profile's
 > `embedding-worker` in `docker-compose.yml`, which gets jobs only when the API has `REDIS_URL` set.
 
 ---
@@ -448,17 +469,18 @@ vector database.
 
 ### Backend: GitHub Actions → ACR → Azure Container App
 
-The workflow `.github/workflows/deploy-backend.yml` triggers on pushes to `dev` and `main` that touch
-what the images are built from: `backend/app/`, `backend/requirements*.txt`, `backend/Dockerfile`,
+The workflow `.github/workflows/deploy-backend.yml` deploys production: it triggers on pushes to `main`
+that touch what the images are built from: `backend/app/`, `backend/requirements*.txt`, `backend/Dockerfile`,
 `backend/.dockerignore` or the workflow itself. A frontend, docs or test push does not rebuild or
 redeploy anything; `workflow_dispatch` forces a run. The filter exists because every push used to
 rebuild the worker image in the registry, about 12 minutes of paid build time each (NZ$34 in
 October 2026).
 
-| Branch | Target Container App | Image Tag |
+| Branch | Target Container Apps | Image Tag |
 |--------|---------------------|-----------|
-| `dev` | `ww-backend-dev` | `dev-latest` + `<sha>` |
-| `main` | `ww-backend` | `latest` + `<sha>` |
+| `main` | `ww-backend` + `ww-embedding-worker` | `latest` + `<sha>` |
+
+Dev deploys to AWS with [`deploy-aws.yml`](#aws-deploy-awsyml) or by hand.
 
 ### Required GitHub Secrets
 
@@ -549,15 +571,15 @@ This automatically captures:
 ### Azure Container Apps
 
 > `min-replicas` for the API is **set by [`deploy-backend.yml`](../../.github/workflows/deploy-backend.yml)
-> on every deploy** (dev 0, prod 1). A manual `az containerapp update --min-replicas …` is overwritten by
-> the next deploy of that branch — change the workflow's *Determine target* step instead.
+> on every deploy** (1). A manual `az containerapp update --min-replicas …` is overwritten by the next
+> deploy, so change the workflow's *Determine target* step instead.
 
-| Setting | Dev | Staging/Prod |
-|---------|-----|--------------|
-| `min-replicas` | 0 (scale to zero) | 1 (keeps the public demo button warm) |
-| `max-replicas` | 1 | see [cloud-infrastructure.md](cloud-infrastructure.md#azure) |
-| CPU | 0.25 vCPU | 0.5 vCPU |
-| Memory | 0.5 Gi | 1 Gi |
+| Setting | Staging/Prod |
+|---------|--------------|
+| `min-replicas` | 1 (keeps the public demo button warm) |
+| `max-replicas` | see [cloud-infrastructure.md](cloud-infrastructure.md#azure) |
+| CPU | 0.5 vCPU |
+| Memory | 1 Gi |
 
 ```bash
 # Scale staging
@@ -591,8 +613,8 @@ fourth copy is what let this section drift out of date:
 
 Three facts differ from the obvious guess, so check them before you touch anything:
 
-- **Redis is a Container App, not Azure Cache for Redis.** `ww-redis-dev` runs `redis:7-alpine` with
-  internal TCP ingress on 6379. Reach it app-to-app by **short name** — `redis://ww-redis-dev:6379`;
+- **Redis is a Container App, not Azure Cache for Redis.** `ww-redis` runs `redis:7-alpine` with
+  internal TCP ingress on 6379. Reach it app-to-app by **short name**, `redis://ww-redis:6379`;
   the `.internal.*` FQDN times out for TCP.
 - **The worker does not scale on Redis.** The ACA KEDA operator cannot reach that internal Redis, so
   scaling uses a **KEDA PostgreSQL scaler** querying `api_jobs` on the matching Supabase project, over
@@ -619,7 +641,8 @@ so **the worker must already be consuming the queue before you set it**, or jobs
 ### Wildlife Brain on a deployed worker
 
 `FF_WILDLIFE_BRAIN_ENABLED` defaults to `true` (#344), but an app that sets the variable keeps its
-value, so check the API and the worker (`scripts/parity_audit.py` prints the `FF_*` values). The
+value, so check the API and the worker
+(`az containerapp show -n <app> -g WW-AE --query "properties.template.containers[0].env"`). The
 embed step runs on the worker, after the pipeline, and needs:
 
 | Setting | Why |
@@ -661,7 +684,7 @@ has the same method worked through for the whole pipeline.
 ### Verifying the split works
 
 1. Trigger an AI run (upload, or `POST /api/brain/reprocess/deployment/{id}`). API logs should show **`job_enqueued_arq`** (not `job_enqueued_local`).
-2. `az containerapp replica list --name ww-embedding-worker-dev -g WW-AE` shows the worker scaling **0 → 1**.
+2. `az containerapp replica list --name ww-embedding-worker -g WW-AE` shows the worker scaling **0 → 1**.
 3. Worker logs show `arq_worker_startup` then `auto_embed_complete` with a cluster count.
 4. Annotations → **Group → Cluster (embeddings)** populates; the worker scales back to **0** when idle.
 
@@ -689,8 +712,8 @@ az containerapp show \
 
 With `REDIS_URL` **unset**, jobs run in-process as asyncio background tasks; with it set, they are
 offloaded to the ARQ worker, so first check *which* process should have run the job. The jobs in
-`IN_PROCESS_JOBS` always run in the API process, where one can be cut off when the replica scales in
-(dev scales to zero); which jobs those are: [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.md#async-job-system). A job stuck in
+`IN_PROCESS_JOBS` always run in the API process, where one can be cut off when the replica scales in;
+which jobs those are: [03-DATA-AND-SYNC](../onboarding/03-DATA-AND-SYNC.md#async-job-system). A job stuck in
 `queued` on a `REDIS_URL`-configured API usually means the worker isn't running or KEDA never woke it
 (see [GPU Worker](#gpu-worker--scale-to-zero-the-ml-worker)). Nothing is failed at boot: if a container
 restarts mid-job, the age-based reaper (`reap_stale_jobs`, `backend/app/jobs/store.py`) fails the job once

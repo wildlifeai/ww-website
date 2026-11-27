@@ -16,8 +16,8 @@ classify) and the **Wildlife Brain** (DINOv3 embeddings → clustering → activ
 > **Where it runs in the cloud.** On Azure, everything below executes in a **dedicated ARQ GPU
 > worker** (`--target worker`, serverless T4), *not* in the API container, whose lean `--target api`
 > image has no ML deps; the API only enqueues, so AI detection there needs `REDIS_URL` and a deployed
-> worker: dev has both since 2026-07-03, production since 2026-07-26. Under `WORKER_BACKEND=lambda`
-> (the AWS path) the GPU jobs wait in `api_jobs` for the REANNZ batch instead, with no Redis
+> worker: production has both since 2026-07-26. Under `WORKER_BACKEND=lambda`
+> (the AWS path, dev since 2026-11-26) the GPU jobs wait in `api_jobs` for the REANNZ batch instead, with no Redis
 > (`backend/app/jobs/dispatch.py`, [settings](../resources/deployment-guide.md#aws-and-the-reannz-batch)).
 > Flags must be set wherever the pipeline runs: on the **worker** as well as the API on Azure, in the
 > `/ww/<env>/` SSM parameters on AWS. See [cloud-infrastructure](../resources/cloud-infrastructure.md) and

@@ -55,7 +55,7 @@ Two house rules an agent must follow here:
 - **Database / Auth / Storage**: Supabase (PostgreSQL + RLS, Auth, Storage)
 - **AI**: SpeciesNet ensemble (detector + species classifier); DINOv3 "Wildlife Brain" embeddings → HDBSCAN clustering → active-learning review
 - **Charts / Maps**: Vega-Lite (`vega-embed`), Leaflet (`react-leaflet`)
-- **Hosting**: Cloudflare Pages (frontend) + Azure Container Apps (backend); an AWS stack (Lambda, S3, GPU batches on the REANNZ cluster) is built behind settings and no site uses it yet
+- **Hosting**: Cloudflare Pages (frontend) + Azure Container Apps (production backend); the dev site's backend runs on AWS (Lambda, S3, GPU batches on the REANNZ cluster) since 2026-11-26
 - **External services**: Google Drive (image archive), Azure Blob (temp buffer), iNaturalist, Sentry (DINOv3 embedding vectors live in Supabase via **pgvector**)
 - **Schema owner**: the database schema is owned by the [`ww-backend`](https://github.com/wildlifeai/ww-backend) repo (see [Database Migrations](#database-migrations))
 
@@ -113,8 +113,8 @@ and production, only the instances and scale differ (see the
 The browser reads observations **directly from Supabase** (RLS-scoped by the user's JWT) and only calls the **Azure backend** for privileged/heavy work. **iNaturalist** is contacted when reviewers publish observations or look up taxa.
 
 > **AWS:** the same flow is built behind settings for AWS, with S3 in place of Azure Blob and Drive,
-> and Lambda and GPU batches on the REANNZ cluster in place of the ARQ worker. No site uses it yet:
-> [settings](./documentation/resources/deployment-guide.md#aws-and-the-reannz-batch).
+> and Lambda and GPU batches on the REANNZ cluster in place of the ARQ worker. The dev site uses it
+> since 2026-11-26: [settings](./documentation/resources/deployment-guide.md#aws-and-the-reannz-batch).
 
 ## Prerequisites
 

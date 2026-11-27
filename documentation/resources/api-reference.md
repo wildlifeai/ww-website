@@ -4,14 +4,14 @@ Complete endpoint reference for the Wildlife Watcher V2 API.
 
 **Base URL:**
 `https://ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io` (production) |
-`https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io` (dev) |
+the AWS dev API (dev) |
 `http://localhost:8000` (local)
 
-> There is **no `api.wildlifewatcher.ai`**: the Cloudflare zone serves the frontend only. Both sites
-> reach the API at its Azure Container Apps FQDN; confirm the current values in
-> [cloud-infrastructure](./cloud-infrastructure.md#azure). The `ww-dev` AWS stack also answers on its
-> API Gateway HTTP API (stack output `ApiUrl`, [cloud-infrastructure](./cloud-infrastructure.md#aws)),
-> which no site points at yet.
+> There is **no `api.wildlifewatcher.ai`**: the Cloudflare zone serves the frontend only. The
+> production site reaches the API at its Azure Container Apps FQDN; confirm it in
+> [cloud-infrastructure](./cloud-infrastructure.md#azure). The dev site calls the AWS dev API, an API
+> Gateway HTTP API whose address is the `ww-dev` stack's `ApiUrl` output
+> ([cloud-infrastructure](./cloud-infrastructure.md#aws)).
 
 **Authentication:** JWT Bearer token from Supabase Auth (required for protected endpoints).
 
