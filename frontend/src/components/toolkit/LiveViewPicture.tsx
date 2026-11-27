@@ -3,11 +3,15 @@
 //
 // LiveViewPicture: the live view's left column (#400). The latest frame with the HM0360's motion
 // grid over it, in 16 or 15 rows, and under it the WAKE lamp and the motion status lines, as
-// live_view.py shows them. With motion detection off it is the plain picture.
-import { TriangleAlert } from 'lucide-react'
+// live_view.py shows them. With the grid off it is the plain picture. Until the first picture,
+// the steps to it stand over the picture, or a warning when the camera does not answer (#528).
+import type { ReactNode } from 'react'
+import { Circle, CircleCheck, CircleDot, TriangleAlert } from 'lucide-react'
 import { MD_COLS, OP_MD_INTERVAL, gridCells, type GridRows } from '../../lib/liveView'
-import type { LiveViewFrame, LiveViewSnapshot } from '../../lib/liveViewSession'
+import { LIVE_VIEW_WARNINGS, type LiveViewFrame, type LiveViewSnapshot } from '../../lib/liveViewSession'
 import { MONO } from './liveViewStyles'
+
+const STEP_ICON = { done: CircleCheck, now: CircleDot, todo: Circle }
 
 function gridLines(rows: GridRows): string {
   return [
@@ -19,17 +23,61 @@ function gridLines(rows: GridRows): string {
 export function LiveViewPicture({ view, rows }: { view: LiveViewSnapshot; rows: GridRows }) {
   return (
     <div style={{ flex: '1 1 360px', maxWidth: 640, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-      <Picture frame={view.frame} rows={rows} showGrid={view.motionDetection} />
+      <Picture frame={view.frame} rows={rows} showGrid={view.motionDetection}>
+        <Overlay view={view} />
+      </Picture>
       {view.motionDetection ? <MotionStatus view={view} rows={rows} /> : (
         <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--text-muted)' }}>
-          Motion detection is off: plain live picture, a frame every {view.intervalMs} ms.
+          No motion grid: plain live picture, a frame every {view.intervalMs} ms.
         </p>
       )}
     </div>
   )
 }
 
-function Picture({ frame, rows, showGrid }: { frame: LiveViewFrame | null; rows: GridRows; showGrid: boolean }) {
+/** Over the picture: why there is none, or the steps to the first one. */
+function Overlay({ view }: { view: LiveViewSnapshot }) {
+  const { warning, steps } = view
+  if (!warning && !steps) return null
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', backgroundColor: 'rgba(0, 0, 0, 0.6)' }}>
+      {warning ? (
+        <p
+          role="alert"
+          style={{
+            margin: 0, maxWidth: '24rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start', padding: '0.75rem 1rem',
+            fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-color)', backgroundColor: 'var(--surface)',
+            border: '1px solid #f59e0b', borderRadius: 'var(--radius)',
+          }}
+        >
+          <TriangleAlert size={16} color="#f59e0b" aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} />
+          {LIVE_VIEW_WARNINGS[warning]}
+        </p>
+      ) : (
+        <ol aria-label="Starting the camera" style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.375rem', fontSize: '0.875rem' }}>
+          {steps?.map(step => {
+            const Icon = STEP_ICON[step.state]
+            return (
+              <li
+                key={step.label}
+                aria-current={step.state === 'now' ? 'step' : undefined}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  color: step.state === 'todo' ? 'rgba(255, 255, 255, 0.55)' : '#fff', fontWeight: step.state === 'now' ? 600 : 400,
+                }}
+              >
+                <Icon size={16} aria-hidden="true" color={step.state === 'done' ? '#4caf50' : 'currentColor'} />
+                {step.label}
+              </li>
+            )
+          })}
+        </ol>
+      )}
+    </div>
+  )
+}
+
+function Picture({ frame, rows, showGrid, children }: { frame: LiveViewFrame | null; rows: GridRows; showGrid: boolean; children: ReactNode }) {
   const ratio = frame && frame.width > 0 && frame.height > 0 ? `${frame.width} / ${frame.height}` : '4 / 3'
   const grid = showGrid && frame?.cells ? gridCells(frame.cells, rows) : null
   return (
@@ -61,6 +109,7 @@ function Picture({ frame, rows, showGrid }: { frame: LiveViewFrame | null; rows:
           ))}
         </svg>
       )}
+      {children}
     </div>
   )
 }

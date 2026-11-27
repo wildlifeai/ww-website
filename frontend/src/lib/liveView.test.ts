@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CHAR_DELAY_MS, HM0360_MAX_INTERVAL_MS, LineSplitter, captureIntervalMs, cleanLine, gridCells, motionCells,
+  CHAR_DELAY_MS, DEVICE_LINES, HM0360_MAX_INTERVAL_MS, LINES, LineSplitter, captureIntervalMs, cleanLine, gridCells, motionCells,
   parseFrameLine, replyExpected, typeSlowly, validFrameInterval, validOpValue, wouldWake,
 } from './liveView'
 
@@ -135,8 +135,9 @@ describe('captureIntervalMs with motion detection off', () => {
     expect(captureIntervalMs('RP3', 500, false)).toBe(100)
   })
 
-  it('takes a frame interval from 20 ms to 60 s, whole milliseconds only', () => {
-    expect([19, 20, 60000, 60001, 20.5].map(validFrameInterval)).toEqual([false, true, true, false, false])
+  it('takes a frame interval from 20 ms to 10 s, whole milliseconds only', () => {
+    // Longer would run into the session's 20 s "no frames, ask again" check (#528).
+    expect([19, 20, 10000, 10001, 20.5].map(validFrameInterval)).toEqual([false, true, true, false, false])
   })
 })
 
@@ -167,5 +168,19 @@ describe('op values and replies', () => {
     expect(replyExpected('getop 33')).toEqual(['OpParam 33 ='])
     expect(replyExpected('setop 33 6')).toEqual(['Set OpParam 33 =', 'valid value for op 33.'])
     expect(replyExpected('camera')).toEqual(['HM0360', 'RP3', 'RP2'])
+    // The reply, not the echo `cmd> sdused`.
+    expect(replyExpected('sdused')).toEqual(['sdused '])
+  })
+
+  it('tells a boot and an unknown command apart (#528)', () => {
+    // An unknown command ends with the boot's "Enter 'help'" line too (FreeRTOS_CLI.c).
+    const unknown = "Command not recognised.  Enter 'help' to view a list of available commands."
+    expect(LINES.cliUp.test(unknown)).toBe(false)
+    expect(LINES.notRecognised.test(unknown)).toBe(true)
+    expect(LINES.cliUp.test('Starting CLI Task')).toBe(true)
+    expect(LINES.echo.exec('cmd> vcm 512')?.[1]).toBe('vcm 512')
+    expect(LINES.cardDone.test('Inactivity period set at 3000ms')).toBe(true)
+    expect(DEVICE_LINES.wake.exec('Motion detected INT_INDIC = 0x01')?.[1]).toBe('Motion detected INT_INDIC')
+    expect(DEVICE_LINES.wake.test('[LS] Timer wake to re-evaluate the flash')).toBe(false)
   })
 })

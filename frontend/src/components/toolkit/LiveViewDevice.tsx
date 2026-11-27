@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // LiveViewDevice: the live view's Device tab (#400). What the camera said about itself in its
-// boot banner, its `ver` answer and its SD card lines, and the op params the page reads.
+// boot banner, its `ver` answer, its SD card lines and `sdused` answer, and the op params the page reads.
 import type { LiveViewSnapshot } from '../../lib/liveViewSession'
 import { MONO, SECTION, SECTION_TITLE } from './liveViewStyles'
 
@@ -31,7 +31,8 @@ function Rows({ rows }: { rows: [string, string | number | null][] }) {
 export function LiveViewDevice({ view }: { view: LiveViewSnapshot }) {
   const d = view.device
   const boot = d.boot ? `${d.boot}${d.wakeReason ? `, ${d.wakeReason}` : ''}` : null
-  const sd = d.sd === 'ready' ? 'ready' : d.sd === 'failed' ? 'failed to start' : null
+  const sd = d.sd === 'ready' ? `ready${d.sdUsed !== null ? `, ${d.sdUsed}% used` : ''}`
+    : d.sd === 'failed' ? 'none, or unreadable' : null
   const fromBanner = d.built || d.branch || d.flashOffset
 
   return (
