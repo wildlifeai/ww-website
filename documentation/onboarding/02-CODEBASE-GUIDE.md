@@ -131,8 +131,9 @@ registries/→ static config (camera configs, model + embedding registries)
 **Routers** (`/api/*`, registered in `app/main.py`): `auth` (demo session), `admin` (system-admin
 device list), `jobs`, `deployments`, `projects`, `exif`, `manifest`, `exports`, `reports` (the GBF
 report, answering `FEATURE_DISABLED` without `FF_GBF_REPORT_ENABLED`), `models`, `media`,
-`public_api`, `inaturalist`, `uploads` (presigned S3 uploads), `worker` (the REANNZ batch's lease
-routes, 404 until `WORKER_TOKEN_SHA256` is set), `lambda_events` (`/events`, only under
+`public_api`, `inaturalist`, `uploads` (presigned S3 uploads), `label_checks` (a project's label
+checks in numbers and a recompute, answering `FEATURE_DISABLED` without `FF_LABEL_CHECKS_ENABLED`),
+`worker` (the REANNZ batch's lease routes, 404 until `WORKER_TOKEN_SHA256` is set), `lambda_events` (`/events`, only under
 `WW_LAMBDA_ROLE`), and, each behind its feature flag, `camtrapdp`,
 `pipeline`, `brain`
 (embeddings/clusters/UMAP/similarity), `qa` (AI-vs-human agreement), `intelligence`

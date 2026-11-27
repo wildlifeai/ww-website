@@ -1,11 +1,11 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// GridBody: the review grid's cards. The "Find similar" list, ranked neighbours of one photo;
-// otherwise the page, flat or in collapsible groups, where a group offers Select for its photos
+// GridBody: the review grid's cards. The "Find similar" list, ranked neighbours of one photo; the
+// "Needs a second look" list of flagged photos (#448); otherwise the page, flat or in collapsible groups, where a group offers Select for its photos
 // and an unconfirmed cluster "Label all", with a mark when it mixes species (#450).
 import { Search, X } from 'lucide-react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type { ClusterGroup } from '../../hooks/useGridGroups'
 import type { MediaRecord } from '../../lib/gridMedia'
 import { Banner } from '../ui/Banner'
@@ -17,6 +17,8 @@ import { SMALL_BTN } from './gridStyles'
 
 interface Props {
   similar: { records: MediaRecord[]; loading: boolean; failed: boolean; onClear: () => void } | null
+  /** "Needs a second look": its panel and the flagged photos, in review order. */
+  secondLook: { panel: ReactNode; records: MediaRecord[]; loading: boolean } | null
   loading: boolean
   /** The page's cards, uploading placeholders last. */
   cards: MediaRecord[]
@@ -37,9 +39,22 @@ interface Props {
 const MUTED: CSSProperties = { color: 'var(--text-muted)', padding: '1rem 0' }
 
 export function GridBody({
-  similar, loading, cards, labelsView, labelCardCount, groups, collapsed, onToggleGroup, onSelectGroup, clusterByLabel, labelAll,
+  similar, secondLook, loading, cards, labelsView, labelCardCount, groups, collapsed, onToggleGroup, onSelectGroup, clusterByLabel, labelAll,
   gridStyle, env,
 }: Props) {
+  if (secondLook) {
+    return (
+      <>
+        {secondLook.panel}
+        {secondLook.records.length === 0 && (
+          <p style={MUTED}>{secondLook.loading ? 'Loading…' : 'No labels need a second look at this sensitivity.'}</p>
+        )}
+        <div style={gridStyle}>
+          <GridCards items={secondLook.records} labelsView={false} env={env} />
+        </div>
+      </>
+    )
+  }
   if (similar) {
     return (
       <>

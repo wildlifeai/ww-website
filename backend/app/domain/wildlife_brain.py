@@ -416,6 +416,13 @@ async def _finish_embedding_run(run_id: str, status: str, image_count: int) -> N
     await asyncio.to_thread(_update)
 
 
+async def _after_run(deployment_ids: list[str]) -> None:
+    """A run with fingerprints is done: their projects' label checks follow (#448; off by flag)."""
+    from app.jobs.label_checks import queue_after_brain_run
+
+    await queue_after_brain_run(deployment_ids)
+
+
 async def _fetch_crops(deployment_id: str) -> list[dict]:
     """Return media rows for the deployment that have an animal_crop_url."""
     from app.services.supabase_client import create_service_client
@@ -527,6 +534,7 @@ async def embed_and_cluster_deployment(
         await asyncio.to_thread(_persist)
 
         await _finish_embedding_run(run_id, "complete", len(media_ids))
+        await _after_run([deployment_id])
         n_clusters = len([s for s in summaries if not s.is_outlier])
         await _tick(1.0, "Done")
         logger.info("wildlife_brain_run_complete", run_id=run_id, images=len(media_ids), clusters=n_clusters)
@@ -749,6 +757,7 @@ async def embed_and_cluster_scope(
         await asyncio.to_thread(_persist)
 
         await _finish_embedding_run(run_id, "complete", len(kept_ids))
+        await _after_run(sorted(set(kept_deps)))
         n_clusters = len({int(label) for label in labels if int(label) != OUTLIER_LABEL})
         await _tick(1.0, "Done")
         logger.info("wildlife_brain_scope_complete", run_id=run_id, images=len(kept_ids), clusters=n_clusters, deployments=len(deployment_ids))

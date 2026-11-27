@@ -4,7 +4,8 @@
 // MediaBrowser: the review grid on Annotations. It holds the grid's choices (deployments,
 // filters, order, page, grouping, view) and wires the parts: the page's photos
 // (hooks/useGridMedia), thumbnails (useGridThumbnails), selection (useGridSelection), the
-// Actions menu (useGridBulkActions), iNaturalist (useGridInat), the ribbon, the cards and the viewer.
+// Actions menu (useGridBulkActions), iNaturalist (useGridInat), the label checks (useGridSecondLook), the
+// ribbon, the cards and the viewer.
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { useDeploymentFilterOptions } from '../../hooks/useDeploymentFilterOptions'
@@ -16,6 +17,7 @@ import { useGridGroups } from '../../hooks/useGridGroups'
 import { useGridInat } from '../../hooks/useGridInat'
 import { useGridMedia } from '../../hooks/useGridMedia'
 import { useGridNotice } from '../../hooks/useGridNotice'
+import { useGridSecondLook } from '../../hooks/useGridSecondLook'
 import { useGridSelection } from '../../hooks/useGridSelection'
 import { useGridThumbnails } from '../../hooks/useGridThumbnails'
 import { useGridViewer } from '../../hooks/useGridViewer'
@@ -39,6 +41,7 @@ import { GridRibbon, type ImageView } from './GridRibbon'
 import { MediaBulkActions } from './MediaBulkActions'
 import { MediaDetail } from './MediaDetail'
 import { ProcessingBanner } from './ProcessingBanner'
+import { SecondLookPanel } from './SecondLookPanel'
 import { gridStyle } from './gridStyles'
 
 export type { MediaAssetRecord, MediaRecord, ObservationRecord } from '../../lib/gridMedia'
@@ -81,7 +84,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   const activeDeploymentIds = useMemo(() => (deploymentKey ? deploymentKey.split(',') : []), [deploymentKey])
   // The query itself names the selected projects unless deployments were picked (02 #8).
   const projectKey = [...new Set(deployments.map(d => d.project_id))].toSorted().join(',')
-  const scope = useMemo(() => gridScopePlan(f.deployments, projectKey ? projectKey.split(',') : []), [f.deployments, projectKey])
+  const projectIds = useMemo(() => (projectKey ? projectKey.split(',') : []), [projectKey])
+  const scope = useMemo(() => gridScopePlan(f.deployments, projectIds), [f.deployments, projectIds])
   const queryKey = gridQueryKey(activeDeploymentIds, f.filters)
   const plan = useMemo(() => gridFilterPlan(f.filters), [f.filters])
   const singleDeployment = activeDeploymentIds.length === 1 ? activeDeploymentIds[0] : null
@@ -109,6 +113,8 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
 
   const grid = useGridMedia({ user, deploymentIds: activeDeploymentIds, queryKey, scope, plan, sort, page, uploadActive })
   const similar = useSimilarMedia(grid.setError)
+  const labelChecksOn = useFeatureEnabled('labelChecks', projectIds[0] ?? null)
+  const look = useGridSecondLook({ projectIds, enabled: labelChecksOn, onError: grid.setError })
   const thumbs = useGridThumbnails({
     media: grid.media, failedThumbs: grid.failedThumbs, loadedAt: grid.loadedAt, shownDeploymentIds: activeDeploymentIds,
     reload: grid.reload, refreshQuietly: grid.refreshQuietly, onError: flashError,
@@ -131,12 +137,12 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
     const pending = survivingPending(pendingUploads, grid.media, pendingSince, new Set(activeDeploymentIds)).map(pendingMediaRecord)
     return pending.length ? [...grid.media, ...pending] : grid.media
   }, [pendingUploads, pendingSince, grid.media, activeDeploymentIds, showPending])
-  // The cards on screen: the page, or the similarity results.
-  const visible = similar.similarToId ? similar.records : cards
+  // The cards on screen: the page, the similarity results, or the photos that need a second look.
+  const visible = similar.similarToId ? similar.records : look.on ? look.records : cards
   const visibleSelectable = visible.filter(isSelectable)
 
   const viewer = useGridViewer(visible, initialMediaId, user?.id)
-  const selection = useGridSelection(`${listKey}|${page}|${similar.similarToId ?? ''}`, visibleSelectable.map(m => m.id), !!viewer.selectedMediaId)
+  const selection = useGridSelection(`${listKey}|${page}|${similar.similarToId ?? ''}|${look.on}`, visibleSelectable.map(m => m.id), !!viewer.selectedMediaId)
   const { selectedIds, clearSelection } = selection
   const inat = useGridInat({ media: grid.media, flash, showCardNotice, onPublished: clearSelection })
   const bulk = useGridBulkActions({
@@ -167,7 +173,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
   const onCardIntent = (id: string, intent: CardIntent, focusObs: string | null) => {
     if (intent === 'open') { viewer.open(id, focusObs); return }
     // The grid's selectable photos in rendered order, for a Shift-click range.
-    const order = similar.similarToId
+    const order = similar.similarToId || look.on
       ? selectableInOrder(visible, isSelectable, false)
       : selectableInOrder(groups.groups ? groups.groups.flatMap(([, items]) => items) : cards, isSelectable, labelsView)
     selection.select(id, intent, order)
@@ -176,11 +182,14 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
     compact, roomy: view.thumbScale >= 200, openId: viewer.selectedMediaId, selectedIds, isSelectable, isStuck: thumbs.isStuck,
     failedThumbs: grid.failedThumbs, onThumbError: grid.markThumbFailed, inatStates: inat.inatStates,
     timezoneOf: id => tzByDeployment.get(id), onIntent: onCardIntent,
+    flagOf: labelChecksOn ? look.flagOf : undefined,
+    secondLook: look.on ? { onChecked: look.markChecked, marking: look.marking } : null,
   }
   const handleMediaUpdated = (updated: MediaRecord) => {
     const swap = (list: MediaRecord[]) => list.map(m => m.id === updated.id ? updated : m)
     grid.setMedia(swap)
     similar.setRecords(swap)
+    look.updateRecord(updated)
     viewer.updateLinked(updated)
   }
   const selectedMedia = viewer.selectedMedia
@@ -191,7 +200,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
       <ProcessingBanner deployments={deployments} />
 
       <GridRibbon
-        pager={similar.similarToId ? null : { win, page, onPage: goToPage, uploading: stats.uploading }}
+        pager={similar.similarToId || look.on ? null : { win, page, onPage: goToPage, uploading: stats.uploading }}
         view={{ image: view.image, onImage: view.setImage, thumbScale: view.thumbScale, onThumbScale: view.setThumbScale }}
         onSelectAll={visibleSelectable.length > 0 ? selection.selectAllOnPage : null}
         bulkBar={selectedIds.size > 0 && (
@@ -210,6 +219,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
           order: reviewOrderOn ? { value: f.orderBy, onChange: f.setOrderBy } : null,
           brain: brainState === false ? null
             : { singleDeployment, embeddingRunId: groups.embeddingRunId, loading: brainState === undefined || groups.embeddingRunLoading },
+          secondLook: look.available ? { on: look.on, onToggle: () => look.setOn(!look.on), count: look.count } : null,
         }}
         group={{
           groupBy: groups.groupBy, options: groups.options, onGroupBy: setGroupChoice,
@@ -231,6 +241,7 @@ export function MediaBrowser({ deployments, initialDeploymentId, initialSpecies,
             similar={similar.similarToId
               ? { records: similar.records, loading: similar.loading, failed: similar.failed, onClear: () => similar.setSimilarToId(null) }
               : null}
+            secondLook={look.on ? { panel: <SecondLookPanel look={look} />, records: look.records, loading: look.loading } : null}
             loading={grid.loading} cards={cards} labelsView={labelsView}
             labelCardCount={labelsView ? cards.reduce((n, m) => n + labelCards(m).length, 0) : 0}
             groups={groups.groups} collapsed={groups.collapsed} onToggleGroup={groups.toggleCollapsed} onSelectGroup={selection.toggleGroup}

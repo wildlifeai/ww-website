@@ -30,6 +30,7 @@ from app.routers import (
     inaturalist,
     intelligence,
     jobs,
+    label_checks,
     manifest,
     media,
     models,
@@ -79,12 +80,14 @@ async def lifespan(app: FastAPI):
     # deletes finished jobs FINISHED_JOB_RETENTION_DAYS after their last update. (The old
     # recover_stuck_jobs failed EVERY 'processing' job at startup, wrong now that AI jobs
     # legitimately run on the separate worker process across API restarts.)
+    from app.jobs.label_checks import maybe_queue_nightly
     from app.jobs.store import reap_stale_jobs
 
     async def _reaper_loop():
         while True:
             try:
                 await reap_stale_jobs(max_age_minutes=60)
+                await maybe_queue_nightly()
             except Exception as e:  # never let the loop die
                 logger.warning("reaper_iteration_failed", error=str(e))
             await asyncio.sleep(15 * 60)
@@ -192,6 +195,8 @@ app.include_router(media.router)
 app.include_router(public_api.router)
 app.include_router(inaturalist.router)
 app.include_router(uploads.router)
+# Answers FEATURE_DISABLED while FF_LABEL_CHECKS_ENABLED is off, which the website's probe reads.
+app.include_router(label_checks.router)
 # The REANNZ batch's lease endpoints: 404 until WORKER_TOKEN_SHA256 is set, not in the OpenAPI document.
 app.include_router(worker.router)
 # Lambda Web Adapter hands non-HTTP events (job invokes, the scheduled tick) to POST /events.

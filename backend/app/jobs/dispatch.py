@@ -55,6 +55,8 @@ IN_PROCESS_JOBS = frozenset(
         "ingest_results_part_job",
         "finalize_batch_job",
         "sync_inat_job",
+        "label_checks_job",
+        "nightly_label_checks_job",
     }
 )
 

@@ -3,13 +3,15 @@
 //
 // GridCards: the review grid's cards, one per photo (Photo view) or one per label (Labels view),
 // with the card gestures of lib/cardSelection (#283): a click or Enter opens, the circle,
-// Ctrl/Cmd-click or Space selects, Shift ranges, the arrow keys move between cards.
-import { Check, Hourglass, ImageOff, Upload } from 'lucide-react'
+// Ctrl/Cmd-click or Space selects, Shift ranges, the arrow keys move between cards. A photo with
+// an open label check carries a badge, or in "Needs a second look" its reason (#448).
+import { Check, Hourglass, ImageOff, ScanEye, Upload } from 'lucide-react'
 import type { InatStates } from '../../hooks/useGridInat'
 import { deriveAnnotationStatus } from '../../lib/annotationStatus'
 import { boxOf } from '../../lib/boxCrop'
 import { arrowTarget, cardClickIntent, cardKeyIntent, circleClickIntent, type CardIntent } from '../../lib/cardSelection'
 import { labelCards, type MediaRecord, type ObservationRecord } from '../../lib/gridMedia'
+import { reasonText, type LabelCheck } from '../../lib/labelChecks'
 import { displayImageUrl } from '../../lib/mediaImageUrl'
 import { isAiLabel, isHumanReviewed, observationLabel, photoVerdict } from '../../lib/observations'
 import { formatCaptureTime } from '../../lib/time'
@@ -34,6 +36,10 @@ export interface CardEnv {
   inatStates: InatStates
   timezoneOf: (deploymentId: string) => string | null | undefined
   onIntent: (id: string, intent: CardIntent, focusObsId: string | null) => void
+  /** A photo's open label check, while its label is still the one flagged. */
+  flagOf?: (m: MediaRecord) => LabelCheck | undefined
+  /** In "Needs a second look": each card's reason, and "Checked, it's right" for a project member. */
+  secondLook?: { onChecked: (checkId: string) => void; marking: boolean } | null
 }
 
 const fileNameOf = (m: MediaRecord) => m.file_name || m.file_path.split('/').pop() || ''
@@ -120,6 +126,36 @@ function LabelBar({ name, isEmpty, conf, hint, time, roomy }: LabelBarProps) {
   )
 }
 
+const AMBER = '#f59e0b'
+
+/** A flagged photo's mark on its thumbnail; the reason is its tooltip. */
+function FlagBadge({ flag }: { flag: LabelCheck }) {
+  return (
+    <span title={`Needs a second look: ${reasonText(flag)}`}
+      style={{ position: 'absolute', bottom: 4, right: 4, width: 18, height: 18, borderRadius: '50%', background: AMBER, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <ScanEye size={11} aria-label="Needs a second look" />
+    </span>
+  )
+}
+
+/** In "Needs a second look": why the photo is flagged, and the button that clears it (decision 9). */
+function FlagLine({ flag, canMark, look }: { flag: LabelCheck; canMark: boolean; look: NonNullable<CardEnv['secondLook']> }) {
+  return (
+    <div style={{ padding: '0 0.5rem 0.4rem', fontSize: '0.6875rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      <span style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+        <ScanEye size={12} aria-hidden style={{ color: AMBER, flexShrink: 0, marginTop: 1 }} />
+        {reasonText(flag)}
+      </span>
+      {canMark && (
+        <button type="button" disabled={look.marking} onClick={e => { e.stopPropagation(); look.onChecked(flag.id) }}
+          style={{ alignSelf: 'flex-start', fontSize: '0.6875rem', padding: '0.1rem 0.45rem', border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'transparent', color: 'var(--text-color)', cursor: 'pointer' }}>
+          Checked, it's right
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** A file still uploading: display only, no selection, viewer or actions. */
 function PendingCard({ m, compact }: { m: MediaRecord; compact: boolean }) {
   const imgUrl = displayImageUrl(m, 'thumb')
@@ -159,6 +195,7 @@ function ThumbCard({ m, env }: { m: MediaRecord; env: CardEnv }) {
     ? observationLabel(topObs) : null
   const inatSt = env.inatStates.get(m.id)
   const stuck = env.isStuck(m)
+  const flag = env.flagOf?.(m)
 
   return (
     <div {...cardProps(m, null, env)} style={cardStyle(env.selectedIds.has(m.id), env.openId === m.id)}>
@@ -188,6 +225,7 @@ function ThumbCard({ m, env }: { m: MediaRecord; env: CardEnv }) {
         {inatSt && (
           <span style={{ position: 'absolute', top: 4, right: 4 }}><INatBadge state={inatSt.state} uri={inatSt.uri} /></span>
         )}
+        {flag && !env.secondLook && <FlagBadge flag={flag} />}
         <SelectCircle m={m} env={env} />
       </div>
       {!env.compact && (
@@ -195,6 +233,7 @@ function ThumbCard({ m, env }: { m: MediaRecord; env: CardEnv }) {
           hint={[topObs?.scientific_name, fileName].filter(Boolean).join(' · ')}
           time={m.timestamp && formatCaptureTime(m.timestamp, env.timezoneOf(m.deployment_id))} roomy={env.roomy} />
       )}
+      {flag && env.secondLook && <FlagLine flag={flag} canMark={env.isSelectable(m)} look={env.secondLook} />}
     </div>
   )
 }

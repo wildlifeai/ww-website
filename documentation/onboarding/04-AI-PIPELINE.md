@@ -167,6 +167,9 @@ A consensus animal no model named is notified as "Unidentified animal".
 A second, deeper track (`domain/wildlife_brain.py`, which also runs HDBSCAN, `embedding_lifecycle.py`,
 `active_learning.py`), surfaced through the `/api/brain/*`, `/api/intelligence/*`, and `/api/qa/*`
 routers. Gated by `FF_WILDLIFE_BRAIN_ENABLED` (on by default, #344) / `FF_ACTIVE_LEARNING_ENABLED` (off).
+After each run, and nightly, the label checks compare each label with the fingerprints around it
+(`domain/label_checks.py`, behind `FF_LABEL_CHECKS_ENABLED`; design and contract:
+[label checks](../development%20reports/2026-11_label-checks.md)).
 
 ```
 animal crop ──DINOv3──▶ media_embeddings ──HDBSCAN──▶ clusters (+ outliers)
