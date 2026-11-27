@@ -295,3 +295,23 @@ export async function removeHumanRow<T extends VerdictRow>(
     },
   }
 }
+
+/**
+ * A box write (drawn, moved, removed, or its undo) followed by its crop file (#449): `crop(rowId)`
+ * asks the API to write the row's crop, or clear it, and resolves to its URL, which the rows then
+ * carry, so the Labels view shows the file. The box stands whatever the crop does: a failed or
+ * switched-off crop leaves the rows as the write left them.
+ */
+export async function withCropFile<T extends VerdictRow & { crop_url?: string | null }>(
+  write: VerdictWrite<T>, rowId: string, crop: (rowId: string) => Promise<string | null>,
+): Promise<VerdictWrite<T>> {
+  const cropped = async (rows: T[]): Promise<T[]> => {
+    try {
+      const url = await crop(rowId)
+      return rows.map(o => (o.id === rowId ? { ...o, crop_url: url } : o))
+    } catch {
+      return rows
+    }
+  }
+  return { ...write, observations: await cropped(write.observations), undo: async () => cropped(await write.undo()) }
+}

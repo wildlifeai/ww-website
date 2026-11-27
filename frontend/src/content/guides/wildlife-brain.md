@@ -28,7 +28,7 @@ Where label checks are switched on, the **Review** tab on **Media** offers **Nee
 - **Unlike other Y**: it is far from every other photo of its species.
 - **Could be X**: it carries a broader name (*Rattus*) among photos with a narrower one (*Rattus rattus*). Never a mistake, shown last.
 
-Labels people confirmed come first. Move **Sensitivity** right to see more, left for only the clearest. **Often confused** lists the species pairs mixed up most; pick one to see both species' photos. If the label is right, choose **Checked, it's right** and the photo leaves the list until its label or fingerprint changes; if it is wrong, correct it and its flag goes at once. A small badge marks these photos in the grid too. The checks run again after each Wildlife Brain run and every night.
+Labels people confirmed come first. Move **Sensitivity** right to see more, left for only the clearest. **Often confused** lists the species pairs mixed up most; pick one to see both species' photos. If the label is right, choose **Checked, it's right** and the photo leaves the list until its label or fingerprint changes; if it is wrong, correct it and its flag goes at once. A small badge marks these photos in the grid too. The checks run again after each Wildlife Brain run and every night. A box you draw around an animal is checked too, from the next Wildlife Brain run.
 
 ## How to run it
 
