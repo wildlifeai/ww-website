@@ -45,6 +45,7 @@ import io
 import json
 import math
 import re
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
@@ -729,19 +730,22 @@ def is_enabled() -> bool:
 
 
 _client = None
+# The presence step calls from several threads at once (GEMINI_PRESENCE_CONCURRENCY): one client for all.
+_client_lock = threading.Lock()
 
 
 def _get_client():
     """Process-wide ``genai.Client`` built from ``settings.GEMINI_API_KEY`` (never logged)."""
     global _client
-    if _client is None:
-        from google import genai
+    with _client_lock:
+        if _client is None:
+            from google import genai
 
-        from app.config import settings
+            from app.config import settings
 
-        if not settings.GEMINI_API_KEY:
-            raise RuntimeError("GEMINI_API_KEY is not set; the Gemini presence filter is disabled")
-        _client = genai.Client(api_key=settings.GEMINI_API_KEY)
+            if not settings.GEMINI_API_KEY:
+                raise RuntimeError("GEMINI_API_KEY is not set; the Gemini presence filter is disabled")
+            _client = genai.Client(api_key=settings.GEMINI_API_KEY)
     return _client
 
 

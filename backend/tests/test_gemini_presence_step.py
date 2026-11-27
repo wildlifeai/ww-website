@@ -4,15 +4,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
+import threading
+import time
 from unittest.mock import MagicMock
 
+import pytest
 from PIL import Image
 
 from app.config import settings
 from app.domain.media_resolver import MediaRef
-from app.domain.pipeline import GeminiPresenceStep, build_gemini_presence_observation, chunk_bursts
+from app.domain.pipeline import GEMINI_WRITE_EVERY, GeminiPresenceStep, build_gemini_presence_observation, chunk_bursts
 from app.jobs.definitions import build_pipeline_steps
 from app.schemas.pipeline import PipelineStepType
 from app.services import gemini_presence as gp
@@ -241,7 +245,7 @@ async def test_step_contact_sheet_groups_a_burst_into_one_call(monkeypatch):
         {"id": "c", "file_path": "x", "timestamp": "2026-09-26T00:10:00+00:00"},  # a new trigger
     ]
     result = await GeminiPresenceStep().run(media, "dep1", {})
-    assert calls == [2, 1]
+    assert sorted(calls) == [1, 2]  # the two calls run side by side
     rows = [r for batch in inserted for r in batch]
     assert [(r["media_id"], r["observation_type"]) for r in rows] == [("a", "animal"), ("b", "blank"), ("c", "animal")]
     assert result.observations_created == 3
@@ -269,14 +273,12 @@ async def test_step_counts_a_failed_call_as_error_and_keeps_going(monkeypatch):
     monkeypatch.setattr("app.domain.pipeline.create_service_client", lambda: _fake_svc(set(), inserted))
 
     async def fake_resolve(path, size="full", media=None):
-        return (_jpeg(), "image/jpeg")
+        return (media.id.encode(), "image/jpeg")
 
     monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)
-    n = {"i": 0}
 
     def flaky(images, variant, model, **kw):
-        n["i"] += 1
-        if n["i"] == 1:
+        if images[0] == b"m1":
             raise RuntimeError("503 from the API")
         return gp.PresenceResult(
             model=model, variant=variant, verdicts=[gp.PresenceVerdict(False, 0.9)], usage=gp.TokenUsage(1, 1, 0, 2), cost_usd=0.0
@@ -286,6 +288,78 @@ async def test_step_counts_a_failed_call_as_error_and_keeps_going(monkeypatch):
     result = await GeminiPresenceStep().run([{"id": "m1", "file_path": "x"}, {"id": "m2", "file_path": "x"}], "dep1", {})
     assert result.errors == 1 and result.observations_created == 1
     assert [r["media_id"] for b in inserted for r in b] == ["m2"]
+
+
+# ── Calls in parallel, rows as they answer (#531) ────────────────────
+
+
+def _enable_single(monkeypatch, concurrency: int) -> list[list[dict]]:
+    monkeypatch.setattr(settings, "FF_GEMINI_PRESENCE_ENABLED", True)
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "k")
+    monkeypatch.setattr(settings, "GEMINI_PRESENCE_VARIANT", "single")
+    monkeypatch.setattr(settings, "GEMINI_PRESENCE_CONCURRENCY", concurrency)
+    inserted: list[list[dict]] = []
+    monkeypatch.setattr("app.domain.pipeline.create_service_client", lambda: _fake_svc(set(), inserted))
+
+    async def fake_resolve(path, size="full", media=None):
+        return (media.id.encode(), "image/jpeg")
+
+    monkeypatch.setattr("app.domain.media_resolver.resolve_media", fake_resolve)
+    return inserted
+
+
+def _answer(images, model, variant) -> gp.PresenceResult:
+    """A verdict that names the frame it was asked about, so a row can be checked against its photo."""
+    v = gp.PresenceVerdict(has_animal=True, confidence=0.8, description=images[0].decode())
+    return gp.PresenceResult(model=model, variant=variant, verdicts=[v], usage=gp.TokenUsage(10, 2, 0, 12), cost_usd=0.0001)
+
+
+@pytest.mark.parametrize("concurrency", [1, 3])
+async def test_calls_run_up_to_the_setting_at_once_and_each_row_keeps_its_photo(monkeypatch, concurrency):
+    inserted = _enable_single(monkeypatch, concurrency)
+    lock = threading.Lock()
+    active = {"now": 0, "most": 0}
+
+    def slow_presence(images, variant, model, **kw):
+        with lock:
+            active["now"] += 1
+            active["most"] = max(active["most"], active["now"])
+        time.sleep(0.05)
+        with lock:
+            active["now"] -= 1
+        return _answer(images, model, variant)
+
+    monkeypatch.setattr(gp, "presence", slow_presence)
+    media = [{"id": f"m{i}", "deployment_id": "dep1", "file_path": "x"} for i in range(9)]
+    result = await GeminiPresenceStep().run(media, "dep1", {})
+
+    assert active["most"] == concurrency
+    rows = [r for batch in inserted for r in batch]
+    assert sorted(r["media_id"] for r in rows) == sorted(m["id"] for m in media)
+    assert all(r["observation_comments"] == r["media_id"] for r in rows)
+    assert result.observations_created == 9 and result.input_tokens == 90 and result.errors == 0
+
+
+async def test_rows_are_written_as_calls_answer_and_a_stopped_run_keeps_them(monkeypatch):
+    """A run cut off part way (the cpu function's timeout) has written the verdicts that answered."""
+    inserted = _enable_single(monkeypatch, 2)
+    release = threading.Event()
+
+    def presence(images, variant, model, **kw):
+        if int(images[0].decode()[1:]) >= GEMINI_WRITE_EVERY + 2:
+            release.wait(10)  # these calls never answer before the run is stopped
+        return _answer(images, model, variant)
+
+    monkeypatch.setattr(gp, "presence", presence)
+    media = [{"id": f"m{i}", "deployment_id": "dep1", "file_path": "x"} for i in range(GEMINI_WRITE_EVERY + 10)]
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(GeminiPresenceStep().run(media, "dep1", {}), timeout=1.0)
+    finally:
+        release.set()
+
+    assert [len(batch) for batch in inserted] == [GEMINI_WRITE_EVERY, 2]  # one write while running, the rest when stopped
+    assert sorted(r["media_id"] for b in inserted for r in b) == sorted(f"m{i}" for i in range(GEMINI_WRITE_EVERY + 2))
 
 
 # ── Wiring ───────────────────────────────────────────────────────────

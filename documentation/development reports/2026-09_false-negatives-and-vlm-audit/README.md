@@ -205,6 +205,7 @@ What is on this branch, how to run it, what it measured, what is still open. The
 | 2026-10-09 | Production stays on prompt v1 (`PROMPT_VERSION`); v2 and v3 are selectable in the eval and through the run's `gemini_prompt_version`. v1's own confidence is still stored and still never a fusion input; fusion scores a v1 answer as a plain yes or no |
 | 2026-10-09 | `Tommy_WW_Tests` leaves the labelled set (see the labelled set below) |
 | 2026-10-09 | Prompt v3: animals only, a person is never an animal (`has_person` on its own), answers short enough to cost about what v1 does |
+| 2026-11-27 | The step's `single` and `contact_sheet` calls run `GEMINI_PRESENCE_CONCURRENCY` at a time (default 4), each in its own thread with its own 429 and 5xx backoff, and their rows are written every 10 verdicts as they answer, so a run stopped part way (the AWS `cpu` function's 15-minute timeout) keeps what it paid for and its next try skips those photos ([#531](https://github.com/wildlifeai/ww-website/issues/531)). `batch` is unchanged |
 
 ### 6.2 Files
 
@@ -219,7 +220,7 @@ What is on this branch, how to run it, what it measured, what is still open. The
 | `backend/app/domain/pipeline.py` | `GeminiPresenceStep` and `build_gemini_presence_observation`; `SpeciesNetStep` records `speciesnet_max_conf` before the threshold filter; `EvidenceFusionStep` and `build_consensus_observation` |
 | `backend/app/schemas/pipeline.py` | `PipelineStepType.GEMINI_PRESENCE`, `EVIDENCE_FUSION`; `PipelineStepResult.input_tokens`, `output_tokens`, `cost_usd`, `counts` |
 | `backend/app/jobs/definitions.py` | `build_pipeline_steps`: Gemini before SpeciesNet, fusion last |
-| `backend/app/config.py` | `FF_GEMINI_PRESENCE_ENABLED`, `GEMINI_API_KEY`, `GEMINI_PRESENCE_MODEL`, `GEMINI_PRESENCE_VARIANT`, `FF_EVIDENCE_FUSION_ENABLED`, `EVIDENCE_FUSION_THRESHOLD`, `BURST_GAP_SECONDS` |
+| `backend/app/config.py` | `FF_GEMINI_PRESENCE_ENABLED`, `GEMINI_API_KEY`, `GEMINI_PRESENCE_MODEL`, `GEMINI_PRESENCE_VARIANT`, `GEMINI_PRESENCE_CONCURRENCY`, `FF_EVIDENCE_FUSION_ENABLED`, `EVIDENCE_FUSION_THRESHOLD`, `BURST_GAP_SECONDS` |
 | `backend/scripts/label_presence.py` | Tkinter labeller, folders in, CSV out, resumable; optional strata columns `animal_size`, `visibility`, `conditions`, `distance` (architecture report section 10) |
 | `backend/scripts/eval_presence.py` | Runs the variants over the labelled frames: dry-run cost, `--prompt-version`, `--only` (a subset by file list), `--max-calls`, `--cache-only`, `--dump-verdicts`, SpeciesNet dump and comparison, the stratified benchmark of architecture report section 10 |
 | `backend/tests/test_gemini_presence*.py`, `test_label_presence.py`, `test_eval_presence.py`, `test_burst_evidence.py`, `test_evidence_fusion_step.py`, `test_media_evidence.py` | 118 tests, no network, SDK and Supabase client mocked; `test_six_frame_burst_worked_example_section_6_3` pins the architecture report's worked example |
