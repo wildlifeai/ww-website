@@ -48,7 +48,7 @@ Originals are keyed by the SHA-256 the upload already computes for deduplication
 3. The upload job registers `media` rows with `s3://` paths, reflects the camera's own scores (the user sees Camera AI at once), and reserves or joins the `ai_pipeline` job exactly as today (#284). With `WORKER_BACKEND=lambda`, `dispatch.enqueue_job` writes the GPU job's name and arguments into `api_jobs.job_data.dispatch` and leaves the row `queued`. No broker exists.
 4. The cron calls `GET /api/worker/pending`. The API answers `submit` from its own gate (table below), plus the GPU image tag and a `--time` sized to the queue.
 5. The job starts, calls `POST /api/worker/lease`, and receives presigned GETs for the originals, public rendition URLs for crops that need vectors, and per-deployment model settings. The API marks the leased jobs `processing` with a lease expiry. Every 5 minutes the job calls `.../heartbeat`, which refreshes `api_jobs.updated_at`.
-6. The job downloads to nobackup, loads one model at a time, and writes per photo the SpeciesNet prediction plus, for every detection the cutoffs keep, BioCLIP labels and, for the hero detection, the DINOv3 vector. Each part of up to 500 photos goes up through a PUT URL fetched at that moment. The job leases again until the API returns nothing, then exits.
+6. The job downloads to nobackup, loads one model at a time, and writes per photo the SpeciesNet prediction plus, for every detection the cutoffs keep, BioCLIP labels and, for the hero detection, the DINOv3 vector. Each part (`BATCH_PART_MAX_PHOTOS` photos) goes up through a PUT URL fetched at that moment. The job leases again until the API returns nothing, then exits.
 7. Ingest validates the part against its lease and the `inference_contract` version, then runs `run_pipeline(media_ids=...)` with precomputed providers behind `get_speciesnet_service()`, `get_bioclip_service()` and `get_dinov3_service()`. The last part of a job triggers incremental embedding, clustering, notifications and `completed`.
 
 | Lease setting | Default | Why |
@@ -106,7 +106,7 @@ A leaked lease token can read the photos of queued jobs for a short window and s
 | Cost of scale-to-zero | Choice |
 | --- | --- |
 | "Try the demo" after idle pays a Lambda cold start, where ACA paid about a minute | No always-on piece at first. The tick keeps one environment warm; if the measured init is too slow, provisioned concurrency on the API function only (priced in section 5). The demo's data stays precomputed, so it never waits on a batch |
-| The 15-minute Lambda limit | Nothing GPU and no long poll runs on Lambda: parts of 500 photos, training as a state machine, exports keep their size cap |
+| The 15-minute Lambda limit | Nothing GPU and no long poll runs on Lambda: parts small enough to ingest in one call, training as a state machine, exports keep their size cap |
 | Supabase connection churn | Does not apply: the code reaches Supabase over PostgREST HTTPS, and the only pooled Postgres client, the KEDA scaler, is deleted |
 | A frozen environment drops work started after the response | Every `enqueue_local_job` becomes an async invoke, and a middleware flushes detached job-status syncs before responding |
 | In-memory rate limits per environment | Accepted; reserved concurrency is the ceiling |
@@ -282,7 +282,7 @@ B submits at most one job per 30-minute tick per environment, and only when the 
 | --- | --- |
 | Demo cold start on Lambda is unmeasured | Measure `Init Duration` on dev in step 4; the 5-minute tick keeps one environment warm; provisioned concurrency is the priced fallback |
 | A precomputed lookup misses (bbox drift, motion-ROI crops) | Misses are counted per job and alarmed; a missing vector is picked up by the next embed lease automatically; the parity test runs in CI |
-| A Lambda limit: 15 minutes, payload, `/tmp` | Parts of 500 photos; exports keep the 4 GB cap in one invocation (measure); training is a state machine; payloads over 200 KB go to `buffer/` |
+| A Lambda limit: 15 minutes, payload, `/tmp` | Parts small enough to ingest in one call; exports keep the 4 GB cap in one invocation (measure); training is a state machine; payloads over 200 KB go to `buffer/` |
 | Compute nodes cannot reach the API host | Spyfish already reaches S3 from compute nodes (run_pipeline.sl); if the API is blocked, the job writes parts to S3 and the lease runs on `--time` instead of heartbeats |
 | L4 queue wait is long | Measured in step 4; the lease protocol makes any GPU a drop-in: an H100 in the same partition, or the report's g6 on AWS Batch in Sydney, runs the same container |
 | Reprocessing reads GIR | The confirmation shows the read-back cost; SpeciesNet reprocess needs originals, embedding reprocess reads Supabase crops only |

@@ -257,7 +257,7 @@ which `backend/app/aws_params.py` loads at each cold start. Status and design:
 | `BATCH_CRON_INTERVAL_MINUTES` | 240, matching the 4-hourly crontab | | How often the cluster's crontab asks for work; must match it (`cluster/reannz/ww_cron.sh`). Added to the gate's wait for the wait the website states ([`batch_wait`](api-reference.md#jobs-async)) |
 | `BATCH_MAX_QUEUE_HOURS` | 24 | | How long the reaper spares a queued batch job |
 | `BATCH_LEASE_MINUTES`, `BATCH_MAX_ATTEMPTS` | 30, 2 | | A lease with no heartbeat for this long is requeued; leases a job may lose before it fails |
-| `BATCH_LEASE_MAX_PHOTOS`, `BATCH_PART_MAX_PHOTOS` | 2,000, 500 | | Photos per lease and per results part |
+| `BATCH_LEASE_MAX_PHOTOS`, `BATCH_PART_MAX_PHOTOS` | 2,000, 40 | | Photos per lease and per results part. One `cpu` call of at most 15 minutes ingests a part; with Gemini presence a photo takes up to 12 s (26 Nov 2026 on dev), so 40 leaves room for its retry waits ([#531](https://github.com/wildlifeai/ww-website/issues/531)) |
 | `WW_LAMBDA_ROLE` | empty | `api` or `cpu`, set by the template | Which function this process is: mounts `/events` and the flush middleware, skips the lifespan reaper |
 | `WW_SSM_PREFIX`, `WW_ENV` | unset | `/ww/<env>/`, `<env>`, set by the template | Environment variables, not settings: the SSM path `aws_params.py` loads before `Settings()`, and the environment's name on the tick's metric line |
 | `SUPABASE_*` | empty | SSM | Empty defaults let the GPU image import the app; the API refuses to start without them (`Settings.require_supabase`) |
