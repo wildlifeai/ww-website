@@ -1,8 +1,8 @@
 import { useRef, useState, useEffect } from 'react'
-import { Info, TriangleAlert } from 'lucide-react'
+import { CircleCheck, Info, TriangleAlert } from 'lucide-react'
 import type { BatchWait, ProgressPhase, ProgressSummary } from '../../types/job'
 import { batchWaitText } from '../../lib/batchWait'
-import { aiAnalysisStatus, aiBatchWait, aiNotRun } from './pipelineProgress'
+import { aiAnalysisStatus, aiBatchWait, aiNotRun, uploadsStored } from './pipelineProgress'
 
 export type LogEntry = {
   ts: number
@@ -13,6 +13,9 @@ export type LogEntry = {
 export type PipelineJob = {
   id: string
   status: string
+  /** The status the server last reported. `status` reads completed as soon as progress reaches
+   *  99.9%, before the server has written the job's summary, so polling goes on until this one ends. */
+  serverStatus?: string
   progress: number
   fileCount: number
   error?: string
@@ -67,9 +70,12 @@ interface StepView {
   progress: number | null
 }
 
+/** The panel's one-line summary: all photos stored, a warning, or an error. */
+type IssueLevel = 'ok' | 'warn' | 'error'
+
 interface StepsResult {
   steps: StepView[]
-  issue: { level: 'warn' | 'error'; text: string } | null
+  issue: { level: IssueLevel; text: string } | null
 }
 
 const STEP_COLOR: Record<StepStatus, string> = {
@@ -189,10 +195,17 @@ function deriveSteps(state: PipelineState, phase: string): StepsResult {
     issue = { level: 'error', text: 'AI analysis hit an error on some deployments. Your photos are safe; you can retry from Processing history.' }
   } else if (dt.skipped > 0) {
     issue = { level: 'warn', text: `${dt.skipped} photo${dt.skipped !== 1 ? 's' : ''} skipped: already in your library. Nothing to do.` }
+  } else if (uploadsStored(state)) {
+    issue = { level: 'ok', text: `All ${total} photo${total !== 1 ? 's are' : ' is'} on the server. You can remove the SD card.` }
   }
 
   return { steps: [uploadStep, driveStep, aiStep], issue }
 }
+
+const ISSUE_BG: Record<IssueLevel, string> = {
+  ok: 'rgba(76,175,80,0.10)', warn: 'rgba(255,152,0,0.10)', error: 'rgba(244,67,54,0.08)',
+}
+const ISSUE_COLOR: Record<IssueLevel, string> = { ok: 'var(--success, #2e7d32)', warn: '#e65100', error: 'var(--error, #f44336)' }
 
 /* ── Stage row ────────────────────────────────────────────────────── */
 
@@ -453,12 +466,14 @@ export function PipelineStatusBox({ state, phase }: { state: PipelineState; phas
         <div style={{
           marginTop: '0.4rem', padding: '0.5rem 0.6rem', borderRadius: 4, fontSize: '0.76rem',
           display: 'flex', gap: '0.45rem', alignItems: 'flex-start',
-          background: issue.level === 'error' ? 'rgba(244,67,54,0.08)' : 'rgba(255,152,0,0.10)',
-          color: issue.level === 'error' ? 'var(--error, #f44336)' : '#e65100',
+          background: ISSUE_BG[issue.level],
+          color: ISSUE_COLOR[issue.level],
         }}>
           {issue.level === 'error'
             ? <TriangleAlert size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
-            : <Info size={14} aria-hidden="true" style={{ flexShrink: 0 }} />}
+            : issue.level === 'ok'
+              ? <CircleCheck size={14} aria-hidden="true" style={{ flexShrink: 0 }} />
+              : <Info size={14} aria-hidden="true" style={{ flexShrink: 0 }} />}
           <span>{issue.text}</span>
         </div>
       )}

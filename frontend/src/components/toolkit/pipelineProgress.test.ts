@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PipelineJob, PipelineState } from './PipelineStatusBox'
-import { aiBatchWait, aiNotRun, aiNotRunReason, jobChanged } from './pipelineProgress'
+import { aiBatchWait, aiNotRun, aiNotRunReason, jobChanged, serverDone, uploadsStored } from './pipelineProgress'
 
 const WAIT = { queued_at: '2026-11-22T01:00:00+00:00', usual_wait_minutes: 300 }
 
@@ -67,5 +67,43 @@ describe('aiNotRun', () => {
     expect(aiNotRun(state([skipped('no photo matched a deployment'), drive('completed')]))).toBeNull()
     expect(aiNotRun(state([drive('completed'), ai('queued')]))).toBeNull()
     expect(aiNotRun(state([]))).toBeNull()
+  })
+})
+
+describe('serverDone', () => {
+  it("waits for the server, not the dock's 99.9% shortcut", () => {
+    expect(serverDone({ ...drive('completed'), serverStatus: 'processing' })).toBe(false)
+    expect(serverDone({ ...drive('completed'), serverStatus: 'completed' })).toBe(true)
+    expect(serverDone(drive('completed'))).toBe(true)
+    expect(serverDone(ai('queued', WAIT))).toBe(false)
+  })
+})
+
+describe("jobChanged, the server's end", () => {
+  it('counts the server ending a job the dock already showed complete, and its summary', () => {
+    const shortcut = { ...drive('completed'), serverStatus: 'processing' }
+    expect(jobChanged(shortcut, { ...shortcut, serverStatus: 'completed' })).toBe(true)
+    expect(jobChanged(shortcut, { ...shortcut, summary: { uploaded: 10, skipped: 0, failed: 0 } as PipelineJob['summary'] })).toBe(true)
+  })
+})
+
+describe('uploadsStored', () => {
+  const stored = { ...drive('completed'), serverStatus: 'completed', summary: { uploaded: 10, skipped: 0, failed: 0 } as PipelineJob['summary'] }
+
+  it('is true once every upload job ended on the server, while the AI still waits for the GPU run', () => {
+    expect(uploadsStored(state([stored, ai('queued', WAIT)]))).toBe(true)
+  })
+
+  it("is false while a file is unsent or an upload job is only at the dock's 99.9%", () => {
+    expect(uploadsStored({ ...state([stored]), uploadedFiles: 9 })).toBe(false)
+    expect(uploadsStored(state([{ ...stored, serverStatus: 'processing' }]))).toBe(false)
+    expect(uploadsStored(state([]))).toBe(false)
+  })
+
+  it('is false when anything failed', () => {
+    expect(uploadsStored({ ...state([stored]), failedFiles: 1 })).toBe(false)
+    expect(uploadsStored({ ...state([stored]), uploadError: 'staging unreachable' })).toBe(false)
+    expect(uploadsStored(state([{ ...stored, serverStatus: 'failed', status: 'failed' }]))).toBe(false)
+    expect(uploadsStored(state([{ ...stored, summary: { uploaded: 9, skipped: 0, failed: 1 } as PipelineJob['summary'] }]))).toBe(false)
   })
 })
