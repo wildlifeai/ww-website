@@ -306,14 +306,33 @@ def test_crop_classification_adds_nothing_without_a_name():
     assert build_crop_classification_observation(_DETECTION, "dep", _crop(sci=None), "bioclip-v1", "t") is None
 
 
-def test_crop_classification_adds_nothing_below_threshold():
-    assert build_crop_classification_observation(_DETECTION, "dep", _crop(score=0.2), "bioclip-v1", "t", confidence_threshold=0.5) is None
+def test_crop_classification_keeps_a_crop_at_or_above_the_floor():
+    for score in (0.5, 0.74):
+        row = build_crop_classification_observation(_DETECTION, "dep", _crop(score=score), "bioclip-v1", "t", min_score=0.5)
+        assert row is not None and row["classification_probability"] == score
+
+
+def test_crop_classification_adds_nothing_below_the_floor():
+    # #433: the dog crop BioCLIP called a mite at 0.21.
+    mite = _crop(sci="Demodex canis", common=None, score=0.21)
+    assert build_crop_classification_observation(_DETECTION, "dep", mite, "bioclip-v1", "t", min_score=0.5) is None
 
 
 def test_crop_classification_allows_missing_score():
-    # A None score is not "below threshold": the classifier just didn't report a probability.
-    row = build_crop_classification_observation(_DETECTION, "dep", _crop(score=None), "bioclip-v1", "t", confidence_threshold=0.5)
+    # A None score is not "below the floor": the classifier just didn't report a probability.
+    row = build_crop_classification_observation(_DETECTION, "dep", _crop(score=None), "bioclip-v1", "t", min_score=0.5)
     assert row is not None and row["classification_probability"] is None
+
+
+def test_bioclip_floor_comes_from_settings_unless_the_run_overrides():
+    from app.config import settings
+    from app.domain.pipeline import bioclip_min_score
+
+    assert settings.BIOCLIP_MIN_SCORE == 0.5
+    assert bioclip_min_score({}) == 0.5
+    # The run's detector threshold is not BioCLIP's floor.
+    assert bioclip_min_score({"confidence_threshold": 0.2}) == 0.5
+    assert bioclip_min_score({"confidence_threshold": 0.2, "bioclip_min_score": 0.3}) == 0.3
 
 
 def test_delete_superseded_ai_observations_scopes_and_cleans_crops():
@@ -497,6 +516,56 @@ async def test_per_crop_run_inserts_beside_speciesnet_and_never_updates_it(monke
     assert rows_read == [media_resolver.MediaRef("m1", "dep")]  # the crop is read as part of its photo
 
 
+async def test_per_crop_rows_take_the_bioclip_floor_not_the_run_threshold(monkeypatch):
+    """#433: a crop under BIOCLIP_MIN_SCORE gets no BioCLIP row, whatever the run's confidence_threshold."""
+    from pathlib import Path
+    from unittest.mock import MagicMock
+
+    from app.config import settings
+    from app.domain import classifiers, media_resolver, pipeline
+
+    monkeypatch.setattr(settings, "FF_BIOCLIP_ENABLED", True)
+    monkeypatch.setattr(settings, "FF_PER_CROP_CLASSIFY_ENABLED", True)
+    monkeypatch.setattr(pipeline, "delete_superseded_ai_observations", lambda *a: None)
+
+    async def resolve(url, size="full", media=None):
+        return b"jpeg", "image/jpeg"
+
+    monkeypatch.setattr(media_resolver, "resolve_media", resolve)
+
+    # Two animals on one photo: a dog crop BioCLIP calls a mite at 0.21, a heron crop at 0.74.
+    detections = [_DETECTION, {**_DETECTION, "id": "heron-row", "bbox_x": 0.5}]
+    answers = {"speciesnet-row": ("Demodex canis", 0.21), "heron-row": ("Ardea cinerea", 0.74)}
+
+    class Classifier:
+        name = "bioclip"
+        version = "bioclip-v1"
+
+        async def classify(self, paths, config):
+            out = []
+            for p in paths:
+                name, score = answers[Path(p).stem]
+                out.append(CropPrediction(p, name, None, score, "species"))
+            return out
+
+    monkeypatch.setitem(classifiers._REGISTRY, "bioclip", Classifier)
+
+    async def written(config):
+        svc = MagicMock()
+        fetch = svc.table.return_value.select.return_value.in_.return_value.eq.return_value.eq.return_value.like.return_value.execute
+        fetch.return_value.data = detections
+        monkeypatch.setattr(pipeline, "create_service_client", lambda: svc)
+        await pipeline.BioCLIPStep().run([{"id": "m1", "deployment_id": "dep"}], "dep", config)
+        return sorted(r["scientific_name"] for call in svc.table.return_value.insert.call_args_list for r in call.args[0])
+
+    # The mite clears the run's 0.2 detector threshold but not the floor.
+    assert await written({"confidence_threshold": 0.2}) == ["Ardea cinerea"]
+    # A detector threshold above the heron's score does not drop it either.
+    assert await written({"confidence_threshold": 0.9}) == ["Ardea cinerea"]
+    # The run's config can move the floor itself.
+    assert await written({"confidence_threshold": 0.2, "bioclip_min_score": 0.2}) == ["Ardea cinerea", "Demodex canis"]
+
+
 # ── Whole-frame and vehicle box rules (#285) ──────────────────────────────────
 
 _RULES = DetectionCutoffs(whole_frame_area=0.9, whole_frame_min_confidence=0.5, drop_vehicles=True)
@@ -675,5 +744,6 @@ async def test_run_pipeline_records_the_effective_cutoffs():
         )
 
     expected = {"confidence_threshold": 0.3, "whole_frame_area": 0.9, "whole_frame_min_confidence": 0.5, "drop_vehicles": False}
+    expected["bioclip_min_score"] = 0.5  # BioCLIP's own floor (#433), recorded beside the cutoffs
     assert {k: inserted["annotation_runs"][0]["config"][k] for k in expected} == expected
     assert {k: seen[0][k] for k in expected} == expected

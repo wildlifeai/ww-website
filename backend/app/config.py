@@ -248,6 +248,15 @@ class Settings(BaseSettings):
     # ── BioCLIP (zero-shot / secondary classifier) ───────────────────
     BIOCLIP_DEVICE: str = Field("cpu", description="Torch device for BioCLIP ('cpu' or 'cuda')")
     BIOCLIP_RANK: str = Field("species", description="Default taxonomic rank for Tree-of-Life predictions")
+    BIOCLIP_MIN_SCORE: float = Field(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "BioCLIP's own floor: a crop it scores below this gets no BioCLIP row, whatever the run's "
+            "confidence_threshold (#433). Provisional: SpeciesNet's species bar until measured on labelled crops"
+        ),
+    )
     EMBEDDING_BATCH_SIZE: int = Field(32, description="Batch size for GPU/CPU embedding extraction")
     EMBEDDING_CHECKPOINT_EVERY: int = Field(1000, description="Write embeddings + Supabase every N images for restartable jobs")
 
