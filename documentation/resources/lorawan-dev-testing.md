@@ -9,8 +9,10 @@ tokens and the byte format are ww-backend's:
 
 ## What a dev reset takes with it
 
-Every merge into ww-backend `dev` wipes cloud dev and reseeds it (`supabase db reset --linked`,
-see [gotchas](../../.agents/skills/references/gotchas.md#cloud-dev-is-reseeded-without-notice)).
+A merge into ww-backend `dev` that touches `supabase/**` or `deployment_scripts/**` wipes cloud
+dev and reseeds it (`supabase db reset --linked` in its `deploy_cloud_projects.yml`, see
+[gotchas](../../.agents/skills/references/gotchas.md#cloud-dev-is-reseeded-without-notice)). A
+merge that touches neither, docs only for example, leaves dev as it is.
 
 | Gone after each reset | Kept |
 |---|---|
@@ -29,14 +31,23 @@ Victor holds the TTN console. The cameras' application on the `au1` cluster
 `ww-dev-ingest`. Leave the first two alone.
 
 1. **Set dev's secret to a value you hold.** Supabase never shows a secret's value, so set a new
-   one (PowerShell):
+   one. In one PowerShell window, generate it; `$t.Length` must print 64:
 
    ```powershell
-   $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $t = ($b | ForEach-Object { $_.ToString('x2') }) -join ''; $t
-   npx supabase secrets set "LORAWAN_INGEST_TOKEN=$t" --project-ref qegeovogqxiouqbrxmnh
+   $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $t = ($b | ForEach-Object { $_.ToString('x2') }) -join ''; $t; $t.Length
    ```
 
-   Keep it in a password manager. Never put it in an issue, a commit or a chat.
+   Then, in the same window, set it and answer Yes when the CLI names the dev project:
+
+   ```powershell
+   npx.cmd supabase secrets set "LORAWAN_INGEST_TOKEN=$t" --remote=qegeovogqxiouqbrxmnh
+   ```
+
+   `npx.cmd`, because PowerShell's script policy blocks `npx` (its `npx.ps1`). `--remote` replaces
+   the deprecated `--project-ref` (Supabase CLI 3). Run `npx.cmd supabase login` first if the CLI
+   says you are not logged in. If `$t` is empty, from another window, the secret is set empty and
+   the ingest refuses every message until it is set again. Keep the value in a password manager.
+   Never put it in an issue, a commit or a chat.
 2. **The webhook.** TTN console, the application, **Integrations** → **Webhooks** →
    `ww-dev-ingest` (or **Add webhook** → **Custom webhook**): format JSON, Base URL
    `https://qegeovogqxiouqbrxmnh.supabase.co/functions/v1/lorawan-ingest?token=<the secret>`,
@@ -47,7 +58,11 @@ Victor holds the TTN console. The cameras' application on the `au1` cluster
    Invoke-RestMethod -Method Post -Uri "https://qegeovogqxiouqbrxmnh.supabase.co/functions/v1/lorawan-ingest?token=$t" -ContentType 'application/json' -Body '{"end_device_ids":{"dev_eui":"70B3D57ED0070001"},"uplink_message":{"f_port":2,"frm_payload":"U+gDUSoAE8hUXxIWVQIABwMwAAE="}}'
    ```
 
-   `ok: True` with `decoded.kind` `report` is right; a 401 is the wrong token.
+   `ok: True` with `decoded.kind` `report` is right. A 401 is the wrong token, or a function
+   instance still on the old one: wait a minute and send it again. To compare without showing the
+   secret, `npx.cmd supabase secrets list --remote=qegeovogqxiouqbrxmnh` prints a SHA-256 digest of
+   each secret, which should match
+   `[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($t))).Replace('-','').ToLower()`.
 4. **A key for downlinks**, so the website can read and change a camera's settings through the
    `lorawan-downlink` function
    ([ww-backend#403](https://github.com/wildlifeai/ww-backend/issues/403), LORAWAN_INGEST.md,
@@ -96,9 +111,10 @@ BEGIN
   SELECT id INTO _deployment FROM public.deployments
    WHERE device_id = _device AND deployment_end IS NULL AND deleted_at IS NULL;
   IF _deployment IS NULL THEN
+    -- No device_eui: ww-backend copies the device's (trg_deployments_copy_device_eui).
     INSERT INTO public.deployments (name, deployment_start, location_name, project_id, device_id,
-                                    device_eui, lorawan_ping_minutes, timezone, latitude, longitude)
-    VALUES ('Bench LoRaWAN test', now(), 'Bench', _project, _device, _eui, 5, 'Pacific/Auckland',
+                                    lorawan_ping_minutes, timezone, latitude, longitude)
+    VALUES ('Bench LoRaWAN test', now(), 'Bench', _project, _device, 5, 'Pacific/Auckland',
             _lat, _lon)
     RETURNING id INTO _deployment;
   ELSE
@@ -121,6 +137,15 @@ unlinked.
 - **A gateway in range** on TTN `au1`, frequency plan *Asia 920-923 MHz (used by TTN Australia)*.
 - **A short ping:** in the app's Engineer Console, `AI setop 32 5` (every 5 minutes); `AI setop 32 0`
   turns LoRaWAN off. The camera joins at once and sends its first message straight after.
+- **When you stop a test,** turn the deployment's ping off too, or end the deployment. It still
+  says 5 minutes, so after 3 periods (15 minutes) the Realtime page shows the camera Silent and
+  `notify_silent_cameras` sends a `camera_silent` alert to anyone with an active rule for the
+  project. In the dev SQL editor (the SQL above sets 5 again):
+
+  ```sql
+  UPDATE public.deployments SET lorawan_ping_minutes = 0
+   WHERE device_eui ILIKE '3B4AFAFEFFDA68D8' AND deployment_end IS NULL AND deleted_at IS NULL;
+  ```
 
 ## Check it worked
 
@@ -151,7 +176,7 @@ unlinked.
 |---|---|
 | Pull the SD card while the camera sleeps, then wake it | Self-test bit 11 at once: **Fault**, "SD card missing" |
 | Put the card back and press RESET | Restart reason 7 (reset switch): no warning |
-| Update its Bluetooth firmware | Restart reason 10, shown as an unexpected restart until [ww-backend#398](https://github.com/wildlifeai/ww-backend/issues/398) |
+| Update its Bluetooth firmware | Restart reason 10: no warning ([ww-backend#398](https://github.com/wildlifeai/ww-backend/issues/398)) |
 | TTN **Messaging** → **Downlink**, FPort `3`, payload `56 10 00 00` | After the camera's next uplink, its answer `56 10 <lo> <hi>`: "Setting 16 read: ..." under **Messages** |
 | The same with `57 10 3C 00` | Sets op 16 (detection threshold) to 60 %: "Setting 16 set to 60" |
 | The same with `57 20 0F 00` | Sets op 32 to 15 minutes: "Setting 32 set to 15", and the deployment's `lorawan_ping_minutes` becomes 15, so Silent follows the camera |
