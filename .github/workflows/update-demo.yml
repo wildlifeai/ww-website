@@ -1,6 +1,7 @@
 name: Update demo sample data
 
-# Keeps the read-only demo account's images in sync with test-fixtures.
+# Keeps the read-only demo account's images, and their labels (test-fixtures/camera-trap/
+# demo-labels.csv), in sync with test-fixtures.
 # Auto-runs when the fixtures (or the seeder) change, targeting the environment
 # that matches the branch:
 #   • push to `dev`  → dev Supabase
@@ -46,8 +47,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependency
-        run: pip install --quiet supabase
+      # structlog: the seeder dates each photo with the backend's EXIF parser.
+      - name: Install dependencies
+        run: pip install --quiet supabase structlog
 
       - name: Seed demo media
         run: |
