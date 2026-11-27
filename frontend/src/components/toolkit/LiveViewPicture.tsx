@@ -8,7 +8,7 @@
 import type { ReactNode } from 'react'
 import { Circle, CircleCheck, CircleDot, TriangleAlert } from 'lucide-react'
 import { MD_COLS, OP_MD_INTERVAL, gridCells, type GridRows } from '../../lib/liveView'
-import { LIVE_VIEW_WARNINGS, type LiveViewFrame, type LiveViewSnapshot } from '../../lib/liveViewSession'
+import { LIVE_VIEW_STALLED, LIVE_VIEW_WARNINGS, type LiveViewFrame, type LiveViewSnapshot } from '../../lib/liveViewSession'
 import { MONO } from './liveViewStyles'
 
 const STEP_ICON = { done: CircleCheck, now: CircleDot, todo: Circle }
@@ -35,9 +35,9 @@ export function LiveViewPicture({ view, rows }: { view: LiveViewSnapshot; rows: 
   )
 }
 
-/** Over the picture: why there is none, or the steps to the first one. */
+/** Over the picture: why there is none, or the steps to the first one, and RESET if they stop. */
 function Overlay({ view }: { view: LiveViewSnapshot }) {
-  const { warning, steps } = view
+  const { warning, steps, stalled } = view
   if (!warning && !steps) return null
   return (
     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem', backgroundColor: 'rgba(0, 0, 0, 0.6)' }}>
@@ -54,24 +54,27 @@ function Overlay({ view }: { view: LiveViewSnapshot }) {
           {LIVE_VIEW_WARNINGS[warning]}
         </p>
       ) : (
-        <ol aria-label="Starting the camera" style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.375rem', fontSize: '0.875rem' }}>
-          {steps?.map(step => {
-            const Icon = STEP_ICON[step.state]
-            return (
-              <li
-                key={step.label}
-                aria-current={step.state === 'now' ? 'step' : undefined}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem',
-                  color: step.state === 'todo' ? 'rgba(255, 255, 255, 0.55)' : '#fff', fontWeight: step.state === 'now' ? 600 : 400,
-                }}
-              >
-                <Icon size={16} aria-hidden="true" color={step.state === 'done' ? '#4caf50' : 'currentColor'} />
-                {step.label}
-              </li>
-            )
-          })}
-        </ol>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '24rem' }}>
+          <ol aria-label="Starting the camera" style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '0.375rem', fontSize: '0.875rem' }}>
+            {steps?.map(step => {
+              const Icon = STEP_ICON[step.state]
+              return (
+                <li
+                  key={step.label}
+                  aria-current={step.state === 'now' ? 'step' : undefined}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    color: step.state === 'todo' ? 'rgba(255, 255, 255, 0.55)' : '#fff', fontWeight: step.state === 'now' ? 600 : 400,
+                  }}
+                >
+                  <Icon size={16} aria-hidden="true" color={step.state === 'done' ? '#4caf50' : 'currentColor'} />
+                  {step.label}
+                </li>
+              )
+            })}
+          </ol>
+          {stalled && <p role="status" style={{ margin: 0, fontSize: '0.875rem', color: '#fff' }}>{LIVE_VIEW_STALLED}</p>}
+        </div>
       )}
     </div>
   )

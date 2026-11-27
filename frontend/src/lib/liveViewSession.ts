@@ -154,6 +154,9 @@ export interface LiveViewSnapshot {
   steps: LiveViewStep[] | null
   /** Seconds since the last frame, when frames are due and have stopped. */
   noPictureFor: number | null
+  /** The steps stopped moving: nothing heard for 10 s, or the first sleep's wake 10 s late. Shown
+   *  as a hint to press RESET; the page does nothing to the camera about it. */
+  stalled: boolean
   /** What woke the camera last, until it sleeps again. */
   wokeBy: WakeCause | null
   /** The camera answered `ver`, or booted: this is its AI console. */
@@ -227,6 +230,7 @@ export class LiveViewSession {
   private unconfirmed: string[] = []
   /** Any line at all since Connect. */
   private heard = false
+  private lastLineAt = -Infinity
   /** `ver` answered, or a boot seen: this is a WW500's AI console. */
   private answered = false
   private silenceNoted = false
@@ -280,6 +284,7 @@ export class LiveViewSession {
     if (!line) return
     this.clock = now
     this.heard = true
+    this.lastLineAt = now
     this.version++
     const frame = parseFrameLine(line)
     if (frame === 'damaged') {
@@ -548,6 +553,7 @@ export class LiveViewSession {
       warning: this.warning(),
       steps: this.steps(),
       noPictureFor: this.noPictureFor(phase),
+      stalled: this.stalled(),
       wokeBy: this.wokeBy,
       answered: this.answered,
       lost: this.lost,
@@ -616,6 +622,15 @@ export class LiveViewSession {
     list.push(['First picture', false])
     const current = list.findIndex(([, done]) => !done)
     return list.map(([label, done], i) => ({ label, state: done ? 'done' : i === current ? 'now' : 'todo' }))
+  }
+
+  /** The start waits for the camera's lines, never a timer, so a lost ready line stops it here:
+   *  after 10 s of silence, or 10 s past the first sleep's wake, the steps say to press RESET. */
+  private stalled(): boolean {
+    const s = this.startup
+    if (!s || !this.answered || this.stopping || this.stopped) return false
+    const since = s.asleepAt !== null && !s.woke ? s.asleepAt + WAKE_SECONDS * 1000 : this.lastLineAt
+    return this.clock - since > SILENT_MS
   }
 
   /** Frames are due (Free run, streaming) and none has come for a while: a camera switched off. */
@@ -943,6 +958,9 @@ export const LIVE_VIEW_WARNINGS: Record<LiveViewWarning, string> = {
   'other-port': 'No answer: this may be the other port. Disconnect, then connect and pick the other one.',
   'no-preview': 'This firmware has no live preview, so the page takes no pictures.',
 }
+
+/** Under the steps once they stop moving. */
+export const LIVE_VIEW_STALLED = "Still starting: if no picture appears, press the camera's RESET button."
 
 const WOKE: Record<WakeCause, string> = {
   motion: 'Woke on motion.', timer: 'Woke on its timer.', bluetooth: 'Woken by the Bluetooth chip.',

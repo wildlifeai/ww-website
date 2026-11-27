@@ -37,6 +37,9 @@ settings, type console commands and save frames and the session log.
    so the page sends it to sleep and sets it to wake itself. That wake takes its own pictures
    before the page can switch saving off, so **one photo is saved to the SD card** each time you
    connect after a reset. The page then puts the 10 second wake back as it was.
+6. Keep the tab in front until the picture shows. The camera goes back to sleep a second after it
+   starts unless the page types to it, and Chrome slows a tab in the background. If the steps stop
+   moving, the page says **Still starting**: press RESET again.
 
 The page starts in **Free run**: bursts of 10 pictures, one after another.
 

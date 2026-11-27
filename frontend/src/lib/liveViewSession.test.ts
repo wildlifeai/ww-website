@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { LIVE_VIEW_WARNINGS, LiveViewSession, liveViewStatus, logText } from './liveViewSession'
+import { LIVE_VIEW_STALLED, LIVE_VIEW_WARNINGS, LiveViewSession, liveViewStatus, logText } from './liveViewSession'
 
 const JPEG_B64 = '/9j/4AAQSkZJRg=='
 
@@ -339,6 +339,38 @@ describe('LiveViewSession, boots', () => {
     b.feed(READY[0], 'Images to capture: 1', READY[1])
     b.run(5000)
     expect(b.s.fullLog().filter(l => /asking again/.test(l.text))).toHaveLength(1) // the one before the reset
+  })
+
+  it('a lost ready line stalls the start: after 10 s of silence it says to press RESET, and types nothing', () => {
+    const b = bench(AWAKE, { replyFirst: true })
+    b.s.start(b.now())
+    // `Inactivity period set at` never arrives, so the writes wait for it.
+    b.feed('### Warm Boot ###', 'Starting CLI Task', READY[0])
+    b.run(500)
+    expect(b.take()).toEqual(['preview 1'])
+    b.run(9000)
+    expect(b.view().stalled).toBe(false)
+    b.run(2000)
+    expect(b.view().stalled).toBe(true)
+    expect(b.view().steps?.at(-1)).toEqual({ label: 'First picture', state: 'now' })
+    expect(LIVE_VIEW_STALLED).toMatch(/press the camera's RESET button/)
+    b.run(30000)
+    expect(b.take()).toEqual([])
+    // RESET: the next boot moves the steps again.
+    b.feed('### Warm Boot ###')
+    expect(b.view().stalled).toBe(false)
+  })
+
+  it("says to press RESET only when the first sleep's wake is 10 s late", () => {
+    const b = bench({ ...AWAKE, 'capture 10 500': 'Error: no captures until after the first sleep.' })
+    b.s.start(b.now())
+    b.run(10000)
+    b.feed('>>> Entering DPD at 2024:01:01 00:00:06')
+    b.run(19000)
+    expect(b.view().stalled).toBe(false)
+    b.run(2000)
+    expect(b.view().stalled).toBe(true)
+    expect(b.view().steps?.[2]).toEqual({ label: 'Wakes any moment', state: 'now' })
   })
 
   it('when the camera refuses a capture, sends it to sleep with the wake set', () => {
