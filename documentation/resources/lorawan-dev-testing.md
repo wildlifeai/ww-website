@@ -17,8 +17,10 @@ see [gotchas](../../.agents/skills/references/gotchas.md#cloud-dev-is-reseeded-w
 | Organisation ingest tokens (`lorawan_ingest_tokens`) | The `LORAWAN_INGEST_TOKEN` function secret |
 | The bench camera's `devices` row and its deployment | The TTN webhook, the camera's TTN registration |
 | Every LoRaWAN message | The camera's own settings (op 32) |
+| Every settings request (`lorawan_downlinks`) | The TTN downlink key, a Supabase Vault secret |
 
-So the webhook uses the function secret, set once, and only the SQL below is redone after a reset.
+So the webhook uses the function secret and the downlink key is in Vault, both set once, and only
+the SQL below is redone after a reset.
 
 ## Once: point TTN at dev
 
@@ -46,6 +48,18 @@ Victor holds the TTN console. The cameras' application on the `au1` cluster
    ```
 
    `ok: True` with `decoded.kind` `report` is right; a 401 is the wrong token.
+4. **A key for downlinks**, so the website can read and change a camera's settings through the
+   `lorawan-downlink` function
+   ([ww-backend#403](https://github.com/wildlifeai/ww-backend/issues/403), LORAWAN_INGEST.md,
+   "Storing a TTN API key"). TTN console, the application, **API keys** → **Add API key**, with
+   only the right *Write downlink application traffic*. TTN shows the key once. In the dev SQL
+   editor:
+
+   ```sql
+   SELECT public.store_lorawan_downlink_key('au1.cloud.thethings.network', 'wildlife-watcher-test', '<the key>');
+   ```
+
+   Without it the function answers 503 `no_network`. Downlinks typed in the TTN console need no key.
 
 ## After every reset: put the camera back on dev
 
@@ -140,6 +154,7 @@ unlinked.
 | Update its Bluetooth firmware | Restart reason 10, shown as an unexpected restart until [ww-backend#398](https://github.com/wildlifeai/ww-backend/issues/398) |
 | TTN **Messaging** → **Downlink**, FPort `3`, payload `56 10 00 00` | After the camera's next uplink, its answer `56 10 <lo> <hi>`: "Setting 16 read: ..." under **Messages** |
 | The same with `57 10 3C 00` | Sets op 16 (detection threshold) to 60 %: "Setting 16 set to 60" |
+| The same with `57 20 0F 00` | Sets op 32 to 15 minutes: "Setting 32 set to 15", and the deployment's `lorawan_ping_minutes` becomes 15, so Silent follows the camera |
 
 A downlink waits for the camera's next uplink (up to one ping period), and only one request goes
 per downlink.
@@ -154,6 +169,9 @@ examples are in ww-hardware's
 ## Traps
 
 - A camera on USB reads about 3.1 V: that is the rail, not a cell.
+- Another board is another DevEUI. After swapping the camera on the bench, nothing reaches dev until
+  the new DevEUI is under TTN **End devices** and in the SQL above, and the new board has its own
+  op 32, often 0. Its Bluetooth console prints `Current DevEui is:` at boot.
 - The webhook's path for **Uplink message** must be empty: TTN appends it to the Base URL, after
   `?token=`.
 - An organisation token (`issue_lorawan_ingest_token`) works too, but goes with the next reset.
