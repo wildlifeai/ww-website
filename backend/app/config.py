@@ -254,7 +254,7 @@ class Settings(BaseSettings):
         le=1.0,
         description=(
             "BioCLIP's own floor: a crop it scores below this gets no BioCLIP row, whatever the run's "
-            "confidence_threshold (#433). Provisional: SpeciesNet's species bar until measured on labelled crops"
+            "confidence_threshold (#433). 0.5, SpeciesNet's species bar, chosen on 27 Nov 2026"
         ),
     )
     EMBEDDING_BATCH_SIZE: int = Field(32, description="Batch size for GPU/CPU embedding extraction")
