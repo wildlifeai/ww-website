@@ -269,6 +269,7 @@ async def run_job(api: Api, lease_id: str, job: dict, work: Path, models: Models
         chunk = await part_items(api, lease_id, job, start, part_size)
         if not chunk:
             break
+        # A paged part can be shorter than part_size: the API ends it between two bursts (#531).
         start += len(chunk)
         fetched, failed = await download(api, chunk, work)
         records = await (infer_embed(fetched, job, models) if job.get("kind") == "embed" else infer_annotate(fetched, job, models, work))

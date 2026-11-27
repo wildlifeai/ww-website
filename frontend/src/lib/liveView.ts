@@ -207,9 +207,10 @@ export function captureIntervalMs(camera: string | null, op11: number | null, mo
   return 500
 }
 
-/** The frame interval box's range: 20 ms is live_view.py's minimum. */
+/** The frame interval box's range: 20 ms is live_view.py's minimum. 10 s keeps two frames inside
+ *  the session's 20 s "no frames, ask again" check, which would otherwise type `capture` mid-burst. */
 export const MIN_FRAME_INTERVAL_MS = 20
-export const MAX_FRAME_INTERVAL_MS = 60000
+export const MAX_FRAME_INTERVAL_MS = 10000
 
 export function validFrameInterval(ms: number): boolean {
   return Number.isInteger(ms) && ms >= MIN_FRAME_INTERVAL_MS && ms <= MAX_FRAME_INTERVAL_MS
@@ -249,18 +250,33 @@ export function replyExpected(cmd: string): string[] {
   if (verb === 'setop') return [`Set OpParam ${a} =`, `valid value for op ${a}.`]
   if (verb === 'camera') return ['HM0360', 'RP3', 'RP2']
   if (verb === 'interval') return ['ms from the next image', 'No capture in progress']
+  // The reply, not the echo `cmd> sdused`, which has no space after it.
+  if (verb === 'sdused') return ['sdused ']
   return []
 }
 
-/** Console lines the session acts on, as the firmware prints them at e3c4d18a. */
+/** Console lines the session acts on, as the firmware prints them at e3c4d18a (the boot, the CLI,
+ *  the card and the replies checked against Seeed dev f9080aea, 27 Nov 2026). */
 export const LINES = {
   op: /OpParam (\d+) = (\d+)/,
+  /** setop's refusal: `Error: 6 is not a valid value for op 33.` */
+  opRefused: /(\d+) is not a valid value for op (\d+)/,
   camera: /^(?:cmd> )?(HM0360|RP3|RP2)$|initialised for camera (HM0360|RP3|RP2)/,
+  /** The only lines that mean a boot. */
   coldBoot: /### Cold Boot ###/,
   warmBoot: /### Warm Boot ###/,
-  cliUp: /Starting CLI Task|Enter 'help' to view/,
+  /** Once per boot, as the command line starts. Not its "Enter 'help' to view" line: an unknown
+   *  command prints that too (FreeRTOS_CLI.c). */
+  cliUp: /Starting CLI Task/,
+  /** Every unknown command's answer (FreeRTOS_CLI.c). */
+  notRecognised: /Command not recognised/,
+  /** The command line's echo of a typed command, after its prompt. */
+  echo: /^cmd> (\S.*)$/,
   /** Camera and data path ready; a capture before this times out. */
   bootDone: /Image sensor and data path initialised/,
+  /** The card task's last start-up line, card or no card (fatfs_task.c): CONFIG.TXT is loaded, so an
+   *  op written now is not overwritten, and the sleep timer runs, so `dpd` works. */
+  cardDone: /Inactivity period set at \d+ms/,
   captureOk: /About to capture/,
   burstStart: /Images to capture: \d+/,
   burstEnd: /Current captures completed:|Capture failed after/,
@@ -284,8 +300,14 @@ export const DEVICE_LINES = {
   wakeReason: /Wakeup_event = 0x[0-9a-fA-F]+, WakeupEvt1 = 0x[0-9a-fA-F]+ (.+)$/,
   /** The second-stage bootloader names the slot it starts from by its flash offset. */
   flashOffset: /slot flash_offset (0x[0-9a-fA-F]+)/,
+  /** After `### Warm Boot ###`: what woke it (ww500_md.c). The motion and Bluetooth wakes share a pin. */
+  wake: /^(Motion detected INT_INDIC|Timer wake$|BLE wake$)/,
   sdReady: /SD card initialised/,
   sdFailed: /SD card initialisation failed/,
+  /** `sdused 12`, or 255 with no card or none readable. */
+  sdUsed: /^sdused (\d+)$/,
+  /** Each frame's write; 3 (not ready) and 13 (no file system) mean no card (FatFs error codes). */
+  imageNotWritten: /Image not written\. Error: (\d+)/,
   nextImage: /'CONFIG\.TXT' found\. \(Next image #(\d+)\)/,
   imagesDir: /images directory .*'([^']+)'/,
 }
