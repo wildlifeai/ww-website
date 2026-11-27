@@ -13,10 +13,12 @@ No HTTP or FastAPI imports — this module runs in the domain layer.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import time
 import uuid
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
@@ -248,6 +250,10 @@ class AnimalCropStep(PipelineStep):
 
 # ── Gemini Presence Step (VLM animal-present verdict) ────────────────
 
+# Verdict rows written per insert as the calls answer, so an ingest the cpu function stops
+# keeps the verdicts already paid for, and its next try skips them (#531).
+GEMINI_WRITE_EVERY = 10
+
 
 def build_gemini_presence_observation(
     media: dict,
@@ -340,6 +346,11 @@ class GeminiPresenceStep(PipelineStep):
     (both must be set on the ARQ worker). Idempotent: a media row that already
     has an observation for this model is skipped.
 
+    The ``single`` and ``contact_sheet`` calls run ``GEMINI_PRESENCE_CONCURRENCY`` at a
+    time, each with its own quota and 5xx backoff, and their rows are written every
+    :data:`GEMINI_WRITE_EVERY` verdicts as they answer, so a run that stops part way keeps
+    what it has paid for (#531). ``batch`` is one Batch API job, written when it ends.
+
     Config overrides: ``gemini_model``, ``gemini_variant`` (single |
     contact_sheet | batch), ``gemini_prompt_version`` (default
     ``gemini_presence.PROMPT_VERSION``, v1), ``gemini_thinking_level``,
@@ -387,17 +398,26 @@ class GeminiPresenceStep(PipelineStep):
         todo = [m for m in media if m["id"] not in done]
 
         errors = 0
+        # Calls (and the reads before them) in flight at once; 1 is one at a time.
+        concurrency = max(1, settings.GEMINI_PRESENCE_CONCURRENCY)
+        reads = asyncio.Semaphore(concurrency)
         frames: dict[str, bytes] = {}
-        for m in todo:
-            try:
-                resolved = await resolve_media(m["file_path"], size="full", media=MediaRef.of(m))
-                if not resolved:
+
+        async def _read(m: dict) -> None:
+            nonlocal errors
+            async with reads:
+                try:
+                    resolved = await resolve_media(m["file_path"], size="full", media=MediaRef.of(m))
+                except Exception as exc:
+                    logger.warning("gemini_presence_resolve_error", media_id=m.get("id"), error=str(exc))
                     errors += 1
-                    continue
-                frames[m["id"]] = resolved[0]
-            except Exception as exc:
-                logger.warning("gemini_presence_resolve_error", media_id=m.get("id"), error=str(exc))
+                    return
+            if not resolved:
                 errors += 1
+                return
+            frames[m["id"]] = resolved[0]
+
+        await asyncio.gather(*(_read(m) for m in todo))
         resolvable = [m for m in todo if m["id"] in frames]
 
         # One call per frame, or one per burst chunk for the contact sheet (the same
@@ -408,45 +428,24 @@ class GeminiPresenceStep(PipelineStep):
             groups = [[m] for m in resolvable]
 
         thinking_level = config.get("gemini_thinking_level")
-
-        def _call_all() -> list:
-            payloads = [[frames[m["id"]] for m in g] for g in groups]
-            if variant == "batch":
-                return gp.presence_batch(
-                    payloads,
-                    variant,
-                    model,
-                    thinking_level=thinking_level,
-                    max_wait_seconds=float(config.get("gemini_batch_max_wait_seconds", gp.BATCH_MAX_WAIT_SECONDS)),
-                    display_name=f"ww-presence-{deployment_id[:8]}",
-                    prompt_version=prompt_version,
-                )
-            out = []
-            for payload in payloads:
-                try:
-                    out.append(gp.presence(payload, variant, model, thinking_level=thinking_level, prompt_version=prompt_version))
-                except Exception as exc:  # one failed call must not sink the batch
-                    logger.warning("gemini_presence_call_error", model=model, error=str(exc))
-                    out.append(
-                        gp.PresenceResult(model=model, variant=variant, verdicts=[None] * len(payload), error=str(exc), prompt_version=prompt_version)
-                    )
-            return out
-
-        results = await asyncio.to_thread(_call_all) if groups else []
-
         timestamp = datetime.now(timezone.utc).isoformat()
         run_id = str(uuid.uuid4())
-        rows: list[dict] = []
-        evidence: list[dict] = []
+        observations_created = evidence_written = 0
         input_tokens = output_tokens = 0
         total_cost = 0.0
-        for group, result in zip(groups, results):
+        # (group index, observation rows, evidence rows) answered but not yet written.
+        pending: list[tuple[int, list[dict], list[dict]]] = []
+
+        def _take(index: int, result) -> None:
+            nonlocal errors, input_tokens, output_tokens, total_cost
             input_tokens += result.usage.input_tokens
             output_tokens += result.usage.billed_output_tokens
             total_cost += result.cost_usd
             if result.error:
                 errors += 1
-            for m, verdict in zip(group, result.verdicts):
+            rows: list[dict] = []
+            evidence: list[dict] = []
+            for m, verdict in zip(groups[index], result.verdicts):
                 if verdict is None:
                     continue
                 rows.append(build_gemini_presence_observation(m, deployment_id, verdict, model, timestamp))
@@ -462,8 +461,9 @@ class GeminiPresenceStep(PipelineStep):
                         run_id=run_id,
                     )
                 )
+            pending.append((index, rows, evidence))
 
-        def _persist() -> tuple[int, int]:
+        def _persist(rows: list[dict], evidence: list[dict]) -> tuple[int, int]:
             keep, _held = without_human_verdicts(svc, rows, model, config.get("force", False))
             for i in range(0, len(keep), 50):
                 svc.table("observations").insert(keep[i : i + 50]).execute()
@@ -474,7 +474,72 @@ class GeminiPresenceStep(PipelineStep):
                 logger.warning("gemini_presence_evidence_write_failed", error=str(exc))
             return len(keep), written
 
-        observations_created, evidence_written = await asyncio.to_thread(_persist) if rows else (0, 0)
+        async def _flush() -> None:
+            nonlocal observations_created, evidence_written
+            answered = sorted(pending, key=lambda p: p[0])
+            pending.clear()
+            rows = [r for _, part, _ in answered for r in part]
+            if not rows:
+                return
+            created, written = await asyncio.to_thread(_persist, rows, [e for _, _, part in answered for e in part])
+            observations_created += created
+            evidence_written += written
+
+        def _ask(index: int):
+            payload = [frames[m["id"]] for m in groups[index]]
+            try:
+                return index, gp.presence(payload, variant, model, thinking_level=thinking_level, prompt_version=prompt_version)
+            except Exception as exc:  # one failed call must not sink the batch
+                logger.warning("gemini_presence_call_error", model=model, error=str(exc))
+                return index, gp.PresenceResult(
+                    model=model, variant=variant, verdicts=[None] * len(payload), error=str(exc), prompt_version=prompt_version
+                )
+
+        async def _ask_all() -> None:
+            if variant == "batch":
+                results = await asyncio.to_thread(
+                    gp.presence_batch,
+                    [[frames[m["id"]] for m in g] for g in groups],
+                    variant,
+                    model,
+                    thinking_level=thinking_level,
+                    max_wait_seconds=float(config.get("gemini_batch_max_wait_seconds", gp.BATCH_MAX_WAIT_SECONDS)),
+                    display_name=f"ww-presence-{deployment_id[:8]}",
+                    prompt_version=prompt_version,
+                )
+                for index, result in enumerate(results):
+                    _take(index, result)
+                return
+            # Each call keeps its own quota and 5xx backoff (gemini_presence._generate_with_backoff),
+            # in its own thread, so one call waiting out a 429 does not hold up the others.
+            loop = asyncio.get_running_loop()
+            pool = ThreadPoolExecutor(max_workers=min(concurrency, len(groups)), thread_name_prefix="gemini-presence")
+
+            def _in_context(index: int) -> Callable[[], Any]:
+                """As asyncio.to_thread does, the call carries this task's context (the log's bound fields)."""
+                context = contextvars.copy_context()
+                return lambda: context.run(_ask, index)
+
+            calls = [loop.run_in_executor(pool, _in_context(i)) for i in range(len(groups))]
+            try:
+                for answered in asyncio.as_completed(calls):
+                    _take(*await answered)
+                    if sum(len(rows) for _, rows, _ in pending) >= GEMINI_WRITE_EVERY:
+                        await _flush()
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
+
+        try:
+            if groups:
+                await _ask_all()
+            await _flush()
+        finally:
+            if pending:  # stopped by an error or a cancellation: keep the verdicts already paid for
+                unwritten = sum(len(rows) for _, rows, _ in pending)
+                try:
+                    await _flush()
+                except Exception as exc:
+                    logger.warning("gemini_presence_flush_failed", rows=unwritten, error=str(exc))
 
         duration = time.monotonic() - start
         logger.info(
@@ -1658,8 +1723,12 @@ def fetch_pipeline_media(
     only_unannotated: bool = True,
     force: bool = False,
     media_ids: list[str] | None = None,
+    sequence_tag: bool = False,
 ) -> list[dict]:
     """The media a run of ``steps`` on ``deployment_id`` would touch, with the guards applied.
+
+    ``sequence_tag`` adds ``trigger_id`` and ``frame_index`` from ``exif_metadata``, which
+    ``burst_evidence.group_bursts`` reads, for the batch lease's part edges (#531).
 
     Shared by :func:`run_pipeline` and the REANNZ batch lease (``domain/batch_lease.py``), so
     the cluster is sent exactly the photos the run will write rows for. Blocking (PostgREST).
@@ -1683,7 +1752,10 @@ def fetch_pipeline_media(
     run_versions = [step_versions[s] for s in steps if s in step_versions]
 
     def _media_query():
-        q = svc.table("media").select("id, deployment_id, file_path, file_name, file_mediatype, timestamp").eq("deployment_id", deployment_id)
+        columns = "id, deployment_id, file_path, file_name, file_mediatype, timestamp"
+        if sequence_tag:
+            columns += ", trigger_id:exif_metadata->>trigger_id, frame_index:exif_metadata->>frame_index"
+        q = svc.table("media").select(columns).eq("deployment_id", deployment_id)
         # Scope to specific media when given (e.g. a CamtrapDP import runs AI only on the
         # image-backed rows, not the fileless CSV references that would choke media_prep).
         if media_ids:

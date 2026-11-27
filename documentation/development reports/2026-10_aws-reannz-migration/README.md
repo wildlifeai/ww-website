@@ -9,7 +9,7 @@ The design is [approach-b.md](approach-b.md), the proposal ranked first on 31 Oc
 | Slice | What | Switched on by | Main files |
 |---|---|---|---|
 | 1 Storage seam | One object store over Azure Blob (delegates to `azure_storage.py`), S3 and a local directory; `s3://` originals read and served by a 5-minute redirect; export ZIPs; an S3 archive in place of Drive | `OBJECT_STORE_BACKEND`, `ARCHIVE_BACKEND` | `backend/app/services/object_store.py`, `backend/app/domain/media_resolver.py`, `backend/app/routers/media.py` |
-| 2 Batch queue | GPU jobs wait in `api_jobs` with a dispatch record; the reaper spares them and requeues an expired lease once; lease endpoints for the cluster | `WORKER_BACKEND=lambda`, `WORKER_TOKEN_SHA256` | `backend/app/jobs/dispatch.py`, `backend/app/jobs/store.py`, `backend/app/domain/batch_lease.py`, `backend/app/routers/worker.py` |
+| 2 Batch queue | GPU jobs wait in `api_jobs` with a dispatch record; the reaper spares them, requeues an expired lease once and queues again a results ingest that stopped; lease endpoints for the cluster | `WORKER_BACKEND=lambda`, `WORKER_TOKEN_SHA256` | `backend/app/jobs/dispatch.py`, `backend/app/jobs/store.py`, `backend/app/domain/batch_lease.py`, `backend/app/routers/worker.py` |
 | 3 Inference split | The cluster runs only the models and writes results parts; ingest runs the existing pipeline steps with precomputed answers behind the three service getters | a lease | `backend/app/jobs/batch_infer.py`, `backend/app/services/inference_cache.py`, `backend/app/jobs/ingest.py` |
 | 4 Lambda packaging | SSM bootstrap, `/events` for job invokes and the tick, sync flush before each response, the five in-process call sites through `enqueue_job`, `lambda` and `gpu` image targets, SAM templates, a manual deploy workflow | `WW_LAMBDA_ROLE`, `WW_SSM_PREFIX` (set by the template) | `backend/app/aws_params.py`, `backend/app/lambda_events.py`, `infra/aws/template.yaml`, `infra/aws/shared.yaml`, `.github/workflows/deploy-aws.yml` |
 | 5 Uploads through S3 | Presigned POSTs to `incoming/<user>/`; the three upload endpoints take keys or multipart; the browser presigns only when the API says so | `OBJECT_STORE_BACKEND=s3` | `backend/app/routers/uploads.py`, `backend/app/services/incoming.py`, `frontend/src/lib/objectStoreUpload.ts` |
@@ -27,7 +27,7 @@ Every setting, its default and its value on AWS: [deployment-guide.md, AWS and t
 |---|---|---|
 | `GET /pending` | | `jobs`, `photos` (upper bound), `oldest_minutes`, `submit`, `image`, `time_limit_minutes`, `contract` |
 | `POST /lease` | `max_photos`, `slurm_job_id`, `paged` | the manifest, or `{"lease_id": null}` |
-| `GET /lease/{id}/items/{job}` | `offset`, `limit` (query, at most 1,000) | a paged job's photos from `offset`, URLs signed now |
+| `GET /lease/{id}/items/{job}` | `offset`, `limit` (query, at most 1,000) | a paged job's photos from `offset`, URLs signed now; the page ends between two bursts, so it can be shorter than `limit` with more to come |
 | `POST /lease/{id}/heartbeat` | `done`, `total` | `cancel`, `expires_at` |
 | `POST /lease/{id}/part` | `job_id`, `part` | `method`, `url` (S3) or `path` (the API), `headers` |
 | `PUT /lease/{id}/part/{job}/{n}` | gzipped part | for the azure and local backends |
@@ -37,13 +37,17 @@ Every setting, its default and its value on AWS: [deployment-guide.md, AWS and t
 
 **Manifest**: `lease_id`, `contract`, `expires_at`, `heartbeat_seconds`, `part_max_photos`, and per job `job_id`, `kind` (`annotate` or `embed`), `models` (`speciesnet`, `bioclip`, or `dinov3` with the model name), `config` (threshold, SpeciesNet cutoffs, `per_detection`, BioCLIP rank and labels), `items` (`media_id`, `deployment_id`, and `url` for S3 or a public rendition, else `path`), or in a paged lease `items_total`, the photos then read page by page.
 
+**Part edges** ([#531](https://github.com/wildlifeai/ww-website/issues/531), `backend/app/domain/batch_lease.py`): evidence fusion groups bursts within one part's photos at ingest, so the API, which has the timestamps and sequence tags, sets the edges. An annotate job's photos are leased burst by burst (`group_bursts` with the run's `burst_gap_seconds`, bursts in the order of their first photo), and each items page the cluster asks for, one part's worth, ends before the first photo of a burst it would cut. The cluster already reads the next page from where the last one ended, so the GPU image needs no rebuild and the contract stays 1. A burst longer than a part is still cut at the part size (logged as `batch_part_splits_burst`), and a lease taken with the photos inline (an image from before paging) is cut by count as before.
+
 **Results part** (`backend/app/services/inference_cache.py`, contract 1): gzipped JSON lines. Header: `contract`, `lease_id`, `job_id`, `part`, `kind`, `image`, `slurm_job_id`, `bioclip_labels`, `bioclip_rank`, `embedding_model`. Record per photo: `media_id`, `deployment_id`, then `speciesnet` (the `ImagePrediction` fields), `bioclip` (`bbox` or null for a whole frame, name, score, rank), `dinov3` (the vector), or `error`.
 
-**Keys**: `originals/{project}/{deployment}/{file_hash}.jpg`, `incoming/{user}/{upload}/{n}-{name}`, `buffer/...`, `exports/{job}.zip`, `results/{lease}/{job}/part-NNNN.jsonl.gz` with `.ingested`, `_done.json` and `_finalized` markers. Lifecycle in `infra/aws/template.yaml`.
+**Keys**: `originals/{project}/{deployment}/{file_hash}.jpg`, `incoming/{user}/{upload}/{n}-{name}`, `buffer/...`, `exports/{job}.zip`, `results/{lease}/{job}/part-NNNN.jsonl.gz` with `.attempt`, `.ingested`, `_done.json` and `_finalized` markers. Lifecycle in `infra/aws/template.yaml`.
 
 **`api_jobs.job_data`** (jsonb, no schema change): `dispatch` (`backend: batch`, `name`, `kind`, `args`, `kwargs`, `queued_at`, `not_before`, `attempts`) and, once leased, `lease` (`id`, `leased_at`, `slurm_job_id`). The lease itself is a `services/locks.py` lease row named `batch-lease:<id>`.
 
 **Lambda events** (`POST /events` through the Web Adapter): `{"ww-job": name, "args", "kwargs"}` or with `payload_key` over 200 KB, on the `cpu` function only; `{"ww-tick": true}` from EventBridge Scheduler: reaper plus one Embedded Metric Format line (`WildlifeWatcher/BatchOldestQueuedMinutes`).
+
+**Ingest retries** ([#531](https://github.com/wildlifeai/ww-website/issues/531), `backend/app/jobs/ingest.py`): the cluster's `done` releases the lease before its last parts are ingested, so for a job with a released lease the reaper reads the parts' markers instead of applying its 60-minute rule. Each ingest try writes the part's `.attempt` marker (try number, started or stopped). A part without `.ingested` whose try started over 17 minutes ago (the `cpu` function's 15-minute timeout plus a margin) or stopped on an error is queued again, the new try counted, until it has had `BATCH_MAX_ATTEMPTS` tries; a part with no try yet waits as long from `done` (`_done.json` `finished_at`) for a free `cpu` instance. A part out of tries fails the job, "the GPU results could not be written", once no other part's ingest runs. A part that can never be written (missing, another lease's or contract's) fails the job at once. A per-part lock makes a second ingest of a running part a no-op, so a dead-letter redrive is harmless but no longer needed.
 
 ## Where the build departs from approach-b.md
 

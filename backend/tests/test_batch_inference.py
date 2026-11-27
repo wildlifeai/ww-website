@@ -14,6 +14,7 @@ import gzip
 import hashlib
 import io
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
@@ -498,6 +499,151 @@ async def test_finalize_waits_for_every_part_then_closes_the_job_once(ingest_env
     final = ingest.update_job.await_args_list[-1]  # pyright: ignore[reportAttributeAccessIssue]
     assert final.kwargs["status"].value == "completed" and "1 photo(s) could not be read" in final.kwargs["message"]
     assert not await ingest.finalize_if_complete(LEASE, JOB)  # already finalised
+
+
+# ── a stopped ingest is tried again (#531) ───────────────────────────
+
+
+def _at(minutes: float) -> datetime:
+    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
+
+
+async def _done(parts_total: int, finished_minutes_ago: float = 0) -> None:
+    from app.domain.batch_lease import done_key
+
+    body = {"parts_total": parts_total, "failed_media": [], "finished_at": _at(-finished_minutes_ago).isoformat()}
+    await object_store.put_object(done_key(LEASE, JOB), json.dumps(body).encode())
+
+
+async def _marker(part: int = 1) -> dict:
+    from app.domain.batch_lease import attempt_key
+
+    found = await object_store.get_object(attempt_key(LEASE, JOB, part))
+    assert found
+    return json.loads(found[0])
+
+
+@pytest.fixture
+def requeue(monkeypatch):
+    enqueue = AsyncMock()
+    monkeypatch.setattr("app.jobs.dispatch.enqueue_job", enqueue)
+    monkeypatch.setattr(settings, "BATCH_MAX_ATTEMPTS", 2)
+    return enqueue
+
+
+async def test_a_timed_out_ingest_is_queued_again_and_the_job_fails_after_its_last_try(ingest_env, requeue):
+    await _store_part([{"media_id": "m1", "deployment_id": DEP}])
+    await _done(1)
+    assert await ingest._start_try(LEASE, JOB, 1) == 1  # the cluster's ingest starts, then Lambda stops it
+
+    assert await ingest.released_lease_decision(LEASE, JOB, now=_at(5)) == ("keep", "")  # it may still be running
+    requeue.assert_not_awaited()
+    assert await ingest.released_lease_decision(LEASE, JOB, now=_at(18)) == ("keep", "")  # past the cpu timeout
+    requeue.assert_awaited_once_with("ingest_results_part_job", LEASE, JOB, 1)
+    assert (await _marker())["attempt"] == 2 and (await _marker())["queued"]
+    assert await ingest.released_lease_decision(LEASE, JOB, now=_at(20)) == ("keep", "")  # waiting for a cpu instance
+    assert requeue.await_count == 1
+
+    assert await ingest._start_try(LEASE, JOB, 1) == 2  # the queued try was counted when it was queued; it stops too
+    action, reason = await ingest.released_lease_decision(LEASE, JOB, now=_at(40))
+    assert action == "fail" and "part 1" in reason and "2 tries" in reason
+    assert requeue.await_count == 1
+
+
+async def test_a_queued_try_ingests_the_part_and_hands_the_job_back_to_the_usual_rule(ingest_env, requeue, monkeypatch):
+    monkeypatch.setattr(ingest, "finalize_if_complete", AsyncMock(return_value=False))
+    await _store_part([{"media_id": "m1", "deployment_id": DEP}])
+    await _done(1)
+    await ingest._start_try(LEASE, JOB, 1)
+    await ingest.released_lease_decision(LEASE, JOB, now=_at(18))
+
+    assert await ingest.ingest_results_part(LEASE, JOB, 1) == "ingested"
+    assert len(ingest_env) == 1 and (await _marker())["attempt"] == 2
+    assert await ingest.released_lease_decision(LEASE, JOB, now=_at(60)) == (None, "")
+
+
+async def test_a_part_never_started_waits_for_a_cpu_instance_before_it_is_queued(ingest_env, requeue):
+    await _store_part([{"media_id": "m1", "deployment_id": DEP}])
+    await _done(1, finished_minutes_ago=5)
+    assert await ingest.released_lease_decision(LEASE, JOB) == ("keep", "")
+    requeue.assert_not_awaited()
+    assert await ingest.released_lease_decision(LEASE, JOB, now=_at(13)) == ("keep", "")
+    requeue.assert_awaited_once_with("ingest_results_part_job", LEASE, JOB, 1)
+    assert await ingest._start_try(LEASE, JOB, 1) == 1  # the cluster's own event or the tick's: one try either way
+
+
+async def test_the_job_is_not_failed_while_another_part_still_runs(ingest_env, requeue):
+    await _store_part([{"media_id": "m1", "deployment_id": DEP}], part=1)
+    await _store_part([{"media_id": "m2", "deployment_id": DEP}], part=2)
+    await _done(2)
+    await ingest._start_try(LEASE, JOB, 1)
+    await ingest.ingest_stopped(LEASE, JOB, 1, "boom")
+    await ingest.released_lease_decision(LEASE, JOB)  # queues try 2 of part 1
+    await ingest._start_try(LEASE, JOB, 1)
+    await ingest.ingest_stopped(LEASE, JOB, 1, "boom again")
+    await ingest._start_try(LEASE, JOB, 2)  # part 2 is being written
+
+    assert await ingest.released_lease_decision(LEASE, JOB, now=_at(1)) == ("keep", "")
+    assert requeue.await_count == 1  # part 1 is out of tries, part 2 still runs
+    from app.domain.batch_lease import ingested_key
+
+    await object_store.put_object(ingested_key(LEASE, JOB, 2), b"{}")  # part 2 is written
+    assert (await ingest.released_lease_decision(LEASE, JOB, now=_at(2)))[0] == "fail"
+
+
+async def test_the_usual_rule_applies_without_the_clusters_done_or_once_finalised(ingest_env, requeue):
+    from app.domain.batch_lease import finalized_key
+
+    assert await ingest.released_lease_decision(LEASE, JOB) == (None, "")
+    await _done(1)
+    await object_store.put_object(finalized_key(LEASE, JOB), b"{}")
+    assert await ingest.released_lease_decision(LEASE, JOB, now=_at(60)) == (None, "")
+    requeue.assert_not_awaited()
+
+
+async def test_an_ingest_error_is_tried_again_and_fails_the_job_only_on_the_last_try(ingest_env, requeue, monkeypatch):
+    from app.jobs import definitions
+
+    async def broken(*a, **k):
+        raise RuntimeError("PostgREST 502")
+
+    monkeypatch.setattr("app.domain.pipeline.run_pipeline", broken)
+    updates = AsyncMock()
+    monkeypatch.setattr(definitions, "update_job", updates)
+    await _store_part([{"media_id": "m1", "deployment_id": DEP}])
+    await _done(1)
+
+    with pytest.raises(RuntimeError):
+        await definitions.ingest_results_part_job(LEASE, JOB, 1)
+    assert "status" not in updates.await_args.kwargs and "tried again" in updates.await_args.kwargs["message"]
+    assert (await _marker())["stopped_at"] and (await _marker())["attempt"] == 1
+
+    assert await ingest.released_lease_decision(LEASE, JOB) == ("keep", "")  # an error is queued again at once
+    requeue.assert_awaited_once_with("ingest_results_part_job", LEASE, JOB, 1)
+    with pytest.raises(RuntimeError):
+        await definitions.ingest_results_part_job(LEASE, JOB, 1)
+    assert updates.await_args.kwargs["status"].value == "failed"
+    assert updates.await_args.kwargs["message"] == ingest.INGEST_FAILED_MESSAGE
+
+
+async def test_a_part_of_another_job_fails_the_job_at_once(ingest_env, monkeypatch):
+    from app.domain.batch_lease import part_key
+    from app.jobs import definitions
+
+    updates = AsyncMock()
+    monkeypatch.setattr(definitions, "update_job", updates)
+    data = inference_cache.encode_part({"lease_id": LEASE, "job_id": "someone-else", "part": 1, "kind": "annotate"}, [])
+    await object_store.put_object(part_key(LEASE, JOB, 1), data)
+    with pytest.raises(inference_cache.ContractMismatch):
+        await definitions.ingest_results_part_job(LEASE, JOB, 1)
+    assert updates.await_args.kwargs["status"].value == "failed"
+
+
+async def test_a_second_ingest_of_a_running_part_does_nothing(ingest_env):
+    await _store_part([{"media_id": "m1", "deployment_id": DEP}])
+    async with locks.exclusive(f"batch-ingest:{LEASE}:{JOB}:1"):
+        assert await ingest.ingest_results_part(LEASE, JOB, 1) == "busy"
+    assert ingest_env == []
 
 
 async def test_finalize_runs_an_embed_job_on_all_its_vectors(monkeypatch):

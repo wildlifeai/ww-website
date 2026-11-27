@@ -250,38 +250,63 @@ async def reap_stale_jobs(max_age_minutes: int = 60) -> int:
 
     Then it deletes the finished jobs past their retention (:func:`delete_finished_jobs`),
     whether or not the first step worked.
+
+    A batch job whose lease the cluster released is asked about first by
+    ``jobs/ingest.released_lease_decision``, which queues again each results part whose ingest
+    stopped (#531): the job is kept while a part's ingest runs or has tries left, and failed
+    with its own message once a part is out of them.
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+    stalled_message = "❌ Failed: the job stalled and was cleaned up automatically."
 
-    def _run() -> int:
-        client = create_service_client()
+    def _rows() -> list[dict]:
         resp = (
-            client.table("api_jobs")
+            create_service_client()
+            .table("api_jobs")
             .select("id, status, job_data, updated_at")
             .in_("status", [JobStatus.QUEUED.value, JobStatus.PROCESSING.value])
             .execute()
         )
+        return rows_of(resp)
+
+    def _write(job_id: str, jd: dict) -> None:
+        create_service_client().table("api_jobs").update({"status": jd["status"], "job_data": jd}).eq("id", job_id).execute()
+
+    async def _decide(row: dict, jd: dict, last: str) -> tuple[Optional[str], str, str]:
+        """``(action, reason, message)``; a job waiting for, or leased to, the REANNZ batch has its own clock."""
+        action, reason = await asyncio.to_thread(batch_reap_decision, row.get("status") or jd.get("status") or "", jd)
+        if action != "ingest":
+            return action, reason, stalled_message
+        from app.jobs.ingest import INGEST_FAILED_MESSAGE, released_lease_decision  # noqa: PLC0415 - ingest imports this module
+
+        try:
+            action, reason = await released_lease_decision(str(jd["lease"]["id"]), row["id"], last_update=last or None)
+        except Exception as exc:  # noqa: BLE001 - one unreadable lease must not stop the reaper; the 60-minute rule applies
+            logger.warning("batch_ingest_check_failed", job_id=row["id"], error=str(exc))
+            action, reason = None, ""
+        return action, reason, INGEST_FAILED_MESSAGE
+
+    async def _run() -> int:
         reaped = 0
-        for row in rows_of(resp):
+        for row in await asyncio.to_thread(_rows):
             jd = row.get("job_data") or {}
-            # A job waiting for, or leased to, the REANNZ batch has its own clock.
-            action, reason = batch_reap_decision(row.get("status") or jd.get("status") or "", jd)
+            last = jd.get("updated_at") or row.get("updated_at") or ""
+            action, reason, message = await _decide(row, jd, last)
             if action == "keep":
                 continue
             if action == "requeue":
                 jd = requeued_job_data(jd, reason)
-                client.table("api_jobs").update({"status": jd["status"], "job_data": jd}).eq("id", row["id"]).execute()
+                await asyncio.to_thread(_write, row["id"], jd)
                 _remember(row["id"], jd)
                 logger.warning("batch_job_requeued", job_id=row["id"], attempts=jd["dispatch"].get("attempts"))
                 continue
-            last = jd.get("updated_at") or row.get("updated_at") or ""
             if action != "fail" and (not last or last >= cutoff):
                 continue
             jd["status"] = JobStatus.FAILED.value
             jd["error"] = reason if action == "fail" else f"Stalled: no progress for over {max_age_minutes} minutes."
-            jd["message"] = "❌ Failed: the job stalled and was cleaned up automatically."
+            jd["message"] = message if action == "fail" else stalled_message
             jd["updated_at"] = datetime.now(timezone.utc).isoformat()
-            client.table("api_jobs").update({"status": jd["status"], "job_data": jd}).eq("id", row["id"]).execute()
+            await asyncio.to_thread(_write, row["id"], jd)
             # Keep this process's memory copy consistent so polls don't resurrect it.
             _memory_store[f"job:{row['id']}"] = json.dumps(jd)
             reaped += 1
@@ -289,7 +314,7 @@ async def reap_stale_jobs(max_age_minutes: int = 60) -> int:
         return reaped
 
     try:
-        reaped = await asyncio.to_thread(_run)
+        reaped = await _run()
     except Exception as e:
         logger.warning("reap_stale_jobs_failed", error=str(e))
         reaped = 0
@@ -340,12 +365,14 @@ def batch_lease_name(lease_id: str) -> str:
 
 
 def batch_reap_decision(status: str, jd: dict, now: Optional[datetime] = None) -> tuple[Optional[str], str]:
-    """What the reaper does with a row of the REANNZ batch: ``keep``, ``requeue``, ``fail`` or None (the 60-minute rule).
+    """What the reaper does with a row of the REANNZ batch: ``keep``, ``requeue``, ``fail``,
+    ``ingest`` or None (the 60-minute rule).
 
     A queued batch job waits for a window and the cluster's queue, so it is spared for
     ``BATCH_MAX_QUEUE_HOURS``. A leased job lives while its lease row (``services.locks``)
     does: an expired lease is requeued until ``BATCH_MAX_ATTEMPTS``, then failed. A released
-    lease means the cluster finished and ingest owns the job, so the usual rule applies.
+    lease means the cluster finished and ingest owns the job: ``ingest``, which the reaper
+    hands to ``jobs/ingest.released_lease_decision``.
     """
     from app.config import settings  # noqa: PLC0415
 
@@ -368,7 +395,7 @@ def batch_reap_decision(status: str, jd: dict, now: Optional[datetime] = None) -
     if state == "held":
         return "keep", ""
     if state == "released":
-        return None, ""
+        return "ingest", ""
     if int(dispatch.get("attempts") or 0) + 1 < settings.BATCH_MAX_ATTEMPTS:
         return "requeue", "Requeued: the GPU cluster job stopped reporting."
     return "fail", "The GPU cluster job stopped reporting, and so did its retry."

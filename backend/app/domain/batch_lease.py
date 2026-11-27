@@ -14,8 +14,8 @@ State lives where no stale copy can overwrite it:
   :func:`finish`; an expired one is requeued by the reaper (``jobs/store.py``);
 - each job's row gets ``status = processing`` and ``job_data.lease = {"id": ...}`` once, at claim;
 - parts and their progress are objects under ``results/{lease}/{job}/`` in the object store:
-  the part, a ``.ingested`` marker per part, ``_done.json`` from the cluster and
-  ``_finalized`` once the job is complete (``jobs/ingest.py``).
+  the part, a ``.attempt`` and a ``.ingested`` marker per part, ``_done.json`` from the
+  cluster and ``_finalized`` once the job is complete (``jobs/ingest.py``).
 
 The cluster never gets a database credential and never fetches a URL a user could have
 written: an original in its own S3 folder (``media_resolver.in_own_folder``) comes as a
@@ -30,6 +30,12 @@ passes Lambda's 6 MB answer, and a URL signed at claim can expire before a late 
 job is downloaded. The photos of a paged job are kept at ``results/{lease}/{job}/_items.json``,
 because the job's own query would no longer return the photos ingest has already annotated. A
 cluster that does not ask gets today's manifest.
+
+An annotate job's photos are leased burst by burst (``burst_evidence.group_bursts``, the grouper
+evidence fusion runs on each part at ingest), and :func:`items_page` ends a page between two
+bursts, so no burst is fused in two halves (#531). The cluster already reads the next page from
+where the last one ended, so a shorter page needs no change on its side; only a burst longer than
+a part is still cut at the part size.
 """
 
 from __future__ import annotations
@@ -79,6 +85,11 @@ def part_key(lease_id: str, job_id: str, part: int) -> str:
 
 def ingested_key(lease_id: str, job_id: str, part: int) -> str:
     return f"{object_store.RESULTS_PREFIX}{lease_id}/{job_id}/part-{int(part):04d}.ingested"
+
+
+def attempt_key(lease_id: str, job_id: str, part: int) -> str:
+    """The part's latest ingest try: its number and when it was queued, started or stopped (``jobs/ingest.py``)."""
+    return f"{object_store.RESULTS_PREFIX}{lease_id}/{job_id}/part-{int(part):04d}.attempt"
 
 
 def done_key(lease_id: str, job_id: str) -> str:
@@ -233,6 +244,43 @@ def _annotate_config(run: AnnotateRun) -> dict:
     return config
 
 
+def _burst_sources(media: list[dict], gap_seconds: float, first_burst: int) -> list[dict]:
+    """``media`` (``fetch_pipeline_media`` rows with the sequence tag) as lease sources, burst by
+    burst, each with its burst's number from ``first_burst`` on.
+
+    The bursts keep the order of their first photo in ``media`` (timestamp order), so the photos
+    move only to join their burst.
+    """
+    from app.domain.burst_evidence import group_bursts
+
+    position = {m["id"]: n for n, m in enumerate(media)}
+    rows = [{**m, "exif_metadata": {"trigger_id": m.get("trigger_id"), "frame_index": m.get("frame_index")}} for m in media]
+    bursts = sorted(group_bursts(rows, gap_seconds), key=lambda burst: min(position[m["id"]] for m in burst))
+    return [
+        {"id": m["id"], "deployment_id": m.get("deployment_id"), "file_path": m.get("file_path"), "burst": first_burst + n}
+        for n, burst in enumerate(bursts)
+        for m in burst
+    ]
+
+
+def part_end(sources: list[dict], start: int, end: int) -> int:
+    """Where a page of ``sources`` from ``start`` stops instead of ``end``, so no burst spans two parts.
+
+    Before the first photo of the burst ``end`` would cut, unless that burst fills the page from
+    ``start`` (a burst longer than a part is cut at the part size). Sources with no burst number,
+    in an ``_items.json`` written before #531, are cut at ``end``.
+    """
+    if end <= start or end >= len(sources):
+        return end
+    burst = sources[end].get("burst")
+    if burst is None or sources[end - 1].get("burst") != burst:
+        return end
+    edge = end - 1
+    while edge > start and sources[edge - 1].get("burst") == burst:
+        edge -= 1
+    return edge if edge > start else end
+
+
 async def _annotate_work(dispatch: dict) -> Optional[dict]:
     """The photos (``sources``) and models of one annotate job, or None when the pipeline has nothing to run."""
     from app.domain.pipeline import fetch_pipeline_media
@@ -250,13 +298,15 @@ async def _annotate_work(dispatch: dict) -> Optional[dict]:
     kwargs = dispatch.get("kwargs") or {}
     force = bool(kwargs.get("force", args[2] if len(args) > 2 else False))
     media_ids = kwargs.get("media_ids", args[3] if len(args) > 3 else None)
+    # The burst gap evidence fusion uses at ingest for this run (EvidenceFusionStep).
+    gap = float(run.config.get("burst_gap_seconds", settings.BURST_GAP_SECONDS))
     svc = create_service_client()
     sources: list[dict] = []
     for dep in _job_deployments(dispatch):
         media = await asyncio.to_thread(
-            fetch_pipeline_media, svc, dep, steps, only_unannotated=run.only_unannotated, force=force, media_ids=media_ids
+            fetch_pipeline_media, svc, dep, steps, only_unannotated=run.only_unannotated, force=force, media_ids=media_ids, sequence_tag=True
         )
-        sources.extend({"id": m["id"], "deployment_id": m.get("deployment_id"), "file_path": m.get("file_path")} for m in media)
+        sources.extend(_burst_sources(media, gap, sources[-1]["burst"] + 1 if sources else 0))
     return {"models": {"speciesnet": speciesnet, "bioclip": bioclip}, "config": _annotate_config(run), "sources": sources}
 
 
@@ -389,13 +439,20 @@ async def heartbeat(lease_id: str, done: int = 0, total: int = 0) -> dict:
 
 
 async def items_page(lease_id: str, job_id: str, offset: int = 0, limit: int = ITEMS_PAGE_MAX) -> dict:
-    """Photos ``offset`` onwards of a paged job, at most ``limit`` (and :data:`ITEMS_PAGE_MAX`), URLs signed now."""
+    """Photos ``offset`` onwards of a paged job, at most ``limit`` (and :data:`ITEMS_PAGE_MAX`), URLs signed now.
+
+    The cluster asks for one results part at a time, and the page ends between two bursts
+    (:func:`part_end`), so it can hold fewer photos than ``limit`` with more to come.
+    """
     row = await _require_job(lease_id, job_id)
     found = await object_store.get_object(items_key(lease_id, job_id))
     if not found:
         raise LeaseError(f"job {job_id} of lease {lease_id} was not leased in pages")
     sources = json.loads(found[0])
-    page = sources[offset : offset + min(limit, ITEMS_PAGE_MAX)]
+    end = part_end(sources, offset, offset + min(limit, ITEMS_PAGE_MAX))
+    if 0 < end < len(sources) and sources[end - 1].get("burst") is not None and sources[end - 1].get("burst") == sources[end].get("burst"):
+        logger.warning("batch_part_splits_burst", lease_id=lease_id, job_id=job_id, offset=offset, limit=limit)
+    page = sources[offset:end]
     kind = ((row.get("job_data") or {}).get("dispatch") or {}).get("kind")
     return {"items": await _items(lease_id, kind, page), "offset": offset, "total": len(sources)}
 
@@ -443,7 +500,12 @@ async def finish(lease_id: str, reports: list[dict]) -> None:
         job_id = str(report.get("job_id"))
         if job_id not in rows:
             raise LeaseError(f"job {job_id} is not in lease {lease_id}")
-        body = {"parts_total": int(report.get("parts_total") or 0), "failed_media": list(report.get("failed_media") or [])}
+        body = {
+            "parts_total": int(report.get("parts_total") or 0),
+            "failed_media": list(report.get("failed_media") or []),
+            # From here a part with no ingest try waits for a free cpu instance (jobs/ingest.py).
+            "finished_at": _now().isoformat(),
+        }
         await object_store.put_object(done_key(lease_id, job_id), json.dumps(body).encode("utf-8"), "application/json")
     await asyncio.to_thread(release_lease, batch_lease_name(lease_id), lease_id)
     for report in reports:

@@ -145,7 +145,7 @@ def test_a_queued_batch_job_fails_after_the_queue_limit(monkeypatch):
 
 @pytest.mark.parametrize(
     ("state", "attempts", "expected"),
-    [("held", 0, "keep"), ("released", 0, None), ("expired", 0, "requeue"), ("expired", 1, "fail")],
+    [("held", 0, "keep"), ("released", 0, "ingest"), ("expired", 0, "requeue"), ("expired", 1, "fail")],
 )
 def test_a_leased_job_follows_its_lease_row(monkeypatch, state, attempts, expected):
     monkeypatch.setattr(locks, "lease_state", lambda name: state)
@@ -180,6 +180,44 @@ async def test_reaper_requeues_an_expired_lease_and_spares_a_waiting_job(monkeyp
     assert by_status["queued"]["job_data"]["dispatch"]["attempts"] == 1
     assert by_status["failed"]["job_data"]["error"].startswith("Stalled")
     assert len(updates) == 2
+
+
+@pytest.mark.parametrize(
+    ("decision", "failed"),
+    [(("keep", ""), None), (("fail", "Results part 1 could not be written"), "the GPU results could not be written"), ((None, ""), "stalled")],
+)
+async def test_reaper_asks_ingest_about_a_released_lease(monkeypatch, decision, failed):
+    """Kept while a part's ingest has tries left, even past 60 minutes; failed with ingest's own message; else the usual rule."""
+    from app.jobs import ingest
+
+    jd = {**_jd("processing", lease="L1"), "updated_at": _iso(90)}
+    rows = [{"id": "j-released", "status": "processing", "job_data": jd, "updated_at": _iso(90)}]
+    client = MagicMock()
+    client.table.return_value.select.return_value.in_.return_value.execute.return_value = SimpleNamespace(data=rows)
+    monkeypatch.setattr(store, "create_service_client", lambda: client)
+    monkeypatch.setattr(locks, "lease_state", lambda name: "released")
+    asked = AsyncMock(return_value=decision)
+    monkeypatch.setattr(ingest, "released_lease_decision", asked)
+
+    assert await store.reap_stale_jobs(60) == (1 if failed else 0)
+    assert asked.await_args is not None and asked.await_args.args == ("L1", "j-released")
+    updates = [c.args[0] for c in client.table.return_value.update.call_args_list]
+    if failed:
+        assert updates[0]["status"] == "failed" and failed in updates[0]["job_data"]["message"]
+    else:
+        assert updates == []
+
+
+async def test_reaper_keeps_to_the_60_minute_rule_when_the_ingest_check_fails(monkeypatch):
+    from app.jobs import ingest
+
+    rows = [{"id": "j1", "status": "processing", "job_data": {**_jd("processing", lease="L1"), "updated_at": _iso(5)}, "updated_at": _iso(5)}]
+    client = MagicMock()
+    client.table.return_value.select.return_value.in_.return_value.execute.return_value = SimpleNamespace(data=rows)
+    monkeypatch.setattr(store, "create_service_client", lambda: client)
+    monkeypatch.setattr(locks, "lease_state", lambda name: "released")
+    monkeypatch.setattr(ingest, "released_lease_decision", AsyncMock(side_effect=RuntimeError("S3 is down")))
+    assert await store.reap_stale_jobs(60) == 0
 
 
 # ── the lease row API on locks ───────────────────────────────────────
@@ -416,6 +454,123 @@ async def test_a_3000_photo_lease_fits_lambdas_answer_when_paged(leasing, lambda
     assert seen == [m["id"] for m in media]
 
 
+# ── part edges at burst gaps (#531) ──────────────────────────────────
+
+# Burst sizes in two folders whose triggers interleave in time, with a tagged burst and an
+# untimed photo: what one upload of a camera's SD card can hold.
+BURSTS_A = [3, 1, 5, 2, 7, 4, 1, 6, 2, 3]
+BURSTS_B = [2, 4, 1, 3, 5]
+
+
+def _burst_media() -> list[dict]:
+    """``fetch_pipeline_media`` rows in its own order (timestamp, then id)."""
+    start = datetime(2026, 11, 27, tzinfo=timezone.utc)
+    rows: list[dict] = []
+    for folder, sizes, offset in (("A", BURSTS_A, 0), ("B", BURSTS_B, 30)):
+        t = offset
+        for b, size in enumerate(sizes):
+            for f in range(size):
+                ts = (start + timedelta(seconds=t + 3 * f)).isoformat()
+                rows.append({"id": f"{folder}{b:02d}-{f}", "deployment_id": DEP, "file_path": f"gdrive://{folder}/{b}-{f}.jpg", "timestamp": ts})
+            t += 600
+    rows += [
+        {
+            "id": f"T-{f}",
+            "deployment_id": DEP,
+            "file_path": "gdrive://A/t.jpg",
+            "timestamp": rows[f]["timestamp"],
+            "trigger_id": "77",
+            "frame_index": str(f + 1),
+        }
+        for f in range(3)
+    ]
+    rows.append({"id": "U-0", "deployment_id": DEP, "file_path": "gdrive://A/u.jpg", "timestamp": None})
+    return sorted(rows, key=lambda r: (r["timestamp"] or "~", r["id"]))
+
+
+def _bursts_of(media: list[dict]) -> list[set[str]]:
+    from app.domain.burst_evidence import group_bursts
+
+    rows = [{**m, "exif_metadata": {"trigger_id": m.get("trigger_id"), "frame_index": m.get("frame_index")}} for m in media]
+    return [{m["id"] for m in burst} for burst in group_bursts(rows, settings.BURST_GAP_SECONDS)]
+
+
+async def _cluster_parts(monkeypatch, tmp_path, media: list[dict], part_size: int) -> list[list[str]]:
+    """Lease ``media`` in pages and run the cluster's own part loop (batch_infer.run_job) over them."""
+    from app.jobs import batch_infer
+
+    monkeypatch.setattr("app.domain.pipeline.fetch_pipeline_media", lambda svc, dep, steps, **kw: media)
+    monkeypatch.setattr(settings, "OBJECT_STORE_BACKEND", "local")
+    monkeypatch.setattr(settings, "LOCAL_OBJECT_STORE_DIR", str(tmp_path))
+    manifest = await batch_lease.claim(paged=True)
+    (job,) = manifest["jobs"]
+    monkeypatch.setattr(batch_lease, "_lease_rows", _leased_as)
+    parts: list[list[str]] = []
+
+    async def download(api, items, work):
+        parts.append([i["media_id"] for i in items])
+        return [], []
+
+    class Api:
+        async def get(self, path, params):
+            return await batch_lease.items_page(manifest["lease_id"], JOB, params["offset"], params["limit"])
+
+        async def post(self, path, body):
+            return {"method": "PUT", "path": path}
+
+        async def put(self, target, data):
+            return None
+
+    monkeypatch.setattr(batch_infer, "download", download)
+    monkeypatch.setattr(batch_infer, "infer_annotate", AsyncMock(return_value=[]))
+    report = await batch_infer.run_job(Api(), manifest["lease_id"], job, tmp_path, batch_infer.default_models(), part_size, batch_infer.Progress())  # pyright: ignore[reportArgumentType]
+    assert report["parts_total"] == len(parts)
+    return parts
+
+
+@pytest.mark.parametrize("part_size", [7, 10, 16])
+async def test_no_burst_spans_two_parts(leasing, monkeypatch, tmp_path, part_size):
+    media = _burst_media()
+    parts = await _cluster_parts(monkeypatch, tmp_path, media, part_size)
+
+    assert sorted(m for part in parts for m in part) == sorted(m["id"] for m in media)
+    assert all(0 < len(part) <= part_size for part in parts)
+    part_of = {m: n for n, part in enumerate(parts) for m in part}
+    for burst in _bursts_of(media):
+        assert len({part_of[m] for m in burst}) == 1, burst
+
+
+async def test_a_burst_longer_than_a_part_is_cut_at_the_part_size(leasing, monkeypatch, tmp_path):
+    media = _burst_media()
+    parts = await _cluster_parts(monkeypatch, tmp_path, media, 5)  # folder A has bursts of 6 and 7
+    assert sorted(m for part in parts for m in part) == sorted(m["id"] for m in media)
+    assert all(0 < len(part) <= 5 for part in parts)
+    part_of = {m: n for n, part in enumerate(parts) for m in part}
+    split = [burst for burst in _bursts_of(media) if len({part_of[m] for m in burst}) > 1]
+    assert sorted(len(b) for b in split) == [6, 7]
+
+
+def test_part_end_stops_before_the_burst_it_would_cut():
+    sources = [{"burst": b} for b in [0, 0, 0, 1, 1, 2, 2, 2, 2, 3]]
+    assert batch_lease.part_end(sources, 0, 4) == 3  # burst 1 would be cut: the part ends before it
+    assert batch_lease.part_end(sources, 0, 3) == 3  # already between two bursts
+    assert batch_lease.part_end(sources, 5, 7) == 7  # burst 2 fills the page: cut at the part size
+    assert batch_lease.part_end(sources, 3, 40) == 40  # the last page
+    assert batch_lease.part_end([{"id": "m1"}, {"id": "m2"}, {"id": "m3"}], 0, 2) == 2  # an _items.json from before #531
+
+
+def test_the_lease_asks_for_the_sequence_tag_only_when_told(monkeypatch):
+    from app.domain import pipeline
+    from app.schemas.pipeline import PipelineStepType
+
+    svc = MagicMock()
+    monkeypatch.setattr(pipeline, "read_all", lambda build: (build(), [])[1])
+    pipeline.fetch_pipeline_media(svc, DEP, [PipelineStepType.SPECIESNET], force=True, sequence_tag=True)
+    assert "trigger_id:exif_metadata->>trigger_id, frame_index:exif_metadata->>frame_index" in svc.table.return_value.select.call_args.args[0]
+    pipeline.fetch_pipeline_media(svc, DEP, [PipelineStepType.SPECIESNET], force=True)
+    assert "exif_metadata" not in svc.table.return_value.select.call_args.args[0]
+
+
 async def test_items_page_needs_a_paged_job_of_the_lease(leased, monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "OBJECT_STORE_BACKEND", "local")
     monkeypatch.setattr(settings, "LOCAL_OBJECT_STORE_DIR", str(tmp_path))
@@ -487,6 +642,7 @@ async def test_finish_records_part_counts_releases_and_finalises(leased, monkeyp
     monkeypatch.setattr(dispatch, "enqueue_job", enqueue)
     await batch_lease.finish("L1", [{"job_id": JOB, "parts_total": 2, "failed_media": ["m9"]}])
     done = json.loads((tmp_path / "results" / "L1" / JOB / "_done.json").read_text())
+    assert datetime.fromisoformat(done.pop("finished_at")) <= datetime.now(timezone.utc)
     assert done == {"parts_total": 2, "failed_media": ["m9"]}
     assert released == ["batch-lease:L1"]
     enqueue.assert_awaited_once_with("finalize_batch_job", "L1", JOB)

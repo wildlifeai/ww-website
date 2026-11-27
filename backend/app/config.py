@@ -190,6 +190,12 @@ class Settings(BaseSettings):
         "single",
         description="Token-saving variant: 'single' (one downscaled frame per call), 'contact_sheet' (one burst per call), 'batch' (Batch API)",
     )
+    GEMINI_PRESENCE_CONCURRENCY: int = Field(
+        4,
+        ge=1,
+        le=32,
+        description="Gemini presence calls in flight at once in one step run ('single' and 'contact_sheet'); 1 is one at a time (#531)",
+    )
 
     # ── SpeciesNet box filters (beside the run's confidence_threshold) ──
     # MegaDetector inside SpeciesNet answers an empty night scene with a box round the
@@ -325,7 +331,9 @@ class Settings(BaseSettings):
     )
     BATCH_MAX_QUEUE_HOURS: int = Field(24, ge=1, description="The reaper spares a queued batch job this long, instead of 60 minutes")
     BATCH_LEASE_MINUTES: int = Field(30, ge=5, description="A lease with no heartbeat for this long is requeued, then failed")
-    BATCH_MAX_ATTEMPTS: int = Field(2, ge=1, description="Leases a batch job may expire through before it is failed")
+    BATCH_MAX_ATTEMPTS: int = Field(
+        2, ge=1, description="Leases a batch job may expire through, and tries each results part's ingest gets, before the job is failed"
+    )
     BATCH_LEASE_MAX_PHOTOS: int = Field(2000, ge=1, description="Photos one lease hands to the cluster")
     BATCH_PART_MAX_PHOTOS: int = Field(
         40, ge=1, description="Photos per results part: one Lambda call ingests a part, at up to 12 s a photo with Gemini presence (#531)"
