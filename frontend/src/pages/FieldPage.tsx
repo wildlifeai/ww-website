@@ -3,18 +3,20 @@
 //
 // Realtime: /field
 // LoRaWAN cameras deployed now, and those whose deployment ended today (isLorawanCamera: deployed
-// with LoRaWAN on, or heard from): KPIs, a map, a "needs attention" panel, and two tabs, Cameras (a status table) and Messages (their LoRaWAN messages, live), read-only
+// with LoRaWAN on, or heard from): KPIs, a map, a "needs attention" panel, and two tabs, Cameras (a status table) and Messages (their LoRaWAN messages, live), the same
 // for every role. Telemetry (last message, battery, SD free, temperature, health) comes from the
 // deployment_latest_lorawan view, the ping period and firmware from the deployment, and detections
 // from the cameras' own LoRaWAN counts (lib/realtimeReads.ts); each camera's state is
 // lib/cameraState.ts. The Messages tab is lib/lorawanFeed.ts, live updates hooks/useFieldLive.ts.
-// Nothing here leaves the page: the photos stay on the camera's SD card while it is out.
+// A project admin who picks an open camera can read or change its check-in period over LoRaWAN
+// (components/data/CheckInPanel.tsx, #521). Photos stay on the camera's SD card while it is out.
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { RadioTower, TriangleAlert } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 import { useProjectSelection } from '../hooks/useProjectSelection'
+import { useProjectRoles } from '../hooks/useProjectRoles'
 import { useFieldLive } from '../hooks/useFieldLive'
 import { useMessageFeed } from '../hooks/useMessageFeed'
 import { supabase } from '../config/supabase'
@@ -30,6 +32,7 @@ import { agoLabel, batteryText, sdFreeText } from '../lib/lorawanFeed'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { DeploymentMap } from '../components/data/DeploymentMap'
 import { LorawanMessages } from '../components/data/LorawanMessages'
+import { CheckInPanel } from '../components/data/CheckInPanel'
 import { NoProjectSelected } from '../components/common/NoProjectSelected'
 
 // ── Types ─────────────────────────────────────────────────────────────
@@ -88,6 +91,7 @@ const SITE: React.CSSProperties = { ...MUTED, fontWeight: 400, fontSize: '0.78re
 export function FieldPage() {
   const { user } = useAuth()
   const { queryProjectIds, noProjectSelected } = useProjectSelection()
+  const roles = useProjectRoles()
   const [tab, setTab] = useState<Tab>('cameras')
   // A camera picked on the map or in the table, ringed on the map and tinted in the table.
   const [picked, setPicked] = useState<string | null>(null)
@@ -155,6 +159,11 @@ export function FieldPage() {
     detections: cameras.reduce((n, c) => n + c.detections48h, 0),
   }), [cameras, troubled])
   const pickedKeys = useMemo(() => (picked ? new Set([picked]) : undefined), [picked])
+  // Settings go to the camera of a deployment with no end date, sent by a project admin: the
+  // function's own rules (request_lorawan_downlink).
+  const pickedCamera = cameras.find(c => c.id === picked)
+  const settable = pickedCamera && !pickedCamera.deployment_end && roles.isProjectAdmin(pickedCamera.project_id)
+    ? pickedCamera : null
   const withGps = cameras.filter(c => c.latitude != null && c.longitude != null).length
   // Only once telemetry has answered, so the notice does not flash while it loads.
   const nothingReported = telemetryQuery.isSuccess && !cameras.some(c => c.lastSeen != null)
@@ -285,6 +294,15 @@ export function FieldPage() {
                 ? 'this camera was deployed without a GPS position.'
                 : 'none of these cameras was deployed with a GPS position.'}
             </p>
+          )}
+
+          {settable && (
+            <CheckInPanel
+              key={settable.id}
+              deploymentId={settable.id}
+              name={cameraName(settable)}
+              pingMinutes={settable.lorawan_ping_minutes}
+            />
           )}
 
           {/* Cameras | Messages */}

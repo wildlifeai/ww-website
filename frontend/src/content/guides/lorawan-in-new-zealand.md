@@ -188,7 +188,7 @@ app. The check-in period is set on the website only.
 Each change saves as soon as you make it. Nothing shorter than 4 hours is
 offered: The Things Network allows each camera 10 messages to it a day, and
 every check-in uses one for its acknowledgement, so 4 hours uses 6 and leaves
-room for others.
+room for the settings you can send from the Realtime page.
 
 **In the app:**
 
@@ -200,7 +200,9 @@ room for others.
 From then on, every camera you deploy in the project has its LoRaWAN turned
 on, with the project's check-in period, when you start monitoring. A camera
 deployed in a project without it has its LoRaWAN turned off. A change to
-either setting reaches a camera at its next deployment.
+either setting reaches a camera at its next deployment. To change the
+check-in period of a camera that is already out, use the Realtime page
+(below).
 
 ## Step 3: Deploy the camera and test it
 
@@ -292,6 +294,16 @@ they are collected. With no such camera in the selected projects, the tab is gre
     tell.
   - It opens with the newest 50 messages. **Load older** adds 50 more, up to 500.
   - Messages that arrive while the page is open stay lightly highlighted.
+- **Check-in period.** A project admin who picks a camera that is out sees its check-in period
+  under the map: what the camera last said, or what it was deployed with. **Read** asks the
+  camera for it, and **Change** sets it to 4, 6, 8, 12 or 24 hours. The camera takes the request
+  when it next checks in, so the answer can take up to one check-in period; the panel shows where
+  the request is as it moves, and the answer also appears under **Messages**. With no answer
+  within two check-in periods, the request expires.
+  - A camera takes one request at a time, and at most 3 a day, which keeps within The Things
+    Network's 10 messages to a camera a day.
+  - A change lasts until the camera's next deployment, which gives it the project's setting.
+  - Requests need the camera to have sent at least one message through The Things Network.
 - **Live** by the title means new messages appear as they arrive. **Connecting** means the
   page is reconnecting; it reads everything again once it is back, and when you return to the
   tab.

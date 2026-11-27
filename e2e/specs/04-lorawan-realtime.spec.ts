@@ -10,6 +10,12 @@ import { login, HAS_CREDS } from '../helpers/session'
  * health_state, #427): Fault with the fault named, and its battery and temperature still showing.
  * A second message, the camera's answer to a settings downlink (kind op_set), must then appear on
  * top of the Messages tab in words (#516).
+ * Picking the camera opens its check-in period panel for the run's user (tui@ww.org, a ww_admin,
+ * by default). A settings request inserted as the service role, as lorawan-downlink records one,
+ * must show there live while it waits, and again once it is answered (#521). No downlink reaches
+ * TTN: the row is synthetic, marked by having no requester, which every request the function
+ * records has; the spec deletes such rows of the seed deployment before and after, so a run that
+ * died cannot leave the camera with a request in flight.
  * This is the end-to-end proof that (a) the realtime publication SQL is applied on the dev
  * database and (b) the page's subscription works. The page listens for the decoded
  * lorawan_parsed_messages row, which lorawan-ingest writes after the message, so the values are
@@ -40,6 +46,9 @@ const HM0360_FAULT = 1 << 9
 // The settings reply: op 16 set to a value no camera uses.
 const OP_INDEX = 16
 const OP_VALUE = 4321
+// The settings request: op 32, the check-in period, set to 6 hours.
+const CHECK_IN_OP = 32
+const CHECK_IN_MINUTES = 360
 const RUN_TAG = process.env.E2E_RUN_TAG || `e2e-local-${Date.now()}`
 
 test.describe('LoRaWAN realtime telemetry', () => {
@@ -103,6 +112,11 @@ test.describe('LoRaWAN realtime telemetry', () => {
       await expect(camera).toContainText(`${SD_FREE}%`)
       await expect(camera).toContainText(`${TEMPERATURE} °C`)
 
+      // Picking the camera opens its check-in period panel, offered to the run's admin user.
+      await camera.click()
+      const panel = page.locator('.card').filter({ hasText: 'Check-in period:' })
+      await expect(panel, 'picking the camera did not open its check-in period panel').toBeVisible({ timeout: 15_000 })
+
       // The same message is on the Messages tab, as a check-in with its volts and SD free.
       await page.getByRole('tab', { name: 'Messages' }).click()
       const row = page.getByRole('row').filter({ hasText: '3.1 V' }).filter({ hasText: `${SD_FREE}%` }).first()
@@ -129,10 +143,38 @@ test.describe('LoRaWAN realtime telemetry', () => {
         page.getByRole('row').filter({ hasText: `Setting ${OP_INDEX} set to ${OP_VALUE}` }).first(),
         'the settings reply did not appear live on the Messages tab',
       ).toBeVisible({ timeout: 30_000 })
+
+      // A settings request, as lorawan-downlink records one: waiting, then answered, both live.
+      const { data: dep, error: e5 } = await sb.from('deployments').select('device_id').eq('id', DEPLOYMENT_ID).single()
+      expect(e5, `read the seed deployment failed: ${e5?.message}`).toBeNull()
+      await sb.from('lorawan_downlinks').delete().eq('deployment_id', DEPLOYMENT_ID).is('requested_by', null)
+      const { data: request, error: e6 } = await sb
+        .from('lorawan_downlinks')
+        .insert({
+          deployment_id: DEPLOYMENT_ID, device_id: dep!.device_id, kind: 'op_set', op_index: CHECK_IN_OP,
+          op_value: CHECK_IN_MINUTES, status: 'sent', sent_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single()
+      expect(e6, `insert lorawan_downlinks failed: ${e6?.message}`).toBeNull()
+      await expect(
+        panel.getByRole('status'),
+        'the settings request did not appear live in the panel. Is lorawan_downlinks in the ' +
+        'supabase_realtime publication on dev (ww-backend#405)?',
+      ).toContainText("Waiting for the camera's next check-in", { timeout: 30_000 })
+      await expect(panel.getByRole('button', { name: 'Change' })).toBeDisabled()
+      const { error: e7 } = await sb
+        .from('lorawan_downlinks')
+        .update({ status: 'answered', answered_at: new Date().toISOString() })
+        .eq('id', request!.id)
+      expect(e7, `update lorawan_downlinks failed: ${e7?.message}`).toBeNull()
+      await expect(panel.getByRole('status'), 'the answer did not appear live in the panel')
+        .toContainText('Check-in period set to 6 hours', { timeout: 30_000 })
     } finally {
       // Clean up the synthetic rows so repeated runs stay idempotent. The parsed
       // rows go with their messages (ON DELETE CASCADE); the fault's notifications do not.
       await sb.from('lorawan_messages').delete().eq('device_eui', RUN_TAG)
+      await sb.from('lorawan_downlinks').delete().eq('deployment_id', DEPLOYMENT_ID).is('requested_by', null)
       await sb.from('notifications').delete()
         .eq('type', 'camera_fault').eq('deployment_id', DEPLOYMENT_ID).gte('created_at', startedAt)
     }

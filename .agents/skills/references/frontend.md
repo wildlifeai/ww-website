@@ -83,6 +83,11 @@ Rules:
   out once in ww-backend for the website, the app and the alerts (ww-backend#381); don't decode
   self-test bits or compare counters here. The page adds only silence, from the deployment's
   `lorawan_ping_minutes`, and words the reason codes, both in `lib/cameraState.ts` (#427).
+* A camera's settings go to it by LoRaWAN downlink through ww-backend's `lorawan-downlink` function,
+  which does every check; the Realtime page only hides the controls from non-admins and words the
+  refusals and each request's status (`lib/lorawanDownlinks.ts`, #521). `functions.invoke` turns a
+  non-2xx answer into an error whose `context` is the response, so read the function's code from
+  `error.context.json()`, as `camtrapExport.ts` does.
 * React Doctor's command and gate are in `AGENTS.md`, "Validate before committing". Rules
   switched off for the repo are in `frontend/doctor.config.json`.
 

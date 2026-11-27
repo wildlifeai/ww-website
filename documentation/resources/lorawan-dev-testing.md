@@ -180,6 +180,7 @@ unlinked.
 | TTN **Messaging** → **Downlink**, FPort `3`, payload `56 10 00 00` | After the camera's next uplink, its answer `56 10 <lo> <hi>`: "Setting 16 read: ..." under **Messages** |
 | The same with `57 10 3C 00` | Sets op 16 (detection threshold) to 60 %: "Setting 16 set to 60" |
 | The same with `57 20 0F 00` | Sets op 32 to 15 minutes: "Setting 32 set to 15", and the deployment's `lorawan_ping_minutes` becomes 15, so Silent follows the camera |
+| As `kowhai@ww.org`, pick the camera on **Realtime**: **Read**, then **Change** to 4 hours (needs the downlink key, step 4) | The panel under the map says "Waiting for the camera's next check-in", then "Check-in period read: ..." and "Check-in period set to 4 hours" after its next uplinks; `rata@ww.org` sees no panel. A fourth request in 24 hours is refused |
 
 A downlink waits for the camera's next uplink (up to one ping period), and only one request goes
 per downlink.

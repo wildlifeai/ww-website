@@ -82,12 +82,15 @@ export const CAMERA_STATE: Record<CameraState, { color: string; label: string }>
 }
 
 /** "12 h", "3 days": how long a camera goes unheard before it is Silent. */
-export function silenceText(pingMinutes: number | null): string {
+export function silenceSpan(pingMinutes: number | null): string {
   const hours = silentAfterHours(pingMinutes) ?? 0
-  const span = hours >= 48 && hours % 24 === 0 ? `${hours / 24} days`
+  return hours >= 48 && hours % 24 === 0 ? `${hours / 24} days`
     : hours >= 1 ? `${Math.round(hours * 10) / 10} h`
       : `${Math.round(hours * 60)} min`
-  return `No message for over ${span}`
+}
+
+export function silenceText(pingMinutes: number | null): string {
+  return `No message for over ${silenceSpan(pingMinutes)}`
 }
 
 // Self-test bits by number, after the firmware's selfTest.h and the app's decodeSelfTest
