@@ -5,14 +5,15 @@
 // for the port (or Reconnect reopens the one used before); this opens it at 921600 baud, feeds
 // each received line to a LiveViewSession (lib/liveViewSession.ts) and types what it asks for,
 // one character every 30 ms. The page shows a snapshot of the session ten times a second.
-// Leaving the page disconnects properly; a reload or a closed tab cannot, so the browser asks first.
+// Leaving the page disconnects properly, and coming back shows that finishing; a reload or a
+// closed tab cannot, so the browser asks first. Reconnect follows the cable out and back in.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BAUD_RATE, LineSplitter, typeSlowly, type MotionOp } from '../lib/liveView'
 import { LiveViewSession, logText, type LiveViewSnapshot } from '../lib/liveViewSession'
 import { downloadBlob, logFileName } from '../lib/liveViewFiles'
 
 // The parts of the Web Serial API used here (no DOM typings ship for it yet).
-interface PortInfo { usbVendorId?: number; usbProductId?: number }
+export interface PortInfo { usbVendorId?: number; usbProductId?: number }
 interface SerialPortLike {
   open(options: { baudRate: number; bufferSize?: number }): Promise<void>
   close(): Promise<void>
@@ -23,7 +24,10 @@ interface SerialPortLike {
 interface SerialLike {
   requestPort(): Promise<SerialPortLike>
   getPorts(): Promise<SerialPortLike[]>
+  addEventListener?(type: 'connect' | 'disconnect', listener: (event: Event) => void): void
+  removeEventListener?(type: 'connect' | 'disconnect', listener: (event: Event) => void): void
 }
+type HasInfo = { getInfo?(): PortInfo }
 
 function webSerial(): SerialLike | null {
   return typeof navigator !== 'undefined' ? (navigator as Navigator & { serial?: SerialLike }).serial ?? null : null
@@ -48,19 +52,36 @@ const now = () => Date.now()
 /** The port this page used last, while the page is open; after a reload, the granted port with
  *  the same USB ids, when only one has them (a bench often has two identical FTDI cables). */
 let lastPort: SerialPortLike | null = null
+/** The session of a page that was left: it finishes Disconnect before the port closes. */
+let running: { session: LiveViewSession; done: Promise<void> } | null = null
+
+function sameIds(port: HasInfo, want: PortInfo): boolean {
+  const info = port.getInfo?.() ?? {}
+  return info.usbVendorId === want.usbVendorId && info.usbProductId === want.usbProductId
+}
+
+/** The port Reconnect opens: the last one while it is granted, else the only one with its ids. */
+export function pickReconnectPort<P extends HasInfo>(ports: readonly P[], last: P | null, want: PortInfo): P | null {
+  if (last && ports.includes(last)) return last
+  const same = ports.filter(p => sameIds(p, want))
+  return same.length === 1 ? same[0] : null
+}
+
+/** The last port after `plugged` came in: a cable with the same ids back in place of one that went. */
+export function portAfterPlugIn<P extends HasInfo>(plugged: P, ports: readonly P[], last: P | null, want: PortInfo): P | null {
+  return (!last || !ports.includes(last)) && sameIds(plugged, want) ? plugged : last
+}
+
+function rememberedIds(): PortInfo {
+  try {
+    return JSON.parse(localStorage.getItem(PORT_KEY) ?? '{}') as PortInfo
+  } catch {
+    return {} // storage off or unreadable: no remembered port
+  }
+}
 
 async function reconnectablePort(serial: SerialLike): Promise<SerialPortLike | null> {
-  const ports = await serial.getPorts()
-  if (lastPort && ports.includes(lastPort)) return lastPort
-  let want: PortInfo = {}
-  try {
-    want = JSON.parse(localStorage.getItem(PORT_KEY) ?? '{}') as PortInfo
-  } catch { /* storage off or unreadable: no remembered port */ }
-  const same = ports.filter(p => {
-    const info = p.getInfo?.() ?? {}
-    return info.usbVendorId === want.usbVendorId && info.usbProductId === want.usbProductId
-  })
-  return same.length === 1 ? same[0] : null
+  return pickReconnectPort(await serial.getPorts(), lastPort, rememberedIds())
 }
 
 function rememberPort(port: SerialPortLike): void {
@@ -70,7 +91,7 @@ function rememberPort(port: SerialPortLike): void {
   } catch { /* storage off: Reconnect still works until the page is reloaded */ }
 }
 
-async function run(port: SerialPortLike, session: LiveViewSession, publish: () => void): Promise<void> {
+async function run(port: SerialPortLike, session: LiveViewSession): Promise<void> {
   const io: { reader: ReadableStreamDefaultReader<Uint8Array> | null } = { reader: null }
   const reading = (async () => {
     const splitter = new LineSplitter()
@@ -106,7 +127,6 @@ async function run(port: SerialPortLike, session: LiveViewSession, publish: () =
       }
       await typeSlowly(text, byte => writer.write(byte), sleep)
       session.typed(text, Date.now())
-      publish()
     }
   } catch (err) {
     session.note(Date.now(), `write error: ${err instanceof Error ? err.message : String(err)}`)
@@ -126,23 +146,76 @@ export function useLiveView() {
   const sessionRef = useRef<LiveViewSession | null>(null)
   // The last session, kept after Disconnect so its log can still be saved.
   const lastSessionRef = useRef<LiveViewSession | null>(null)
+  // Stops showing the session when the page goes; the session itself carries on.
+  const unfollowRef = useRef<(() => void) | null>(null)
 
   const checkReconnect = useCallback(async () => {
     const serial = webSerial()
     setCanReconnect(!!serial && (await reconnectablePort(serial).catch(() => null)) !== null)
   }, [])
 
-  // Offer Reconnect on arrival when this browser already granted the camera's port.
+  /** Shows a session ten times a second until it ends, then offers Reconnect. */
+  const follow = useCallback((session: LiveViewSession, done: Promise<void>) => {
+    sessionRef.current = session
+    lastSessionRef.current = session
+    let shown = -1
+    let following = true
+    const publish = () => {
+      if (session.version === shown) return
+      shown = session.version
+      setView(session.snapshot())
+    }
+    const timer = window.setInterval(publish, PUBLISH_MS)
+    unfollowRef.current = () => {
+      following = false
+      window.clearInterval(timer)
+    }
+    const ended = () => {
+      if (!following) return
+      window.clearInterval(timer)
+      publish()
+      if (sessionRef.current === session) sessionRef.current = null
+      void checkReconnect()
+    }
+    done.then(ended, ended)
+  }, [checkReconnect])
+
+  // Offer Reconnect on arrival when this browser already granted the camera's port, and again when
+  // a granted cable goes or comes back.
   useEffect(() => {
     const serial = webSerial()
     if (!serial) return
     let alive = true
-    reconnectablePort(serial).then(port => { if (alive) setCanReconnect(port !== null) }, () => undefined)
-    return () => { alive = false }
+    const check = () => {
+      reconnectablePort(serial).then(port => { if (alive) setCanReconnect(port !== null) }, () => undefined)
+    }
+    // The event's target is the port plugged in.
+    const pluggedIn = (event: Event) => {
+      const plugged = event.target as unknown as SerialPortLike | null
+      serial.getPorts().then(ports => {
+        if (plugged) lastPort = portAfterPlugIn(plugged, ports, lastPort, rememberedIds())
+        check()
+      }, () => undefined)
+    }
+    check()
+    serial.addEventListener?.('connect', pluggedIn)
+    serial.addEventListener?.('disconnect', check)
+    return () => {
+      alive = false
+      serial.removeEventListener?.('connect', pluggedIn)
+      serial.removeEventListener?.('disconnect', check)
+    }
   }, [])
 
   // Leaving the page: the session carries on until the camera is asleep, then closes the port.
-  useEffect(() => () => sessionRef.current?.disconnect(Date.now()), [])
+  // Coming back meanwhile shows it finishing, rather than a port that will not open.
+  useEffect(() => {
+    if (running && !running.session.stopped) follow(running.session, running.done)
+    return () => {
+      sessionRef.current?.disconnect(Date.now())
+      unfollowRef.current?.()
+    }
+  }, [follow])
 
   const active = view !== null && view.phase !== 'stopped'
   useEffect(() => {
@@ -161,23 +234,13 @@ export function useLiveView() {
     }
     rememberPort(port)
     const session = new LiveViewSession()
-    sessionRef.current = session
-    lastSessionRef.current = session
-    let shown = -1
-    const publish = () => {
-      if (session.version === shown) return
-      shown = session.version
-      setView(session.snapshot())
-    }
     session.start(Date.now())
-    publish()
-    const timer = window.setInterval(publish, PUBLISH_MS)
-    await run(port, session, publish)
-    window.clearInterval(timer)
-    publish()
-    sessionRef.current = null
-    void checkReconnect()
-  }, [checkReconnect])
+    const done = run(port, session).finally(() => {
+      if (running?.session === session) running = null
+    })
+    running = { session, done }
+    follow(session, done)
+  }, [follow])
 
   const connect = useCallback(async () => {
     const serial = webSerial()

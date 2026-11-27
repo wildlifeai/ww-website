@@ -14,7 +14,7 @@ export function LiveViewPage() {
         <h2 style={{ margin: 0 }}>Motion live view</h2>
         <PageHelp label="About the motion live view" guide="/guides/tuning-motion-detection" guideLabel="Read the motion detection guide">
           What a camera on its USB cable sees, where it detects motion, and whether that would wake it.
-          Settings you change here are saved on the camera at once.
+          The motion settings you change here are saved on the camera at once.
         </PageHelp>
       </div>
       <MotionLiveView />

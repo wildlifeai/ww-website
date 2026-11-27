@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // LiveViewControls: the live view's Controls tab (#400), as live_view.py lays them out. Free run,
-// Stop and One image; Save frame; the frame interval; the Motion detection switch with the three
-// motion op params, written to the camera and read back, and the grid rows; Keep awake.
+// Stop and One image; Save frame; the frame interval; the motion grid switch with the three
+// motion op params, written to the camera and shown once it confirms them, and the grid rows;
+// Keep awake, whose untick stops Free run.
 import { useState } from 'react'
 import {
   MAX_FRAME_INTERVAL_MS, MIN_FRAME_INTERVAL_MS, OP_MD_INTERVAL, OP_RANGE, OP_SENSITIVITY, OP_THRESHOLD,
@@ -37,7 +38,8 @@ export function LiveViewControls({ view, rows, onRows, actions }: {
   const [withGrid, setWithGrid] = useState(false)
   const live = view.phase !== 'stopping' && view.phase !== 'stopped'
   const run = { free: actions.freeRun, paused: actions.pause, one: actions.oneImage }
-  const { ops } = view
+  const { ops, pendingOps } = view
+  const op = (n: MotionOp) => pendingOps[n] ?? ops[n]
   const intervalHint = view.intervalSet ? 'set here' : view.motionDetection && view.camera === 'HM0360' ? 'follows the MD interval' : 'default'
 
   return (
@@ -80,7 +82,7 @@ export function LiveViewControls({ view, rows, onRows, actions }: {
       <section style={SECTION}>
         <label style={{ ...CHECK, fontWeight: 600 }}>
           <input type="checkbox" checked={view.motionDetection} disabled={!live} onChange={e => actions.setMotionDetection(e.target.checked)} />
-          Motion detection
+          Show motion grid
         </label>
         {view.motionDetection && (
           <>
@@ -92,8 +94,8 @@ export function LiveViewControls({ view, rows, onRows, actions }: {
                     <input
                       type="radio"
                       name="md-sensitivity"
-                      checked={ops[OP_SENSITIVITY] === s.value}
-                      disabled={!live || ops[OP_SENSITIVITY] === undefined}
+                      checked={op(OP_SENSITIVITY) === s.value}
+                      disabled={!live || ops[OP_SENSITIVITY] === undefined || pendingOps[OP_SENSITIVITY] !== undefined}
                       onChange={() => actions.setOp(OP_SENSITIVITY, s.value)}
                     />
                     {s.label}
@@ -101,8 +103,12 @@ export function LiveViewControls({ view, rows, onRows, actions }: {
                 ))}
               </div>
             </fieldset>
-            <OpBox label="Wake threshold (cells)" op={OP_THRESHOLD} value={ops[OP_THRESHOLD]} live={live} onSet={actions.setOp} />
-            <OpBox label="MD interval (ms, 0 = off)" op={OP_MD_INTERVAL} value={ops[OP_MD_INTERVAL]} live={live} onSet={actions.setOp} />
+            <OpBox label="Wake threshold (cells)" op={OP_THRESHOLD} view={view} live={live} onSet={actions.setOp} />
+            <OpBox label="MD interval (ms, 0 = off)" op={OP_MD_INTERVAL} view={view} live={live} onSet={actions.setOp} />
+            {view.opNotice && <p role="alert" style={{ margin: 0, color: '#ef4444' }}>{view.opNotice}</p>}
+            {view.device.sd === 'failed' && (
+              <p style={{ margin: 0, color: 'var(--text-muted)' }}>No SD card: a change here is lost when the camera restarts.</p>
+            )}
             <fieldset style={{ border: 'none', margin: 0, padding: 0 }}>
               <legend style={{ fontWeight: 500, marginBottom: '0.25rem', padding: 0 }}>Grid rows</legend>
               <div style={ROW}>
@@ -126,19 +132,23 @@ export function LiveViewControls({ view, rows, onRows, actions }: {
   )
 }
 
-function OpBox({ label, op, value, live, onSet }: {
+/** A motion op: the value being written until the camera confirms it, then the camera's own. */
+function OpBox({ label, op, view, live, onSet }: {
   label: string
   op: MotionOp
-  value: number | undefined
+  view: LiveViewSnapshot
   live: boolean
   onSet: (op: MotionOp, value: number) => void
 }) {
   const [min, max] = OP_RANGE[op]
-  return <NumberBox label={label} value={value} min={min} max={max} disabled={!live || value === undefined} onSet={v => onSet(op, v)} />
+  const pending = view.pendingOps[op]
+  const value = pending ?? view.ops[op]
+  return <NumberBox label={label} value={value} min={min} max={max} disabled={!live || value === undefined || pending !== undefined} onSet={v => onSet(op, v)} />
 }
 
 /** A number the camera holds: typed freely, sent on Enter or leaving the box, then shown as the
- *  camera reports it, so a value out of range or refused goes back to the camera's. */
+ *  camera reports it, so a refused value goes back to the camera's. One out of range stays in the
+ *  box with the range under it. */
 function NumberBox({ label, value, min, max, disabled, onSet }: {
   label: string
   value: number | undefined
@@ -148,10 +158,12 @@ function NumberBox({ label, value, min, max, disabled, onSet }: {
   onSet: (value: number) => void
 }) {
   const [draft, setDraft] = useState<string | null>(null)
+  const typed = draft === null || draft.trim() === '' ? null : Number(draft)
+  const outOfRange = typed !== null && !(Number.isInteger(typed) && typed >= min && typed <= max)
   const commit = () => {
-    if (draft === null) return
+    if (draft === null || outOfRange) return
     setDraft(null)
-    if (draft.trim() !== '' && Number(draft) !== value) onSet(Number(draft))
+    if (typed !== null && typed !== value) onSet(typed)
   }
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', fontWeight: 500 }}>
@@ -166,8 +178,10 @@ function NumberBox({ label, value, min, max, disabled, onSet }: {
         onChange={e => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={e => { if (e.key === 'Enter') commit() }}
+        aria-invalid={outOfRange || undefined}
         style={INPUT}
       />
+      {outOfRange && <span role="alert" style={{ fontWeight: 400, color: '#ef4444' }}>{min} to {max}</span>}
     </label>
   )
 }
