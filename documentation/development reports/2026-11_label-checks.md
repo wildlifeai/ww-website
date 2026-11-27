@@ -1,6 +1,6 @@
 # Label checks with DINOv3 fingerprints
 
-> **Status:** 📋 Proposal, decisions taken 2026-11-21 (a design grill with Victor). Not built. Work is tracked in the issues listed under [Work](#work).
+> **Status:** 📋 Proposal, decisions taken 2026-11-21 (a design grill with Victor). Step 3 built 2026-11-27; steps 1 and 2 not built. Work is tracked in the issues listed under [Work](#work).
 
 The Wildlife Brain already gives every AI-detected animal a DINOv3 fingerprint (an embedding of its crop) and uses them for groups, find-similar, the map, outliers and the grid's "Needs review first" sort ([wildlife-brain guide](../../frontend/src/content/guides/wildlife-brain.md)). None of those look at the labels: that sort's "disagreement" is the AI and a person disagreeing on the same photo. These checks compare each label with the labels of animals that look like it, to catch likely mistakes for a second look.
 
@@ -49,4 +49,4 @@ A flag and its outcome need storage, which belongs to ww-backend: a table (`labe
 |---|---|
 | 1. The checks, the filter, the slider and "Checked, it's right" | [#448](https://github.com/wildlifeai/ww-website/issues/448) |
 | 2. Crop files and fingerprints for drawn boxes | [#449](https://github.com/wildlifeai/ww-website/issues/449) |
-| 3. The mixed-group warning | [#450](https://github.com/wildlifeai/ww-website/issues/450) |
+| 3. The mixed-group warning | [#450](https://github.com/wildlifeai/ww-website/issues/450), built: [`domain/cluster_labels.py`](../../backend/app/domain/cluster_labels.py) behind `GET /api/brain/clusters/{deployment_id}/labels`, lineage in [`domain/taxon_lineage.py`](../../backend/app/domain/taxon_lineage.py) |

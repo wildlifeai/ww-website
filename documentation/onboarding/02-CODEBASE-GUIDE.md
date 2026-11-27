@@ -89,7 +89,7 @@ password) or uses Forgot password.
 | `/manifest` | `ManifestPage` | Firmware `MANIFEST.zip` builder |
 | `/live-view` | `LiveViewPage` | A bench tool for a WW500 on its USB cable through Web Serial (Chrome or Edge on a computer), no backend: the live picture with the motion grid and wake status, and Controls (run modes, Save frame, frame interval, motion ops, Keep awake), Console (commands, session log) and Device tabs. The console protocol is `lib/liveView.ts` and `lib/liveViewSession.ts`, ported from the firmware's `live_view.py` and `live_preview.md` (#400) |
 | `/upload-model` | `UploadModelPage` | Edge Impulse → Vela model upload (org managers) |
-| `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters, unconfirmed and biggest first, ten per page; a confirm offers Undo |
+| `/clusters/:id` | `ClusterReviewPage` | Bulk-confirm HDBSCAN clusters, unconfirmed and biggest first, ten per page; a confirm offers Undo; a cluster that mixes species is marked and its confirm warns first (#450) |
 | `/review/:id` | `ReviewQueuePage` | Retired Review Queue: redirects to `/annotations?deployment=:id` |
 | `/umap/:id` | `UmapExplorerPage` | Embedding-space map of a deployment; a click opens that photo in the grid |
 | `/intelligence/:id` | `DatasetHealthPage` | Dataset health + QA agreement (per project), behind `FF_INTELLIGENCE_ENABLED`. Links to a flagged page show only when `useFeatureEnabled` says the feature answers |

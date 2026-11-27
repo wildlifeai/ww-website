@@ -3,13 +3,14 @@
 """Wildlife Brain router — DINOv3 embeddings, clusters, similarity.
 
 Thin HTTP layer (envelope responses); the logic is in domain/wildlife_brain.py, the pgvector
-vector store, and domain/human_verdicts.py for the label writes (cluster confirm and undo,
-review). Gated behind ``FF_WILDLIFE_BRAIN_ENABLED``.
+vector store, domain/human_verdicts.py for the label writes (cluster confirm and undo,
+review) and domain/cluster_labels.py for the species a cluster mixes. Gated behind ``FF_WILDLIFE_BRAIN_ENABLED``.
 """
 
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -31,7 +32,7 @@ from app.authz import (
 )
 from app.config import settings
 from app.dependencies import get_current_user, get_verified_user, require_not_demo
-from app.domain import human_verdicts
+from app.domain import cluster_labels, human_verdicts
 from app.middleware.rate_limit import limiter
 from app.schemas.brain import (
     ConfirmClusterRequest,
@@ -136,6 +137,21 @@ async def list_clusters(request: Request, deployment_id: str, user=Depends(get_c
 
     run_id, clusters = await asyncio.to_thread(_fetch)
     return ApiResponse(data={"embedding_run_id": run_id, "clusters": clusters}, meta=ApiMeta(request_id=req_id))
+
+
+@router.get("/clusters/{deployment_id}/labels", dependencies=[Depends(require_deployment_access)])
+async def list_cluster_labels(
+    request: Request,
+    deployment_id: str,
+    ids: list[str] = Query(..., min_length=1, max_length=cluster_labels.MAX_CLUSTERS, description="Cluster assignment ids"),
+    user=Depends(get_current_user),
+):
+    """The species each listed cluster's members carry, and whether they mix (#450)."""
+    req_id = getattr(request.state, "request_id", None)
+    if not settings.FF_WILDLIFE_BRAIN_ENABLED:
+        return _disabled(req_id)
+    result = await asyncio.to_thread(cluster_labels.cluster_labels, create_service_client(), deployment_id, ids)
+    return ApiResponse(data={"clusters": [asdict(c) for c in result]}, meta=ApiMeta(request_id=req_id))
 
 
 @router.post("/clusters/multi", dependencies=[Depends(require_not_demo)])

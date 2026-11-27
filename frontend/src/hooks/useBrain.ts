@@ -45,6 +45,44 @@ export function useClusters(deploymentId?: string) {
   })
 }
 
+/** One species among a cluster's members, by their photo verdicts. */
+export interface ClusterLabelCount {
+  scientific_name: string
+  vernacular_name: string | null
+  taxon_id: string | null
+  photos: number
+  /** Members no person has labelled, which a confirm of the cluster relabels. */
+  unreviewed: number
+}
+
+export interface ClusterLabels {
+  /** The cluster assignment id. */
+  id: string
+  /** Two of its species are neither the same nor a broader or narrower name of each other. */
+  mixed: boolean
+  labels: ClusterLabelCount[]
+}
+
+/** The route's cap on clusters per request. */
+export const CLUSTER_LABELS_MAX = 50
+
+/**
+ * The species each listed cluster's members carry, and whether they mix (#450). Kept under the
+ * clusters key, so a confirm or a review, which invalidate it, reads them again.
+ */
+export function useClusterLabels(deploymentId: string | undefined, clusterIds: readonly string[]) {
+  const ids = clusterIds.toSorted().slice(0, CLUSTER_LABELS_MAX)
+  return useQuery({
+    queryKey: ['brain', 'clusters', deploymentId, 'labels', ids],
+    queryFn: async () => {
+      const query = ids.map(id => `ids=${encodeURIComponent(id)}`).join('&')
+      const r = (await apiClient.get(`/api/brain/clusters/${deploymentId}/labels?${query}`)) as { data: { clusters: ClusterLabels[] } }
+      return Object.fromEntries(r.data.clusters.map(c => [c.id, c])) as Record<string, ClusterLabels | undefined>
+    },
+    enabled: !!deploymentId && ids.length > 0,
+  })
+}
+
 export function useUmapCoords(deploymentId?: string) {
   return useQuery({
     queryKey: ['brain', 'umap', deploymentId],

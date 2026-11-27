@@ -3,12 +3,14 @@
 //
 // GridBody: the review grid's cards. The "Find similar" list, ranked neighbours of one photo;
 // otherwise the page, flat or in collapsible groups, where a group offers Select for its photos
-// and an unconfirmed cluster "Label all".
+// and an unconfirmed cluster "Label all", with a mark when it mixes species (#450).
 import { Search, X } from 'lucide-react'
 import type { CSSProperties } from 'react'
+import type { ClusterGroup } from '../../hooks/useGridGroups'
 import type { MediaRecord } from '../../lib/gridMedia'
 import { Banner } from '../ui/Banner'
 import { ClusterLabelAll } from './ClusterLabelAll'
+import { MixedMark } from './MixedCluster'
 import { GridCards, type CardEnv } from './GridCards'
 import { MediaGroup } from './MediaGroup'
 import { SMALL_BTN } from './gridStyles'
@@ -25,7 +27,7 @@ interface Props {
   collapsed: ReadonlySet<string>
   onToggleGroup: (label: string) => void
   onSelectGroup: (ids: string[], allSelected: boolean) => void
-  clusterByLabel: ReadonlyMap<string, { id: string; confirmed: boolean }>
+  clusterByLabel: ReadonlyMap<string, ClusterGroup>
   /** "Label all" on an unconfirmed cluster: its deployment and project, when the user may label it. */
   labelAll: { deploymentId: string; projectId?: string; onDone: (created: number, name: string) => void } | null
   gridStyle: CSSProperties
@@ -77,6 +79,7 @@ export function GridBody({
         const groupSelectable = groupItems.filter(env.isSelectable)
         const allSelected = groupSelectable.length > 0 && groupSelectable.every(m => env.selectedIds.has(m.id))
         const canLabelAll = !!(clusterInfo && !clusterInfo.confirmed && labelAll)
+        const mixed = clusterInfo?.labels?.mixed ? clusterInfo.labels : null
         return (
           <MediaGroup
             key={groupLabel}
@@ -84,8 +87,9 @@ export function GridBody({
             count={groupItems.length}
             open={!collapsed.has(groupLabel)}
             onToggle={() => onToggleGroup(groupLabel)}
-            action={(groupSelectable.length > 0 || canLabelAll) ? (
+            action={(groupSelectable.length > 0 || canLabelAll || mixed) ? (
               <>
+                {mixed && <MixedMark cluster={mixed} />}
                 {groupSelectable.length > 0 && (
                   <button type="button" style={SMALL_BTN} onClick={() => onSelectGroup(groupSelectable.map(m => m.id), allSelected)}
                     title={allSelected ? 'Deselect the photos in this group' : 'Select the photos in this group'}>
@@ -93,7 +97,8 @@ export function GridBody({
                   </button>
                 )}
                 {canLabelAll && clusterInfo && labelAll && (
-                  <ClusterLabelAll clusterId={clusterInfo.id} deploymentId={labelAll.deploymentId} projectId={labelAll.projectId} onDone={labelAll.onDone} />
+                  <ClusterLabelAll clusterId={clusterInfo.id} deploymentId={labelAll.deploymentId} projectId={labelAll.projectId}
+                    labels={clusterInfo.labels} labelsLoading={clusterInfo.labelsLoading} onDone={labelAll.onDone} />
                 )}
               </>
             ) : undefined}

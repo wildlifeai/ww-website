@@ -3,12 +3,21 @@
 //
 // useGridGroups: the review grid's Group by. Groups split the page (lib/gridGrouping); cluster
 // groups come from the multi-cluster API, fetched only while grouped by cluster, and the groups
-// the reviewer collapsed are kept for the current grouping. It also reports whether the one
-// deployment in view has a Wildlife Brain run, for the Review tab.
+// the reviewer collapsed are kept for the current grouping. An unconfirmed cluster's group carries
+// the species its members carry, for the mixed mark and Label all's warning (#450). It also reports
+// whether the one deployment in view has a Wildlife Brain run, for the Review tab.
 import { useMemo, useState } from 'react'
 import type { MediaRecord } from '../lib/gridMedia'
 import { availableGroupings, groupInOrder, photoGroupKey, type GroupBy, type GroupNames } from '../lib/gridGrouping'
-import { useClusters, useMultiClusters } from './useBrain'
+import { useClusterLabels, useClusters, useMultiClusters, type ClusterLabels } from './useBrain'
+
+/** A cluster's group: its confirm-able row, and the species of its members while it is unconfirmed. */
+export interface ClusterGroup {
+  id: string
+  confirmed: boolean
+  labels?: ClusterLabels
+  labelsLoading: boolean
+}
 
 const NONE: ReadonlySet<string> = new Set()
 
@@ -42,7 +51,7 @@ export function useGridGroups({ cards, choice, deploymentIds, deploymentNames, p
   // Map a cluster group's display label → its confirm-able row id, so the group
   // header can offer "label all" (only for unconfirmed clusters). Mirrors the
   // label logic in groups below.
-  const clusterByLabel = useMemo(() => {
+  const clusterRows = useMemo(() => {
     const m = new Map<string, { id: string; confirmed: boolean }>()
     if (groupBy !== 'cluster') return m
     for (const c of clustersQ.data?.clusters ?? []) {
@@ -77,6 +86,20 @@ export function useGridGroups({ cards, choice, deploymentIds, deploymentNames, p
       return photoGroupKey(groupBy, m, names)
     })
   }, [cards, groupBy, names, clustersQ.data])
+
+  const openClusterIds = useMemo(
+    () => (groups ?? []).flatMap(([label]) => {
+      const c = clusterRows.get(label)
+      return c && !c.confirmed ? [c.id] : []
+    }),
+    [groups, clusterRows],
+  )
+  const labelsQ = useClusterLabels(groupBy === 'cluster' ? singleDeployment ?? undefined : undefined, openClusterIds)
+  const clusterByLabel = useMemo(() => {
+    const m = new Map<string, ClusterGroup>()
+    for (const [label, c] of clusterRows) m.set(label, { ...c, labels: labelsQ.data?.[c.id], labelsLoading: labelsQ.isLoading })
+    return m
+  }, [clusterRows, labelsQ.data, labelsQ.isLoading])
 
   // Groups the reviewer collapsed, for the current grouping.
   const [collapsedAt, setCollapsedAt] = useState<{ groupBy: GroupBy; labels: ReadonlySet<string> }>({ groupBy: 'none', labels: NONE })
