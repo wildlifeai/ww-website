@@ -5,10 +5,12 @@
 // Sets projects.capture_method_id (default triggering method), projects.model_id
 // (default AI model), the burst, projects.photos_per_trigger and photo_interval_milliseconds
 // (lib/burstCapture.ts), the on-device detection threshold, projects.detection_threshold_pct
-// (lib/detectionThreshold.ts), and the capture flash, projects.flash_* (lib/flashSettings.ts).
+// (lib/detectionThreshold.ts), the capture flash, projects.flash_* (lib/flashSettings.ts), and
+// LoRaWAN, projects.lorawan_required and lorawan_ping_minutes (lib/lorawanSettings.ts, #524).
 // Writes are gated by RLS to project admins. RLS turns a refused update into 0 rows with no
-// error, so a save asks for the row back and shows what the database holds. Members see the
-// same controls switched off, so they can read the settings and ask an admin (decision 8).
+// error, so a save asks for the row back and shows what the database holds
+// (lib/projectDefaults.ts). Members see the same controls switched off, so they can read the
+// settings and ask an admin (decision 8).
 /* eslint-disable react-hooks/set-state-in-effect */
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
@@ -19,27 +21,13 @@ import {
   defaultWindow, describeUtc, FLASH_LEDS, FLASH_MODES, localOffsetMinutes, windowFromLocal, windowToLocal,
   type FlashLed, type FlashMode, type FlashWindow,
 } from '../../lib/flashSettings'
-
-interface Project {
-  id: string
-  name: string
-  capture_method_id: number | null
-  model_id: string | null
-  photos_per_trigger: number
-  photo_interval_milliseconds: number
-  detection_threshold_pct: number
-  flash_mode: FlashMode
-  flash_led: FlashLed
-  flash_window_start_minutes_utc: number | null
-  flash_window_minutes: number | null
-}
+import { formatPing, pingChoices } from '../../lib/lorawanSettings'
+import {
+  PROJECT_DEFAULT_COLUMNS, saveProjectDefaults, type DefaultsPatch, type ProjectDefaults as Project,
+} from '../../lib/projectDefaults'
 
 // Read once: calling Intl during render made the React compiler lint skip this component.
 const BROWSER_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
-
-const PROJECT_COLUMNS =
-  'id, name, capture_method_id, model_id, photos_per_trigger, photo_interval_milliseconds, ' +
-  'detection_threshold_pct, flash_mode, flash_led, flash_window_start_minutes_utc, flash_window_minutes'
 
 function storedWindow(p: Project): FlashWindow | null {
   return p.flash_window_start_minutes_utc == null || p.flash_window_minutes == null
@@ -72,7 +60,7 @@ export function ProjectDefaultsPanel({ projectId, canEdit, onSaved }: {
     let cancelled = false
     setLoading(true)
     Promise.all([
-      supabase.from('projects').select(PROJECT_COLUMNS).eq('id', projectId).maybeSingle(),
+      supabase.from('projects').select(PROJECT_DEFAULT_COLUMNS).eq('id', projectId).maybeSingle(),
       supabase.from('capture_methods').select('id, value, description').eq('is_active', true),
       // A converted or trained model is 'validated' (ready to load); 'deployed' means on a device.
       // Both are usable as a project's Species Brain.
@@ -88,18 +76,15 @@ export function ProjectDefaultsPanel({ projectId, canEdit, onSaved }: {
   }, [user, projectId])
 
   // Resolves true when the database took the change.
-  const save = async (id: string, patch: Partial<Project>): Promise<boolean> => {
-    const { data, error } = await supabase.from('projects').update(patch).eq('id', id).select(PROJECT_COLUMNS)
-    const saved = (data as Project[] | null)?.[0]
-    if (saved) {
-      setProject(saved)
+  const save = async (id: string, patch: DefaultsPatch): Promise<boolean> => {
+    const result = await saveProjectDefaults(supabase, id, patch)
+    if ('saved' in result) {
+      setProject(result.saved)
       onSaved(true)
-    } else {
-      onSaved(false, error
-        ? error.code === '23514' ? `That value is not allowed: ${error.message}` : `Not saved: ${error.message}`
-        : NOT_ALLOWED)
+      return true
     }
-    return !!saved
+    onSaved(false, result.message)
+    return false
   }
 
   // The input shows what is saved: an out-of-range entry snaps into 50 to 99, and a refused save
@@ -215,13 +200,39 @@ export function ProjectDefaultsPanel({ projectId, canEdit, onSaved }: {
         />
       </label>
       <FlashControls p={p} sel={sel} disabled={off} offset={offset} timezone={BROWSER_TIMEZONE} onMode={saveFlashMode} onLed={led => save(p.id, { flash_led: led })} onWindow={saveWindow} />
+      <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', marginTop: '0.85rem' }}>
+        <label style={FIELD}>
+          <span style={MUTED}>LoRaWAN</span>
+          <select
+            value={p.lorawan_required ? 'on' : 'off'}
+            onChange={e => save(p.id, { lorawan_required: e.target.value === 'on' })}
+            disabled={off}
+            style={{ ...sel, minWidth: 90 }}
+          >
+            <option value="off">Off</option>
+            <option value="on">On</option>
+          </select>
+        </label>
+        {p.lorawan_required && (
+          <label style={FIELD}>
+            <span style={MUTED}>Check-in every</span>
+            <select
+              value={p.lorawan_ping_minutes}
+              onChange={e => save(p.id, { lorawan_ping_minutes: Number(e.target.value) })}
+              disabled={off}
+              style={{ ...sel, minWidth: 120 }}
+            >
+              {pingChoices(p.lorawan_ping_minutes).map(m => <option key={m} value={m}>{formatPing(m)}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      <div style={{ ...MUTED, fontSize: '0.75rem', marginTop: '0.4rem' }}>Applies to cameras deployed from now on.</div>
     </div>
   )
 }
 
 const MUTED: React.CSSProperties = { color: 'var(--text-muted)' }
-
-const NOT_ALLOWED = 'You need the Project Admin role to change this.'
 
 const FIELD: React.CSSProperties = { fontSize: '0.78rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }
 

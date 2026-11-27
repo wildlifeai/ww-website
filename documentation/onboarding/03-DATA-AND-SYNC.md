@@ -87,8 +87,13 @@ ww-mobile-app#282): `flash_mode` (default `off`, which also turns off the night 
 detection), `flash_led`, and for `time_of_day` a window stored as UTC minutes
 (`flash_window_start_minutes_utc`, `flash_window_minutes`, null for any other mode). The panel
 shows the window in the browser's timezone beside the UTC the camera runs on; the conversion is
-`frontend/src/lib/flashSettings.ts`. A save asks for the row back, because RLS turns a
-non-admin's update into 0 rows with no error.
+`frontend/src/lib/flashSettings.ts`. It also edits LoRaWAN (#524): `lorawan_required`, which the
+app's LoRaWAN Required tickbox writes too, and while it is on `lorawan_ping_minutes`, the check-in
+period the app writes as op 32 (ww-backend#408: 60 to 1440, default 240; ww-mobile-app#551). The
+panel offers 4, 6, 8, 12 or 24 hours, kept within The Things Network's 10 downlinks a day; the
+choices and the reason live in `frontend/src/lib/lorawanSettings.ts`. A save asks for the row
+back, because RLS turns a non-admin's update into 0 rows with no error
+(`frontend/src/lib/projectDefaults.ts`).
 
 Settings → ✎ Details edits a project's `name`, `description` and `website` as the signed-in user,
 through `frontend/src/lib/projectDetails.ts` (#288). The `projects` UPDATE policy allows a
