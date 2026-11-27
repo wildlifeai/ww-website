@@ -236,6 +236,10 @@ its health, battery and SD card space, and its messages appear under
   out of range of a gateway, or the gateway is offline. Check the gateway's
   light and its **Connected** status in the TTN console, raise the gateway or
   move it closer, and test again.
+- The camera shows **Not registered for LoRaWAN: contact wildlife.ai**: the
+  camera has no LoRaWAN identity (DevEUI) on record, so its messages cannot
+  reach your project however well it sends. Contact us at
+  [wildlife.ai](https://wildlife.ai/contact/) and we add it.
 - The camera is not listed at all: it is not deployed in a project you have
   selected, or the project is not one you belong to.
 - The camera was deployed before the project had LoRaWAN turned on, so its
@@ -262,7 +266,8 @@ they are collected. With no such camera in the selected projects, the tab is gre
   deployed at under it, and with its newest message.
   - **Health** is the camera's state, with its first reason beside it; hover over it for the
     rest. Silent, Fault and Warning cameras are also listed, with every reason, under **need
-    attention** above the map.
+    attention** above the map, and so is a camera **Not registered for LoRaWAN** (see "If nothing
+    arrives" above).
     - **Fault**: its main camera, its HM0360 camera or its AI processor failed, or its SD card
       is missing.
     - **Warning**: a low battery, an SD card 10% free or less, another self-test problem, or,

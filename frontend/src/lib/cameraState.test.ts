@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
-  cameraState, healthReasonText, healthReasonTexts, needsAttention, silenceSpan, silenceText, silentAfterHours, toHealthState,
+  cameraState, healthReasonText, healthReasonTexts, needsAttention, notRegisteredReason, silenceSpan, silenceText,
+  silentAfterHours, toHealthState, NOT_REGISTERED,
   CAMERA_STATE, FRESH_HOURS, STALE_HOURS, type CameraFacts,
 } from './cameraState'
 
@@ -124,6 +125,18 @@ describe('CAMERA_STATE', () => {
     expect(CAMERA_STATE.fault.color).toBe('#ef4444')
     expect(CAMERA_STATE.checking_in.color).toBe(CAMERA_STATE.ok.color)
     expect(CAMERA_STATE.off.color).toBe(CAMERA_STATE.awaiting.color)
+  })
+})
+
+describe('notRegisteredReason', () => {
+  it('explains an Awaiting or Silent camera with no DevEUI, and nothing else', () => {
+    expect(NOT_REGISTERED).toBe('Not registered for LoRaWAN: contact wildlife.ai')
+    expect(notRegisteredReason('awaiting', true)).toBe(NOT_REGISTERED)
+    expect(notRegisteredReason('silent', true)).toBe(NOT_REGISTERED)
+    for (const state of ['finished', 'off', 'fault', 'warning', 'stale', 'ok', 'checking_in'] as const) {
+      expect(notRegisteredReason(state, true)).toBeNull()
+    }
+    expect(notRegisteredReason('awaiting', false)).toBeNull()
   })
 })
 

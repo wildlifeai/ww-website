@@ -11,7 +11,7 @@ drive the real UI against a real database.
 | `01-smoke` | Site + API up; public pages (`/`, `/guides`, `/faq`, `/resources`) render clean; seeded user can log in and every authed page (`/toolkit`, `/field`, `/annotations`, `/insights`, `/settings`) renders without errors or auth bounces |
 | `02-demo` | "Try the demo" opens a signed-in session via `/api/auth/demo-session`; DemoGuard keeps it read-only (upload gated) |
 | `03-upload-exif` | Real SD-card folder upload through `/upload-data` (webkitdirectory), AI off; the deployment UUIDs the WW500 stamps in EXIF bind exact-match to seeded deployments; a stamped UUID with **no** deployments row goes through triage and is created under that id (#92), so nothing lands unassigned and every touched deployment is one of the card's folders |
-| `04-lorawan-realtime` | With the Realtime page (`/field`) open, a synthetic `lorawan_messages`+`lorawan_parsed_messages` insert with a fault bit appears in the Cameras table as Fault with the fault named (#427) and its temperature, and on top of the Messages tab, **without reload**, followed by a settings reply (`op_set`) shown in words (#516), and, with the camera picked, a synthetic `lorawan_downlinks` request shown in its check-in period panel while it waits and once answered (#521; no downlink reaches TTN). Verifies the page's subscription to the decoded row (#94, `hooks/useFieldLive.ts`), that the realtime publication SQL is applied to the dev DB, and that `deployment_latest_lorawan` gives the health state |
+| `04-lorawan-realtime` | With the Realtime page (`/field`) open: the seed camera, given a ping and no DevEUI for the run, first says "Not registered for LoRaWAN" (#525); a synthetic `lorawan_messages`+`lorawan_parsed_messages` insert with a fault bit then appears in the Cameras table as Fault with the fault named (#427) and its temperature, and on top of the Messages tab, **without reload**, followed by a settings reply (`op_set`) shown in words (#516); with the camera picked, a synthetic `lorawan_downlinks` request shows in its check-in period panel while it waits and once answered (#521; no downlink reaches TTN). Verifies the page's subscription to the decoded row (#94, `hooks/useFieldLive.ts`), that the realtime publication SQL is applied to the dev DB, and that `deployment_latest_lorawan` gives the health state |
 | `05-a11y` | The public pages (`/`, `/login`, `/signup`, `/guides`, `/faq`, `/resources`) have no serious or critical axe-core violations (WCAG 2.0 and 2.1, A and AA). No account needed |
 
 ## Running
@@ -74,7 +74,9 @@ The jobs:
   The cleanup finds a run's rows by markers the run owns. LoRaWAN rows carry the run's tag
   (`e2e-ci-<run id>-<attempt>`) as their `device_eui`; marked rows over an hour old from a
   run that died go too. Its settings request is a `lorawan_downlinks` row with no requester on the
-  seed deployment, which the spec itself deletes before and after. The upload's media rows cannot carry a tag (the backend names them),
+  seed deployment, which the spec itself deletes before and after. The spec gives the seed
+  deployment a 240-minute ping and takes its camera's DevEUI for the run, and puts both back as it
+  found them; a run that dies first leaves them changed until the next run or reset. The upload's media rows cannot carry a tag (the backend names them),
   so they are the rows created since the run started in a deployment whose id starts with one
   of the fixture SD card's folder names; their observations, events and renditions go with
   them. The originals stay in S3: the `dev` environment holds no AWS credential. The archive

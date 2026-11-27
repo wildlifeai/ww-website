@@ -1,22 +1,91 @@
 // Copyright (c) 2026
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
- * AdminDevicesPage — /admin/devices
+ * AdminDevicesPage: /admin/devices
  *
- * Read-only list of every device for a ww_admin, with its latest deployment and that
- * project's organisation (#343): cameras belong to no organisation (ww-backend#346).
+ * Every device for a ww_admin, with its latest deployment and that project's organisation
+ * (#343): cameras belong to no organisation (ww-backend#346). The ww_admin sets or corrects a
+ * camera's LoRaWAN DevEUI in its row (#525, lib/deviceEui.ts), written as the signed-in user.
  */
 import { useMemo, useState } from 'react'
 import { Navigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { Pencil } from 'lucide-react'
+import { supabase } from '../config/supabase'
 import { useIsAdmin } from '../hooks/useIsAdmin'
-import { useAdminDevices, type AdminDevice } from '../hooks/useAdminDevices'
+import { ADMIN_DEVICES_KEY, useAdminDevices, type AdminDevice } from '../hooks/useAdminDevices'
 import { DataTable, type Column } from '../components/ui/DataTable'
 import { FilterSelect } from '../components/ui/ControlBar'
+import { saveDeviceEui } from '../lib/deviceEui'
+
+const MUTED: React.CSSProperties = { color: 'var(--text-muted)' }
+const INPUT: React.CSSProperties = {
+  padding: '0.25rem 0.4rem', fontSize: '0.75rem', fontFamily: 'monospace', width: '13rem', border: '1px solid var(--border)',
+  borderRadius: 'var(--radius)', background: 'var(--surface)', color: 'var(--text-color)',
+}
+const SMALL_BUTTON: React.CSSProperties = { padding: '0.25rem 0.6rem', fontSize: '0.75rem' }
+
+/** The camera's DevEUI, with an edit in place: the messages of a camera with none never link. */
+function EuiCell({ device }: { device: AdminDevice }) {
+  const queryClient = useQueryClient()
+  const [draft, setDraft] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  if (draft === null) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+        {device.device_eui ?? <span style={MUTED}>-</span>}
+        <button
+          type="button"
+          aria-label={`Edit the DevEUI of ${device.name}`}
+          title="Edit DevEUI"
+          onClick={() => { setError(null); setDraft(device.device_eui ?? '') }}
+          style={{ background: 'transparent', border: 'none', padding: '0.125rem', cursor: 'pointer', lineHeight: 0, color: 'var(--text-muted)' }}
+        >
+          <Pencil size={13} aria-hidden />
+        </button>
+      </span>
+    )
+  }
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await saveDeviceEui(supabase, device.id, draft)
+      await queryClient.invalidateQueries({ queryKey: ADMIN_DEVICES_KEY })
+      setDraft(null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={e => { e.preventDefault(); void save() }} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      <span style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+        <input
+          aria-label={`DevEUI of ${device.name}`}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          placeholder="70B3D57ED0012345"
+          spellCheck={false}
+          style={INPUT}
+        />
+        <button type="submit" className="btn" disabled={saving} style={SMALL_BUTTON}>{saving ? 'Saving…' : 'Save'}</button>
+        <button type="button" className="btn btn-outline" disabled={saving} onClick={() => setDraft(null)} style={SMALL_BUTTON}>Cancel</button>
+      </span>
+      {error && <span role="alert" style={{ color: 'var(--error)', fontSize: '0.75rem' }}>{error}</span>}
+    </form>
+  )
+}
 
 const columns: Column<AdminDevice>[] = [
   { key: 'name', label: 'Name', cellStyle: { fontWeight: 500 } },
   { key: 'bluetooth_id', label: 'Bluetooth id' },
-  { key: 'device_eui', label: 'EUI', render: d => d.device_eui ?? '—' },
+  { key: 'device_eui', label: 'EUI', render: d => <EuiCell device={d} /> },
   { key: 'organisation', label: 'Organisation', render: d => d.organisation?.name ?? '—', getValue: d => d.organisation?.name },
   {
     key: 'latest_deployment', label: 'Latest deployment',

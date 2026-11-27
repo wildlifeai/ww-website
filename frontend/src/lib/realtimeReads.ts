@@ -38,6 +38,11 @@ export interface FieldDeployment {
   lorawan_ping_minutes: number | null
   project_name: string
   device_name: string
+  /**
+   * The camera is on record with no LoRaWAN DevEUI, so lorawan-ingest cannot link its messages
+   * (#525). False when the camera cannot be read (the demo account reads no devices).
+   */
+  no_dev_eui: boolean
   /** The versions of the firmware the deployment started with. */
   ble_firmware: string | null
   himax_firmware: string | null
@@ -79,16 +84,16 @@ export const realtimeKeys = {
   checkIn: (deploymentId: string) => ['realtime', 'check-in', deploymentId] as const,
 }
 
-type DeploymentRow = Omit<FieldDeployment, 'project_name' | 'device_name' | 'ble_firmware' | 'himax_firmware'> & {
+type DeploymentRow = Omit<FieldDeployment, 'project_name' | 'device_name' | 'no_dev_eui' | 'ble_firmware' | 'himax_firmware'> & {
   projects: { name: string } | null
-  devices: { name: string } | null
+  devices: { name: string; device_eui: string | null } | null
   ble: { version: string } | null
   himax: { version: string } | null
 }
 
 /** Two keys from `deployments` to `firmware`, so each embed names its own. */
 const FIELD_DEPLOYMENT_COLUMNS = 'id, project_id, device_id, location_name, latitude, longitude, deployment_start, '
-  + 'deployment_end, lorawan_ping_minutes, projects(name), devices(name), '
+  + 'deployment_end, lorawan_ping_minutes, projects(name), devices(name, device_eui), '
   + 'ble:firmware!deployments_ble_firmware_id_fkey(version), himax:firmware!deployments_himax_firmware_id_fkey(version)'
 
 /** "BLE 0.30.62 · Himax 1.2.0", whichever the deployment recorded; a dash for neither. */
@@ -170,6 +175,7 @@ export async function fetchFieldDeployments(
     .range(from, to))
   return (rows as unknown as DeploymentRow[]).map(({ projects, devices, ble, himax, ...d }) => ({
     ...d, project_name: projects?.name ?? '-', device_name: devices?.name ?? '-',
+    no_dev_eui: devices != null && !devices.device_eui?.trim(),
     ble_firmware: ble?.version ?? null, himax_firmware: himax?.version ?? null,
   }))
 }

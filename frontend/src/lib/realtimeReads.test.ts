@@ -154,7 +154,8 @@ describe('fetchFieldDeployments', () => {
     const deps = await fetchFieldDeployments(db, ['p1'], new Date('2026-10-21T00:00:00Z'))
     expect(deps).toHaveLength(PAGE_SIZE + 1)
     expect(deps[0]).toEqual({
-      id: 'd0', project_id: 'p1', project_name: 'P', device_name: '-', ble_firmware: null, himax_firmware: null,
+      id: 'd0', project_id: 'p1', project_name: 'P', device_name: '-', no_dev_eui: false, ble_firmware: null,
+      himax_firmware: null,
     })
     expect(queries[0]).toContainEqual(['order', 'id'])
     expect(queries[1]).toContainEqual(['range', PAGE_SIZE, 2 * PAGE_SIZE - 1])
@@ -162,18 +163,32 @@ describe('fetchFieldDeployments', () => {
 
   it('reads the ping period and the firmware versions through their own keys', async () => {
     const row = {
-      id: 'd1', project_id: 'p1', lorawan_ping_minutes: 240, projects: { name: 'P' }, devices: { name: 'Cam' },
-      ble: { version: '0.30.62' }, himax: { version: '1.4.2' },
+      id: 'd1', project_id: 'p1', lorawan_ping_minutes: 240, projects: { name: 'P' },
+      devices: { name: 'Cam', device_eui: '70B3D57ED0012345' }, ble: { version: '0.30.62' }, himax: { version: '1.4.2' },
     }
     const { db, queries } = fakeDb(() => ({ data: [row], error: null }))
     expect(await fetchFieldDeployments(db, ['p1'])).toEqual([{
-      id: 'd1', project_id: 'p1', lorawan_ping_minutes: 240, project_name: 'P', device_name: 'Cam',
+      id: 'd1', project_id: 'p1', lorawan_ping_minutes: 240, project_name: 'P', device_name: 'Cam', no_dev_eui: false,
       ble_firmware: '0.30.62', himax_firmware: '1.4.2',
     }])
     const select = String(queries[0].find(c => c[0] === 'select')?.[1])
     expect(select).toContain('lorawan_ping_minutes')
     expect(select).toContain('ble:firmware!deployments_ble_firmware_id_fkey(version)')
     expect(select).toContain('himax:firmware!deployments_himax_firmware_id_fkey(version)')
+  })
+
+  it('marks a camera on record with no DevEUI, never one it cannot read (#525)', async () => {
+    const base = { id: 'd1', project_id: 'p1', projects: { name: 'P' }, ble: null, himax: null }
+    const rows = [
+      { ...base, id: 'none', devices: { name: 'Cam', device_eui: null } },
+      { ...base, id: 'blank', devices: { name: 'Cam', device_eui: ' ' } },
+      { ...base, id: 'set', devices: { name: 'Cam', device_eui: '70B3D57ED0012345' } },
+      { ...base, id: 'unreadable', devices: null },
+    ]
+    const { db, queries } = fakeDb(() => ({ data: rows, error: null }))
+    const deps = await fetchFieldDeployments(db, ['p1'])
+    expect(deps.map(d => [d.id, d.no_dev_eui])).toEqual([['none', true], ['blank', true], ['set', false], ['unreadable', false]])
+    expect(String(queries[0].find(c => c[0] === 'select')?.[1])).toContain('devices(name, device_eui)')
   })
 
   it('keeps a deployment that ended today, from midnight in the viewer\'s zone', async () => {

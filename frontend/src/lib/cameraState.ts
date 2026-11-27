@@ -69,6 +69,17 @@ export function needsAttention(state: CameraState): boolean {
   return state === 'silent' || state === 'fault' || state === 'warning'
 }
 
+export const NOT_REGISTERED = 'Not registered for LoRaWAN: contact wildlife.ai'
+
+/**
+ * Why an Awaiting or Silent camera has no messages when its camera has no DevEUI on record:
+ * lorawan-ingest links a message to a camera by `devices.device_eui`, so none ever reaches the
+ * project (#525). Such a camera is on the "needs attention" list too. Null otherwise.
+ */
+export function notRegisteredReason(state: CameraState, noDevEui: boolean): string | null {
+  return noDevEui && (state === 'awaiting' || state === 'silent') ? NOT_REGISTERED : null
+}
+
 export const CAMERA_STATE: Record<CameraState, { color: string; label: string }> = {
   finished:    { color: '#3b82f6', label: 'Finished' },
   off:         { color: '#9ca3af', label: 'LoRaWAN off' },
