@@ -34,7 +34,7 @@ Setup detail, env reference and a verification checklist:
 ## Validate before committing
 
 ```bash
-cd backend  && ruff check . && ruff format --check . && pyright && pytest
+cd backend  && ruff check . && ruff format --check . && pyright && python -m pytest
 cd frontend && npm run lint && npm test && npx tsc -b --noEmit && npm run build && npm run size
 cd frontend && npx -y react-doctor@0.9.12 . --scope changed --base origin/dev --verbose --yes
 node scripts/validate-docs.js
@@ -42,6 +42,9 @@ node scripts/validate-docs.js
 
 `tsc -b`, not `tsc`: the root `tsconfig.json` is references-only, so plain `tsc --noEmit`
 checks nothing and exits 0 with errors present.
+
+`python -m pytest`, not `pytest`, as `ci.yml` runs it: the `pytest` command leaves `backend/`
+off the import path, so every test that imports `app` fails to collect.
 
 React Doctor passes on its "No issues found" line; its score is not the gate. It scans only
 files git tracks, so `git add` a new file first, or it passes here and fails on the pull request.

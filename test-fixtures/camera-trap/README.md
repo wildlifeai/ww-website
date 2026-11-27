@@ -21,6 +21,7 @@ test-fixtures/camera-trap/
 ├── sdcard/<label>/IMAGES.000/    ← ready-to-upload camera images (pre-bound via EXIF)
 ├── source/<label>/               ← (optional) raw frames that NEED EXIF stamping
 ├── deployments.json              ← (optional) targets for the manual prepare.py path
+├── demo-labels.csv               ← one label per photo, for the demo account (documentation/resources/demo-account.md)
 └── prepare.py                    ← (optional) stamps source/ → MEDIA/ for the manual path
 ```
 

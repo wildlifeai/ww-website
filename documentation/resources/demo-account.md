@@ -64,18 +64,29 @@ If the endpoint returns `{"error":{"code":"DEMO_DISABLED"}}`, the server has no
 
 ## Sample data
 
-The demo project's images are the real camera-trap fixtures in
-[`test-fixtures/camera-trap`](../../test-fixtures/camera-trap). They're uploaded to
-Supabase Storage and attached as `media` rows on a deployment in the demo project by
-[`scripts/seed_demo_media.py`](../../scripts/seed_demo_media.py) — idempotent, so it only
-adds what's missing.
+The demo project's images are the 98 real camera-trap fixtures in
+[`test-fixtures/camera-trap`](../../test-fixtures/camera-trap), and their labels are in
+[`demo-labels.csv`](../../test-fixtures/camera-trap/demo-labels.csv) beside them: one row per
+photo, its `observation_type` (animal, human or blank) and, for an animal, its
+`scientific_name` and `vernacular_name`, read from the photo by eye at the rank it supports
+(`Aves` where a bird is too small to name).
+[`scripts/seed_demo_media.py`](../../scripts/seed_demo_media.py) uploads each photo to
+Supabase Storage, attaches it as a `media` row on a deployment in the demo project, dated from
+its EXIF `DateTimeOriginal` as an upload dates it, and writes its label as an `observations`
+row with `source_type` 'imported', `review_status` 'unreviewed' (the labels were set by eye, so
+the demo shows them as needing review) and `classified_by` 'Wildlife Watcher demo labels'. No AI
+runs on the demo photos.
+
+The script is idempotent: it adds what is missing, dates a photo that has no capture time,
+rewrites a label the file has changed, removes one the file has dropped, and never touches an
+observation it did not write. To change a label, edit the CSV: the push to `dev` re-runs it.
 
 ---
 
 ## How seeding works, per environment
 
 The demo has three pieces: the **auth user**, its **viewer role + project**, and the
-**media (images)**. How they're created differs because **dev is rebuilt from scratch on
+**media (images) and their labels**. How they're created differs because **dev is rebuilt from scratch on
 every deploy** while **staging/prod is not**.
 
 ### Dev — automatic
@@ -83,11 +94,12 @@ every deploy** while **staging/prod is not**.
 | Piece | How |
 |-------|-----|
 | Demo **user** + **viewer role** + **project** | Seeded in `ww-backend/supabase/seeds/dev/data.sql`. Dev deploys do a destructive `supabase db reset` + re-seed, so these are recreated every deploy. |
-| Demo **media** | The [`update-demo.yml`](../../.github/workflows/update-demo.yml) workflow runs `seed_demo_media.py` on any push to `dev` that touches `test-fixtures/**`, and on demand (the workflow targets dev or staging by branch/input — see below). |
+| Demo **media** and **labels** | The [`update-demo.yml`](../../.github/workflows/update-demo.yml) workflow runs `seed_demo_media.py` on any push to `dev` that touches `test-fixtures/**` or the seeder, and on demand (the workflow targets dev or staging by branch/input, see below). |
 
-> ⚠️ Because the dev DB reset wipes `media` rows, re-run `update-demo.yml` (manually, or it
-> re-fires on the next fixtures change) after a `ww-backend` dev deploy. To make this
-> bulletproof, have the dev deploy trigger `update-demo.yml` via `repository_dispatch`.
+> ⚠️ Because the dev DB reset wipes the `media` and `observations` rows, re-run
+> `update-demo.yml` after a `ww-backend` dev deploy, or it waits for the next fixtures change:
+> `gh workflow run update-demo.yml --repo wildlifeai/ww-website -f environment=dev`. Nothing
+> runs it from ww-backend's dev deploy; that would be a ww-backend change.
 
 Requires `DEMO_EMAIL`, `DEMO_PASSWORD`, and `SUPABASE_SERVICE_ROLE_KEY` in the GitHub
 **`dev`** environment. `DEMO_PASSWORD` must equal the dev seed's `SEED_USER_PASSWORD`.
@@ -112,7 +124,9 @@ and it persists. Steps (against the staging/prod Supabase + the `ww-backend` con
    `staging` GitHub environment's `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` secrets and a
    `DEMO_PROJECT_ID` **var** (your staging demo project). Since staging isn't reset, the
    images persist — the workflow just keeps them in sync as the fixtures change. (You can
-   also run the script directly once if you prefer.)
+   also run the script directly once if you prefer.) On 27 Nov 2026 the `staging` environment
+   had neither the key nor the var, so every run on `main` logged a warning and skipped: the
+   fixture photos and their labels have not reached production this way.
 3. **Configure the backend** — set `DEMO_EMAIL` + `DEMO_PASSWORD` on the `ww-backend`
    container app (env vars) so `/api/auth/demo-session` can sign in.
 4. **CORS** is already handled: the production origin `wildlifewatcher.ai` is allowed by
