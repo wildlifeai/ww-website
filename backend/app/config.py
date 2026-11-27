@@ -190,6 +190,12 @@ class Settings(BaseSettings):
         "single",
         description="Token-saving variant: 'single' (one downscaled frame per call), 'contact_sheet' (one burst per call), 'batch' (Batch API)",
     )
+    GEMINI_PRESENCE_CONCURRENCY: int = Field(
+        4,
+        ge=1,
+        le=32,
+        description="Gemini presence calls in flight at once in one step run ('single' and 'contact_sheet'); 1 is one at a time (#531)",
+    )
 
     # ── SpeciesNet box filters (beside the run's confidence_threshold) ──
     # MegaDetector inside SpeciesNet answers an empty night scene with a box round the
