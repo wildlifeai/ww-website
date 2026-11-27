@@ -240,7 +240,8 @@ they are collected. With no such camera in the selected projects, the tab is gre
   highlighted in the Cameras table. Tap it again to clear it. A camera deployed without a GPS
   position is not on the map. The page has no photos: they stay on the SD card until you collect
   the camera and upload them.
-- **Cameras** lists each camera once, with its newest message.
+- **Cameras** lists each camera once, by the name on its label (WILD-XXXX) with the site it was
+  deployed at under it, and with its newest message.
   - **Health** is the camera's state, with its first reason beside it; hover over it for the
     rest. Silent, Fault and Warning cameras are also listed, with every reason, under **need
     attention** above the map.

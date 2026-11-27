@@ -5,10 +5,12 @@
 // upload or AI run is still processing a deployment the user is looking at, the grid would
 // otherwise show empty cards with no reason. Driven by the user's active jobs (GET /api/jobs),
 // intersected with the deployments currently in view. A run that only makes thumbnails (an
-// upload without the AI, or a Retry) says so, not that the AI is analysing.
+// upload without the AI, or a Retry) says so, not that the AI is analysing, and an AI run that
+// waits for the next GPU run (AWS, `batch_wait`) says that, not "Analysing 0%".
 import { Link } from 'react-router-dom'
-import { ChartColumn, RefreshCw } from 'lucide-react'
+import { ChartColumn, Clock, RefreshCw } from 'lucide-react'
 import { useJobsList } from '../../hooks/useJobs'
+import { batchWaitText } from '../../lib/batchWait'
 import { onlyMakingThumbnails } from '../../lib/thumbnailRetry'
 import { Banner, BannerProgress } from '../ui/Banner'
 import { SMALL_BTN } from './gridStyles'
@@ -27,16 +29,29 @@ export function ProcessingBanner({ deployments }: { deployments: readonly { id: 
   const depNames = depIds.map(id => names.get(id) || id.slice(0, 8))
   const shown = depNames.length <= 3 ? depNames.join(', ') : `${depNames.slice(0, 3).join(', ')} +${depNames.length - 3} more`
   const isOne = depIds.length === 1
+  // A job waiting for the GPU run has not started, so its 0% is no progress: only running jobs count.
+  const running = active.filter(j => !j.batch_wait)
+  const wait = active.find(j => j.batch_wait)?.batch_wait ?? null
   // Progress from the active AI job(s) (now reported per-deployment); the analysing job carries it.
-  const pct = Math.round(Math.max(0, ...active.map(j => j.progress ?? 0)) * 100)
+  const pct = Math.round(Math.max(0, ...running.map(j => j.progress ?? 0)) * 100)
   // Insights takes the deployment parameter once per deployment.
   const insightsLink = `/insights?tab=reports${depIds.map(id => `&deployment=${encodeURIComponent(id)}`).join('')}`
 
-  if (onlyMakingThumbnails(active)) {
+  if (running.length === 0 && wait) {
+    return (
+      <Banner tone="info" icon={Clock}>
+        <strong>{batchWaitText(wait)}</strong>: AI analysis of {isOne ? 'deployment ' : 'deployments '}
+        <strong>{shown}</strong>. The photos are uploaded; their labels appear after the run.
+      </Banner>
+    )
+  }
+
+  if (onlyMakingThumbnails(running)) {
     return (
       <Banner tone="info" icon={RefreshCw} footer={<BannerProgress pct={pct} />}>
         <strong>Making thumbnails {pct}%</strong>: {isOne ? 'deployment ' : 'deployments '}
         <strong>{shown}</strong>. The photos appear as they are ready.
+        {wait && ' AI analysis then waits for the next GPU run.'}
       </Banner>
     )
   }

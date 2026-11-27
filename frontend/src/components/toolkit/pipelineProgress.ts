@@ -52,6 +52,8 @@ export function aiNotRun(state: PipelineState): string | null {
 export function jobChanged(prev: PipelineJob, next: PipelineJob): boolean {
   return (
     prev.status !== next.status ||
+    prev.serverStatus !== next.serverStatus ||
+    (prev.summary?.uploaded ?? null) !== (next.summary?.uploaded ?? null) ||
     prev.progress !== next.progress ||
     prev.message !== next.message ||
     (next.eventCount ?? 0) > (prev.eventCount ?? 0) ||
@@ -59,4 +61,24 @@ export function jobChanged(prev: PipelineJob, next: PipelineJob): boolean {
     !prev.gpuBatch !== !next.gpuBatch ||
     (prev.aiNotRun ?? null) !== (next.aiNotRun ?? null)
   )
+}
+
+/** Whether the server has finished with a job, by its own status, not the dock's 99.9% shortcut. */
+export function serverDone(job: PipelineJob): boolean {
+  return TERMINAL_STATUSES.includes(job.serverStatus ?? job.status)
+}
+
+/**
+ * Every photo the browser sent is stored on the server: all of them uploaded, none failed, and
+ * every upload job finished on the server without a failure. The SD card can come out, and the
+ * grid's "uploading" cards have their rows, even while the AI still waits for the next GPU run.
+ */
+export function uploadsStored(state: PipelineState): boolean {
+  const uploads = state.jobs.filter((j) => j.fileCount > 0)
+  return state.totalFiles > 0
+    && state.uploadedFiles >= state.totalFiles
+    && (state.failedFiles ?? 0) === 0
+    && !state.uploadError
+    && uploads.length > 0
+    && uploads.every((j) => serverDone(j) && (j.serverStatus ?? j.status) !== 'failed' && (j.summary?.failed ?? 0) === 0)
 }

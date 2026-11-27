@@ -202,7 +202,7 @@ export function DeploymentMap({ deployments, onSelectDeployment, selectedDeploym
   }, [mapped, offsets, pieMode, speciesMode, speciesColour, projectNames, selectedDeploymentId])
 
   const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2))
-  const gpsNote = `${mapped.length} of ${deployments.length} deployment${deployments.length !== 1 ? 's' : ''} have GPS`
+  const gpsNote = `${mapped.length} of ${deployments.length} deployment${deployments.length !== 1 ? 's' : ''} ${mapped.length === 1 ? 'has' : 'have'} GPS`
 
   if (!bounds) {
     return (

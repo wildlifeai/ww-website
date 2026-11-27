@@ -1,7 +1,8 @@
 # Copyright (c) 2026
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Thumbnails for an upload whose AI does not run: they are the pipeline's first step, so the
-upload job starts the thumbnails job itself, one per deployment, shared by the upload's chunks."""
+"""Thumbnails for an upload whose AI does not run, or waits for the next GPU run: they are the
+pipeline's first step, so the upload job starts the thumbnails job itself, one per deployment,
+shared by the upload's chunks."""
 
 import asyncio
 
@@ -20,16 +21,18 @@ def registry_on(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "deps, steps, run_ai, expected",
+    "deps, steps, run_ai, route, expected",
     [
-        ([DEP], STEPS, True, False),  # the AI runs, and makes them first
-        ([DEP], STEPS, False, True),  # "Run AI" off on the upload
-        ([DEP], [], True, True),  # no AI configured on this server
-        ([], STEPS, False, False),  # no real deployment in the upload
+        ([DEP], STEPS, True, "arq", False),  # the AI runs at once on the worker, and makes them first
+        ([DEP], STEPS, True, None, False),  # the AI ran in the upload job itself
+        ([DEP], STEPS, True, "batch", True),  # the AI waits for the next GPU run (AWS): hours away
+        ([DEP], STEPS, False, None, True),  # "Run AI" off on the upload
+        ([DEP], [], True, None, True),  # no AI configured on this server
+        ([], STEPS, False, None, False),  # no real deployment in the upload
     ],
 )
-def test_an_upload_needs_its_own_thumbnails_job_only_when_the_ai_does_not_run(registry_on, deps, steps, run_ai, expected):
-    assert definitions.thumbnails_need_their_own_job(deps, steps, run_ai) is expected
+def test_an_upload_needs_its_own_thumbnails_job_unless_the_ai_runs_soon(registry_on, deps, steps, run_ai, route, expected):
+    assert definitions.thumbnails_need_their_own_job(deps, steps, run_ai, route) is expected
 
 
 def test_no_thumbnails_job_without_the_media_registry(monkeypatch):

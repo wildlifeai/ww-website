@@ -1719,11 +1719,11 @@ async def upload_drive_images_job(job_id: str, payload: dict):
         if ai_result["ai"] == "not_run":
             await emit_event(job_id, ProgressEvent(type=EventType.PROGRESS, phase=ProgressPhase.AI_PIPELINE, message=f"⏭️ {ai_words}"))
 
-        # ── Thumbnails when the AI does not run: they are its first step, so make them here ──
-        if thumbnails_need_their_own_job(_dep_ids, _steps, _run_ai):
+        # ── Thumbnails when the AI does not run soon: they are its first step, so make them here ──
+        if thumbnails_need_their_own_job(_dep_ids, _steps, _run_ai, ai_queued[1] if ai_queued else None):
             for _dep_id in _dep_ids:
                 await start_thumbnail_backfill(_dep_id, _user_id, delay_s=THUMBNAIL_DEBOUNCE_SECONDS)
-            logger.info("thumbnails_queued_without_ai", job_id=job_id, deployments=len(_dep_ids))
+            logger.info("thumbnails_queued_by_upload", job_id=job_id, deployments=len(_dep_ids), ai_route=ai_queued[1] if ai_queued else None)
 
         # ── Final status (Drive sync + AI pipeline done) ──────────────────
         job_data = await get_job(job_id)
@@ -1801,15 +1801,18 @@ THUMBNAIL_DEBOUNCE_SECONDS = 20
 _pending_thumbnails: dict[str, str] = {}
 
 
-def thumbnails_need_their_own_job(deployment_ids: list[str], steps: list, run_ai: bool) -> bool:
-    """An upload whose AI does not run (run_ai off, or no AI configured) still needs thumbnails.
+def thumbnails_need_their_own_job(deployment_ids: list[str], steps: list, run_ai: bool, ai_route: str | None = None) -> bool:
+    """Whether an upload makes its thumbnails itself instead of leaving them to the AI run.
 
-    They are the AI pipeline's first step (media_prep), so without this its photos would have
-    none, and the review grid would say "Processing…" with nothing running.
+    They are the AI pipeline's first step (media_prep). An upload whose AI does not run (run_ai
+    off, or no AI configured) has nothing else to make them, and one whose AI waits for the next
+    GPU run (``ai_route == "batch"``, AWS) would have them hours later. Either way the review grid
+    would say "Processing…" with nothing running. The run's media_prep then finds them made.
     """
     from app.config import settings
 
-    return bool(deployment_ids) and settings.FF_MEDIA_REGISTRY_ENABLED and not (steps and run_ai)
+    ai_runs_soon = bool(steps and run_ai) and ai_route != "batch"
+    return bool(deployment_ids) and settings.FF_MEDIA_REGISTRY_ENABLED and not ai_runs_soon
 
 
 def upload_ai_outcome(deployment_ids: list[str], steps: list, run_ai: bool, queued: tuple[str, str] | None = None) -> tuple[dict[str, str], str]:
