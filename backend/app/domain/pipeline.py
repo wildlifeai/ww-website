@@ -1278,19 +1278,20 @@ def build_bioclip_observations(
     prediction,  # services.bioclip_service.CropPrediction (duck-typed)
     model_version: str,
     timestamp: str,
-    confidence_threshold: float = 0.0,
+    min_score: float = 0.0,
 ) -> list[dict]:
     """Map a BioCLIP CropPrediction to a CamtrapDP observation row (pure).
 
     BioCLIP has no detector, so it never produces blanks — it only adds an
     ``animal`` observation carrying its species guess. The row is tagged with
     BioCLIP's own ``source_model_version`` so it sits alongside (not on top of)
-    the SpeciesNet observation, enabling ensemble/disagreement views. Below the
-    threshold, or with no name, nothing is emitted.
+    the SpeciesNet observation, enabling ensemble/disagreement views. Below
+    ``min_score`` (BioCLIP's own floor, :func:`bioclip_min_score`), or with no
+    name, nothing is emitted.
     """
     if not prediction.scientific_name:
         return []
-    if prediction.score is not None and prediction.score < confidence_threshold:
+    if prediction.score is not None and prediction.score < min_score:
         return []
     return [
         {
@@ -1320,7 +1321,7 @@ def build_crop_classification_observation(
     prediction,  # services.bioclip_service.CropPrediction (duck-typed)
     model_version: str,
     timestamp: str,
-    confidence_threshold: float = 0.0,
+    min_score: float = 0.0,
 ) -> Optional[dict]:
     """The per-crop classifier's own row for one detector observation (pure).
 
@@ -1331,12 +1332,14 @@ def build_crop_classification_observation(
     classifier's species, score and version. It has no ``crop_url``: the crop
     belongs to the detector's row.
 
-    Returns ``None`` when the classifier has no usable name or scores below the
-    threshold, as for the whole-image rows (``build_bioclip_observations``).
+    Returns ``None`` when the classifier has no usable name or scores below
+    ``min_score``, as for the whole-image rows (``build_bioclip_observations``).
+    The detector's row is untouched either way, so a crop under the floor keeps
+    SpeciesNet's label only (#433).
     """
     if not prediction.scientific_name:
         return None
-    if prediction.score is not None and prediction.score < confidence_threshold:
+    if prediction.score is not None and prediction.score < min_score:
         return None
     return {
         "id": str(uuid.uuid4()),
@@ -1363,6 +1366,17 @@ def build_crop_classification_observation(
     }
 
 
+def bioclip_min_score(config: dict[str, Any]) -> float:
+    """BioCLIP's own floor: the run config's ``bioclip_min_score``, else ``settings.BIOCLIP_MIN_SCORE``.
+
+    Never the run's ``confidence_threshold``, which is SpeciesNet's box cutoff (0.2 by
+    default) and let a 0.21 BioCLIP guess through as a species row (#433).
+    """
+    from app.config import settings
+
+    return float(config.get("bioclip_min_score", settings.BIOCLIP_MIN_SCORE))
+
+
 class BioCLIPStep(PipelineStep):
     """Classify stage — labels animal crops with a pluggable classifier.
 
@@ -1381,7 +1395,8 @@ class BioCLIPStep(PipelineStep):
       - ``classifier``:    str       → registry id (default 'bioclip').
       - ``bioclip_labels``: list[str] → constrain to a custom label set.
       - ``bioclip_rank``:   str       → Tree-of-Life rank (default 'species').
-      - ``confidence_threshold``: float (shared with the run).
+      - ``bioclip_min_score``: float  → the classifier's floor (``bioclip_min_score``);
+        the run's ``confidence_threshold`` does not apply to it.
     """
 
     step_type = PipelineStepType.BIOCLIP
@@ -1410,14 +1425,14 @@ class BioCLIPStep(PipelineStep):
         classifier = resolve_classifier(resolve_classifier_name(config))
         model_version = classifier.version
 
-        threshold = config.get("confidence_threshold", 0.0)
+        min_score = bioclip_min_score(config)
 
         # Per-crop path: refine each per-detection observation in place rather than
         # adding one hero-crop second-opinion row per image (mixed-species frames get
         # a distinct species per animal). Pairs with build_speciesnet_observations(
         # per_detection=True). The hero-crop branch below is the legacy default.
         if settings.FF_PER_CROP_CLASSIFY_ENABLED:
-            return await self._refine_crops_per_detection(media, deployment_id, config, classifier, model_version, threshold, start)
+            return await self._refine_crops_per_detection(media, deployment_id, config, classifier, model_version, min_score, start)
 
         svc = create_service_client()
         errors = 0
@@ -1495,7 +1510,7 @@ class BioCLIPStep(PipelineStep):
                 if m["id"] in confident_ids:
                     skipped_confident += 1
                     continue  # SpeciesNet already labelled this animal confidently — no redundant row
-                obs_batch.extend(build_bioclip_observations(m, deployment_id, pred, model_version, timestamp, threshold))
+                obs_batch.extend(build_bioclip_observations(m, deployment_id, pred, model_version, timestamp, min_score))
 
             if obs_batch:
                 # Replace this classifier's prior machine rows for the media it just
@@ -1522,6 +1537,7 @@ class BioCLIPStep(PipelineStep):
             "classify_step_complete",
             deployment_id=deployment_id,
             classifier=classifier.name,
+            min_score=min_score,
             media_processed=len(media),
             observations_created=observations_created,
             skipped_confident_speciesnet=skipped_confident,
@@ -1544,7 +1560,7 @@ class BioCLIPStep(PipelineStep):
         config: dict[str, Any],
         classifier,
         model_version: str,
-        threshold: float,
+        min_score: float,
         start: float,
     ) -> PipelineStepResult:
         """Classify *each* per-detection animal crop into its own row beside the detector's.
@@ -1556,7 +1572,7 @@ class BioCLIPStep(PipelineStep):
         (``build_crop_classification_observation``). The SpeciesNet row is never edited,
         so a cat+rat frame keeps SpeciesNet's two rows and gains the classifier's two
         (#162). This classifier's prior rows for the same media are replaced, as on the
-        whole-image path; below-threshold or nameless crops add nothing.
+        whole-image path; crops under ``min_score`` or with no name add nothing.
         """
         import os
         import shutil
@@ -1618,7 +1634,7 @@ class BioCLIPStep(PipelineStep):
                 obs = path_to_obs.get(pred.filepath)
                 if not obs:
                     continue
-                row = build_crop_classification_observation(obs, deployment_id, pred, model_version, timestamp, threshold)
+                row = build_crop_classification_observation(obs, deployment_id, pred, model_version, timestamp, min_score)
                 if row:
                     obs_batch.append(row)
 
@@ -1641,6 +1657,7 @@ class BioCLIPStep(PipelineStep):
             "classify_crops_complete",
             deployment_id=deployment_id,
             classifier=classifier.name,
+            min_score=min_score,
             crops_classified=len(path_to_obs),
             observations_created=observations_created,
             errors=errors,
@@ -1882,6 +1899,8 @@ async def _run_pipeline_held(
     # The effective SpeciesNet box cutoffs (#285): every step reads the same values,
     # and the annotation_runs row below records them.
     config.update(DetectionCutoffs.from_config(config).as_config())
+    # BioCLIP's own floor (#433), recorded the same way.
+    config["bioclip_min_score"] = bioclip_min_score(config)
     # Set here, never taken from the caller's config: it decides whether a step may
     # write beside a human verdict (without_human_verdicts).
     config["force"] = force

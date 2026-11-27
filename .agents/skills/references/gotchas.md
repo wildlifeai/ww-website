@@ -239,6 +239,10 @@ edits another model's row. The final presence verdict is a derived `source_type=
 row (`evidence_fusion_v1`). Per-crop classification follows it too: its row sits on the
 detection's box beside SpeciesNet's (#162).
 
+Each model's scores need their own floor too. The run's `confidence_threshold` is SpeciesNet's box
+cutoff (0.2); BioCLIP read it until 27 Nov 2026 and wrote a dog crop as a mite at 0.21 (#433), so
+it now has `BIOCLIP_MIN_SCORE` (`pipeline.bioclip_min_score`). A new classifier gets its own.
+
 ---
 
 ## A pipeline step writes nothing beside a human verdict
