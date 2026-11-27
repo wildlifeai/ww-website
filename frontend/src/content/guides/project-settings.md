@@ -3,7 +3,7 @@ title: Project settings and roles
 description: What each project role can change on the Settings page, and how defaults, notifications and members work.
 category: Setup
 order: 30
-updated: 2026-11-26
+updated: 2026-11-27
 ---
 
 Open **Settings** from your avatar menu. Click a project's row to see its settings in a panel on
@@ -34,9 +34,14 @@ the project goes in.
 ## Defaults
 
 Defaults are the settings a camera takes when it is next deployed in the project: the triggering
-method, the AI model, photos per trigger and the time between them, the detection threshold and
-the capture flash. Cameras pick up a change at their next deployment, not straight away. Each
-change saves as soon as you make it.
+method, the AI model, photos per trigger and the time between them, the detection threshold, the
+capture flash, and LoRaWAN. Cameras pick up a change at their next deployment, not straight away.
+Each change saves as soon as you make it.
+
+**LoRaWAN** on sends the camera's check-ins over LoRaWAN, and **Check-in every** sets how often:
+4, 6, 8, 12 or 24 hours, 4 to start with. The app's **LoRaWAN Required** tickbox is the same
+setting. Setting up the network, and why nothing shorter than 4 hours, is in the
+[LoRaWAN guide](/guides/lorawan-in-new-zealand).
 
 ## Notifications
 

@@ -202,7 +202,7 @@ export function FaqPage() {
 
       <FaqItem q="Does the camera support LoRaWAN?">
         LoRaWAN support is rolling out in early access. Cameras send small check-ins (detection counts, battery,
-        SD card space and health) over LoRaWAN, as often as the mobile app set when you deployed them, and a short
+        SD card space and health) over LoRaWAN, as often as their project's check-in period, and a short
         message at once when their AI detects something or their health changes. They never send photos, which
         stay on the SD card until you upload them to the website. The website's Realtime page shows
         each camera's last check-in, battery, health and detection counts; it does not send a notification for a detection. See the{' '}

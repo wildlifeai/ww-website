@@ -1,6 +1,6 @@
 ---
 title: Connecting your Wildlife Watcher over LoRaWAN in New Zealand
-description: What LoRaWAN gives you, and every step to get your cameras reporting in, from coverage and a gateway to the project setting in the app and your first check-in
+description: What LoRaWAN gives you, and every step to get your cameras reporting in, from coverage and a gateway to the project setting and your first check-in
 category: Setup
 order: 20
 updated: 2026-11-27
@@ -19,9 +19,10 @@ you through setting it up in Aotearoa New Zealand, step by step.
 
 - **Check-ins**: a tiny status message with the camera's detection counts,
   battery, SD card space, temperature and health (any fault, and whether it
-  has restarted). The mobile app sets how often when you deploy the camera,
-  at present every 4 hours. Cameras on older firmware send battery and
-  detection counts only, with no health.
+  has restarted). How often is a project setting, every 4 hours unless a
+  project admin changes it, and the mobile app gives it to the camera when
+  you deploy it. Cameras on older firmware send battery and detection counts
+  only, with no health.
 - **Straight away when something happens**: when the on-device AI counts a
   detection, or the camera's health changes, it sends a message at once
   rather than waiting for the next check-in. If more happens before then,
@@ -49,7 +50,7 @@ ship your cameras.
 ## Setting it up, step by step
 
 1. **Coverage**: find a gateway in range of your site, or set up your own.
-2. **Your project**: turn on **LoRaWAN Required** in the mobile app.
+2. **Your project**: turn on **LoRaWAN** in the project's settings on the website, or in the app.
 3. **Deploy and test**: start monitoring and run the **LoRaWAN Signal** test.
 4. **Check**: see the camera's first check-in on the website's Realtime page.
 
@@ -175,7 +176,21 @@ you. Then go to Step 2.
 
 ## Step 2: Turn on LoRaWAN in your project
 
-A project admin does this once, in the Wildlife Watcher app:
+A project admin does this once, on the website or in the Wildlife Watcher
+app. The check-in period is set on the website only.
+
+**On the website:**
+
+1. Open **Settings** from your avatar menu and click the project's row.
+2. Open **Defaults** and set **LoRaWAN** to **On**.
+3. Choose **Check-in every**: 4, 6, 8, 12 or 24 hours. It starts at 4 hours.
+
+Each change saves as soon as you make it. Nothing shorter than 4 hours is
+offered: The Things Network allows each camera 10 messages to it a day, and
+every check-in uses one for its acknowledgement, so 4 hours uses 6 and leaves
+room for others.
+
+**In the app:**
 
 1. **Projects** → open the project → **Edit Project**. For a new project,
    **New Project**.
@@ -183,8 +198,9 @@ A project admin does this once, in the Wildlife Watcher app:
 3. Save.
 
 From then on, every camera you deploy in the project has its LoRaWAN turned
-on, with its check-in period set, when you start monitoring. A camera
-deployed in a project without it has its LoRaWAN turned off.
+on, with the project's check-in period, when you start monitoring. A camera
+deployed in a project without it has its LoRaWAN turned off. A change to
+either setting reaches a camera at its next deployment.
 
 ## Step 3: Deploy the camera and test it
 
@@ -220,9 +236,9 @@ its health, battery and SD card space, and its messages appear under
   move it closer, and test again.
 - The camera is not listed at all: it is not deployed in a project you have
   selected, or the project is not one you belong to.
-- The camera was deployed before the project had **LoRaWAN Required**
-  ticked, so its LoRaWAN is off. Tick it, then deploy the camera again with
-  the app.
+- The camera was deployed before the project had LoRaWAN turned on, so its
+  LoRaWAN is off. Turn it on (Step 2), then deploy the camera again with the
+  app.
 - With your own network server (1c): check it forwards to Wildlife Watcher,
   and talk to us.
 
@@ -289,6 +305,6 @@ they are collected. With no such camera in the selected projects, the tab is gre
 | The Things Network cluster | Australia 1, `au1.cloud.thethings.network` |
 | Uplink port | FPort 2 |
 | Check-in content | detection counts, battery, SD card space, temperature, health (self-test, last restart and why, restarts, AI processor failures); older firmware: battery and detection counts |
-| Check-in interval | set by the mobile app when it deploys the camera, at present every 4 hours |
+| Check-in interval | the project's setting, 4, 6, 8, 12 or 24 hours (default 4), given to the camera by the mobile app when it deploys it |
 | Messages between check-ins | at once on a new detection or a change in health, at most one of each per check-in interval |
 | Gateway tested by wildlife.ai | Seeed SenseCAP M2 (AS923), Packet Forwarder to TTN |
