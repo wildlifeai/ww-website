@@ -24,13 +24,16 @@ import { login, HAS_CREDS } from '../helpers/session'
  * Needs service-role access to insert synthetic telemetry:
  *   E2E_SUPABASE_URL + E2E_SUPABASE_SERVICE_ROLE_KEY
  * Seed deployment used: Zealandia Kiwi Watch (deterministic dev-seed UUID). It has no ping period
- * and no message, so the page leaves it out (isLorawanCamera) until the insert arrives: the camera
- * itself appears live.
+ * and no message. For the run it gets a 240-minute ping and its camera loses its DevEUI, so the
+ * page lists it from the start as a LoRaWAN camera with no messages and must say why: "Not
+ * registered for LoRaWAN" beside its state and under "need attention" (#525). The `finally` puts
+ * both back as it found them.
  *
  * The rows carry the run's tag as their device_eui (E2E_RUN_TAG in CI, set by
  * .github/workflows/e2e.yml), so e2e/cleanup.mjs can find them when a run dies
  * before the `finally` below. The fault also sends a camera_fault notification to anyone with
- * that alert on in the seed project (ww-backend#359); the `finally` deletes those too.
+ * that alert on in the seed project (ww-backend#359), and the ping can bring a camera_silent one;
+ * the `finally` deletes those too.
  */
 
 const SB_URL = process.env.E2E_SUPABASE_URL || ''
@@ -69,7 +72,16 @@ test.describe('LoRaWAN realtime telemetry', () => {
     }))
 
     const startedAt = new Date().toISOString()
+    // The seed rows as found, put back in the `finally`.
+    const { data: seed, error: e0 } = await sb
+      .from('deployments').select('device_id, lorawan_ping_minutes, devices(device_eui)').eq('id', DEPLOYMENT_ID).single()
+    expect(e0, `read the seed deployment failed: ${e0?.message}`).toBeNull()
+    const seedDevice = seed!.device_id as string
+    const seedPing = seed!.lorawan_ping_minutes as number | null
+    const seedEui = (seed!.devices as unknown as { device_eui: string | null } | null)?.device_eui ?? null
     try {
+      await sb.from('deployments').update({ lorawan_ping_minutes: 240 }).eq('id', DEPLOYMENT_ID)
+      await sb.from('devices').update({ device_eui: null }).eq('id', seedDevice)
       await login(page)
       await page.goto('/field')
       await page.waitForLoadState('networkidle')
@@ -77,6 +89,14 @@ test.describe('LoRaWAN realtime telemetry', () => {
         message: 'the Realtime page never got "Subscribed to PostgreSQL" from Realtime for field-lorawan-live',
         timeout: 30_000,
       }).toBe(true)
+
+      // A LoRaWAN camera with no DevEUI on record says why it has no messages.
+      await expect(
+        page.locator('#field-panel-cameras').getByRole('row').filter({ hasText: 'Not registered for LoRaWAN' }).first(),
+        'the camera with no DevEUI did not say "Not registered for LoRaWAN" in the Cameras table',
+      ).toBeVisible({ timeout: 30_000 })
+      // The header "1 camera needs attention", whose parent holds the list.
+      await expect(page.getByText(/cameras? needs? attention/).locator('..')).toContainText('Not registered for LoRaWAN')
 
       // Insert a synthetic uplink AFTER the page is subscribed, then its decoded values.
       const { data: msg, error: e1 } = await sb
@@ -145,13 +165,11 @@ test.describe('LoRaWAN realtime telemetry', () => {
       ).toBeVisible({ timeout: 30_000 })
 
       // A settings request, as lorawan-downlink records one: waiting, then answered, both live.
-      const { data: dep, error: e5 } = await sb.from('deployments').select('device_id').eq('id', DEPLOYMENT_ID).single()
-      expect(e5, `read the seed deployment failed: ${e5?.message}`).toBeNull()
       await sb.from('lorawan_downlinks').delete().eq('deployment_id', DEPLOYMENT_ID).is('requested_by', null)
       const { data: request, error: e6 } = await sb
         .from('lorawan_downlinks')
         .insert({
-          deployment_id: DEPLOYMENT_ID, device_id: dep!.device_id, kind: 'op_set', op_index: CHECK_IN_OP,
+          deployment_id: DEPLOYMENT_ID, device_id: seedDevice, kind: 'op_set', op_index: CHECK_IN_OP,
           op_value: CHECK_IN_MINUTES, status: 'sent', sent_at: new Date().toISOString(),
         })
         .select('id')
@@ -175,8 +193,11 @@ test.describe('LoRaWAN realtime telemetry', () => {
       // rows go with their messages (ON DELETE CASCADE); the fault's notifications do not.
       await sb.from('lorawan_messages').delete().eq('device_eui', RUN_TAG)
       await sb.from('lorawan_downlinks').delete().eq('deployment_id', DEPLOYMENT_ID).is('requested_by', null)
+      // camera_silent too: with its ping, the camera is silent until the insert (ww-backend's alert).
       await sb.from('notifications').delete()
-        .eq('type', 'camera_fault').eq('deployment_id', DEPLOYMENT_ID).gte('created_at', startedAt)
+        .in('type', ['camera_fault', 'camera_silent']).eq('deployment_id', DEPLOYMENT_ID).gte('created_at', startedAt)
+      await sb.from('deployments').update({ lorawan_ping_minutes: seedPing }).eq('id', DEPLOYMENT_ID)
+      await sb.from('devices').update({ device_eui: seedEui }).eq('id', seedDevice)
     }
   })
 })

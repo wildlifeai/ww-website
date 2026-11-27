@@ -196,7 +196,8 @@ examples are in ww-hardware's
 
 - A camera on USB reads about 3.1 V: that is the rail, not a cell.
 - Another board is another DevEUI. After swapping the camera on the bench, nothing reaches dev until
-  the new DevEUI is under TTN **End devices** and in the SQL above, and the new board has its own
+  the new DevEUI is under TTN **End devices** and in the SQL above (or set by a `ww_admin`
+  on the **Devices** page, `/admin/devices`, #525), and the new board has its own
   op 32, often 0. Its Bluetooth console prints `Current DevEui is:` at boot.
 - The webhook's path for **Uplink message** must be empty: TTN appends it to the Base URL, after
   `?token=`.

@@ -25,7 +25,7 @@ import {
   temperatureText, NO_MESSAGE, type FieldDeployment, type Telemetry,
 } from '../lib/realtimeReads'
 import {
-  CAMERA_STATE, cameraState, healthReasonTexts, needsAttention, silenceText,
+  CAMERA_STATE, cameraState, healthReasonTexts, needsAttention, notRegisteredReason, silenceText,
   LOW_BATTERY_REASON, SD_LOW_REASON, type CameraState,
 } from '../lib/cameraState'
 import { agoLabel, batteryText, sdFreeText } from '../lib/lorawanFeed'
@@ -40,8 +40,10 @@ import { NoProjectSelected } from '../components/common/NoProjectSelected'
 interface Camera extends FieldDeployment, Telemetry {
   state: CameraState
   detections48h: number         // the camera's own count, from its LoRaWAN messages
-  /** In words: the silence first, then the health reasons, worst first. */
+  /** In words: no DevEUI on record, the silence, then the health reasons, worst first. */
   reasons: string[]
+  /** On the "needs attention" list: Silent, Fault, Warning, or no DevEUI on record (#525). */
+  attention: boolean
   lowBattery: boolean
   sdLow: boolean
 }
@@ -138,18 +140,21 @@ export function FieldPage() {
     })
     // A finished camera has been collected: nothing about it needs a visit.
     const finished = state === 'finished'
+    const notRegistered = notRegisteredReason(state, d.no_dev_eui)
     const reasons = finished ? [] : [
+      ...(notRegistered ? [notRegistered] : []),
       ...(state === 'silent' ? [silenceText(d.lorawan_ping_minutes)] : []), ...healthReasonTexts(t.healthReasons),
     ]
     return [{
-      ...d, ...t, state, reasons, detections48h: detections[d.id] ?? 0,
+      ...d, ...t, state, reasons, attention: needsAttention(state) || notRegistered != null,
+      detections48h: detections[d.id] ?? 0,
       lowBattery: !finished && t.healthReasons.includes(LOW_BATTERY_REASON),
       sdLow: !finished && t.healthReasons.includes(SD_LOW_REASON),
     }]
   }), [deps, telemetry, detections])
   const names = useMemo(() => new Map(deps.map(d => [d.id, cameraName(d)])), [deps])
 
-  const troubled = useMemo(() => cameras.filter(c => needsAttention(c.state)), [cameras])
+  const troubled = useMemo(() => cameras.filter(c => c.attention), [cameras])
   const kpi = useMemo(() => ({
     active: cameras.filter(c => c.state !== 'finished').length,
     troubled: troubled.length,

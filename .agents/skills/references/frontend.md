@@ -82,7 +82,10 @@ Rules:
 * A camera's health (`health_state`, `health_reasons` in `deployment_latest_lorawan`) is worked
   out once in ww-backend for the website, the app and the alerts (ww-backend#381); don't decode
   self-test bits or compare counters here. The page adds only silence, from the deployment's
-  `lorawan_ping_minutes`, and words the reason codes, both in `lib/cameraState.ts` (#427).
+  `lorawan_ping_minutes`, and "Not registered for LoRaWAN" for a camera with no `device_eui`, whose
+  messages lorawan-ingest cannot link (#525), and words the reason codes, all in
+  `lib/cameraState.ts` (#427). `devices.device_eui` has no format check or unique index in
+  ww-backend, so Admin Devices checks both before it writes (`lib/deviceEui.ts`).
 * A camera's settings go to it by LoRaWAN downlink through ww-backend's `lorawan-downlink` function,
   which does every check; the Realtime page only hides the controls from non-admins and words the
   refusals and each request's status (`lib/lorawanDownlinks.ts`, #521). `functions.invoke` turns a

@@ -22,9 +22,12 @@ export interface AdminDevice {
   } | null
 }
 
+/** Invalidated after a DevEUI is saved on the page. */
+export const ADMIN_DEVICES_KEY = ['admin', 'devices'] as const
+
 export function useAdminDevices(enabled: boolean) {
   return useQuery({
-    queryKey: ['admin', 'devices'],
+    queryKey: ADMIN_DEVICES_KEY,
     queryFn: async (): Promise<AdminDevice[]> => {
       const r = (await apiClient.get('/api/admin/devices')) as { data?: AdminDevice[] }
       return r.data ?? []
