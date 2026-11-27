@@ -76,7 +76,12 @@ function Kpi({ label, value, tone }: { label: string; value: number | string; to
   )
 }
 
-const cameraName = (d: FieldDeployment) => d.location_name || d.device_name || d.id.slice(0, 8)
+/** The camera's own name, as on its label (WILD-XXXX); `realtimeReads` gives '-' for none. */
+const cameraName = (d: FieldDeployment) =>
+  (d.device_name && d.device_name !== '-' ? d.device_name : d.location_name) || d.id.slice(0, 8)
+/** The site the camera was deployed at, shown under its name. */
+const siteName = (d: FieldDeployment) => (d.location_name && d.location_name !== cameraName(d) ? d.location_name : null)
+const SITE: React.CSSProperties = { ...MUTED, fontWeight: 400, fontSize: '0.78rem' }
 
 // ── Component ──────────────────────────────────────────────────────────
 
@@ -155,8 +160,12 @@ export function FieldPage() {
   const nothingReported = telemetryQuery.isSuccess && !cameras.some(c => c.lastSeen != null)
 
   const columns = useMemo<Column<Camera>[]>(() => [
-    { key: 'location_name', label: 'Camera', cellStyle: { fontWeight: 500 },
-      render: c => cameraName(c), getValue: c => c.location_name ?? '' },
+    { key: 'device_name', label: 'Camera', cellStyle: { fontWeight: 500 },
+      render: c => {
+        const site = siteName(c)
+        return site ? <>{cameraName(c)}<div style={SITE}>{site}</div></> : cameraName(c)
+      },
+      getValue: c => [cameraName(c), siteName(c)].filter(Boolean).join(' ') },
     { key: 'project_name', label: 'Project' },
     // The state and the first reason; every reason on hover and in the attention list.
     { key: '_health', label: 'Health',
