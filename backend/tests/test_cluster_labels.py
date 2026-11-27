@@ -25,6 +25,16 @@ TAXA = {
     "t-muridae": {"id": "t-muridae", "scientific_name": "Muridae", "rank": "family", "family": "Muridae"},
     "t-mouse": {"id": "t-mouse", "scientific_name": "Mus musculus", "rank": "species", "family": "Muridae", "genus": "Mus", "species": "musculus"},
     "t-aves": {"id": "t-aves", "scientific_name": "Aves", "rank": "class", "class": "Aves"},
+    "t-rodentia": {"id": "t-rodentia", "scientific_name": "Rodentia", "rank": "order", "order_name": "Rodentia"},
+    "t-rat-full": {
+        "id": "t-rat-full",
+        "scientific_name": "Rattus rattus",
+        "rank": "species",
+        "order_name": "Rodentia",
+        "family": "Muridae",
+        "genus": "Rattus",
+        "species": "rattus",
+    },
 }
 
 RAT = Named("Rattus rattus", "t-rat")
@@ -51,6 +61,13 @@ def test_a_family_contains_a_species_through_its_taxa_row():
     assert not contains(Named("Aves", "t-aves"), MOUSE, TAXA)
     # Without the narrow taxon's row the family cannot be placed, so it is a different name.
     assert not contains(MURIDAE, Named("Mus musculus"), TAXA)
+
+
+def test_an_order_contains_a_species_through_its_order_name_column():
+    # taxa.rank holds 'order' and the narrower row names it in order_name (34a_taxa.sql).
+    rodentia, rat = Named("Rodentia", "t-rodentia"), Named("Rattus rattus", "t-rat-full")
+    assert contains(rodentia, rat, TAXA)
+    assert not mixes_species([rodentia, rat], TAXA)
 
 
 def test_two_species_mix_but_a_broader_name_does_not():
