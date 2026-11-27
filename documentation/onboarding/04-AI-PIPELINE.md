@@ -86,8 +86,7 @@ labels (`groupByBox` in `frontend/src/lib/observations.ts`). A crop BioCLIP scor
 `BIOCLIP_MIN_SCORE` adds no row, so its box keeps SpeciesNet's label only: the step keeps BioCLIP's
 top species and its score, not a genus score, so it cannot roll up the way `rollup_taxon` does. The
 floor was the run's 0.2 detector threshold until #433, which let a dog crop through as a mite
-(*Demodex canis*) at 0.21; 0.5 is provisional, SpeciesNet's species bar, until it is measured on
-labelled crops. A re-run replaces BioCLIP's earlier rows only on the photos it writes a new row for,
+(*Demodex canis*) at 0.21; the floor is 0.5, SpeciesNet's species bar (Victor, 27 Nov 2026). A re-run replaces BioCLIP's earlier rows only on the photos it writes a new row for,
 so a photo whose crops all fall under the floor keeps its old ones. With the
 flag on, `count` becomes **human-only** ("N individuals" annotations) since AI rows are 1-per-detection.
 Requires the GPU worker; set it on the **worker**, and reprocess a deployment to migrate existing rows
