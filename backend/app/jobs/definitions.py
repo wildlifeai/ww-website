@@ -2029,16 +2029,22 @@ async def embed_deployments_job(job_id: str, deployment_ids: list[str], model_na
 
 async def ingest_results_part_job(lease_id: str, job_id: str, part: int):
     """Write one REANNZ results part's rows (``jobs/ingest.py``); the last part finishes the job."""
-    from app.jobs.ingest import ingest_results_part
+    from app.jobs.ingest import INGEST_FAILED_MESSAGE, IngestError, ingest_results_part, ingest_stopped
+    from app.services.inference_cache import ContractMismatch
 
     try:
         outcome = await ingest_results_part(lease_id, job_id, int(part))
         logger.info("job_complete", job_type="ingest_results_part", job_id=job_id, part=part, outcome=outcome)
     except Exception as e:
-        # The part stays in the object store without its marker, so a retry (the dead-letter
-        # queue on Lambda) ingests it and finishes the job.
+        # The part stays in the object store without its marker. A part that can never be
+        # written (missing, or another lease's or contract's) fails the job now; any other
+        # error is tried again by the scheduled tick (ingest.released_lease_decision) until
+        # BATCH_MAX_ATTEMPTS. Raised either way, so the dead-letter queue still records it.
         logger.error("job_failed", job_type="ingest_results_part", job_id=job_id, part=part, error=str(e))
-        await update_job(job_id, status=JobStatus.FAILED, error=f"Results part {part} could not be written: {e}")
+        if isinstance(e, (IngestError, ContractMismatch)) or await ingest_stopped(lease_id, job_id, int(part), str(e)):
+            await update_job(job_id, status=JobStatus.FAILED, error=f"Results part {part} could not be written: {e}", message=INGEST_FAILED_MESSAGE)
+        else:
+            await update_job(job_id, message=f"Writing results stopped at part {part}; it will be tried again")
         raise
 
 
