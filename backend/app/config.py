@@ -97,6 +97,25 @@ class Settings(BaseSettings):
     FF_ACTIVE_LEARNING_ENABLED: bool = Field(False, description="Enable active-learning review queue scoring")
     FF_INTELLIGENCE_ENABLED: bool = Field(False, description="Enable conservation intelligence endpoints (health, alerts, shift)")
     FF_LOCAL_EMBEDDING_ENABLED: bool = Field(False, description="Accept client-computed (WebGPU) embedding vectors")
+    FF_LABEL_CHECKS_ENABLED: bool = Field(
+        False,
+        description=(
+            "Label checks from DINOv3 fingerprints (#448): /api/label-checks, the recompute after each Brain run and nightly. "
+            "Off: FEATURE_DISABLED and no recompute. Needs ww-backend's label_checks table (on dev since 25 Nov 2026)"
+        ),
+    )
+    LABEL_CHECK_NEIGHBOURS: int = Field(5, ge=1, le=50, description="k: the nearest fingerprints each label check compares (#448)")
+    LABEL_CHECK_MIN_EXAMPLES: int = Field(
+        5,
+        ge=2,
+        description="A species' fewest examples for a reference: below it in confirmed labels its AI labels count too, below it in all, no check",
+    )
+    LABEL_CHECK_ODD_Z: float = Field(
+        3.0, gt=0, description="Odd one out: the robust z-score of a label's distance to its species that flags it (score 0.5, 1 at twice it)"
+    )
+    LABEL_CHECK_NIGHTLY_HOUR_UTC: int = Field(
+        14, ge=0, le=23, description="UTC hour of the nightly recompute for projects whose labels changed that day (14 = 2 or 3 am in New Zealand)"
+    )
 
     # ── Species Brain training ("Create species ID model" on the Annotations page) ──
     FF_MODEL_TRAINING_ENABLED: bool = Field(

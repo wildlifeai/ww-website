@@ -81,6 +81,7 @@ Errors come in three shapes, so check both the status and the body:
 - [CamtrapDP Export](#camtrapdp-export)
 - [Reports](#reports)
 - [Wildlife Brain — Embeddings & Clustering](#wildlife-brain--embeddings--clustering)
+- [Label Checks](#label-checks)
 - [Conservation Intelligence](#conservation-intelligence)
 - [QA](#qa)
 - [Public Data API (v1)](#public-data-api-v1)
@@ -392,6 +393,21 @@ Same prefix; the queue/score endpoints are additionally gated by **`FF_ACTIVE_LE
 | `GET /api/brain/review-queue/{deployment_id}` | Media ranked by `active_learning_score` DESC with AI label + score reasons (`?limit=50`) |
 | `POST /api/brain/review/{media_id}` | **Write** (see [Access](#access)), demo refused, `FF_WILDLIFE_BRAIN_ENABLED` only. Record a reviewer decision (`approve` / `reassign` → `human_reviewed`, `expert` → `expert_reviewed`) as the photo's human row: added when it has none, updated when it has one |
 | `POST /api/brain/review/batch` | **Write** per photo, demo refused, `FF_WILDLIFE_BRAIN_ENABLED` only. One decision on up to 500 photos: body `{ media_ids, decision: 'reassign' \| 'expert', taxon_id?, scientific_name?, vernacular_name? }` (`reassign` needs `taxon_id` or `scientific_name`; more than 500 is `422`). The same meaning as the per-photo route, written in chunks of 50. Without a species, `expert` keeps a photo's own label and changes its status. Photos the caller may not change are skipped, `403` when that is all of them. → `{ created, updated, observation_ids, skipped: [{ media_id, reason: 'not_writable' \| 'not_found' }] }` |
+
+---
+
+## Label Checks
+
+Flags on labels that look wrong next to the DINOv3 fingerprints around them
+([#448](https://github.com/wildlifeai/ww-website/issues/448), design and decisions in
+[label checks](../development%20reports/2026-11_label-checks.md)). JWT required; gated by
+**`FF_LABEL_CHECKS_ENABLED`** (off: `FEATURE_DISABLED`). The flags themselves are ww-backend's
+`label_checks` rows, which the website reads and marks checked through PostgREST under their RLS.
+
+| Method · Path | Description |
+|---|---|
+| `GET /api/label-checks/{project_id}` | Read access. The project's flags in numbers → `{ open: { odd_one_out?, look_alike?, more_specific? }, checked, relabelled, computed_at }`: `checked` against `relabelled` is the feedback that sets the slider's default (decision 15). Also the website's probe for the flag |
+| `POST /api/label-checks/{project_id}/recompute` | **Write** (see [Access](#access)), demo refused, 6 a minute. Recompute the project's flags now, as a `label_checks` job (CPU, `IN_PROCESS_JOBS`) → `{ job_id, status: 'queued', project_id }`. It also runs after each Wildlife Brain run and nightly |
 
 ---
 

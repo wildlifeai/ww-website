@@ -2060,6 +2060,55 @@ async def finalize_batch_job(lease_id: str, job_id: str):
         raise
 
 
+def _label_check_tuning():
+    from app.config import settings
+    from app.domain.label_checks import Tuning
+
+    return Tuning(k=settings.LABEL_CHECK_NEIGHBOURS, min_examples=settings.LABEL_CHECK_MIN_EXAMPLES, odd_z=settings.LABEL_CHECK_ODD_Z)
+
+
+async def label_checks_job(job_id: str, project_id: str):
+    """Recompute a project's label checks from its DINOv3 fingerprints (#448); CPU only."""
+    from app.domain.label_check_runs import recompute_project
+    from app.services.supabase_client import create_service_client
+
+    logger.info("job_start", job_type="label_checks", job_id=job_id, project_id=project_id)
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.1, message="Checking labels…")
+    try:
+        r = await asyncio.to_thread(recompute_project, create_service_client(), project_id, _label_check_tuning())
+        await update_job(
+            job_id,
+            status=JobStatus.COMPLETED,
+            progress=1.0,
+            message=f"{r.flagged} labels flagged for a second look",
+            result={"flagged": r.flagged, "written": r.written, "relabelled": r.relabelled, "deleted": r.deleted},
+        )
+    except Exception as e:
+        logger.error("job_failed", job_type="label_checks", job_id=job_id, error=str(e))
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+
+
+async def nightly_label_checks_job(job_id: str, since: str):
+    """Recompute the label checks of every project whose labels changed since ``since`` (#448)."""
+    from app.domain.label_check_runs import projects_with_changed_labels, recompute_project
+    from app.services.supabase_client import create_service_client
+
+    logger.info("job_start", job_type="nightly_label_checks", job_id=job_id)
+    await update_job(job_id, status=JobStatus.PROCESSING, progress=0.05, message="Finding changed projects…")
+    try:
+        svc = create_service_client()
+        projects = await asyncio.to_thread(projects_with_changed_labels, svc, since)
+        flagged = 0
+        for n, project_id in enumerate(projects):
+            flagged += (await asyncio.to_thread(recompute_project, svc, project_id, _label_check_tuning())).flagged
+            await update_job(job_id, progress=0.05 + 0.9 * (n + 1) / len(projects))
+        message = f"{len(projects)} projects checked, {flagged} labels flagged"
+        await update_job(job_id, status=JobStatus.COMPLETED, progress=1.0, message=message, result={"projects": len(projects)})
+    except Exception as e:
+        logger.error("job_failed", job_type="nightly_label_checks", job_id=job_id, error=str(e))
+        await update_job(job_id, status=JobStatus.FAILED, error=str(e))
+
+
 JOBS = [
     convert_model_job,
     train_species_brain_job,
@@ -2081,4 +2130,6 @@ JOBS = [
     ingest_results_part_job,
     finalize_batch_job,
     sync_inat_job,
+    label_checks_job,
+    nightly_label_checks_job,
 ]

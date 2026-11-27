@@ -3,8 +3,9 @@
 //
 // GridRibbon: the review grid's sticky command bar. The menu bar holds the pager (one count, the
 // filtered total, 02 #5, #24), the Photo / Labels toggle, the thumbnail size and "All on page";
-// the sub-bar the selection's actions. The tabs, in order: Review (the review order and the
-// Wildlife Brain's cluster review and map, opened first), Filter (the query) and Group.
+// the sub-bar the selection's actions. The tabs, in order: Review (the review order, the
+// Wildlife Brain's cluster review and map, and "Needs a second look", opened first), Filter (the
+// query) and Group.
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Hourglass, Search, SlidersHorizontal, X } from 'lucide-react'
@@ -43,6 +44,8 @@ interface Props {
     order: { value: '' | 'review'; onChange: (v: '' | 'review') => void } | null
     /** The Wildlife Brain's pages, when its flag is on. */
     brain: { singleDeployment: string | null; embeddingRunId: string | null; loading: boolean } | null
+    /** "Needs a second look" (#448), when label checks are on: the flagged photos' count. */
+    secondLook: { on: boolean; onToggle: () => void; count: number } | null
   }
   group: {
     groupBy: GroupBy
@@ -70,6 +73,7 @@ export function GridRibbon({ pager, view, onSelectAll, bulkBar, filter, review, 
   const advancedActive = filter.advancedCount > 0
   const labels = group.labels
   const brain = review.brain
+  const secondLook = review.secondLook
   const reviewGroups = [
     ...(review.order ? [{ id: 'order', title: 'Order', content: (
       <FilterSelect value={review.order.value} onChange={v => review.order?.onChange(v === 'review' ? 'review' : '')} placeholder="Newest first"
@@ -91,6 +95,13 @@ export function GridRibbon({ pager, view, onSelectAll, bulkBar, filter, review, 
       ) : (
         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Pick one deployment in Filter to review its clusters</span>
       )
+    ) }] : []),
+    ...(secondLook ? [{ id: 'second-look', title: 'Label checks', content: (
+      <button type="button" aria-pressed={secondLook.on} onClick={secondLook.onToggle}
+        title="Photos whose label looks unlike the photos that look like them"
+        style={{ ...SMALL_BTN, borderColor: secondLook.on ? 'var(--primary)' : undefined, color: secondLook.on ? 'var(--primary)' : undefined }}>
+        Needs a second look ({secondLook.count})
+      </button>
     ) }] : []),
   ]
   return (

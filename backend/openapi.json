@@ -4743,6 +4743,106 @@
         ]
       }
     },
+    "/api/label-checks/{project_id}": {
+      "get": {
+        "description": "The project's open flags by kind, how many were marked checked and how many relabelled\n(design decision 15), and when they were last computed.",
+        "operationId": "label_check_summary_api_label_checks__project_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Label Check Summary",
+        "tags": [
+          "label-checks"
+        ]
+      }
+    },
+    "/api/label-checks/{project_id}/recompute": {
+      "post": {
+        "description": "Recompute the project's flags now, as a job.",
+        "operationId": "recompute_label_checks_api_label_checks__project_id__recompute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "title": "Project Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Recompute Label Checks",
+        "tags": [
+          "label-checks"
+        ]
+      }
+    },
     "/api/manifest/branches": {
       "get": {
         "description": "Return available branches from the Grove Vision AI firmware repo.\n\nProxied through the backend to avoid CORS issues on the frontend.",

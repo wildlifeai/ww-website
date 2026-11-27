@@ -7,7 +7,8 @@ an embed (``projects.organisation_id``), ``or_`` and ``not_`` on the table, ``or
 ``foreign_table``), ``range``, ``limit`` and ``count="exact"``, as PostgREST does for these
 cases: a filter on an embed trims that embed, and drops the parent row only when the embed is
 ``!inner``. Two timestamps with a zone compare as instants, as ``timestamptz`` does. ``update``
-and ``upsert`` are enough for the API key and job stores; ``insert`` and ``delete`` return the
+is enough for the API key and job stores, and ``upsert`` takes a row or a list and matches on
+``on_conflict`` (``id`` by default); ``insert`` and ``delete`` return the
 rows they wrote, as supabase-py asks for by default. Like PostgREST, a read returns at most
 ``max_rows`` (1,000) rows, so a read that does not page stops there in a test too. A database
 function is ``rpcs[name](params)``, a stand-in the test gives, and each call is kept in ``calls``.
@@ -68,6 +69,7 @@ COLUMNS = {
         "annotator_id",
         "deleted_at",
         "created_at",
+        "updated_at",
         "observation_level",
         "classified_by",
         "classification_timestamp",
@@ -97,7 +99,34 @@ COLUMNS = {
         "created_at",
     },
     "annotation_runs": {"id", "deployment_id", "run_type", "model_id", "config", "started_at", "completed_at", "observation_count", "created_by"},
-    "media_embeddings": {"media_id", "deployment_id", "embedding_run_id", "cluster_id", "cluster_confidence", "is_outlier", "created_at"},
+    "media_embeddings": {
+        "media_id",
+        "deployment_id",
+        "embedding_run_id",
+        "cluster_id",
+        "cluster_confidence",
+        "is_outlier",
+        "embedding",
+        "embedding_model",
+        "created_at",
+    },
+    # 60_label_checks.sql, 27 Nov 2026 (#448).
+    "label_checks": {
+        "id",
+        "observation_id",
+        "project_id",
+        "kind",
+        "score",
+        "other_scientific_name",
+        "other_taxon_id",
+        "reference",
+        "embedding_run_id",
+        "label_scientific_name",
+        "computed_at",
+        "checked_by",
+        "checked_at",
+        "outcome",
+    },
     "embedding_runs": {"id", "deployment_id", "model_name", "status", "created_at"},
     "cluster_assignments": {
         "id",
@@ -225,8 +254,8 @@ class Query:
         self.mode, self.payload = "update", payload
         return self
 
-    def upsert(self, payload: dict):
-        self.mode, self.payload = "upsert", payload
+    def upsert(self, payload, on_conflict: str = "id"):
+        self.mode, self.payload, self.on_conflict = "upsert", payload, on_conflict
         return self
 
     def insert(self, payload):
@@ -331,13 +360,19 @@ class Query:
 
     def execute(self):
         if self.mode == "upsert":
+            # A row matching every ``on_conflict`` column is updated, else one is added.
             rows = self.db.tables.setdefault(self.table, [])
-            existing = next((r for r in rows if r["id"] == self.payload["id"]), None)
-            if existing:
-                existing.update(copy.deepcopy(self.payload))
-            else:
-                rows.append(copy.deepcopy(self.payload))
-            return SimpleNamespace(data=[self.payload], count=None)
+            keys = [k.strip() for k in self.on_conflict.split(",")]
+            for item in self.payload if isinstance(self.payload, list) else [self.payload]:
+                existing = next((r for r in rows if all(r.get(k) == item.get(k) for k in keys)), None)
+                if existing:
+                    existing.update(copy.deepcopy(item))
+                else:
+                    if "id" not in item:
+                        self.db.next_id += 1
+                        item = {"id": f"new-{self.db.next_id}", **item}
+                    rows.append(copy.deepcopy(item))
+            return SimpleNamespace(data=self.payload if isinstance(self.payload, list) else [self.payload], count=None)
         if self.mode == "update":
             for column in self.payload:
                 _check_column(self.table, column)

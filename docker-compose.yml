@@ -48,6 +48,8 @@ services:
       # the report could not be switched on in a container.
       - FF_EDGE_REFLECT_ENABLED=${FF_EDGE_REFLECT_ENABLED:-false}
       - FF_INTELLIGENCE_ENABLED=${FF_INTELLIGENCE_ENABLED:-false}
+      # Label checks (#448): the routes, and the recompute after a Brain run and nightly.
+      - FF_LABEL_CHECKS_ENABLED=${FF_LABEL_CHECKS_ENABLED:-false}
       # General
       - GENERAL_ORG_ID=${GENERAL_ORG_ID:-b0000000-0000-0000-0000-000000000001}
       # Observability
@@ -101,6 +103,8 @@ services:
       - SUPABASE_MEDIA_BUCKET=${SUPABASE_MEDIA_BUCKET:-media-renditions}
       # The embed step after the pipeline runs here, so the worker reads the same flag.
       - FF_WILDLIFE_BRAIN_ENABLED=${FF_WILDLIFE_BRAIN_ENABLED:-true}
+      # A Brain run here queues its projects' label checks (#448).
+      - FF_LABEL_CHECKS_ENABLED=${FF_LABEL_CHECKS_ENABLED:-false}
       - HF_TOKEN=${HF_TOKEN:-}
       - EMBEDDING_DEFAULT_MODEL=${EMBEDDING_DEFAULT_MODEL:-dinov3-vith}
       - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}

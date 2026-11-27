@@ -7,9 +7,10 @@ Mounted only on Lambda (``WW_LAMBDA_ROLE`` set). Two kinds:
 - a job, ``{"ww-job": "<definition>", "args": [...], "kwargs": {...}}`` or with
   ``payload_key`` for a payload spilled to the object store (``services/lambda_invoke.py``).
   Run to completion here, on the ``cpu`` function only;
-- the scheduled tick, ``{"ww-tick": true}`` from EventBridge Scheduler: the stale-job reaper
-  and one ``batch_queue`` log line (queued jobs, oldest age) that a CloudWatch metric filter
-  turns into the "oldest queued" alarm. Harmless if called over HTTP, so any role accepts it.
+- the scheduled tick, ``{"ww-tick": true}`` from EventBridge Scheduler: the stale-job reaper,
+  the nightly label checks (``jobs/label_checks.py``, once a day) and one ``batch_queue`` log
+  line (queued jobs, oldest age) that a CloudWatch metric filter turns into the "oldest queued"
+  alarm. Harmless if called over HTTP, so any role accepts it.
 
 A failed job answers 500, which makes the invoke count as failed, so the template's
 on-failure destination (the dead-letter queue) keeps the event.
@@ -82,9 +83,11 @@ def emf_line(oldest_minutes: float, queued_jobs: int) -> str:
 async def run_tick() -> dict:
     """The reaper, and the queue's age for the alarm."""
     from app.domain.batch_lease import pending_summary
+    from app.jobs.label_checks import maybe_queue_nightly
     from app.jobs.store import reap_stale_jobs
 
     reaped = await reap_stale_jobs(max_age_minutes=60)
+    await maybe_queue_nightly()
     summary = await pending_summary() if settings.WORKER_BACKEND == "lambda" else {"jobs": 0, "oldest_minutes": 0}
     logger.info("batch_queue", queued_jobs=summary["jobs"], oldest_minutes=summary["oldest_minutes"], reaped=reaped)
     print(emf_line(float(summary["oldest_minutes"]), int(summary["jobs"])), flush=True)
