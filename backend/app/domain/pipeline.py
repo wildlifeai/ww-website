@@ -1658,8 +1658,12 @@ def fetch_pipeline_media(
     only_unannotated: bool = True,
     force: bool = False,
     media_ids: list[str] | None = None,
+    sequence_tag: bool = False,
 ) -> list[dict]:
     """The media a run of ``steps`` on ``deployment_id`` would touch, with the guards applied.
+
+    ``sequence_tag`` adds ``trigger_id`` and ``frame_index`` from ``exif_metadata``, which
+    ``burst_evidence.group_bursts`` reads, for the batch lease's part edges (#531).
 
     Shared by :func:`run_pipeline` and the REANNZ batch lease (``domain/batch_lease.py``), so
     the cluster is sent exactly the photos the run will write rows for. Blocking (PostgREST).
@@ -1683,7 +1687,10 @@ def fetch_pipeline_media(
     run_versions = [step_versions[s] for s in steps if s in step_versions]
 
     def _media_query():
-        q = svc.table("media").select("id, deployment_id, file_path, file_name, file_mediatype, timestamp").eq("deployment_id", deployment_id)
+        columns = "id, deployment_id, file_path, file_name, file_mediatype, timestamp"
+        if sequence_tag:
+            columns += ", trigger_id:exif_metadata->>trigger_id, frame_index:exif_metadata->>frame_index"
+        q = svc.table("media").select(columns).eq("deployment_id", deployment_id)
         # Scope to specific media when given (e.g. a CamtrapDP import runs AI only on the
         # image-backed rows, not the fileless CSV references that would choke media_prep).
         if media_ids:

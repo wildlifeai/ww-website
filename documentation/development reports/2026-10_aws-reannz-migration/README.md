@@ -27,7 +27,7 @@ Every setting, its default and its value on AWS: [deployment-guide.md, AWS and t
 |---|---|---|
 | `GET /pending` | | `jobs`, `photos` (upper bound), `oldest_minutes`, `submit`, `image`, `time_limit_minutes`, `contract` |
 | `POST /lease` | `max_photos`, `slurm_job_id`, `paged` | the manifest, or `{"lease_id": null}` |
-| `GET /lease/{id}/items/{job}` | `offset`, `limit` (query, at most 1,000) | a paged job's photos from `offset`, URLs signed now |
+| `GET /lease/{id}/items/{job}` | `offset`, `limit` (query, at most 1,000) | a paged job's photos from `offset`, URLs signed now; the page ends between two bursts, so it can be shorter than `limit` with more to come |
 | `POST /lease/{id}/heartbeat` | `done`, `total` | `cancel`, `expires_at` |
 | `POST /lease/{id}/part` | `job_id`, `part` | `method`, `url` (S3) or `path` (the API), `headers` |
 | `PUT /lease/{id}/part/{job}/{n}` | gzipped part | for the azure and local backends |
@@ -36,6 +36,8 @@ Every setting, its default and its value on AWS: [deployment-guide.md, AWS and t
 | `GET /lease/{id}/media/{media_id}?crop=` | | one original or hero crop through the SSRF-guarded resolver; a 307 to a presigned copy when it is too large to answer |
 
 **Manifest**: `lease_id`, `contract`, `expires_at`, `heartbeat_seconds`, `part_max_photos`, and per job `job_id`, `kind` (`annotate` or `embed`), `models` (`speciesnet`, `bioclip`, or `dinov3` with the model name), `config` (threshold, SpeciesNet cutoffs, `per_detection`, BioCLIP rank and labels), `items` (`media_id`, `deployment_id`, and `url` for S3 or a public rendition, else `path`), or in a paged lease `items_total`, the photos then read page by page.
+
+**Part edges** ([#531](https://github.com/wildlifeai/ww-website/issues/531), `backend/app/domain/batch_lease.py`): evidence fusion groups bursts within one part's photos at ingest, so the API, which has the timestamps and sequence tags, sets the edges. An annotate job's photos are leased burst by burst (`group_bursts` with the run's `burst_gap_seconds`, bursts in the order of their first photo), and each items page the cluster asks for, one part's worth, ends before the first photo of a burst it would cut. The cluster already reads the next page from where the last one ended, so the GPU image needs no rebuild and the contract stays 1. A burst longer than a part is still cut at the part size (logged as `batch_part_splits_burst`), and a lease taken with the photos inline (an image from before paging) is cut by count as before.
 
 **Results part** (`backend/app/services/inference_cache.py`, contract 1): gzipped JSON lines. Header: `contract`, `lease_id`, `job_id`, `part`, `kind`, `image`, `slurm_job_id`, `bioclip_labels`, `bioclip_rank`, `embedding_model`. Record per photo: `media_id`, `deployment_id`, then `speciesnet` (the `ImagePrediction` fields), `bioclip` (`bbox` or null for a whole frame, name, score, rank), `dinov3` (the vector), or `error`.
 
