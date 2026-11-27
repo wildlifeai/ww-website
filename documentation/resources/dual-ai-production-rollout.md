@@ -48,8 +48,7 @@ The two repos promote **differently**, and that asymmetry is why this is safe:
 
 - ✅ ww-backend `dual_ai_v0` migration merged (`observations.ai_origin`, `device_alert_rules`) — additive.
 - ✅ ww-website edge reflection (`domain/edge_reflection.py`) + 📟 Camera-AI badge merged.
-- ✅ `FF_EDGE_REFLECT_ENABLED=true` was set on the Azure dev API + worker (removed 2026-11-27);
-  AWS dev takes its `FF_*` flags from SSM under `/ww/dev/`.
+- ✅ `FF_EDGE_REFLECT_ENABLED=true` on dev (SSM `/ww/dev/`).
 - ✅ EXIF NUL-byte ingest fix (§6) — a production-blocker found during the dev demo.
 
 ---

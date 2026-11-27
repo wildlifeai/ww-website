@@ -349,9 +349,9 @@ the API's `/api/inat/callback`, not the site, and `INAT_REDIRECT_URI` must be th
 | production (`ww-backend`, wildlifewatcher.ai) | `https://ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io/api/inat/callback` |
 | local | `http://localhost:8000/api/inat/callback` |
 
-**Dev is not set up.** Its app's redirect URI was the Azure dev API's `/api/inat/callback`, and AWS
-dev has no `INAT_*` parameters in SSM yet, so iNaturalist on dev needs those parameters under
-`/ww/dev/` and the AWS dev API's `/api/inat/callback` registered with the iNaturalist app.
+**Dev has no OAuth app.** `/ww/dev/` holds `FF_INAT_ENABLED` and `INAT_TOKEN_KEY` (2026-11-26), which
+the pasted token needs, but no `INAT_CLIENT_ID`. An app for dev takes the AWS dev API's
+`/api/inat/callback` as its redirect URI.
 
 The code default, `https://wildlifewatcher.ai/inat/callback`, is the site, where no page handles the
 callback, so set the variable everywhere. After the callback the API sends the browser to the first
