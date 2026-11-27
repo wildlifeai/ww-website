@@ -76,7 +76,7 @@ function H3({ children }: { children: React.ReactNode }) {
   return <h3 style={{ fontSize: '1.1rem', marginTop: '1.5rem', marginBottom: '0.75rem' }}>{children}</h3>
 }
 
-function Ul({ items }: { items: string[] }) {
+function Ul({ items }: { items: React.ReactNode[] }) {
   return (
     <ul style={{ paddingLeft: '1.25rem', margin: '0.5rem 0 1rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
       {items.map((item, i) => <li key={i} style={{ lineHeight: 1.6 }}>{item}</li>)}
@@ -165,7 +165,7 @@ export function ResourcesPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
               {[
                 { title: 'Ground-facing (downward view)', steps: ['Use the integrated adjustable stand to place the device securely facing the ground', 'Adjust the angle to cover the desired field of view', 'Fix the wildlife platform in the camera view', 'Set up any bait or attractants'] },
-                { title: 'Tree / post mount', steps: ['Use straps and mounting clasps to attach to a tree trunk or post trunk', 'Adjust the angle to capture the target zone', 'Ensure the camera is level and stable', 'Use the dedicated holes to screw the device securely in place'] },
+                { title: 'Tree / post mount', steps: ['Use straps and mounting clasps to attach to a tree trunk or post', 'Adjust the angle to capture the target zone', 'Ensure the camera is level and stable', 'Use the dedicated holes to screw the device securely in place'] },
               ].map(m => (
                 <div key={m.title} style={{ padding: '1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
                   <strong style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>{m.title}</strong>
@@ -179,8 +179,10 @@ export function ResourcesPage() {
 
           <Section id="mobile-app" title="Mobile App" icon={Smartphone}>
             <p style={{ lineHeight: 1.7, marginBottom: '1rem' }}>
-              The Wildlife Watcher companion app is the only way to configure, control, and monitor your cameras.
-              It connects via Bluetooth and is available for iOS and Android.
+              The Wildlife Watcher companion app, for iOS and Android, connects to the camera over Bluetooth
+              to start and stop monitoring. To install camera software or an AI model, Prepare SD card on the
+              website is faster than Bluetooth: see{' '}
+              <Link to="/guides/preparing-an-sd-card" style={{ color: 'var(--primary)' }}>Preparing an SD card</Link>.
             </p>
 
             <H3>Installing the app</H3>
@@ -199,7 +201,17 @@ export function ResourcesPage() {
             <Ul items={[
               'Check the batteries — ensure fresh premium alkaline or lithium AA batteries are installed.',
               'Check the microSD card has space (the card itself: see What you will need, above).',
-              'Test the camera preview to verify field of view.',
+              <>
+                Put the latest camera software and your project's AI model on the card with Prepare SD
+                card on the website. It is faster than Bluetooth: see{' '}
+                <Link to="/guides/preparing-an-sd-card" style={{ color: 'var(--primary)' }}>Preparing an SD card</Link>.
+              </>,
+              'Connect with the app and check what the camera sees with Camera View.',
+              <>
+                Monitoring a platform 30 to 50 cm away? Turn the lens to refocus at that distance, taking
+                another Camera View picture after each turn. See{' '}
+                <Link to="/guides/focusing-the-camera" style={{ color: 'var(--primary)' }}>Focusing the camera</Link>.
+              </>,
             ]} />
             <Note>Always test the camera before heading into the field to avoid wasted trips.</Note>
           </Section>
@@ -207,7 +219,8 @@ export function ResourcesPage() {
           <Section id="deployment" title="Start Monitoring" icon={Rocket}>
             <p style={{ lineHeight: 1.7, marginBottom: '1rem' }}>
               Monitoring is a camera recording session linked to a specific project and location.
-              All images captured during the session are stored locally and can be reviewed in the app.
+              Every photo is saved to the camera's SD card. You see them after you upload the card's MEDIA
+              folder to the website (Image Annotation, below).
             </p>
 
             <H3>Starting monitoring</H3>
@@ -218,10 +231,16 @@ export function ResourcesPage() {
               <strong>Connect:</strong> Open the Mobile App. Tap "Search for devices" in the mobile app and physically press the button at the bottom of the device to connect to it.
             </Step>
             <Step n={3}>
-              <strong>Configure:</strong> The app displays the configuration screen. The mandatory steps are to associate the session with a Project and optionally add monitoring notes.
+              <strong>Configure:</strong> The app opens the Start Monitoring screen. Choose the Project (required). Notes are optional.
             </Step>
             <Step n={4}>
-              <strong>Advanced Settings (Optional):</strong> Access the expandable section to set specific location data, camera height, preview the field of view, perform a quick motion detection test, or update firmware (though firmware should ideally be done before the field).
+              <strong>Check (optional):</strong> Camera View takes a picture so you see what the camera sees.
+              Motion projects add Test Motion Detection, which shows what wakes the camera. Projects that use
+              LoRaWAN add LoRaWAN Signal, which checks that a gateway hears the camera (see the{' '}
+              <Link to="/guides/lorawan-in-new-zealand" style={{ color: 'var(--primary)' }}>LoRaWAN in New Zealand guide</Link>).
+              Site Photo keeps your phone's pictures of the camera in place, so it is easy to find again.
+              Advanced settings, at the bottom, holds the Site Name, the Camera Height, battery and SD card
+              checks, and Update software when the camera needs it. Update before you head into the field.
             </Step>
             <Step n={5}>
               <strong>Start:</strong> Click Start Monitoring.
@@ -269,7 +288,7 @@ export function ResourcesPage() {
             <H3>Regular maintenance</H3>
             <Ul items={[
               'Clean the lens and sensor area regularly with a soft, dry cloth.',
-              'Format the SD card after each session to free up space.',
+              'Once your photos are on the website, format the SD card before the next session.',
               'Firmware updates should be performed before you head into the field.',
               'Inspect mounting straps and clasps for wear after extended outdoor use.',
             ]} />
@@ -291,7 +310,7 @@ export function ResourcesPage() {
                 },
                 {
                   issue: 'SD card not detected',
-                  fix: 'Remove and reinsert the microSD card. Ensure it is formatted as FAT32 and the contacts are facing opposite from the batteries. Try formatting the card via the app settings.',
+                  fix: 'Remove and reinsert the microSD card. Ensure it is formatted as FAT32 and the contacts are facing opposite from the batteries. Try formatting it from the Engineer Console, in the app\'s side menu, then restart the camera. Formatting erases the card, so upload its photos first if you can.',
                 },
               ].map(({ issue, fix }) => (
                 <div key={issue} style={{ padding: '1rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>

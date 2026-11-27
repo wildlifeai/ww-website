@@ -123,9 +123,11 @@ export function FaqPage() {
       </FaqItem>
 
       <FaqItem q="Does it have a mobile app?">
-        Yes — the app is available on the iOS App Store and Google Play. It connects to the
-        camera via Bluetooth and is required to configure, control, and start your monitoring
-        sessions. Installing it is step three of{' '}
+        Yes, on the iOS App Store and Google Play. The app connects to the camera over Bluetooth
+        to start and stop monitoring. To install camera software or an AI model, Prepare SD card
+        on the website is faster than Bluetooth: see{' '}
+        <Link to="/guides/preparing-an-sd-card" style={{ color: 'var(--primary)' }}>Preparing an SD card</Link>.
+        Installing the app is step three of{' '}
         <Link to="/resources#mobile-app" style={{ color: 'var(--primary)' }}>Get started</Link>.
       </FaqItem>
 
@@ -202,9 +204,8 @@ export function FaqPage() {
         LoRaWAN support is rolling out in early access. Cameras send small check-ins (detection counts, battery,
         SD card space and health) over LoRaWAN, as often as the mobile app set when you deployed them, and a short
         message at once when their AI detects something or their health changes. They never send photos, which
-        stay on the SD card until you collect them or sync with
-        the mobile app. The website's Realtime page shows each camera's last check-in, battery,
-        health and detection counts; it does not send a notification for a detection. See the{' '}
+        stay on the SD card until you upload them to the website. The website's Realtime page shows
+        each camera's last check-in, battery, health and detection counts; it does not send a notification for a detection. See the{' '}
         <Link to="/guides/lorawan-in-new-zealand" style={{ color: 'var(--primary)' }}>LoRaWAN in New Zealand guide</Link>{' '}
         for setting it up, step by step, from the gateway to your first check-in.
       </FaqItem>
