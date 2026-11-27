@@ -1,18 +1,20 @@
 import { useMemo, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Upload } from 'lucide-react'
-import { useClusters, useUmapCoords, useConfirmCluster, useUnconfirmCluster, useEmbedDeployment, useBulkReview } from '../hooks/useBrain'
-import type { ClusterAssignment } from '../hooks/useBrain'
+import { useClusters, useClusterLabels, useUmapCoords, useConfirmCluster, useUnconfirmCluster, useEmbedDeployment, useBulkReview } from '../hooks/useBrain'
+import type { ClusterAssignment, ClusterLabels } from '../hooks/useBrain'
 import { useMediaThumbs } from '../hooks/useMediaThumbs'
 import { useDeploymentProject } from '../hooks/useDeploymentProject'
 import { useProjectRoles } from '../hooks/useProjectRoles'
 import { useINat } from '../hooks/useINat'
 import { useJobHistory } from '../hooks/useJobs'
 import { SpeciesPicker, type SpeciesSelection } from '../components/data/SpeciesPicker'
+import { MixedMark, MixedWarning } from '../components/data/MixedCluster'
 import { FeatureOff } from '../components/common/FeatureOff'
 import { showUndoToast } from '../components/common/undoToastBus'
 import { isFeatureDisabled } from '../lib/featureFlags'
 import { CLUSTERS_PER_PAGE, MEMBERS_PER_STEP, confirmedText, orderClusters, pageOf } from '../lib/clusterReview'
+import { confirmWarning } from '../lib/clusterLabels'
 import { inatBlocker, inatErrorNotice, inatPublishNotice, type CardNotice } from '../lib/inatPublish'
 import { canStartGrouping, groupingStatusText, pendingGrouping } from '../lib/batchWait'
 import type { JobStatusValue } from '../types/job'
@@ -127,6 +129,96 @@ function PhotoGrid({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ConfirmStrip: confirm a whole cluster as one species, asking first when it mixes species (#450)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ConfirmStrip({
+  c,
+  deploymentId,
+  projectId,
+  labels,
+  labelsLoading,
+  onConfirmed,
+  onUndo,
+  onNotice,
+}: {
+  c: ClusterAssignment
+  deploymentId: string
+  projectId?: string | null
+  labels?: ClusterLabels
+  labelsLoading: boolean
+  onConfirmed: (clusterAssignmentId: string) => void
+  /** Takes the confirm back. The panel holds it: this strip is gone once the cluster is confirmed. */
+  onUndo: () => Promise<void>
+  onNotice: (notice: Notice) => void
+}) {
+  const [confirmPick, setConfirmPick] = useState<SpeciesSelection | null>(null)
+  // The reviewer pressed Confirm on a mixed group and is being asked first.
+  const [asking, setAsking] = useState(false)
+  const confirm = useConfirmCluster(deploymentId)
+  const changes = confirmPick ? confirmWarning(labels, confirmPick) : null
+
+  const pickSpecies = (pick: SpeciesSelection | null) => {
+    setConfirmPick(pick)
+    setAsking(false)
+  }
+
+  const handleConfirm = () => {
+    const pick = confirmPick
+    if (!pick) return
+    if (changes && !asking) {
+      setAsking(true)
+      return
+    }
+    onNotice(null)
+    confirm.mutate(
+      {
+        id: c.id,
+        taxon: {
+          taxon_id: pick.taxon_id ?? undefined,
+          scientific_name: pick.scientific_name,
+          vernacular_name: pick.vernacular_name ?? undefined,
+        },
+      },
+      {
+        onSuccess: (r) => {
+          onConfirmed(c.id)
+          pickSpecies(null)
+          showUndoToast({
+            message: confirmedText(r.observations_created, r.skipped, speciesName(pick)),
+            onUndo,
+          })
+        },
+        onError: (err) => onNotice({ ok: false, text: `Not confirmed: ${errorText(err)}` }),
+      },
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <SpeciesPicker placeholder="Confirm the cluster as..." disabled={confirm.isPending} onSelect={pickSpecies}
+          projectIds={projectId ? [projectId] : undefined} />
+      </div>
+      <button
+        className="btn"
+        disabled={!confirmPick || confirm.isPending || labelsLoading || (asking && !!changes)}
+        onClick={handleConfirm}
+        style={{ fontSize: '0.8125rem', backgroundColor: 'var(--primary)' }}
+      >
+        {confirm.isPending ? 'Confirming…' : confirmPick ? `Confirm as ${speciesName(confirmPick)}` : 'Confirm'}
+      </button>
+      {asking && changes && confirmPick && (
+        <div style={{ flexBasis: '100%' }}>
+          <MixedWarning changes={changes} pickName={speciesName(confirmPick)} pending={confirm.isPending}
+            onConfirm={handleConfirm} onCancel={() => setAsking(false)} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ClusterPanel: one cluster with its confirm strip, expandable photos and actions
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -139,6 +231,8 @@ function ClusterPanel({
   canWrite,
   inat,
   hasLocation,
+  labels,
+  labelsLoading,
   onConfirmed,
 }: {
   c: ClusterAssignment
@@ -152,17 +246,18 @@ function ClusterPanel({
   inat: ReturnType<typeof useINat>
   /** The deployment has coordinates, which iNaturalist needs; undefined while unknown. */
   hasLocation?: boolean
+  /** The species its members carry (#450); unset while loading, or for a confirmed or outlier cluster. */
+  labels?: ClusterLabels
+  labelsLoading: boolean
   onConfirmed: (clusterAssignmentId: string) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [shown, setShown] = useState(MEMBERS_PER_STEP)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [confirmPick, setConfirmPick] = useState<SpeciesSelection | null>(null)
   const [reassignPick, setReassignPick] = useState<SpeciesSelection | null>(null)
   const [mode, setMode] = useState<Mode>('idle')
   const [notice, setNotice] = useState<Notice>(null)
 
-  const confirm = useConfirmCluster(deploymentId)
   const unconfirm = useUnconfirmCluster(deploymentId)
   const review = useBulkReview(deploymentId)
   // No query cache holds iNaturalist state, so publishing is a plain call, not a mutation. The
@@ -183,33 +278,6 @@ function ClusterPanel({
     if (next.has(id)) { next.delete(id) } else { next.add(id) }
     return next
   })
-
-  const handleConfirm = () => {
-    const pick = confirmPick
-    if (!pick) return
-    setNotice(null)
-    confirm.mutate(
-      {
-        id: c.id,
-        taxon: {
-          taxon_id: pick.taxon_id ?? undefined,
-          scientific_name: pick.scientific_name,
-          vernacular_name: pick.vernacular_name ?? undefined,
-        },
-      },
-      {
-        onSuccess: (r) => {
-          onConfirmed(c.id)
-          setConfirmPick(null)
-          showUndoToast({
-            message: confirmedText(r.observations_created, r.skipped, speciesName(pick)),
-            onUndo: async () => { await unconfirm.mutateAsync(c.id) },
-          })
-        },
-        onError: (err) => setNotice({ ok: false, text: `Not confirmed: ${errorText(err)}` }),
-      },
-    )
-  }
 
   const runReview = (decision: 'reassign' | 'expert') => {
     const pick = reassignPick
@@ -289,6 +357,7 @@ function ClusterPanel({
                 {DEPTH_LABEL[c.review_depth || 'full']}
               </span>
             )}
+            {labels?.mixed && <MixedMark cluster={labels} />}
             {c.review_state === 'confirmed' && (
               <span style={{ fontSize: '0.75rem', color: 'var(--primary)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                 <Check size={12} aria-hidden /> {c.scientific_name}
@@ -312,20 +381,8 @@ function ClusterPanel({
 
       {/* Confirm the whole cluster (members only, unconfirmed non-outlier clusters) */}
       {canConfirm && mode === 'idle' && (
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginTop: '0.75rem' }}>
-          <div style={{ flex: 1, minWidth: 200 }}>
-            <SpeciesPicker placeholder="Confirm the cluster as..." disabled={confirm.isPending} onSelect={setConfirmPick}
-              projectIds={projectId ? [projectId] : undefined} />
-          </div>
-          <button
-            className="btn"
-            disabled={!confirmPick || confirm.isPending}
-            onClick={handleConfirm}
-            style={{ fontSize: '0.8125rem', backgroundColor: 'var(--primary)' }}
-          >
-            {confirm.isPending ? 'Confirming…' : confirmPick ? `Confirm as ${speciesName(confirmPick)}` : 'Confirm'}
-          </button>
-        </div>
+        <ConfirmStrip c={c} deploymentId={deploymentId} projectId={projectId} labels={labels} labelsLoading={labelsLoading}
+          onConfirmed={onConfirmed} onUndo={async () => { await unconfirm.mutateAsync(c.id) }} onNotice={setNotice} />
       )}
 
       {notice && (
@@ -503,6 +560,8 @@ export function ClusterReviewPage() {
   const ordered = useMemo(() => orderClusters(clusters, showConfirmed, confirmedHere), [clusters, showConfirmed, confirmedHere])
   const shownPage = pageOf(ordered, page, CLUSTERS_PER_PAGE)
   const stripThumbs = useMediaThumbs(shownPage.items.flatMap(c => (membersByCluster[c.cluster_id] || []).slice(0, 5)))
+  // The species of the page's open clusters, for the mixed mark and the confirm warning (#450).
+  const labelsQ = useClusterLabels(deployment_id, shownPage.items.flatMap(c => (!c.is_outlier_cluster && c.review_state !== 'confirmed' ? [c.id] : [])))
 
   const confirmed = clusters.filter(c => c.review_state === 'confirmed').length
   const total = clusters.filter(c => !c.is_outlier_cluster).length
@@ -562,6 +621,8 @@ export function ClusterReviewPage() {
           canWrite={canWrite}
           inat={inat}
           hasLocation={projectQ.data?.hasLocation}
+          labels={labelsQ.data?.[c.id]}
+          labelsLoading={labelsQ.isLoading}
           onConfirmed={id => setConfirmedHere(prev => new Set(prev).add(id))}
         />
       ))}

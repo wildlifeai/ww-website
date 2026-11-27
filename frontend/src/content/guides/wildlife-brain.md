@@ -3,7 +3,7 @@ title: Grouping look-alikes with the Wildlife Brain
 description: How the Wildlife Brain groups visually similar animals so you can review large datasets far faster — clusters, find-similar, and the map
 category: Analysis
 order: 30
-updated: 2026-11-26
+updated: 2026-11-27
 ---
 
 Once your photos are on the website and the [Cloud AI](/guides/camera-ai-and-cloud-ai) has identified species, you still have to *review* the results — and a busy camera can produce tens of thousands of photos. The **Wildlife Brain** is the tool that makes that review fast.
@@ -16,7 +16,7 @@ Importantly, it does **not** name species — that's the Cloud AI's job. The Wil
 
 ## Three ways you'll use it
 
-- **Clusters** — the Wildlife Brain sorts your animals into groups of look-alikes. Open a cluster, check it's all one species, and **confirm the whole group at once** instead of labelling photo by photo. Mixed group? Split off the odd ones.
+- **Clusters**: the Wildlife Brain sorts your animals into groups of look-alikes. Open a cluster, check it's all one species, and **confirm the whole group at once** instead of labelling photo by photo. Mixed group? Split off the odd ones. A group whose photos carry different species is marked **Mixed species** (a broader name such as *Rattus* beside *Rattus rattus* does not count), and confirming it asks first, saying which labels would change. Photos a person already labelled keep their label.
 - **Find similar** — from any one animal, jump straight to every other photo that looks like it. Great for pulling together all the sightings of the same individual or the same species.
 - **Map** — a visual scatter (a "UMAP") of your entire dataset, where similar animals sit near each other. Handy for spotting patterns, outliers, and anything the automatic labels missed.
 

@@ -2550,6 +2550,72 @@
         ]
       }
     },
+    "/api/brain/clusters/{deployment_id}/labels": {
+      "get": {
+        "description": "The species each listed cluster's members carry, and whether they mix (#450).",
+        "operationId": "list_cluster_labels_api_brain_clusters__deployment_id__labels_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "deployment_id",
+            "required": true,
+            "schema": {
+              "title": "Deployment Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Cluster assignment ids",
+            "in": "query",
+            "name": "ids",
+            "required": true,
+            "schema": {
+              "description": "Cluster assignment ids",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "minItems": 1,
+              "title": "Ids",
+              "type": "array"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Cluster Labels",
+        "tags": [
+          "brain"
+        ]
+      }
+    },
     "/api/brain/compare-runs": {
       "get": {
         "description": "Compare cluster assignments between two embedding runs.",
