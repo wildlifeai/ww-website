@@ -22,7 +22,7 @@ import { registerLocalPreviews } from '../lib/localPreviewStore'
 import { derivePhase, type UploadPhase } from '../lib/uploadPhase'
 import { orderFilesBySession, planBatches } from '../lib/uploadPlanning'
 import type { PipelineState, PipelineJob, LogEntry } from '../components/toolkit/PipelineStatusBox'
-import { aiNotRunReason, jobChanged } from '../components/toolkit/pipelineProgress'
+import { aiNotRunReason, jobChanged, serverDone, uploadsStored } from '../components/toolkit/pipelineProgress'
 
 // Re-exported for existing consumers; implementations live in lib/ so they
 // can be unit-tested without React or the API client.
@@ -171,32 +171,40 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
     }
     if (phase === 'processing' && lastPhase === 'uploading' && dockState === 'medium') setDockState('minimised')
   }
+  // Once every photo is stored the grid's uploading cards have their rows, though the pipeline may
+  // wait hours more for the GPU run (AWS): drop them then, or the page counts "74 uploading".
+  const stored = uploadsStored(pipelineState)
+  const [lastStored, setLastStored] = useState(stored)
+  if (stored !== lastStored) {
+    setLastStored(stored)
+    if (stored) {
+      setPendingUploads([])
+      setPendingSince(null)
+    }
+  }
 
   // ── Job polling ────────────────────────────────────────────────────────────
   useEffect(() => {
     const { jobs } = pipelineState
     if (jobs.length === 0) return
 
-    const incomplete = jobs.filter((j) =>
-      ['queued', 'in_progress', 'processing', 'deferred'].includes(j.status),
-    )
-    if (incomplete.length === 0) return
+    // Polled until the server says each job ended, not the dock's 99.9% shortcut: an upload job
+    // writes its summary (the "saved" count) as it finishes.
+    if (jobs.every(serverDone)) return
 
     const timer = setInterval(async () => {
       try {
         const updates = await Promise.all(
           jobs.map(async (job): Promise<PipelineJob> => {
-            if (
-              ['completed', 'completed_with_errors', 'failed', 'skipped'].includes(job.status)
-            )
-              return job
+            if (serverDone(job)) return job
 
             try {
               const res = await apiClient.get(`/api/jobs/${job.id}`)
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               const j: any = res.data?.data ?? res.data ?? {}
 
-              let status: string = j.status ?? job.status
+              const serverStatus: string = j.status ?? job.serverStatus ?? job.status
+              let status: string = serverStatus
               let progress: number = j.progress ?? job.progress
 
               if (progress >= 0.999 && ['in_progress', 'processing'].includes(status)) {
@@ -207,6 +215,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
               return {
                 ...job,
                 status,
+                serverStatus,
                 progress,
                 error: j.error ? String(j.error) : job.error,
                 message: j.message ?? job.message,
