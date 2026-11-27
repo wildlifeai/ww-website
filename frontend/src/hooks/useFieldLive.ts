@@ -8,11 +8,15 @@
 // - lorawan_parsed_messages INSERT: lorawan-ingest stores the decoded values a moment after the
 //   message, so a re-read on the message alone could miss them. The decoded row reads its message
 //   (one request) for the Messages tab and the camera's values (two) for the Cameras table.
+// - lorawan_downlinks, any change: a settings request moved on (queued, sent, answered, failed,
+//   expired, #521). The picked camera's panel (components/data/CheckInPanel.tsx) reads its request
+//   and reply again; so does a settings reply, which can come from a request sent elsewhere.
 // - Realtime does not resend changes missed while disconnected, and focus refetch is off site-wide
 //   (lib/queryClient.ts), so every re-subscribe, and a return to the tab (at most every 30 s),
 //   reads the page again.
 //
-// Both tables are in the supabase_realtime publication (ww-backend migration 20260711043000) and
+// The three tables are in the supabase_realtime publication (ww-backend migration 20260711043000,
+// lorawan_downlinks with #405) and
 // Realtime checks each change against the subscriber's read policy, so a change from another
 // project never arrives. The decoded row has no deployment_id to filter on: one from a camera
 // the page does not show is dropped by its device_id before any read.
@@ -22,7 +26,7 @@ import { supabase } from '../config/supabase'
 import {
   fetchDeploymentUpdate, realtimeKeys, withEntry, withLastSeen, type FieldDeployment, type Telemetry,
 } from '../lib/realtimeReads'
-import { fetchFeedMessage, isFeedKind, withLiveRow, type FeedState } from '../lib/lorawanFeed'
+import { fetchFeedMessage, isFeedKind, isSettingsReply, withLiveRow, type FeedState } from '../lib/lorawanFeed'
 import { shouldRefreshOnReturn, subscribeToTabReturn } from '../lib/tabReturnRefresh'
 
 /** The channel name's start; e2e/specs/04-lorawan-realtime.spec.ts waits for it to subscribe. */
@@ -44,6 +48,8 @@ export function useFieldLive(deployments: FieldDeployment[]): boolean {
     const detectionsKey = realtimeKeys.detections(ids)
 
     const readAgain = () => { void queryClient.invalidateQueries({ queryKey: realtimeKeys.all }) }
+    // Only the open panel's read is active, so this reads nothing for any other camera.
+    const readCheckIn = (id: string) => { void queryClient.invalidateQueries({ queryKey: realtimeKeys.checkIn(id) }) }
 
     const refreshCamera = async (id: string) => {
       const { telemetry, detections } = await fetchDeploymentUpdate(supabase, id)
@@ -58,6 +64,7 @@ export function useFieldLive(deployments: FieldDeployment[]): boolean {
         const message = await fetchFeedMessage(supabase, row.lorawan_message_id)
         if (!message || !shown.has(message.deploymentId)) return
         queryClient.setQueryData<FeedState>(realtimeKeys.feed(ids), s => s && withLiveRow(s, message))
+        if (isSettingsReply(message)) readCheckIn(message.deploymentId)
         await refreshCamera(message.deploymentId)
       } catch {
         // Read everything again, which shows the error if the database still refuses.
@@ -83,6 +90,12 @@ export function useFieldLive(deployments: FieldDeployment[]): boolean {
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'lorawan_parsed_messages' },
         (payload) => { void onDecoded(payload.new as Parameters<typeof onDecoded>[0]) })
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'lorawan_downlinks' },
+        (payload) => {
+          const id = (payload.new as { deployment_id?: string } | null)?.deployment_id
+          if (id && shown.has(id)) readCheckIn(id)
+        })
       .subscribe((status) => {
         const up = status === 'SUBSCRIBED'
         setLive(up)

@@ -75,6 +75,8 @@ export const realtimeKeys = {
   telemetry: (ids: string[]) => ['realtime', 'telemetry', ids] as const,
   detections: (ids: string[]) => ['realtime', 'detections', ids] as const,
   feed: (ids: string[]) => ['realtime', 'feed', ids] as const,
+  /** A picked camera's settings request and check-in period (lib/lorawanDownlinks.ts). */
+  checkIn: (deploymentId: string) => ['realtime', 'check-in', deploymentId] as const,
 }
 
 type DeploymentRow = Omit<FieldDeployment, 'project_name' | 'device_name' | 'ble_firmware' | 'himax_firmware'> & {

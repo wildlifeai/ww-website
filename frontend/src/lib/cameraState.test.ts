@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  cameraState, healthReasonText, healthReasonTexts, needsAttention, silenceText, silentAfterHours, toHealthState,
+  cameraState, healthReasonText, healthReasonTexts, needsAttention, silenceSpan, silenceText, silentAfterHours, toHealthState,
   CAMERA_STATE, FRESH_HOURS, STALE_HOURS, type CameraFacts,
 } from './cameraState'
 
@@ -134,6 +134,10 @@ describe('silenceText', () => {
     expect(silenceText(1440)).toBe('No message for over 3 days')
     expect(silenceText(720)).toBe('No message for over 36 h')
     expect(silenceText(10)).toBe('No message for over 30 min')
+  })
+
+  it('gives the span alone for the check-in choices (#521)', () => {
+    expect([240, 360, 480, 720, 1440].map(silenceSpan)).toEqual(['12 h', '18 h', '24 h', '36 h', '3 days'])
   })
 })
 
