@@ -44,11 +44,6 @@ HDBSCAN clustering → similarity-search path runs on the GPU worker (gated DINO
 no other RG. Do not let tooling auto-create resource groups (`DefaultResourceGroup-*`), other regions, or
 extra Log Analytics workspaces — that is the main source of sprawl and cost confusion.
 
-> **Removed with the Azure dev environment, 2026-11-27:** container apps `ww-backend-dev`,
-> `ww-embedding-worker-dev` and `ww-redis-dev`, the alert `ww-gpu-worker-stuck-dev`, and the image
-> tags `dev-latest`, `dev-devpair1220` and `dev-pairfix1207` in both `wwregistry` repos. The dev site had moved to [AWS](#aws), and the dev
-> worker's KEDA rule counted every job in the dev project, so it woke the T4 only for AWS jobs,
-> with nothing to do. Everything below is production's, or shared with local dev.
 
 ### Resources (`WW-AE` RG, `australiaeast`)
 
@@ -165,21 +160,16 @@ rather than re-deriving them.
 | Container Registry | NZ$43.91 | Measured 2026-08-03: **Standard SKU + ~50 GiB storage overage** (150.4 GiB used vs 100 GiB included) — see the ACR action below |
 | Everything else | NZ$0.03 | Storage, Key Vault, Monitor, bandwidth — all effectively free |
 
-The **flat floor is the cost, not the GPU**: three always-on containers (`ww-backend-dev`, `ww-backend`,
-`ww-redis-dev`) at roughly NZ$1.80–2/day each. The T4 spikes total only ~NZ$25–30/month, which is the
+The **flat floor is the cost, not the GPU**: always-on containers at roughly NZ$1.80–2/day each. The T4 spikes total only ~NZ$25–30/month, which is the
 worker doing real work — scale-to-zero is behaving.
 
 **Actions** (state as of 2026-08-03):
 
-- [x] **`ww-backend-dev` → scale-to-zero** (~NZ$55/mo). Applied live via `az` **and** enforced by
-      `deploy-backend.yml`, so it survives deploys.
-- [x] **`ww-redis-dev` right-sized** 0.5 vCPU / 1 Gi → **0.25 / 0.5 Gi** (~NZ$12/mo). Done while the
-      worker was at 0 replicas (nothing queued); replica confirmed `Running` after the revision.
 - [x] **ACR overage eliminated — count-based purge executed 2026-08-07.** Prior state: Standard SKU,
       **150.4 GiB against the 100 GiB included** (~50 GiB overage ≈ the extra ~NZ$10/mo; age-based
       purge reclaimed 0 bytes — the whole registry postdates the 2026-06-29 `WW-AE` migration).
       Ran `acr purge --filter '<repo>:^[0-9a-f]{40}$' --ago 0d --keep 5 --untagged` on both repos
-      (SHA-only filter, so `latest`/`dev-latest`/`stable` can never match): **80 tags + 74 manifests
+      (SHA-only filter, so `latest`/`stable` can never match): **80 tags + 74 manifests
       deleted, usage now 45.7 GiB** — under the included 100 GiB, ACR back to the flat ~NZ$33/mo.
       Before purging, the deployed images were pinned as **`:stable`** (`az acr import … --image
       <repo>:stable`) — a purge-proof rollback anchor; **re-point `stable` when you bless a new build**

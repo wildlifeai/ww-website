@@ -1,7 +1,7 @@
 name: Deploy Backend to Azure Container App
 
 # Production only: a push to main deploys ww-backend and ww-embedding-worker. Dev runs on AWS
-# (deploy-aws.yml); the Azure dev apps were removed on 2026-11-27, as the dev site had moved.
+# (deploy-aws.yml).
 on:
   push:
     branches:

@@ -41,7 +41,7 @@ Prod names have no suffix: **`ww-redis`**, **`ww-embedding-worker`**. Everything
 ---
 
 ## 1 · Prod Redis broker (ARQ)
-KEDA can't reach an internal Redis, but the **worker/API** reach it app-to-app by short name (as on dev).
+KEDA can't reach an internal Redis, but the **worker/API** reach it app-to-app by short name.
 ```bash
 az containerapp create -n ww-redis -g WW-AE --environment ww-env \
   --image redis:7-alpine \
