@@ -80,7 +80,7 @@ jobs:
         run: python scripts/export_openapi.py --check
 
   # ── Backend: the image the deploy ships ──────────────────────────────
-  # deploy-backend.yml builds `--target api` on a push to dev or main, so a
+  # deploy-backend.yml builds `--target api` on a push to main, so a
   # Dockerfile or requirements change that breaks the image used to be found
   # after merge, at deploy time (#224). This builds the same stage on the
   # pull request, then starts it with the test env the pytest job uses and

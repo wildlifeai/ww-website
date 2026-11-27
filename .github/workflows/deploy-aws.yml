@@ -1,5 +1,5 @@
-# Deploy the backend to AWS (approach B of the AWS + REANNZ migration), beside the Azure
-# workflow (deploy-backend.yml), which stays the live path until the cutover.
+# Deploy the backend to AWS (approach B of the AWS + REANNZ migration). Dev runs only here;
+# production stays on Azure (deploy-backend.yml) until its cutover.
 #
 # Manual only, and inert until the repository variable AWS_DEPLOY_ENABLED is "true". Each
 # environment is its own AWS account, so AWS_DEPLOY_ROLE_ARN (infra/aws/shared.yaml's output),

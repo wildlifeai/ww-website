@@ -34,7 +34,7 @@ The dependencies the web app runs on and why. Versions live only in
 | Runtime | Python 3.11+ | |
 | Validation | `pydantic` (+ `pydantic-settings`) | request/response models + env validation |
 | DB client | `supabase` (supabase-py) | service-role + per-request user clients |
-| Jobs | `arq` worker + in-process `asyncio` fallback | Where each job runs: [03-DATA-AND-SYNC](./03-DATA-AND-SYNC.md#async-job-system). Both Azure environments run the worker; local dev runs in-process |
+| Jobs | `arq` worker + in-process `asyncio` fallback | Where each job runs: [03-DATA-AND-SYNC](./03-DATA-AND-SYNC.md#async-job-system). Production on Azure runs the worker, AWS dev the REANNZ batch; local dev runs in-process |
 | Storage | `azure-storage-blob`, `boto3`, Google Drive API | the upload buffer and export ZIPs (Azure Blob or S3, `OBJECT_STORE_BACKEND`), the archive (Drive or S3, `ARCHIVE_BACKEND`); `boto3` also invokes the Lambda `cpu` function |
 | HTTP | `httpx` + `tenacity` | retrying external calls |
 | AI | SpeciesNet, DINOv3 (Wildlife Brain), `ethos-u-vela` | inference, embeddings, model conversion |
@@ -57,10 +57,10 @@ fails to import it.
 |---------|----------|------|
 | **Supabase** | PostgreSQL + RLS, Auth, Storage (incl. the public `media-renditions` bucket), RPCs | always |
 | **Cloudflare** | Frontend hosting (Pages, builds of `main` and `dev` only), DNS for `wildlifewatcher.ai`, CDN, anonymous web analytics | always (hosting) |
-| **Azure** | Backend hosting (Container Apps + ACR); **Blob** = temporary image buffer during upload (deleted after Drive archival); the **ARQ GPU worker** (serverless T4) that runs SpeciesNet / BioCLIP / DINOv3 | hosting; Blob with Drive uploads |
+| **Azure** | Production backend hosting (Container Apps + ACR); **Blob** = temporary image buffer during upload (deleted after Drive archival); the **ARQ GPU worker** (serverless T4) that runs SpeciesNet / BioCLIP / DINOv3 | hosting; Blob with Drive uploads |
 | **Redis** | ARQ job broker between the API and the GPU worker. Runs as an internal **Container App** (`redis:7-alpine`), not Azure Cache for Redis. Unset `REDIS_URL` → jobs run in-process | `REDIS_URL` |
 | **Google Drive** | Permanent image archive (`gdrive://` originals) | `GOOGLE_DRIVE_ENABLED`, under `ARCHIVE_BACKEND=gdrive` |
-| **AWS** | Being set up, dev only, no site points at it: the API and CPU jobs on Lambda, S3 for uploads, originals and export ZIPs, SSM for settings ([settings](../resources/deployment-guide.md#aws-and-the-reannz-batch), [what exists](../resources/cloud-infrastructure.md#aws)) | `OBJECT_STORE_BACKEND`, `ARCHIVE_BACKEND`, `WORKER_BACKEND` |
+| **AWS** | Dev hosting, which the dev site calls since 2026-11-26: the API and CPU jobs on Lambda, S3 for uploads, originals and export ZIPs, SSM for settings ([settings](../resources/deployment-guide.md#aws-and-the-reannz-batch), [what exists](../resources/cloud-infrastructure.md#aws)) | `OBJECT_STORE_BACKEND`, `ARCHIVE_BACKEND`, `WORKER_BACKEND` |
 | **REANNZ** | GPU batches (SpeciesNet, BioCLIP, DINOv3) for the AWS path, leased from `api_jobs` by a cron on the cluster (`cluster/reannz/`) | `WORKER_BACKEND=lambda`, `WORKER_TOKEN_SHA256` |
 | **Vector store** | DINOv3 embeddings for the Wildlife Brain (similarity / clustering). **`pgvector` in the Supabase Postgres** — no new vendor; live since 2026-07-09. Vectors live in `media_embeddings.embedding`; the former Qdrant container has been **removed**. See [Deployment Guide → Vector Store](../resources/deployment-guide.md#vector-store--pgvector-supabase) | `FF_WILDLIFE_BRAIN_ENABLED` |
 | **iNaturalist** | Taxa autocomplete + lineage registration, observation publishing + community-ID sync | `FF_INAT_ENABLED` |

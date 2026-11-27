@@ -76,13 +76,14 @@ took:
   worker (`"arq"`), or runs here if Redis cannot be reached.
 * Everything else runs in this process as an asyncio task (`"local"`).
 
-Where each runs, as of 2026-11-26:
+Where each runs, as of 2026-11-27:
 
-* **Cloud dev**, Redis + the ARQ GPU worker are **live** (`ww-embedding-worker-dev`, serverless T4).
-* **Production** (the staging tier), the same: `ww-redis` + `ww-embedding-worker` since 26 Jul 2026,
-  with the pipeline and Wildlife Brain flags on the worker.
-* **AWS `ww-dev`**, `WORKER_BACKEND=lambda`: functions `ww-dev-api` and `ww-dev-cpu`, with
-  GPU batches on the REANNZ cluster under Spyfish's `wildlife03546`. No site points at it yet
+* **Production** (the staging tier), Azure: Redis + the ARQ GPU worker (`ww-redis` +
+  `ww-embedding-worker`, serverless T4) since 26 Jul 2026, with the pipeline and Wildlife Brain
+  flags on the worker.
+* **Cloud dev**, AWS `ww-dev`, `WORKER_BACKEND=lambda`: functions `ww-dev-api` and `ww-dev-cpu`,
+  with GPU batches on the REANNZ cluster under Spyfish's `wildlife03546`, and no Redis or ARQ
+  worker. The dev site calls it since 2026-11-26
   ([cloud-infrastructure.md](../../../documentation/resources/cloud-infrastructure.md#aws)).
 * **Local**, in-process by default; the ML deps only exist in the `dev` Docker image.
 
@@ -98,7 +99,7 @@ Rules:
 * The jobs in `IN_PROCESS_JOBS` (`jobs/dispatch.py`: uploads, the CamtrapDP import and export,
   manifests, model conversion and downloads, batch ingest) run in the API process on Azure whatever
   `REDIS_URL` says, so their settings belong on the API. Such a job can be cut off when the API
-  replica scales in (dev scales to zero), as uploads and the import already can.
+  replica scales in, as uploads and the import already can.
 * Status is mirrored to Supabase `api_jobs`, so `/api/jobs/{id}` polling works cross-process. Rely on
   that rather than in-memory state.
 * `api_jobs` also holds the run-lock leases (`status = 'lock'`, `services/locks.py`) when there is

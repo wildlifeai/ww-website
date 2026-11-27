@@ -54,7 +54,7 @@ curl -sX POST https://<backend>/api/pipeline/run \
 ```
 
 Backend hosts:
-- **Dev:** `https://ww-backend-dev.<...>.azurecontainerapps.io`
+- **Dev:** the AWS dev API, the `ww-dev` stack's `ApiUrl` output ([cloud-infrastructure](cloud-infrastructure.md#aws))
 - **Staging/prod:** `https://ww-backend.<...>.azurecontainerapps.io`
 
 If the endpoint returns `{"error":{"code":"DEMO_DISABLED"}}`, the server has no
@@ -124,7 +124,7 @@ and it persists. Steps (against the staging/prod Supabase + the `ww-backend` con
 
 | Setting | Where | Purpose |
 |---------|-------|---------|
-| `DEMO_EMAIL`, `DEMO_PASSWORD` | `ww-backend` container app env (per environment) | Credentials `/api/auth/demo-session` signs in as. **Unset either → the endpoint self-disables** (`DEMO_DISABLED`) and the button hides the error. |
+| `DEMO_EMAIL`, `DEMO_PASSWORD` | `ww-backend` container app env on Azure; SSM `/ww/dev/` on AWS dev | Credentials `/api/auth/demo-session` signs in as. **Unset either → the endpoint self-disables** (`DEMO_DISABLED`) and the button hides the error. |
 | `SUPABASE_SERVICE_ROLE_KEY` | GitHub `dev`/`staging` env (for seeders only) | Lets the seed scripts create the user, role, and media. |
 | `app_metadata.is_demo` | on the demo Supabase user | Drives the frontend banner and the backend `require_not_demo` / `get_verified_user` checks. |
 

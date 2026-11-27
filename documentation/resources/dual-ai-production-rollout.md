@@ -32,7 +32,7 @@ The two repos promote **differently**, and that asymmetry is why this is safe:
 | Repo | dev | staging / production |
 |---|---|---|
 | **ww-backend** (schema) | **destructive reset + full reseed** (`db reset --no-seed` then `seed.sql` + `dev/data.sql` + fixtures), which is why the demo Rat model + deployment exist only on dev | **schema-only `supabase db push`**: additive migrations, **no reset, no reseed** ([deploy_cloud_projects.yml](https://github.com/wildlifeai/ww-backend/blob/main/.github/workflows/deploy_cloud_projects.yml)) |
-| **ww-website** (app) | merge to `dev` → build + roll `ww-backend-dev` (API) + `ww-embedding-worker-dev` (worker) | a `dev` to `main` release → build + roll `ww-backend` / `ww-embedding-worker` (`.github/workflows/deploy-backend.yml`; there is no staging branch) |
+| **ww-website** (app) | merge to `dev`, then deploy the AWS `ww-dev` stack by hand or with `deploy-aws.yml` ([deployment guide](deployment-guide.md#aws-deploy-awsyml)) | a `dev` to `main` release → build + roll `ww-backend` / `ww-embedding-worker` (`.github/workflows/deploy-backend.yml`; there is no staging branch) |
 
 **Consequences:**
 - The `dual_ai_v0` migration (`observations.ai_origin` + `device_alert_rules`) is
@@ -48,8 +48,8 @@ The two repos promote **differently**, and that asymmetry is why this is safe:
 
 - ✅ ww-backend `dual_ai_v0` migration merged (`observations.ai_origin`, `device_alert_rules`) — additive.
 - ✅ ww-website edge reflection (`domain/edge_reflection.py`) + 📟 Camera-AI badge merged.
-- ✅ `FF_EDGE_REFLECT_ENABLED=true` set on the dev API + worker (worker via
-  `az containerapp revision copy --set-env-vars`, which preserves the KEDA scale rule).
+- ✅ `FF_EDGE_REFLECT_ENABLED=true` was set on the Azure dev API + worker (removed 2026-11-27);
+  AWS dev takes its `FF_*` flags from SSM under `/ww/dev/`.
 - ✅ EXIF NUL-byte ingest fix (§6) — a production-blocker found during the dev demo.
 
 ---

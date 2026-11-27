@@ -6,20 +6,24 @@ missing media RLS predicate, missing GOOGLE_DRIVE_* config, missing
 FF_MEDIA_REGISTRY_ENABLED + media-renditions bucket. Each was invisible
 until a user hit it. This script diffs the surfaces those gaps lived on:
 
-  1. Container-app env var NAMES (values compared for flags only)
-  2. Container-app secret NAMES (never values)
-  3. Supabase Storage buckets (name + public flag)
-  4. Supabase Auth external providers (public settings endpoint)
-  5. SQL surface (policies / grants / functions / realtime publication) —
+  1. Supabase Storage buckets (name + public flag)
+  2. Supabase Auth external providers (public settings endpoint)
+  3. SQL surface (policies / grants / functions / realtime publication),
      printed as a query to run in both SQL editors; pass the saved JSON
      outputs back in with --sql-dev/--sql-prod to have them diffed.
 
+Dev runs on AWS since 2026-11-26, so the app settings and secret names are
+no longer compared: comparing the dev SSM parameters with the prod container
+app is #466.
+
 Requirements: Python 3.9+, `az` CLI logged in with access to the WW-AE
-resource group. No third-party packages; secrets are read via `az` and
-used only in Authorization headers, never printed.
+resource group (the prod side), and the dev project's SUPABASE_URL and
+SUPABASE_SERVICE_ROLE_KEY in the environment or the repo-root .env (the
+shared dev .env, from scripts/fetch-env.sh). No third-party packages; keys
+are used only in Authorization headers, never printed.
 
 Usage:
-  python scripts/parity_audit.py                 # sections 1-4 + SQL to run
+  python scripts/parity_audit.py                 # sections 1-2 + SQL to run
   python scripts/parity_audit.py --sql-dev dev.json --sql-prod prod.json
 
 Exit code 1 when unexplained gaps exist (CI-friendly).
@@ -29,47 +33,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 import urllib.request
+from pathlib import Path
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to cp1252
 
 RG = "WW-AE"
-DEV_APP = "ww-backend-dev"
 PROD_APP = "ww-backend"
 SERVICE_KEY_SECRET = "supabase-service-key"
 
 # Intentional differences, with the reason they are fine. Anything NOT in
-# this list is reported as an unexplained gap. Keep reasons honest — an
+# this list is reported as an unexplained gap. Keep reasons honest: an
 # entry here is a documented decision, not a way to silence the report.
-EXPECTED_ENV_DIFFS: dict[str, str] = {}
-
-# Vars that must exist on BOTH sides with DIFFERENT values. These never
-# belong in EXPECTED_ENV_DIFFS (that list excuses absence, and losing one
-# of these is a real gap) - for them the dangerous state is identical
-# values, i.e. one environment pointing at the other's infrastructure.
-MUST_DIFFER: dict[str, str] = {
-    "SUPABASE_URL": "identical URL = one env talking to the other's database",
-    "ALLOWED_ORIGINS": "each API must allow only its own frontend origins",
-    "GOOGLE_DRIVE_FOLDER_ID": "each env archives into its own Drive root",
-    "AZURE_STORAGE_CONTAINER_NAME": "each env buffers uploads in its own container",
-    "REDIS_URL": "identical broker = prod jobs run on the dev worker against the dev database",
-}
-EXPECTED_SECRET_DIFFS: dict[str, str] = {
-    "pg-conn": "KEDA scaler pooler creds live on each worker app, not the API",
-    "hf-token": "gated DINOv3 weights only needed where the worker runs",
-}
 EXPECTED_BUCKET_DIFFS: dict[str, str] = {
     "analysis-images": "legacy prod-only bucket predating the renditions design",
 }
-
-# Env vars whose VALUES must match across environments (feature behaviour),
-# not just exist. Everything else only has its presence compared.
-VALUE_COMPARED_PREFIXES = ("FF_",)
-VALUE_COMPARED_SUFFIXES = ("_ENABLED",)
 
 
 def az(args: list[str]):
@@ -104,18 +87,27 @@ def app_env(app: str) -> dict[str, dict]:
     return {e["name"]: e for e in env}
 
 
-def app_secret_names(app: str) -> set[str]:
-    rows = az(["containerapp", "secret", "list", "-n", app, "-g", RG,
-               "--query", "[].name"]) or []
-    return set(rows)
-
-
 def supabase_of(app: str, envs: dict[str, dict]) -> tuple[str, str]:
     url = (envs.get("SUPABASE_URL") or {}).get("value") or ""
     key = az(["containerapp", "secret", "show", "-n", app, "-g", RG,
               "--secret-name", SERVICE_KEY_SECRET, "--query", "value"])
     if not url or not key:
         sys.exit(f"could not resolve Supabase URL/key for {app}")
+    return url.rstrip("/"), key
+
+
+def dev_supabase() -> tuple[str, str]:
+    """The dev project's URL and service key: the environment first, then the repo-root .env."""
+    vals = dict(os.environ)
+    env_file = Path(__file__).resolve().parent.parent / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            name, sep, value = line.partition("=")
+            if sep and not line.lstrip().startswith("#"):
+                vals.setdefault(name.strip(), value.strip().strip('"').strip("'"))
+    url, key = vals.get("SUPABASE_URL", ""), vals.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    if not url or not key:
+        sys.exit("set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY for the dev project, or fetch the dev .env")
     return url.rstrip("/"), key
 
 
@@ -126,10 +118,6 @@ def buckets(url: str, key: str) -> dict[str, bool]:
 def auth_providers(url: str, key: str) -> dict[str, bool]:
     s = http_json(f"{url}/auth/v1/settings", key)
     return {k: bool(v) for k, v in (s.get("external") or {}).items() if v}
-
-
-def value_compared(name: str) -> bool:
-    return name.startswith(VALUE_COMPARED_PREFIXES) or name.endswith(VALUE_COMPARED_SUFFIXES)
 
 
 SQL_QUERY = """-- Run in BOTH SQL editors, save each result as JSON, then:
@@ -187,43 +175,13 @@ def main() -> int:
     args = ap.parse_args()
     problems = 0
 
-    dev_env, prod_env = app_env(DEV_APP), app_env(PROD_APP)
+    print("\n== App settings and secret names ==\n   not compared: dev runs on AWS, see #466")
+    dev_url, dev_key = dev_supabase()
+    prod_url, prod_key = supabase_of(PROD_APP, app_env(PROD_APP))
+    if dev_url == prod_url:
+        sys.exit("the dev SUPABASE_URL is the prod project's: check the environment and .env")
 
-    # ── 1. Env vars ──
-    gaps, expected = [], []
-    for name in sorted(set(dev_env) | set(prod_env)):
-        in_dev, in_prod = name in dev_env, name in prod_env
-        if in_dev != in_prod:
-            side = "prod" if in_dev else "dev"
-            line = f"{name}: missing in {side}"
-            (expected.append(f"{line} — {EXPECTED_ENV_DIFFS[name]}")
-             if name in EXPECTED_ENV_DIFFS else gaps.append(line))
-        elif value_compared(name):
-            dv = (dev_env[name].get("value") or "").lower()
-            pv = (prod_env[name].get("value") or "").lower()
-            if dv != pv:
-                gaps.append(f"{name}: dev={dv or '<secretref>'} prod={pv or '<secretref>'}")
-        elif name in MUST_DIFFER:
-            dv = (dev_env[name].get("value") or "")
-            pv = (prod_env[name].get("value") or "")
-            if dv and pv and dv == pv:
-                gaps.append(f"{name}: identical in both envs - {MUST_DIFFER[name]}")
-    problems += report(f"Env vars ({DEV_APP} vs {PROD_APP})", gaps, expected)
-
-    # ── 2. Secrets (names only) ──
-    dev_sec, prod_sec = app_secret_names(DEV_APP), app_secret_names(PROD_APP)
-    gaps, expected = [], []
-    for name in sorted(dev_sec ^ prod_sec):
-        side = "prod" if name in dev_sec else "dev"
-        line = f"{name}: missing in {side}"
-        (expected.append(f"{line} — {EXPECTED_SECRET_DIFFS[name]}")
-         if name in EXPECTED_SECRET_DIFFS else gaps.append(line))
-    problems += report("Secrets (names only)", gaps, expected)
-
-    dev_url, dev_key = supabase_of(DEV_APP, dev_env)
-    prod_url, prod_key = supabase_of(PROD_APP, prod_env)
-
-    # ── 3. Storage buckets ──
+    # ── 1. Storage buckets ──
     db, pb = buckets(dev_url, dev_key), buckets(prod_url, prod_key)
     gaps, expected = [], []
     for name in sorted(set(db) | set(pb)):
@@ -236,7 +194,7 @@ def main() -> int:
             gaps.append(f"{name}: public flag differs (dev={db[name]} prod={pb[name]})")
     problems += report("Storage buckets", gaps, expected)
 
-    # ── 4. Auth providers ──
+    # ── 2. Auth providers ──
     try:
         dp, pp = auth_providers(dev_url, dev_key), auth_providers(prod_url, prod_key)
         gaps = [f"{name}: enabled only in {'dev' if name in dp else 'prod'}"
@@ -245,7 +203,7 @@ def main() -> int:
     except Exception as exc:  # settings endpoint shape varies across gotrue versions
         print(f"\n== Auth external providers ==\n   skipped ({exc})")
 
-    # ── 5. SQL surface ──
+    # ── 3. SQL surface ──
     if args.sql_dev and args.sql_prod:
         dev_rows, prod_rows = load_sql_rows(args.sql_dev), load_sql_rows(args.sql_prod)
         gaps = []

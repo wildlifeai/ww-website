@@ -20,8 +20,8 @@ name: E2E (Playwright)
 # database and storage: never point it at production.
 #
 # The full suite also runs on its own (#217) against the dev preview and the
-# dev API: after each successful push deploy of the dev backend
-# (deploy-backend.yml), and nightly at 14:17 UTC (03:17 NZDT, 02:17 NZST).
+# dev API (the E2E_API_URL variable, the AWS dev API): after each successful
+# run of deploy-aws.yml on dev, and nightly at 14:17 UTC (03:17 NZDT, 02:17 NZST).
 # Both triggers only fire from the copy of this file on the default branch.
 # Full runs queue behind each other, never side by side, and end with
 # e2e/cleanup.mjs, which deletes what the run wrote even when it failed.
@@ -35,7 +35,7 @@ name: E2E (Playwright)
 
 on:
   workflow_run:
-    workflows: ['Deploy Backend to Azure Container App']
+    workflows: ['Deploy Backend to AWS']
     types: [completed]
     branches: [dev]
   schedule:
@@ -52,9 +52,8 @@ on:
         default: 'https://dev.ww-website.pages.dev'
         required: true
       api_url:
-        description: 'FastAPI backend (dev container app)'
-        default: 'https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io'
-        required: true
+        description: 'FastAPI backend (default: the E2E_API_URL variable, the AWS dev API)'
+        required: false
       suite:
         description: 'smoke: public pages, sign-in, demo. full: also upload and LoRaWAN (writes to dev)'
         type: choice
@@ -69,14 +68,14 @@ concurrency:
 
 env:
   E2E_BASE_URL: ${{ inputs.base_url || 'https://dev.ww-website.pages.dev' }}
-  E2E_API_URL: ${{ inputs.api_url || vars.E2E_API_URL || 'https://ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io' }}
+  E2E_API_URL: ${{ inputs.api_url || vars.E2E_API_URL }}
 
 jobs:
   smoke:
     name: ${{ (inputs.suite == 'full' || github.event_name == 'schedule' || github.event_name == 'workflow_run') && 'E2E Full' || 'E2E Smoke' }}
     if: >-
       github.event_name != 'workflow_run'
-      || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+      || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     # The seeded account's password and the dev service-role key live here
     environment: dev
@@ -141,8 +140,8 @@ jobs:
           CI: 'true'
           E2E_EMAIL: ${{ vars.E2E_EMAIL || 'tui@ww.org' }}
           # Every seeded user shares ww-backend's SEED_USER_PASSWORD, and the dev
-          # environment already holds it as DEMO_PASSWORD for the backend deploy
-          # (deploy-backend.yml). E2E_PASSWORD overrides it for a dedicated account.
+          # environment holds it as DEMO_PASSWORD (the AWS dev API reads its own copy
+          # from SSM). E2E_PASSWORD overrides it for a dedicated account.
           E2E_PASSWORD: ${{ secrets.E2E_PASSWORD || secrets.DEMO_PASSWORD }}
           # The full suite only: the LoRaWAN spec inserts and deletes synthetic rows
           E2E_SUPABASE_URL: ${{ env.E2E_FULL == 'true' && secrets.SUPABASE_URL || '' }}

@@ -1,9 +1,10 @@
 name: Deploy Backend to Azure Container App
 
+# Production only: a push to main deploys ww-backend and ww-embedding-worker. Dev runs on AWS
+# (deploy-aws.yml); the Azure dev apps were removed on 2026-11-27, as the dev site had moved.
 on:
   push:
     branches:
-      - dev
       - main
     # Only the files the two images are built from (backend/Dockerfile copies app/ and the
     # requirements files) or this workflow. A frontend, docs, test or dependency-manifest
@@ -22,17 +23,13 @@ on:
         description: 'Docker image tag (default: latest)'
         required: false
         default: 'latest'
-      target:
-        description: 'Target environment (dev or staging)'
-        required: false
-        default: 'auto'
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
-    # Determine environment for secret scoping
-    environment: ${{ (github.event.inputs.target == 'dev' || (github.event.inputs.target != 'staging' && github.ref_name == 'dev')) && 'dev' || 'staging' }}
+    # The production environment's secrets (the GitHub environment is named staging).
+    environment: staging
 
     steps:
       - name: Checkout Repository
@@ -41,24 +38,13 @@ jobs:
       - name: Determine target
         id: target
         run: |
-          if [[ "${{ (github.event.inputs.target == 'dev' || (github.event.inputs.target != 'staging' && github.ref_name == 'dev')) && 'dev' || 'staging' }}" == "dev" ]]; then
-            echo "app_name=ww-backend-dev" >> $GITHUB_OUTPUT
-            echo "worker_name=ww-embedding-worker-dev" >> $GITHUB_OUTPUT
-            echo "image_tag=dev-${{ github.event.inputs.tag || 'latest' }}" >> $GITHUB_OUTPUT
-            echo "env=dev" >> $GITHUB_OUTPUT
-            # Dev scales to zero: the API is idle most of the day and an always-on
-            # replica was ~1/3 of the Container Apps bill. The trade is a cold start
-            # (~1 min) on the first request after idle, which is acceptable for dev.
-            echo "min_replicas=0" >> $GITHUB_OUTPUT
-          else
-            echo "app_name=ww-backend" >> $GITHUB_OUTPUT
-            echo "worker_name=ww-embedding-worker" >> $GITHUB_OUTPUT
-            echo "image_tag=${{ github.event.inputs.tag || 'latest' }}" >> $GITHUB_OUTPUT
-            echo "env=staging" >> $GITHUB_OUTPUT
-            # Prod stays warm: the public "Try the demo" button must not hit a
-            # ~1-min cold start on the first click.
-            echo "min_replicas=1" >> $GITHUB_OUTPUT
-          fi
+          echo "app_name=ww-backend" >> $GITHUB_OUTPUT
+          echo "worker_name=ww-embedding-worker" >> $GITHUB_OUTPUT
+          echo "image_tag=${{ github.event.inputs.tag || 'latest' }}" >> $GITHUB_OUTPUT
+          echo "env=staging" >> $GITHUB_OUTPUT
+          # Prod stays warm: the public "Try the demo" button must not hit a
+          # ~1-min cold start on the first click.
+          echo "min_replicas=1" >> $GITHUB_OUTPUT
 
       - name: Log in to Azure Container Registry
         uses: azure/docker-login@v2
@@ -94,18 +80,15 @@ jobs:
         run: |
           echo "Deploying to ${{ steps.target.outputs.app_name }} (${{ steps.target.outputs.env }})"
           # --set-env-vars MERGES the named vars (SUPABASE_* etc. are left intact).
-          # DEMO_* come from the environment-scoped GitHub secrets (dev env → dev
-          # demo account, staging env → prod demo account). Empty values just leave
+          # DEMO_* come from the staging environment's secrets (the prod demo account).
+          # Empty values just leave
           # the "Try the demo" button self-disabled. GitHub masks the values in logs;
           # for higher sensitivity switch to container-app secrets + secretref.
-          # --min-replicas is per-environment (see the "Determine target" step):
-          # prod stays at 1 so the public "Try the demo" button doesn't hit a ~1-min
-          # cold start on the first click; dev is 0 because an always-on idle replica
-          # was ~1/3 of the Container Apps spend. Do NOT hardcode this back to 1 —
-          # that silently reverts dev to always-on on the next deploy.
-          # Deploy by the IMMUTABLE ${{ github.sha }} tag, NOT the mutable dev-latest:
+          # --min-replicas 1 (the "Determine target" step) keeps the public "Try the demo"
+          # button from a ~1-min cold start on the first click.
+          # Deploy by the IMMUTABLE ${{ github.sha }} tag, NOT the mutable latest:
           # ACA compares the image *reference string* and won't roll a new revision when
-          # only the code changed (same dev-latest tag + unchanged env) — so the API silently
+          # only the code changed (same latest tag + unchanged env), so the API silently
           # kept running stale code. The SHA tag forces a fresh revision every deploy, exactly
           # as the worker's `revision copy --image :${SHA}` already does below.
           az containerapp update \
@@ -177,8 +160,6 @@ jobs:
             echo "::warning::Health check returned '${STATUS}' — container may still be starting"
           fi
 
-      # NOTE: the demo account is NOT seeded here. ww-backend's dev deploy does a
-      # destructive `supabase db reset` + re-seed, so the demo user lives in
-      # ww-backend's seed (supabase/seeds/dev/data.sql) to survive that reset.
-      # This workflow only injects DEMO_EMAIL/DEMO_PASSWORD (above) so the demo
-      # endpoint can sign in — DEMO_PASSWORD must equal ww-backend's SEED_USER_PASSWORD.
+      # NOTE: the demo account is not created here. This workflow only injects
+      # DEMO_EMAIL/DEMO_PASSWORD (above) so the demo endpoint can sign in; the account is
+      # in documentation/resources/demo-account.md.
