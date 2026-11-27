@@ -294,7 +294,7 @@ async def run_lease(api: Api, manifest: dict, work: Path, models: Models) -> Non
     beat = asyncio.create_task(_heartbeats(api, lease_id, float(manifest.get("heartbeat_seconds") or 300), progress))
     try:
         reports = [
-            await run_job(api, lease_id, job, work, models, int(manifest.get("part_max_photos") or 500), progress)
+            await run_job(api, lease_id, job, work, models, int(manifest.get("part_max_photos") or 40), progress)
             for job in manifest.get("jobs") or []
         ]
     finally:

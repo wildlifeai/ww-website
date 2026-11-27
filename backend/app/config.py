@@ -327,7 +327,9 @@ class Settings(BaseSettings):
     BATCH_LEASE_MINUTES: int = Field(30, ge=5, description="A lease with no heartbeat for this long is requeued, then failed")
     BATCH_MAX_ATTEMPTS: int = Field(2, ge=1, description="Leases a batch job may expire through before it is failed")
     BATCH_LEASE_MAX_PHOTOS: int = Field(2000, ge=1, description="Photos one lease hands to the cluster")
-    BATCH_PART_MAX_PHOTOS: int = Field(500, ge=1, description="Photos per results part, so each ingest stays well inside 15 minutes")
+    BATCH_PART_MAX_PHOTOS: int = Field(
+        40, ge=1, description="Photos per results part: one Lambda call ingests a part, at up to 12 s a photo with Gemini presence (#531)"
+    )
     WW_LAMBDA_ROLE: Literal["", "api", "cpu"] = Field("", description="Set by the SAM template: which Lambda function this process is")
 
     # ── Media Registry renditions (Supabase Storage public bucket; originals stay in Drive) ──
