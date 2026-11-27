@@ -53,7 +53,7 @@ extra Log Analytics workspaces — that is the main source of sprawl and cost co
 | `wwuploadsae` | Storage account | **Azure Blob** temporary upload buffer (deleted after Drive archival), one container per environment. Also `camtrapdp-exports`, the private container for the CamtrapDP export ZIPs (#387), shared by dev and prod: job ids never collide and nothing lists it. | ✅ | Connection string is an ACA secret on the apps. Public blob access is off for the account, so export links are read-only SAS links. The exports' lifecycle rule is [below](#wwuploadsae-lifecycle-rule). |
 | `ww-redis-dev` | Container App | **ARQ broker** (internal `redis:7-alpine`, TCP, `exposedPort=6379`). 0.25 vCPU / 0.5 Gi (right-sized 2026-08-03). | ✅ | Reach app-to-app via the **short name** `redis://ww-redis-dev:6379` (the `.internal.*` FQDN times out for TCP). **Not KEDA-reachable** — see the worker row. |
 | `ww-backend-dev` | Container App | **Dev API** (`--target api`), **min-0** (scale-to-zero), external ingress. `REDIS_URL` → offloads jobs to the worker. FQDN `ww-backend-dev.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io`. | ✅ | Dev Supabase project; secrets as **ACA secrets**. **`min-replicas` is set by CI, not by hand** — see the note below. |
-| `ww-embedding-worker-dev` | Container App | **Dev ML worker** (`--target worker`) on the **`gpu-t4` serverless T4 GPU** profile. SpeciesNet detect + per-crop BioCLIP + DINOv3 (Wildlife Brain, live). ~1–2 s/image vs ~30–50 s on CPU. | ✅ | `EMBEDDING_DEVICE=cuda` / `BIOCLIP_DEVICE=cuda` (SpeciesNet auto-detects CUDA). Gated DINOv3 weights need the **`HF_TOKEN`** ACA secret (else `image_count=0`). Scales **0↔1** via **KEDA Postgres scaler on `api_jobs`** (see below). Secrets as ACA secrets. |
+| `ww-embedding-worker-dev` | Container App | **Dev ML worker** (`--target worker`) on the **`gpu-t4` serverless T4 GPU** profile. SpeciesNet detect + per-crop BioCLIP + DINOv3 (Wildlife Brain, live). ~1–2 s/image vs ~30–50 s on CPU. | ✅ | `EMBEDDING_DEVICE=cuda` / `BIOCLIP_DEVICE=cuda` (SpeciesNet auto-detects CUDA). Gated DINOv3 weights need the **`HF_TOKEN`** ACA secret (else `image_count=0`). Scales **0↔1** via **KEDA Postgres scaler on `api_jobs`** (see below); **parked since 2026-11-27**, its query is `SELECT 0`. Secrets as ACA secrets. |
 | `ww-backend` | Container App | **Prod API** (`--target api`), serving the production website, min 1 / max 2. `REDIS_URL` → `ww-redis` (since 2026-07-26), so it offloads jobs to `ww-embedding-worker`. FQDN `ww-backend.bravesand-8bd2f1d4.australiaeast.azurecontainerapps.io`. | ✅ | Prod Supabase project. Google Drive archival configured **2026-07-26**: `GOOGLE_DRIVE_ENABLED`, `GOOGLE_DRIVE_FOLDER_ID`, secret `google-sa-json` (⚠️ currently the **same service account as dev**, `ww-drive-uploader@…`; split it before it matters for rotation or audit). Before that date all three were unset, so prod stored no images at all. Console logs can lag ~1 day, so don't use them to prove live traffic. |
 | `ww-redis` | Container App | **Prod ARQ broker**, the same internal `redis:7-alpine` TCP app as `ww-redis-dev` (`exposedPort=6379`, no volume). 0.5 vCPU / 1 Gi, min 1 / max 1, created 2026-07-26. | ✅ | Reach it as `redis://ww-redis:6379` (short name). Still at the runbook's size; dev was right-sized to 0.25 / 0.5 Gi on 2026-08-03. |
 | `ww-embedding-worker` | Container App | **Prod ML worker** (`--target worker`) on the **`gpu-t4`** profile, 4 vCPU / 16 Gi, created 2026-07-26 from the [runbook](prod-worker-provisioning-runbook.md). Same pipeline as the dev worker, against the prod Supabase project; `REDIS_URL` → `ww-redis`. | ✅ | Scales **0↔1** on its own KEDA rule over **prod** `api_jobs`, 1-hour window (see below). `deploy-backend.yml` rolls it with `revision copy` on each push to `main`. Secrets as ACA secrets, including its own `pg-conn` and `hf-token`. |
@@ -82,10 +82,18 @@ SELECT count(*) FROM api_jobs WHERE status IN ('queued','processing')
 
 | Worker | Project | Window | Replicas | Stuck-GPU alert |
 |---|---|---|---|---|
-| `ww-embedding-worker-dev` | dev | `15 minutes` | 0 to 1 | `ww-gpu-worker-stuck-dev` (2026-07-09) |
+| `ww-embedding-worker-dev` | dev | none, parked: `SELECT 0` (was `15 minutes`) | 0 to 1 | `ww-gpu-worker-stuck-dev` (2026-07-09) |
 | `ww-embedding-worker` | prod | `1 hour` | 0 to 1 | `ww-gpu-worker-stuck` (2026-07-26) |
 
 Both rules poll every 30 s with a 300 s cooldown (checked with `az` on 2026-10-26).
+
+**The dev worker is parked (2026-11-27).** The dev site runs on AWS, and the rule counted every job in
+the dev project, AWS ones included, so each AWS upload woke the T4 for about an hour with nothing to do
+(`ww-gpu-worker-stuck-dev` fired). Its `pg-pending` query is now `SELECT 0`, set in the Portal, so KEDA
+keeps it at 0 and the deploy's empty-query guard still passes. Deleting the rule does not park it: with
+no rule, the revision each `dev` deploy makes (`revision copy` in `deploy-backend.yml`) runs a replica,
+and the deploy fails at the guard. To bring it back, put the query above with `15 minutes` back in the
+Portal (*Edit and deploy* → *Scale* → `pg-pending`).
 
 A pending job → `count ≥ 1` → KEDA scales the worker **0→1** (on the GPU node); queue drains → back to
 **0**. The pooler connection string lives in each worker's ACA secret **`pg-conn`**, which must point at
