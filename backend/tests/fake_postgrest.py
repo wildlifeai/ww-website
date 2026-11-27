@@ -79,6 +79,12 @@ COLUMNS = {
         "embedding_run_id",
         "cluster_id",
         "observation_event_id",
+        # The box and its crop (#449).
+        "bbox_x",
+        "bbox_y",
+        "bbox_w",
+        "bbox_h",
+        "crop_url",
     },
     "observation_events": {
         "id",
@@ -110,6 +116,8 @@ COLUMNS = {
         "embedding_model",
         "created_at",
     },
+    # 46_media_assets.sql, 27 Nov 2026 (#449).
+    "media_assets": {"media_id", "storage_provider", "storage_key", "thumbnail_url", "preview_url", "animal_crop_url", "created_at"},
     # 60_label_checks.sql, 27 Nov 2026 (#448).
     "label_checks": {
         "id",
@@ -188,6 +196,7 @@ RELATIONS = {
     ("devices", "deployments"): ("deployments", "id", "device_id", False),
     ("media", "deployments"): ("deployments", "deployment_id", "id", True),
     ("media", "observations"): ("observations", "id", "media_id", False),
+    ("media", "media_assets"): ("media_assets", "id", "media_id", True),
     ("observations", "media"): ("media", "media_id", "id", True),
     ("lorawan_messages", "deployments"): ("deployments", "deployment_id", "id", True),
     ("lorawan_messages", "lorawan_parsed_messages"): ("lorawan_parsed_messages", "id", "lorawan_message_id", False),

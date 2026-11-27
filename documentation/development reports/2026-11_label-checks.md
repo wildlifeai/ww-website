@@ -1,6 +1,6 @@
 # Label checks with DINOv3 fingerprints
 
-> **Status:** 📋 Proposal, decisions taken 2026-11-21 (a design grill with Victor). Steps 1 and 3 built 2026-11-27, step 1 behind `FF_LABEL_CHECKS_ENABLED` on dev; step 2 not built. Work is tracked in the issues listed under [Work](#work).
+> **Status:** 📋 Proposal, decisions taken 2026-11-21 (a design grill with Victor). All three steps built 2026-11-27, steps 1 and 2 behind `FF_LABEL_CHECKS_ENABLED` on dev. Work is tracked in the issues listed under [Work](#work).
 
 The Wildlife Brain already gives every AI-detected animal a DINOv3 fingerprint (an embedding of its crop) and uses them for groups, find-similar, the map, outliers and the grid's "Needs review first" sort ([wildlife-brain guide](../../frontend/src/content/guides/wildlife-brain.md)). None of those look at the labels: that sort's "disagreement" is the AI and a person disagreeing on the same photo. These checks compare each label with the labels of animals that look like it, to catch likely mistakes for a second look.
 
@@ -60,10 +60,19 @@ Code: the signals in [`domain/label_checks.py`](../../backend/app/domain/label_c
 | Where | Review tab, *Needs a second look*: the flagged photos in decision 13's order, the first 100 at a time, the reason and *Checked, it's right* on each card, the slider and up to 8 confused pairs; a badge on flagged photos in the grid |
 | Feedback (15) | `GET /api/label-checks/{project_id}` gives `checked` against `relabelled`; across projects, read-only: `select kind, outcome, count(*) from label_checks group by 1, 2` |
 
+## Built (step 2, 2026-11-27)
+
+| Topic | As built |
+|---|---|
+| Crop | After a person's box is drawn, moved or removed (or undone), the viewer calls `POST /api/media/{media_id}/observations/{observation_id}/crop` ([API reference](../resources/api-reference.md#media-registry)), which crops it on the CPU side into `observations.crop_url`, or clears it; [`media_registry.write_box_crop`](../../backend/app/domain/media_registry.py) |
+| Fingerprint | One per photo (`media_embeddings` is keyed by photo): the Brain run fingerprints the photo's latest person-drawn box crop in place of the AI's hero crop, and a photo only a person boxed joins the run ([`wildlife_brain._fetch_crops`](../../backend/app/domain/wildlife_brain.py)); the REANNZ batch reads the same function. A box change clears the photo's fingerprint until that run |
+| Labels without a box | A photo with no crop at all (no AI detection, no drawn box) has no fingerprint, so its label stays unchecked; a label without its own box on a photo with the AI's crop is checked on that crop |
+| Flag | Both behind `FF_LABEL_CHECKS_ENABLED`: off, the route answers `FEATURE_DISABLED` (the viewer carries on) and the Brain takes the hero crops as before |
+
 ## Work
 
 | Step | Issue |
 |---|---|
 | 1. The checks, the filter, the slider and "Checked, it's right" | [#448](https://github.com/wildlifeai/ww-website/issues/448), built (above); production waits for ww-backend to promote `label_checks` |
-| 2. Crop files and fingerprints for drawn boxes | [#449](https://github.com/wildlifeai/ww-website/issues/449) |
+| 2. Crop files and fingerprints for drawn boxes | [#449](https://github.com/wildlifeai/ww-website/issues/449), built (above) |
 | 3. The mixed-group warning | [#450](https://github.com/wildlifeai/ww-website/issues/450), built: [`domain/cluster_labels.py`](../../backend/app/domain/cluster_labels.py) behind `GET /api/brain/clusters/{deployment_id}/labels`, lineage in [`domain/taxon_lineage.py`](../../backend/app/domain/taxon_lineage.py) |

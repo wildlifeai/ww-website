@@ -1,12 +1,13 @@
 import { useState, useEffect, useEffectEvent, useMemo } from 'react'
 import { Ban, Check, SlidersHorizontal, Square, Tag, Trash2, User, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { supabase } from '../../config/supabase'
+import { apiClient } from '../../lib/apiClient'
 import { useAuth } from '../../hooks/useAuth'
 import { useCanLabel } from '../../hooks/useCanLabel'
 import type { ObservationRecord, MediaRecord } from './MediaBrowser'
 import { isEdgeAi, isHumanReviewed, isHumanRow, isAiLabel, observationLabel, opinionSource, photoVerdict } from '../../lib/observations'
 import {
-  confirmLabel, labelOf, removeHumanRow, updateHumanRow, verdictIsReviewed, writeVerdict,
+  confirmLabel, labelOf, removeHumanRow, updateHumanRow, verdictIsReviewed, withCropFile, writeVerdict,
   type VerdictLabel, type VerdictWrite,
 } from '../../lib/humanVerdict'
 import { labelledSpecies } from '../../lib/speciesSuggestions'
@@ -452,10 +453,14 @@ export function MediaDetail({ media, timezone, mediaList, onSelect, onClose, onU
 
   const blank = () => run(() => writeVerdict(supabase, media, { observation_type: 'blank' }, actor), 'Marked blank', { advance: true })
 
+  // A saved, moved or removed box (and its undo) gets its crop file from the API (#449).
+  const cropFile = async (rowId: string) =>
+    ((await apiClient.post(`/api/media/${media.id}/observations/${rowId}/crop`)) as { data: { crop_url: string | null } }).data.crop_url
   const saveBox = (obsId: string, fields: Partial<ObservationRecord>) => {
     const drawing = fields.bbox_x != null
     return run(
-      () => updateHumanRow(supabase, media, obsId, drawing ? { ...fields, observation_level: 'media' } : fields, actor),
+      async () => withCropFile(
+        await updateHumanRow(supabase, media, obsId, drawing ? { ...fields, observation_level: 'media' } : fields, actor), obsId, cropFile),
       drawing ? 'Box saved' : 'Box removed',
     )
   }

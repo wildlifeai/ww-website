@@ -5263,6 +5263,65 @@
         ]
       }
     },
+    "/api/media/{media_id}/observations/{observation_id}/crop": {
+      "post": {
+        "description": "After a person's box is drawn, moved or removed: write its crop file to ``crop_url``, or clear\nit, and clear the photo's fingerprint for the next Wildlife Brain run (#449). Behind\n``FF_LABEL_CHECKS_ENABLED``.",
+        "operationId": "box_crop_api_media__media_id__observations__observation_id__crop_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "media_id",
+            "required": true,
+            "schema": {
+              "title": "Media Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "observation_id",
+            "required": true,
+            "schema": {
+              "title": "Observation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Box Crop",
+        "tags": [
+          "media"
+        ]
+      }
+    },
     "/api/media/{media_id}/resolve": {
       "get": {
         "description": "Return a URL a plain ``<img>`` can load for a media item, regardless of storage provider.\n\n``url`` is null when the photo has no rendition yet and its original is private.",

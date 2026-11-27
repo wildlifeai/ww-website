@@ -169,7 +169,9 @@ A second, deeper track (`domain/wildlife_brain.py`, which also runs HDBSCAN, `em
 routers. Gated by `FF_WILDLIFE_BRAIN_ENABLED` (on by default, #344) / `FF_ACTIVE_LEARNING_ENABLED` (off).
 After each run, and nightly, the label checks compare each label with the fingerprints around it
 (`domain/label_checks.py`, behind `FF_LABEL_CHECKS_ENABLED`; design and contract:
-[label checks](../development%20reports/2026-11_label-checks.md)).
+[label checks](../development%20reports/2026-11_label-checks.md)). With that flag on, a box a person
+draws gets its crop file at once (`media_registry.write_box_crop`), and the Brain fingerprints a
+photo's latest such crop in place of the AI's hero crop (`wildlife_brain._fetch_crops`).
 
 ```
 animal crop ──DINOv3──▶ media_embeddings ──HDBSCAN──▶ clusters (+ outliers)

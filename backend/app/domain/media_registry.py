@@ -242,6 +242,62 @@ async def generate_observation_crops(media_id: str) -> Optional[str]:
     return hero_url
 
 
+class BoxCropRefused(ValueError):
+    """The observation is not a person's row of this photo."""
+
+
+async def write_box_crop(media_id: str, observation_id: str) -> Optional[str]:
+    """A person's box on a photo, after it was drawn, moved or removed (#449): its crop written to
+    ``observations.crop_url``, as ``generate_observation_crops`` does for the AI's, or cleared
+    when the row has no box. The photo's fingerprint is cleared too, so the next Wildlife Brain
+    run fingerprints the crop it should (``wildlife_brain._fetch_crops`` prefers a person's box).
+
+    Returns the crop's URL, or None once cleared. Raises ``BoxCropRefused`` for an observation that
+    is not a live person's row of ``media_id``, and ``RenditionUploadError`` when the crop could not
+    be made or stored.
+    """
+    from app.domain.media_resolver import MediaRef, resolve_media
+    from app.domain.public_api import is_human_row
+    from app.services import image_processing as imgproc
+    from app.services.storage import upload_rendition
+    from app.services.supabase_client import create_service_client
+    from app.services.vector_store import get_vector_service
+
+    svc = create_service_client()
+
+    def _fetch():
+        obs = (
+            svc.table("observations")
+            .select("id, media_id, deployment_id, source_type, classification_method, bbox_x, bbox_y, bbox_w, bbox_h")
+            .eq("id", observation_id)
+            .eq("media_id", media_id)
+            .is_("deleted_at", "null")
+            .limit(1)
+            .execute()
+        )
+        media = svc.table("media").select("id, deployment_id, file_path").eq("id", media_id).is_("deleted_at", "null").limit(1).execute()
+        return (rows_of(obs) or [None])[0], (rows_of(media) or [None])[0]
+
+    obs, media_row = await asyncio.to_thread(_fetch)
+    if obs is None or media_row is None or not is_human_row(obs):
+        raise BoxCropRefused("Only a person's own label on this photo has a box crop.")
+
+    url: Optional[str] = None
+    if obs.get("bbox_x") is not None:
+        resolved = await resolve_media(media_row["file_path"], size="full", media=MediaRef.of(media_row))
+        if not resolved:
+            raise RenditionUploadError("The photo could not be read to crop its box.")
+        bbox = (obs["bbox_x"], obs["bbox_y"], obs["bbox_w"], obs["bbox_h"])
+        crop = await asyncio.to_thread(imgproc.crop_bbox, resolved[0], bbox, CROP_PADDING)
+        url = await upload_rendition(f"crops/{media_row['deployment_id']}/{media_id}/{observation_id}.jpg", crop)
+        if not url:
+            raise RenditionUploadError("The box crop could not be stored.")
+
+    await asyncio.to_thread(lambda: svc.table("observations").update({"crop_url": url}).eq("id", observation_id).execute())
+    await get_vector_service().delete([media_id])
+    return url
+
+
 def group_bursts(media_rows: list[dict], gap_seconds: float) -> list[list[dict]]:
     """Trigger bursts of ``media_rows``: the one grouper, ``domain.burst_evidence.group_bursts``.
 

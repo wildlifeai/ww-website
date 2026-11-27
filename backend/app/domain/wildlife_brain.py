@@ -22,6 +22,7 @@ from typing import Optional, Sequence
 import numpy as np
 import structlog
 
+from app.config import settings
 from app.registries.embedding_registry import (
     DEFAULT_HDBSCAN_PRESET,
     HDBSCAN_PRESETS,
@@ -32,7 +33,7 @@ from app.registries.embedding_registry import (
     purity_bucket,
     review_depth_for_purity,
 )
-from app.services.db_utils import rows_of
+from app.services.db_utils import read_all, rows_of
 
 logger = structlog.get_logger()
 
@@ -423,8 +424,40 @@ async def _after_run(deployment_ids: list[str]) -> None:
     await queue_after_brain_run(deployment_ids)
 
 
+def _person_box_crops(svc, deployment_ids: list[str]) -> dict[str, tuple[str, str]]:
+    """Each live photo's latest crop of a box a person drew (#449): media id to (deployment id, crop URL)."""
+    out: dict[str, tuple[str, str]] = {}
+    for i in range(0, len(deployment_ids), 50):
+        part = deployment_ids[i : i + 50]
+        for r in read_all(
+            lambda part=part: (
+                svc.table("observations")
+                .select("id, media_id, deployment_id, crop_url, created_at, media!inner(id)")
+                .in_("deployment_id", part)
+                .eq("source_type", "human")
+                .not_.is_("crop_url", "null")
+                .not_.is_("bbox_x", "null")
+                .is_("deleted_at", "null")
+                .is_("media.deleted_at", "null")
+                .order("created_at")
+                .order("id")
+            )
+        ):
+            out[r["media_id"]] = (r["deployment_id"], r["crop_url"])
+    return out
+
+
+def with_person_boxes(rows: list[dict], boxes: dict[str, tuple[str, str]]) -> list[dict]:
+    """``rows`` of {id, deployment_id, crop_url} with a person's box crop in place of the AI's hero
+    crop, and the photos only a person boxed added: the label a person drew is the one to fingerprint."""
+    out = [{**r, "crop_url": boxes[r["id"]][1]} if r["id"] in boxes else r for r in rows]
+    seen = {r["id"] for r in rows}
+    return out + [{"id": m, "deployment_id": d, "crop_url": url} for m, (d, url) in boxes.items() if m not in seen]
+
+
 async def _fetch_crops(deployment_id: str) -> list[dict]:
-    """Return media rows for the deployment that have an animal_crop_url."""
+    """Return media rows for the deployment that have an animal_crop_url, or, with label checks on,
+    a crop of a box a person drew (#449), which wins."""
     from app.services.supabase_client import create_service_client
 
     svc = create_service_client()
@@ -445,7 +478,7 @@ async def _fetch_crops(deployment_id: str) -> list[dict]:
             crop = (assets or {}).get("animal_crop_url")
             if crop:
                 rows.append({"id": r["id"], "deployment_id": r["deployment_id"], "crop_url": crop})
-        return rows
+        return with_person_boxes(rows, _person_box_crops(svc, [deployment_id])) if settings.FF_LABEL_CHECKS_ENABLED else rows
 
     return await asyncio.to_thread(_fetch)
 
@@ -612,6 +645,9 @@ async def _fetch_crops_for_deployments(deployment_ids: list[str], only_unreviewe
                 crop = (assets or {}).get("animal_crop_url")
                 if crop:
                     rows.append({"id": r["id"], "deployment_id": r["deployment_id"], "crop_url": crop})
+        # A photo a person boxed is reviewed, so an unreviewed-only run takes no box crops.
+        if settings.FF_LABEL_CHECKS_ENABLED and not only_unreviewed:
+            return with_person_boxes(rows, _person_box_crops(svc, deployment_ids))
         return rows
 
     return await asyncio.to_thread(_fetch)

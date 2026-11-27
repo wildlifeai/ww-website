@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   confirmLabel, labelOf, planVerdict, removeHumanRow, updateHumanRow, verdictFields, verdictIsReviewed,
-  writeVerdict, writeVerdicts, type VerdictRow,
+  withCropFile, writeVerdict, writeVerdicts, type VerdictRow,
 } from './humanVerdict'
 import { NOT_REMOVED, NOT_SAVED } from './observationWrites'
 
@@ -178,5 +178,23 @@ describe('updateHumanRow and removeHumanRow', () => {
   it('reports a delete that matched nothing as not removed', async () => {
     const { db } = fakeDb(viewer)
     await expect(removeHumanRow(db, photo(mine), 'h1')).rejects.toThrow(NOT_REMOVED)
+  })
+})
+
+describe('withCropFile', () => {
+  const rows = [{ id: 'h1', source_type: 'human', crop_url: null }, { id: 'a1', source_type: 'ai', crop_url: 'ai.jpg' }]
+  const write = { observations: rows, rowId: 'h1', undo: vi.fn().mockResolvedValue(rows) }
+
+  it('puts the crop file on the boxed row, after the write and after its undo', async () => {
+    const crop = vi.fn().mockResolvedValueOnce('h1.jpg').mockResolvedValueOnce(null)
+    const done = await withCropFile(write, 'h1', crop)
+    expect(done.observations.map(o => o.crop_url)).toEqual(['h1.jpg', 'ai.jpg'])
+    expect((await done.undo()).map(o => o.crop_url)).toEqual([null, 'ai.jpg'])
+    expect(crop).toHaveBeenCalledWith('h1')
+  })
+
+  it('keeps the box when the crop fails or is switched off', async () => {
+    const done = await withCropFile(write, 'h1', vi.fn().mockRejectedValue(Object.assign(new Error('off'), { code: 'FEATURE_DISABLED' })))
+    expect(done.observations).toEqual(rows)
   })
 })

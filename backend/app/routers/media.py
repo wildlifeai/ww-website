@@ -4,6 +4,7 @@
 
 GET /api/media/{media_id}/image?size=thumb → low-res thumbnail (grid)
 GET /api/media/{media_id}/image?size=full  → full resolution (detail panel)
+POST /api/media/{media_id}/observations/{observation_id}/crop → a person's box crop (#449)
 """
 
 import asyncio
@@ -14,10 +15,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel, Field
 
-from app.authz import WRITE_REFUSED, require_deployment_access, require_media_access, writable_media_ids
+from app.authz import WRITE_REFUSED, require_deployment_access, require_media_access, require_media_write, writable_media_ids
 from app.config import settings
 from app.dependencies import get_current_user, get_user_client, get_verified_user, require_not_demo
-from app.domain.media_registry import resolve_url, with_resolved_urls
+from app.domain.media_registry import BoxCropRefused, RenditionUploadError, resolve_url, with_resolved_urls, write_box_crop
 from app.domain.media_resolver import MediaRef, serve_media
 from app.domain.pipeline import PipelineBusyError
 from app.domain.soft_delete import now_iso, restore_media_as_user, soft_delete_media_as_user
@@ -120,6 +121,29 @@ async def resolve_media_url(
         data={"media_id": media_id, "size": size, "url": resolve_url(row, size)},
         meta=ApiMeta(request_id=req_id),
     )
+
+
+@router.post(
+    "/{media_id}/observations/{observation_id}/crop",
+    dependencies=[Depends(require_media_write), Depends(require_not_demo)],
+)
+async def box_crop(request: Request, media_id: str, observation_id: str, user=Depends(get_current_user)):
+    """After a person's box is drawn, moved or removed: write its crop file to ``crop_url``, or clear
+    it, and clear the photo's fingerprint for the next Wildlife Brain run (#449). Behind
+    ``FF_LABEL_CHECKS_ENABLED``."""
+    req_id = getattr(request.state, "request_id", None)
+    if not settings.FF_LABEL_CHECKS_ENABLED:
+        return ApiResponse(
+            error=ApiError(code="FEATURE_DISABLED", message="Box crops are part of label checks (FF_LABEL_CHECKS_ENABLED)."),
+            meta=ApiMeta(request_id=req_id),
+        )
+    try:
+        url = await write_box_crop(media_id, observation_id)
+    except BoxCropRefused as e:
+        return ApiResponse(error=ApiError(code="NOT_FOUND", message=str(e)), meta=ApiMeta(request_id=req_id))
+    except RenditionUploadError as e:
+        return ApiResponse(error=ApiError(code="CROP_FAILED", message=str(e), retryable=True), meta=ApiMeta(request_id=req_id))
+    return ApiResponse(data={"observation_id": observation_id, "crop_url": url}, meta=ApiMeta(request_id=req_id))
 
 
 @router.get("/registry/{deployment_id}", dependencies=[Depends(require_deployment_access)])
